@@ -94,6 +94,8 @@ struct ReplaySummary {
 [[nodiscard]] std::string inspect_replay_bytes(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] std::string inspect_replay_file(const std::string& path);
 [[nodiscard]] std::string replay_summary_to_json(const ReplaySummary& summary);
+[[nodiscard]] std::string dump_subrecord_family(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte);
+[[nodiscard]] std::string compare_subrecord_family(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t prefix_bytes);
 
 }  // namespace rofl::core
 

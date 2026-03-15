@@ -803,7 +803,6 @@ struct FramedSubrecord {
     std::size_t length = 0;
 };
 
-
 struct SubrecordGroup {
     std::size_t size = 0;
     std::uint8_t sig = 0;
@@ -1838,6 +1837,132 @@ std::string replay_summary_to_json(const ReplaySummary& summary) {
 
     output << "\"metadataJson\":\"" << json_escape(summary.metadata_json) << "\"";
     output << '}';
+    return output.str();
+}
+
+struct ExtractedSubrecord {
+    int chunk_id = 0;
+    std::size_t chunk_offset = 0;
+    std::vector<std::uint8_t> payload;
+};
+
+[[nodiscard]] std::vector<ExtractedSubrecord> extract_subrecord_family(
+    const std::vector<std::uint8_t>& bytes,
+    const ReplaySummary& summary,
+    std::size_t target_length,
+    std::uint8_t target_first_byte
+) {
+    std::vector<ExtractedSubrecord> results;
+
+    for (const ReplaySegmentSummary& segment : summary.container.segments) {
+        if (segment.codec != "zstd" || segment.type != "chunk") continue;
+
+        std::vector<std::uint8_t> decompressed;
+        std::string error;
+        if (try_decompress_zstd_segment(bytes, segment, decompressed, error)) {
+            const auto best_u16 = analyze_le_length_prefix(decompressed, 2);
+            if (best_u16.record_count >= 2) {
+                // Check framing at offset 0 and offset 1 (as seen in chunk 6)
+                const auto best_u16_offset_1 = analyze_le_length_prefix(std::vector<std::uint8_t>(decompressed.begin() + 1, decompressed.end()), 2);
+                
+                std::size_t start_offset = best_u16.start_offset;
+                if (best_u16_offset_1.record_count > best_u16.record_count) {
+                    start_offset = best_u16_offset_1.start_offset + 1;
+                }
+
+                auto records = extract_le_framed_subrecords(decompressed, 2, start_offset, 1000000);
+                for (const auto& rec : records) {
+                    if (rec.length == target_length && decompressed[rec.payload_offset] == target_first_byte) {
+                        ExtractedSubrecord extracted;
+                        extracted.chunk_id = segment.chunk_id;
+                        extracted.chunk_offset = rec.payload_offset;
+                        extracted.payload.assign(
+                            decompressed.begin() + static_cast<std::ptrdiff_t>(rec.payload_offset),
+                            decompressed.begin() + static_cast<std::ptrdiff_t>(rec.payload_offset + target_length)
+                        );
+                        results.push_back(std::move(extracted));
+                    }
+                }
+            }
+        }
+    }
+
+    return results;
+}
+
+std::string dump_subrecord_family(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte) {
+    std::ostringstream output;
+    const std::vector<std::uint8_t> bytes = read_file_bytes(path);
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    
+    auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    output << "Found " << records.size() << " records of size " << target_length 
+           << " starting with 0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << static_cast<int>(target_first_byte) << std::dec << "\n\n";
+
+    for (std::size_t i = 0; i < records.size(); ++i) {
+        output << "Record #" << i + 1 << " (chunkId=" << records[i].chunk_id << ", offset=" << records[i].chunk_offset << ")\n";
+        output << "  Hex: " << format_hex_preview(records[i].payload, 64) << "\n";
+        output << "  Ascii: \"" << format_ascii_preview(records[i].payload, 64) << "\"\n\n";
+    }
+
+    return output.str();
+}
+
+std::string compare_subrecord_family(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t prefix_bytes) {
+    std::ostringstream output;
+    const std::vector<std::uint8_t> bytes = read_file_bytes(path);
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    
+    auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    output << "Comparing " << records.size() << " records of size " << target_length 
+           << " starting with 0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << static_cast<int>(target_first_byte) << std::dec << "\n\n";
+
+    if (records.empty()) return output.str();
+
+    std::size_t compare_len = std::min<std::size_t>(target_length, prefix_bytes);
+    
+    output << "Stability Map (len=" << compare_len << "):\n";
+    output << ". = constant, * = low variance, X = high variance\n\n";
+
+    std::string stability_map;
+    stability_map.reserve(compare_len);
+
+    for (std::size_t offset = 0; offset < compare_len; ++offset) {
+        std::vector<std::uint8_t> seen;
+        for (std::size_t i = 0; i < records.size(); ++i) {
+            std::uint8_t v = records[i].payload[offset];
+            if (std::find(seen.begin(), seen.end(), v) == seen.end()) {
+                seen.push_back(v);
+            }
+        }
+        
+        if (seen.size() == 1) {
+            stability_map += '.';
+        } else if (seen.size() <= 3) {
+            stability_map += '*';
+        } else {
+            stability_map += 'X';
+        }
+    }
+    
+    for (std::size_t i = 0; i < stability_map.size(); i += 32) {
+        std::string chunk = stability_map.substr(i, 32);
+        output << std::setw(4) << std::setfill('0') << i << " | " << chunk << "\n";
+    }
+    
+    output << "\nU32 Columns (first " << std::min<std::size_t>(compare_len / 4, 16) << " fields, across up to 10 records):\n";
+    std::size_t u32_count = std::min<std::size_t>(compare_len / 4, 16);
+    
+    for (std::size_t i = 0; i < std::min<std::size_t>(records.size(), 10); ++i) {
+        output << "Rec #" << std::setw(2) << std::setfill('0') << i << " | ";
+        for (std::size_t f = 0; f < u32_count; ++f) {
+            std::uint32_t val = 0;
+            read_u32_le(records[i].payload, f * 4, val);
+            output << std::setw(11) << std::setfill(' ') << val << " ";
+        }
+        output << "\n";
+    }
+
     return output.str();
 }
 
