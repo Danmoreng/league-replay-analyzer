@@ -246,7 +246,7 @@ On March 15, 2026, we reran chunk-family correlation against the local Riot API 
 
 - first regular gameplay chunk id is `4` in `replays/EUW1-7779216102.rofl`
 - event timestamps map to replay chunks as `chunkId = firstRegularChunkId + floor(timestamp / 30000)`
-- the native CLI path in this repo currently resolves to `build/packages/rofl-core/Debug/rofl_core_cli.exe`
+- the native CLI path may be `build/packages/rofl-core/rofl_core_cli.exe` under Ninja or `build/packages/rofl-core/Debug/rofl_core_cli.exe` under multi-config builds
 
 Using the corrected `payload-pattern-hunter` flow on the local sample:
 
@@ -265,3 +265,28 @@ This is the strongest current answer to what later chunk payloads represent:
 
 - not a flat event log with one stable kill/objective opcode family
 - more likely a bundle of heterogeneous state/update records, where the sparse fixed-size families carry broad world/entity state and other families carry additional specialized delta data
+
+## Working Interpretation And Next Step
+
+As of March 15, 2026, the current evidence is more consistent with stored spectator-style state and delta data than with a compact stream of raw player inputs:
+
+- the dominant sparse family recurs in quiet and eventful windows alike
+- its body looks like a fixed-capacity slot table with mixed float-like and non-float-like lanes
+- chunk timing aligns cleanly with replay timeline windows and keyframe boundaries
+- no single universal kill/objective family has appeared across all eventful chunks
+
+That does not prove player inputs are absent, but inputs do not currently look like the primary payload layer we have identified.
+
+The decoding focus should therefore be:
+
+1. rank sparse slots by coordinate-like smooth motion across adjacent records
+2. group those slots into coarse classes by lane pair, dominant first byte, and lane mask
+3. compare the best candidates against champion counts, ward timing, and objective windows
+4. use keyframes as minute-boundary anchors to separate baseline state from half-minute deltas
+
+This direction is now backed by the native slot profiler command:
+
+- `rofl_core_cli --profile-position-slots <path> --length 53970 --first-byte 0xD2 --header-size 2 --stride 16`
+
+That command is intended to surface candidate position/state slots before we try to assign specific semantic identities such as champion, ward, missile, or minion.
+

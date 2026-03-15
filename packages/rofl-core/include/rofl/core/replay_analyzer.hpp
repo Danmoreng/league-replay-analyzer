@@ -100,8 +100,10 @@ struct ReplaySummary {
 [[nodiscard]] std::string guess_stride(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size);
 [[nodiscard]] std::string analyze_sparse_family(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_elements);
 [[nodiscard]] std::string trace_sparse_slot(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t slot_index, std::size_t max_records);
+[[nodiscard]] std::string profile_position_slots(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots, float move_epsilon, float smooth_threshold);
 
 }  // namespace rofl::core
+
 
 
 
