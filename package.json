@@ -15,7 +15,8 @@
     "build:wasm": "pwsh -File ./scripts/build-wasm.ps1",
     "test:native": "pwsh -File ./scripts/test-native.ps1 -UseNinja",
     "fetch:riot": "node ./scripts/fetch-riot-match-data.mjs",
-    "publish:riot-fixtures": "node ./scripts/publish-riot-fixtures.mjs"
+    "publish:riot-fixtures": "node ./scripts/publish-riot-fixtures.mjs",
+    "compare:riot": "node ./scripts/correlate-replay-api.mjs"
   },
   "devDependencies": {
     "vite-plus": "latest"

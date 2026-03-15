@@ -47,6 +47,33 @@ $env:RIOT_API_KEY = "RGAPI-..."
 npm run fetch:riot -- --replay .\replays\EUW1-7779216102.rofl --fetch-accounts
 ```
 
+## Comparing Replay Structure Against Riot Data
+
+Once replay fixtures and API bundles are present locally, run:
+
+```powershell
+npm run compare:riot -- --replay .\replays\EUW1-7779216102.rofl
+```
+
+To compare the whole local corpus at once:
+
+```powershell
+npm run compare:riot -- --all
+```
+
+This joins:
+
+- the native replay summary from `rofl_core_cli --summary`
+- `match.json` final participant data
+- `timeline.json` frame and event data
+
+The report is useful for validating:
+
+- whether replay metadata matches Match-V5 participant stats
+- whether replay keyframes align to official timeline frame boundaries
+- which chunk IDs correspond to event-heavy 30 second windows
+- whether chunk size changes correlate with kills or objective events
+
 ## Publishing To The Web App
 
 The web data browser loads Riot fixture bundles from `apps/web/public/riot-api-fixtures/`.

@@ -137,6 +137,33 @@ When the classic header path validates, the parser reads segment headers as 17-b
 
 `rofl-core` currently exposes those fields in normalized form but does not decode classic segment payloads yet.
 
+## Riot API Correlation Findings
+
+On March 15, 2026, we compared the local replay corpus directly against official Match-V5 and timeline fixtures.
+
+High-confidence matches across the current seven-replay corpus:
+
+- replay `gameLengthMillis` stays within `14` to `502` ms of Match-V5 `gameDuration * 1000`
+- replay metadata player summaries match Match-V5 exactly for champion, team, team position, Riot ID, K/D/A, total damage to champions, vision score, and win/loss across all `70` participants checked
+- replay `goldEarned` is almost the same as Match-V5 but not perfectly identical: `40 / 70` exact, `29 / 70` at `-1`, and `1 / 70` at `-2` when computed as `replay - API`
+- official timeline `frameCount` equals replay `keyframeCount + 1` on all seven replays
+- every checked keyframe record satisfies `keyframe.chunkId = 2 * keyframe.id + 1`
+- every checked chunk record satisfies `chunk.chunkId = chunk.id + 1`, which means metadata `lastGameChunkId` matches the highest chunk record `id`, not the highest normalized `chunkId` exposed by the parser; across the current corpus, the highest normalized `chunkId` is always `lastGameChunkId + 1`
+
+This strongly suggests a time model for newer footer-style files:
+
+- keyframes align to the official timeline frame boundaries, with replay keyframe `1` corresponding to timeline frame `0`
+- chunk records behave like approximately `30` second delta windows between those minute snapshots
+- the final replay chunk parity matches the final official timeline interval length: replays with a tail shorter than `30` seconds end on an odd `lastGameChunkId`, while longer tails keep the second half-minute chunk
+
+Practical implication for decoding:
+
+- when the API shows a dragon, baron, herald, tower, or kill cluster at time `T`, inspect the replay chunk whose half-minute window covers `T` before scanning neighboring chunks
+- use replay metadata `statsJson` as a stable bridge for player ordering and identity, but do not assume `goldEarned` is a perfect byte-for-byte copy of Match-V5
+- raw chunk size is only a weak semantic signal overall, although compressed chunk size has a moderate corpus-level correlation with champion kills (`r ~= 0.37`)
+
+This does not decode payloads yet, but it gives us a reliable time-alignment layer for subrecord-family work.
+
 ## Current Boundary
 
 What is implemented now:
