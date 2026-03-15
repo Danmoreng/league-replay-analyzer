@@ -68,6 +68,7 @@ Implication for the next parser step:
 - keep the footer-style record indexing path; it is now validated
 - inspect decompressed startup, keyframe, and chunk payloads for packet/frame structure
 - avoid assuming the classic `payload_offset -> 17-byte table -> segment bytes` layout exists in this replay era
+- if nested zstd frames appear inside decompressed chunk payloads, explicitly test skippable-frame and seek-table interpretations before assuming a custom wrapper
 
 ## Footer-Style Zstd Record Layout
 
@@ -188,6 +189,11 @@ Current interpretation:
 - the next useful decoder step is to parse these candidate chunk subrecords consistently and compare their leading bytes across several neighboring chunks to find repeated headers, counters, timestamps, or entity identifiers
 
 These are still heuristics, not a verified packet schema, but they are strong enough to justify building the next inspection layer around chunk-subrecord extraction.
+
+Methodological note:
+
+- future chunk inspection tooling should prefer deterministic JSON summaries, family hashes, and corpus-level comparisons over console-only dumps
+- regression fixtures for extracted subrecord families will be more valuable than synthetic-only tests once a family-level decoder starts to stabilize
 
 ## Confidence Levels
 

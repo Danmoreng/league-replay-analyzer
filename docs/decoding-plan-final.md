@@ -51,6 +51,17 @@ These points are still hypotheses and should not be promoted to "facts" yet:
 4. Require cross-record evidence before naming fields.
 5. Validate every candidate field against replay semantics, not just byte patterns.
 
+## Additional External Guidance
+
+A few durable points from external format research are worth carrying forward into this plan:
+
+- Treat the ROFL2 metadata footer rule as a stable container fact: the final 4 bytes encode the metadata JSON size, while the game version still needs a separate early-file scan.
+- If decompressed chunk payloads ever reveal nested zstd framing, test `skippable frame` and `seek-table` hypotheses before inventing a custom wrapper format. Zstd seekable layout is the closest generic analogue to the `footer-style` observations in this repo.
+- Prefer machine-readable inspection outputs and deterministic fixture summaries over console-only inspection. Hash-addressed family dumps and JSON summaries are more valuable than one-off terminal transcripts.
+- Keep quantitative framing gates explicit: coverage, leftover bytes, failure rate, and boundary consistency should decide whether a framing rule is good enough to build decoders on top of.
+
+These are process constraints, not proof about League payload semantics, so they should guide tooling and validation rather than be treated as decoded format facts.
+
 ## What We Need To Learn
 
 For the first large family, we need to determine:
@@ -141,6 +152,13 @@ We should treat the framing as operationally valid only if:
 - leftover bytes become explainable and small
 - repeated families appear at consistent boundaries
 - the extracted record counts are stable enough to compare across time
+
+Suggested minimum gates for moving from framing to decoder work:
+
+- coverage ratio is high enough that the unexplained remainder is genuinely small
+- leftover bytes cluster into one or two repeatable wrapper/footer patterns rather than random fragmentation
+- parser failures stay rare and reproducible
+- neighboring chunks reproduce the same family boundaries with only small wrapper variance
 
 ### Failure criteria
 
