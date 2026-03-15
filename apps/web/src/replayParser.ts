@@ -19,6 +19,10 @@ export interface ReplaySegmentSummary {
   length: number;
   chunkId: number;
   offset: number;
+  headerOffset: number;
+  payloadOffset: number;
+  uncompressedLength: number;
+  codec: string;
 }
 
 export interface ReplayContainerSummary {
@@ -70,6 +74,7 @@ const knownHeaderLength = 288;
 const knownPayloadHeaderMinimumSize = 34;
 const knownSegmentHeaderLength = 17;
 const footerLengthFieldSize = 4;
+const footerRecordHeaderLength = 17;
 
 function findSubsequence(bytes: Uint8Array, needle: Uint8Array): number {
   outer: for (let offset = 0; offset <= bytes.length - needle.length; offset += 1) {
@@ -318,6 +323,10 @@ function tryParseClassicContainer(bytes: Uint8Array): ReplayContainerSummary | n
           length,
           chunkId,
           offset,
+          headerOffset: entryOffset,
+          payloadOffset: payloadOffset + tableSize + offset,
+          uncompressedLength: 0,
+          codec: "unknown",
         });
       }
     }
@@ -363,6 +372,154 @@ function extractFooterMetadata(
   }
 
   return { offset: metadataOffset, size: metadataSize, json };
+}
+
+function isZstdMagic(bytes: Uint8Array, offset: number): boolean {
+  return (
+    offset >= 0 &&
+    offset + 4 <= bytes.length &&
+    bytes[offset] === 0x28 &&
+    bytes[offset + 1] === 0xb5 &&
+    bytes[offset + 2] === 0x2f &&
+    bytes[offset + 3] === 0xfd
+  );
+}
+
+interface FooterZstdRecord {
+  headerOffset: number;
+  payloadOffset: number;
+  id: number;
+  relatedId: number;
+  kind: number;
+  uncompressedLength: number;
+  compressedLength: number;
+}
+
+function parseFooterZstdContainer(
+  bytes: Uint8Array,
+  metadataOffset: number,
+  metadataSize: number,
+  lastGameChunkId: number,
+  lastKeyFrameId: number,
+): ReplayContainerSummary | null {
+  const records: FooterZstdRecord[] = [];
+
+  for (let payloadOffset = footerRecordHeaderLength; payloadOffset + 4 <= metadataOffset; payloadOffset += 1) {
+    if (!isZstdMagic(bytes, payloadOffset)) {
+      continue;
+    }
+
+    const headerOffset = payloadOffset - footerRecordHeaderLength;
+    if (
+      bytes[headerOffset + 1] !== 0 ||
+      bytes[headerOffset + 2] !== 0 ||
+      bytes[headerOffset + 3] !== 0 ||
+      bytes[headerOffset + 5] !== 0 ||
+      bytes[headerOffset + 6] !== 0 ||
+      bytes[headerOffset + 7] !== 0
+    ) {
+      continue;
+    }
+
+    const kind = bytes[headerOffset + 8] ?? 0;
+    const uncompressedLength = readU32LE(bytes, headerOffset + 9) ?? 0;
+    const compressedLength = readU32LE(bytes, headerOffset + 13) ?? 0;
+    if (![1, 2, 3].includes(kind) || uncompressedLength <= 0 || compressedLength <= 0) {
+      continue;
+    }
+
+    if (
+      !isRangeValid(payloadOffset, compressedLength, metadataOffset) ||
+      !isZstdMagic(bytes, payloadOffset)
+    ) {
+      continue;
+    }
+
+    records.push({
+      headerOffset,
+      payloadOffset,
+      id: bytes[headerOffset] ?? 0,
+      relatedId: bytes[headerOffset + 4] ?? 0,
+      kind,
+      uncompressedLength,
+      compressedLength,
+    });
+  }
+
+  records.sort((left, right) => left.headerOffset - right.headerOffset);
+  const uniqueRecords = records.filter(
+    (record, index) => index === 0 || record.headerOffset !== records[index - 1].headerOffset,
+  );
+  if (uniqueRecords.length === 0) {
+    return null;
+  }
+
+  let chunkCount = 0;
+  let keyframeCount = 0;
+  let startupChunkEndId = 0;
+  let gameStartChunkId = 0;
+  let maxChunkId = 0;
+  let maxKeyframeId = 0;
+
+  const segments: ReplaySegmentSummary[] = uniqueRecords.map((record) => {
+    let type = "startup";
+    if (record.kind === 1) {
+      type = "chunk";
+      chunkCount += 1;
+      maxChunkId = Math.max(maxChunkId, record.id);
+      if (gameStartChunkId === 0) {
+        gameStartChunkId = record.id;
+      }
+    } else if (record.kind === 2) {
+      type = "keyframe";
+      keyframeCount += 1;
+      maxKeyframeId = Math.max(maxKeyframeId, record.id);
+    } else {
+      startupChunkEndId = Math.max(startupChunkEndId, record.relatedId);
+    }
+
+    return {
+      id: record.id,
+      type,
+      length: record.compressedLength,
+      chunkId: record.relatedId,
+      offset: record.headerOffset,
+      headerOffset: record.headerOffset,
+      payloadOffset: record.payloadOffset,
+      uncompressedLength: record.uncompressedLength,
+      codec: "zstd",
+    };
+  });
+
+  if (lastKeyFrameId > 0 && keyframeCount !== lastKeyFrameId) {
+    return null;
+  }
+  if (lastGameChunkId > 0 && maxChunkId > 0 && maxChunkId !== lastGameChunkId) {
+    return null;
+  }
+  if (lastKeyFrameId > 0 && maxKeyframeId > 0 && maxKeyframeId !== lastKeyFrameId) {
+    return null;
+  }
+
+  return {
+    format: "rofl2-like-footer",
+    metadataSource: "footer-size",
+    metadataOffset,
+    metadataSize,
+    payloadHeaderOffset: 0,
+    payloadHeaderSize: 0,
+    payloadOffset: uniqueRecords[0]?.headerOffset ?? 0,
+    matchId: 0,
+    keyframeCount,
+    chunkCount,
+    startupChunkEndId,
+    gameStartChunkId: gameStartChunkId || (startupChunkEndId > 0 ? startupChunkEndId + 1 : 0),
+    keyframeIntervalMillis: 0,
+    binaryHeaderPresent: false,
+    payloadHeaderPresent: false,
+    segmentTablePresent: true,
+    segments,
+  };
 }
 
 export function parseReplayBuffer(buffer: ArrayBuffer): ReplaySummary {
@@ -414,10 +571,6 @@ export function parseReplayBuffer(buffer: ArrayBuffer): ReplaySummary {
         "Known classic ROFL header fields were not recognized. Metadata was recovered by scanning for the embedded JSON block instead.",
       );
     }
-
-    warnings.push(
-      "Payload header and segment table parsing are currently available only for the known classic ROFL layout. Payload decoding is not implemented yet.",
-    );
   }
 
   const metadata = JSON.parse(metadataJson) as {
@@ -431,6 +584,32 @@ export function parseReplayBuffer(buffer: ArrayBuffer): ReplaySummary {
   const players = metadata.statsJson
     ? (JSON.parse(metadata.statsJson) as Record<string, unknown>[]).map(normalizePlayer)
     : [];
+
+  if (!classicContainer && container.metadataSource === "footer-size") {
+    const footerContainer = parseFooterZstdContainer(
+      bytes,
+      container.metadataOffset,
+      container.metadataSize,
+      metadata.lastGameChunkId ?? 0,
+      metadata.lastKeyFrameId ?? 0,
+    );
+
+    if (footerContainer) {
+      container = footerContainer;
+      capabilities.segmentTableAvailable = true;
+      warnings.push(
+        "Footer-style zstd records were indexed from the pre-metadata payload region. Payload decompression and packet decoding are not implemented yet.",
+      );
+    } else {
+      warnings.push(
+        "Payload header and segment table parsing are currently available only for the known classic ROFL layout. Payload decoding is not implemented yet.",
+      );
+    }
+  } else if (!classicContainer) {
+    warnings.push(
+      "Payload header and segment table parsing are currently available only for the known classic ROFL layout. Payload decoding is not implemented yet.",
+    );
+  }
 
   capabilities.metadataAvailable = true;
   capabilities.playerStatsAvailable = players.length > 0;

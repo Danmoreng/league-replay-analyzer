@@ -96,9 +96,9 @@ const capabilityItems = computed(() => {
       detail: "Classic payload header fields",
     },
     {
-      label: "Segment Table",
+      label: "Segment Index",
       available: capabilities.segmentTableAvailable,
-      detail: "Classic chunk/keyframe index",
+      detail: "Classic table or footer-style zstd record index",
     },
     {
       label: "Payload Decode",
@@ -128,6 +128,14 @@ const containerRows = computed(() => {
     { label: "Match ID", value: formatOptionalNumber(container.matchId) },
     { label: "Chunk Count", value: formatOptionalNumber(container.chunkCount) },
     { label: "Keyframe Count", value: formatOptionalNumber(container.keyframeCount) },
+    {
+      label: "Startup Chunk End",
+      value: formatOptionalNumber(container.startupChunkEndId),
+    },
+    {
+      label: "Game Start Chunk",
+      value: formatOptionalNumber(container.gameStartChunkId),
+    },
     {
       label: "Keyframe Interval",
       value:
@@ -190,7 +198,7 @@ async function loadReplay(file: File): Promise<void> {
     summary.value = await parseReplayBufferWithWasm(buffer);
     setDuration(summary.value.gameLengthMillis);
     seek(0);
-    status.value = `Parsed ${file.name}. Metadata source: ${summary.value.container.metadataSource}. Player stats: ${summary.value.playerCount}.`;
+    status.value = `Parsed ${file.name}. Metadata source: ${summary.value.container.metadataSource}. Player stats: ${summary.value.playerCount}. Indexed segments: ${summary.value.container.segments.length}.`;
   } catch (error) {
     summary.value = null;
     errorMessage.value = error instanceof Error ? error.message : String(error);
@@ -282,18 +290,24 @@ function onFileChange(event: Event): void {
                   <tr>
                     <th>ID</th>
                     <th>Type</th>
-                    <th>Length</th>
+                    <th>Codec</th>
+                    <th>Compressed</th>
+                    <th>Uncompressed</th>
                     <th>Chunk ID</th>
-                    <th>Offset</th>
+                    <th>Header Offset</th>
+                    <th>Payload Offset</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="segment in segmentPreview" :key="`${segment.id}-${segment.offset}`">
+                  <tr v-for="segment in segmentPreview" :key="`${segment.id}-${segment.headerOffset}`">
                     <td>{{ segment.id }}</td>
                     <td>{{ segment.type }}</td>
+                    <td>{{ segment.codec || "unknown" }}</td>
                     <td>{{ formatNumber(segment.length) }}</td>
+                    <td>{{ formatOptionalNumber(segment.uncompressedLength) }}</td>
                     <td>{{ formatNumber(segment.chunkId) }}</td>
-                    <td>{{ formatNumber(segment.offset) }}</td>
+                    <td>{{ formatNumber(segment.headerOffset) }}</td>
+                    <td>{{ formatNumber(segment.payloadOffset) }}</td>
                   </tr>
                 </tbody>
               </table>

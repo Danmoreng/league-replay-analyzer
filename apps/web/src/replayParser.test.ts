@@ -25,6 +25,32 @@ function writeAscii(bytes: Uint8Array, offset: number, text: string): void {
   }
 }
 
+function writeZstdRecordHeader(
+  bytes: Uint8Array,
+  offset: number,
+  id: number,
+  relatedId: number,
+  kind: number,
+  uncompressedLength: number,
+  compressedLength: number,
+): void {
+  bytes[offset] = id;
+  bytes[offset + 4] = relatedId;
+  bytes[offset + 8] = kind;
+  writeU32LE(bytes, offset + 9, uncompressedLength);
+  writeU32LE(bytes, offset + 13, compressedLength);
+}
+
+function writeZstdPayload(bytes: Uint8Array, offset: number, compressedLength: number): void {
+  bytes[offset] = 0x28;
+  bytes[offset + 1] = 0xb5;
+  bytes[offset + 2] = 0x2f;
+  bytes[offset + 3] = 0xfd;
+  for (let index = 4; index < compressedLength; index += 1) {
+    bytes[offset + index] = (offset + index) & 0xff;
+  }
+}
+
 function buildClassicFixture(): ArrayBuffer {
   const metadata =
     '{"gameLength":123456,"lastGameChunkId":66,"lastKeyFrameId":32,"statsJson":"[{\\"TEAM\\":\\"100\\",\\"SKIN\\":\\"Ornn\\",\\"RIOT_ID_GAME_NAME\\":\\"TheBearinator\\",\\"RIOT_ID_TAG_LINE\\":\\"BABBA\\",\\"TEAM_POSITION\\":\\"TOP\\",\\"WIN\\":\\"Win\\",\\"CHAMPIONS_KILLED\\":\\"3\\",\\"NUM_DEATHS\\":\\"7\\",\\"ASSISTS\\":\\"6\\",\\"GOLD_EARNED\\":\\"10373\\",\\"TOTAL_DAMAGE_DEALT_TO_CHAMPIONS\\":\\"27239\\",\\"VISION_SCORE\\":\\"17\\"}]"}';
@@ -87,6 +113,47 @@ function buildFooterFixture(): ArrayBuffer {
   return bytes.buffer;
 }
 
+function buildFooterZstdFixture(): ArrayBuffer {
+  const metadata = '{"gameLength":240000,"lastGameChunkId":4,"lastKeyFrameId":1,"statsJson":"[]"}';
+
+  const startupHeader = 28;
+  const startupCompressed = 12;
+  const startupPayload = startupHeader + 17;
+  const keyframeHeader = startupPayload + startupCompressed;
+  const keyframeCompressed = 14;
+  const keyframePayload = keyframeHeader + 17;
+  const chunk3Header = keyframePayload + keyframeCompressed;
+  const chunk3Compressed = 16;
+  const chunk3Payload = chunk3Header + 17;
+  const chunk4Header = chunk3Payload + chunk3Compressed;
+  const chunk4Compressed = 10;
+  const chunk4Payload = chunk4Header + 17;
+  const metadataOffset = chunk4Payload + chunk4Compressed;
+  const bytes = new Uint8Array(metadataOffset + metadata.length + 4);
+
+  writeAscii(bytes, 0, "RIOT");
+  bytes[4] = 0x02;
+  bytes[5] = 0x00;
+  writeAscii(bytes, 16, "16.5.752.7101");
+
+  writeZstdRecordHeader(bytes, startupHeader, 1, 2, 3, 64, startupCompressed);
+  writeZstdPayload(bytes, startupPayload, startupCompressed);
+
+  writeZstdRecordHeader(bytes, keyframeHeader, 1, 3, 2, 80, keyframeCompressed);
+  writeZstdPayload(bytes, keyframePayload, keyframeCompressed);
+
+  writeZstdRecordHeader(bytes, chunk3Header, 3, 4, 1, 96, chunk3Compressed);
+  writeZstdPayload(bytes, chunk3Payload, chunk3Compressed);
+
+  writeZstdRecordHeader(bytes, chunk4Header, 4, 5, 1, 48, chunk4Compressed);
+  writeZstdPayload(bytes, chunk4Payload, chunk4Compressed);
+
+  writeAscii(bytes, metadataOffset, metadata);
+  writeU32LE(bytes, bytes.length - 4, metadata.length);
+
+  return bytes.buffer;
+}
+
 describe("parseReplayBuffer", () => {
   it("parses classic ROFL container fields and player stats", () => {
     const summary = parseReplayBuffer(buildClassicFixture());
@@ -118,6 +185,10 @@ describe("parseReplayBuffer", () => {
       length: 100,
       chunkId: 0,
       offset: 0,
+      headerOffset: summary.container.payloadOffset,
+      payloadOffset: summary.container.payloadOffset + 17,
+      uncompressedLength: 0,
+      codec: "unknown",
     });
   });
 
@@ -140,5 +211,48 @@ describe("parseReplayBuffer", () => {
     });
     expect(summary.warnings[0]).toContain("footer size parsing");
     expect(summary.gameLengthMillis).toBe(1895012);
+  });
+
+  it("indexes footer-style zstd records into startup, keyframe, and chunk segments", () => {
+    const summary = parseReplayBuffer(buildFooterZstdFixture());
+
+    expect(summary.container).toMatchObject({
+      format: "rofl2-like-footer",
+      metadataSource: "footer-size",
+      payloadOffset: 28,
+      segmentTablePresent: true,
+      startupChunkEndId: 2,
+      gameStartChunkId: 3,
+      keyframeCount: 1,
+      chunkCount: 2,
+    });
+    expect(summary.capabilities).toMatchObject({
+      metadataAvailable: true,
+      binaryHeaderAvailable: false,
+      payloadHeaderAvailable: false,
+      segmentTableAvailable: true,
+    });
+    expect(summary.container.segments).toHaveLength(4);
+    expect(summary.container.segments[0]).toMatchObject({
+      id: 1,
+      type: "startup",
+      chunkId: 2,
+      payloadOffset: 45,
+      uncompressedLength: 64,
+      codec: "zstd",
+    });
+    expect(summary.container.segments[1]).toMatchObject({
+      id: 1,
+      type: "keyframe",
+      chunkId: 3,
+      codec: "zstd",
+    });
+    expect(summary.container.segments[2]).toMatchObject({
+      id: 3,
+      type: "chunk",
+      chunkId: 4,
+      codec: "zstd",
+    });
+    expect(summary.warnings.at(-1)).toContain("Footer-style zstd records were indexed");
   });
 });

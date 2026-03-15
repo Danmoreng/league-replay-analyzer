@@ -35,6 +35,10 @@ struct ReplaySegmentSummary {
     int length = 0;
     int chunk_id = 0;
     int offset = 0;
+    int header_offset = 0;
+    int payload_offset = 0;
+    int uncompressed_length = 0;
+    std::string codec;
 };
 
 struct ReplayContainerSummary {
@@ -90,5 +94,6 @@ struct ReplaySummary {
 [[nodiscard]] std::string replay_summary_to_json(const ReplaySummary& summary);
 
 }  // namespace rofl::core
+
 
 

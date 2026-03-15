@@ -9,6 +9,8 @@ target_include_directories(rofl_core
 
 target_compile_features(rofl_core PUBLIC cxx_std_20)
 
+target_link_libraries(rofl_core PUBLIC libzstd_static)
+
 add_executable(rofl_core_cli
     src/cli_main.cpp
 )

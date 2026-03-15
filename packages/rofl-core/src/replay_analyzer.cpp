@@ -3,9 +3,12 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+
+#include <zstd.h>
 
 namespace rofl::core {
 namespace {
@@ -15,6 +18,7 @@ constexpr std::size_t kKnownHeaderLength = 288;
 constexpr std::size_t kKnownPayloadHeaderMinimumSize = 34;
 constexpr std::size_t kKnownSegmentHeaderLength = 17;
 constexpr std::size_t kFooterLengthFieldSize = 4;
+constexpr std::size_t kFooterRecordHeaderLength = 17;
 
 struct KnownBinaryHeader {
     std::uint16_t header_length = 0;
@@ -42,6 +46,16 @@ struct MetadataRegion {
     std::string source;
     std::string format;
     std::string json;
+};
+
+struct FooterZstdRecord {
+    std::size_t header_offset = 0;
+    std::size_t payload_offset = 0;
+    std::uint8_t id = 0;
+    std::uint8_t related_id = 0;
+    std::uint8_t kind = 0;
+    std::uint32_t uncompressed_length = 0;
+    std::uint32_t compressed_length = 0;
 };
 
 [[nodiscard]] bool is_digit(char value) {
@@ -496,6 +510,10 @@ struct MetadataRegion {
         segment.length = static_cast<int>(length);
         segment.chunk_id = static_cast<int>(chunk_id);
         segment.offset = static_cast<int>(data_offset);
+        segment.header_offset = static_cast<int>(offset);
+        segment.payload_offset = static_cast<int>(header.payload_offset + table_size + data_offset);
+        segment.uncompressed_length = 0;
+        segment.codec = "unknown";
         segments.push_back(std::move(segment));
     }
 
@@ -539,6 +557,157 @@ struct MetadataRegion {
     return true;
 }
 
+[[nodiscard]] bool is_zstd_magic(const std::vector<std::uint8_t>& bytes, std::size_t offset) {
+    return is_range_valid(offset, 4, bytes.size()) &&
+           bytes[offset] == 0x28 &&
+           bytes[offset + 1] == 0xB5 &&
+           bytes[offset + 2] == 0x2F &&
+           bytes[offset + 3] == 0xFD;
+}
+
+[[nodiscard]] bool parse_footer_zstd_record(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t header_offset,
+    std::size_t metadata_offset,
+    FooterZstdRecord& record
+) {
+    if (metadata_offset <= header_offset || !is_range_valid(header_offset, kFooterRecordHeaderLength, metadata_offset)) {
+        return false;
+    }
+
+    if (bytes[header_offset + 1] != 0 || bytes[header_offset + 2] != 0 || bytes[header_offset + 3] != 0 ||
+        bytes[header_offset + 5] != 0 || bytes[header_offset + 6] != 0 || bytes[header_offset + 7] != 0) {
+        return false;
+    }
+
+    std::uint32_t uncompressed_length = 0;
+    std::uint32_t compressed_length = 0;
+    if (!read_u32_le(bytes, header_offset + 9, uncompressed_length) ||
+        !read_u32_le(bytes, header_offset + 13, compressed_length)) {
+        return false;
+    }
+
+    const std::uint8_t kind = bytes[header_offset + 8];
+    const std::size_t payload_offset = header_offset + kFooterRecordHeaderLength;
+    if ((kind != 1 && kind != 2 && kind != 3) || uncompressed_length == 0 || compressed_length == 0) {
+        return false;
+    }
+
+    if (!is_range_valid(payload_offset, compressed_length, metadata_offset) || !is_zstd_magic(bytes, payload_offset)) {
+        return false;
+    }
+
+    record.header_offset = header_offset;
+    record.payload_offset = payload_offset;
+    record.id = bytes[header_offset];
+    record.related_id = bytes[header_offset + 4];
+    record.kind = kind;
+    record.uncompressed_length = uncompressed_length;
+    record.compressed_length = compressed_length;
+    return true;
+}
+
+[[nodiscard]] std::vector<FooterZstdRecord> find_footer_zstd_records(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t metadata_offset
+) {
+    std::vector<FooterZstdRecord> records;
+    if (metadata_offset <= kFooterRecordHeaderLength + 4) {
+        return records;
+    }
+
+    for (std::size_t payload_offset = kFooterRecordHeaderLength; payload_offset + 4 <= metadata_offset; ++payload_offset) {
+        if (!is_zstd_magic(bytes, payload_offset)) {
+            continue;
+        }
+
+        FooterZstdRecord record;
+        if (parse_footer_zstd_record(bytes, payload_offset - kFooterRecordHeaderLength, metadata_offset, record)) {
+            records.push_back(record);
+        }
+    }
+
+    std::sort(records.begin(), records.end(), [](const FooterZstdRecord& left, const FooterZstdRecord& right) {
+        return left.header_offset < right.header_offset;
+    });
+
+    records.erase(std::unique(records.begin(), records.end(), [](const FooterZstdRecord& left, const FooterZstdRecord& right) {
+        return left.header_offset == right.header_offset;
+    }), records.end());
+
+    return records;
+}
+
+[[nodiscard]] bool populate_footer_zstd_segments(
+    const std::vector<FooterZstdRecord>& records,
+    ReplaySummary& summary
+) {
+    if (records.empty()) {
+        return false;
+    }
+
+    int chunk_records = 0;
+    int keyframe_records = 0;
+    int startup_chunk_end_id = 0;
+    int game_start_chunk_id = 0;
+    int max_chunk_id = 0;
+    int max_keyframe_id = 0;
+
+    summary.container.segments.clear();
+    summary.container.segments.reserve(records.size());
+    summary.container.payload_offset = records.front().header_offset;
+
+    for (const FooterZstdRecord& record : records) {
+        ReplaySegmentSummary segment;
+        segment.id = static_cast<int>(record.id);
+        segment.length = static_cast<int>(record.compressed_length);
+        segment.chunk_id = static_cast<int>(record.related_id);
+        segment.offset = static_cast<int>(record.header_offset);
+        segment.header_offset = static_cast<int>(record.header_offset);
+        segment.payload_offset = static_cast<int>(record.payload_offset);
+        segment.uncompressed_length = static_cast<int>(record.uncompressed_length);
+        segment.codec = "zstd";
+
+        if (record.kind == 1) {
+            segment.type = "chunk";
+            chunk_records += 1;
+            max_chunk_id = std::max(max_chunk_id, static_cast<int>(record.id));
+            if (game_start_chunk_id == 0) {
+                game_start_chunk_id = static_cast<int>(record.id);
+            }
+        } else if (record.kind == 2) {
+            segment.type = "keyframe";
+            keyframe_records += 1;
+            max_keyframe_id = std::max(max_keyframe_id, static_cast<int>(record.id));
+        } else {
+            segment.type = "startup";
+            startup_chunk_end_id = std::max(startup_chunk_end_id, static_cast<int>(record.related_id));
+        }
+
+        summary.container.segments.push_back(std::move(segment));
+    }
+
+    if (summary.last_keyframe_id > 0 && keyframe_records != summary.last_keyframe_id) {
+        return false;
+    }
+    if (summary.last_game_chunk_id > 0 && max_chunk_id > 0 && max_chunk_id != summary.last_game_chunk_id) {
+        return false;
+    }
+    if (max_keyframe_id > 0 && summary.last_keyframe_id > 0 && max_keyframe_id != summary.last_keyframe_id) {
+        return false;
+    }
+
+    summary.container.chunk_count = chunk_records;
+    summary.container.keyframe_count = keyframe_records;
+    summary.container.startup_chunk_end_id = startup_chunk_end_id;
+    summary.container.game_start_chunk_id = game_start_chunk_id == 0 && startup_chunk_end_id > 0
+        ? startup_chunk_end_id + 1
+        : game_start_chunk_id;
+    summary.container.segment_table_present = true;
+    summary.capabilities.segment_table_available = true;
+    return true;
+}
+
 struct SegmentTableCandidate {
     std::size_t offset = 0;
     int score = 0;
@@ -554,6 +723,70 @@ struct SegmentTableCandidate {
     std::ostringstream output;
     output << offset << " (0x" << std::hex << std::uppercase << offset << std::nouppercase << std::dec << ")";
     return output.str();
+}
+
+[[nodiscard]] bool try_decompress_zstd_segment(
+    const std::vector<std::uint8_t>& bytes,
+    const ReplaySegmentSummary& segment,
+    std::vector<std::uint8_t>& decompressed,
+    std::string& error
+) {
+    if (segment.codec != "zstd") {
+        error = "segment codec is not zstd";
+        return false;
+    }
+    if (segment.length <= 0 || segment.uncompressed_length <= 0) {
+        error = "segment lengths were not populated";
+        return false;
+    }
+
+    const std::size_t payload_offset = static_cast<std::size_t>(segment.payload_offset);
+    const std::size_t compressed_length = static_cast<std::size_t>(segment.length);
+    const std::size_t uncompressed_length = static_cast<std::size_t>(segment.uncompressed_length);
+    if (!is_range_valid(payload_offset, compressed_length, bytes.size())) {
+        error = "segment payload range is out of bounds";
+        return false;
+    }
+
+    decompressed.assign(uncompressed_length, 0);
+    const std::size_t result = ZSTD_decompress(
+        decompressed.data(),
+        decompressed.size(),
+        bytes.data() + payload_offset,
+        compressed_length
+    );
+    if (ZSTD_isError(result) != 0) {
+        error = ZSTD_getErrorName(result);
+        decompressed.clear();
+        return false;
+    }
+
+    decompressed.resize(result);
+    return true;
+}
+
+[[nodiscard]] std::string format_hex_preview(const std::vector<std::uint8_t>& bytes, std::size_t limit) {
+    std::ostringstream output;
+    const std::size_t preview_size = std::min(limit, bytes.size());
+    for (std::size_t index = 0; index < preview_size; ++index) {
+        if (index > 0) {
+            output << ' ';
+        }
+        output << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+               << static_cast<int>(bytes[index]) << std::dec << std::nouppercase;
+    }
+    return output.str();
+}
+
+[[nodiscard]] std::string format_ascii_preview(const std::vector<std::uint8_t>& bytes, std::size_t limit) {
+    std::string preview;
+    const std::size_t preview_size = std::min(limit, bytes.size());
+    preview.reserve(preview_size);
+    for (std::size_t index = 0; index < preview_size; ++index) {
+        const char ch = static_cast<char>(bytes[index]);
+        preview.push_back(std::isprint(static_cast<unsigned char>(ch)) != 0 ? ch : '.');
+    }
+    return preview;
 }
 
 [[nodiscard]] std::vector<std::size_t> find_signature_hits(
@@ -731,8 +964,8 @@ struct SegmentTableCandidate {
 
 BuildInfo get_build_info() {
     return {
-        .version = "0.3.0-container-probe",
-        .parser_state = "metadata-plus-known-container-layouts",
+        .version = "0.5.0-footer-zstd-decompression",
+        .parser_state = "footer-zstd-records-plus-decompression",
         .wasm_state = "scaffolded-not-built"
     };
 }
@@ -755,8 +988,9 @@ ReplaySummary parse_replay_bytes(const std::vector<std::uint8_t>& bytes) {
 
     KnownBinaryHeader binary_header;
     KnownPayloadHeader payload_header;
+    const bool has_classic_container = parse_known_binary_header(bytes, binary_header);
 
-    if (parse_known_binary_header(bytes, binary_header)) {
+    if (has_classic_container) {
         summary.container.format = "classic-rofl";
         summary.container.metadata_source = "binary-header";
         summary.container.metadata_offset = binary_header.metadata_offset;
@@ -812,10 +1046,6 @@ ReplaySummary parse_replay_bytes(const std::vector<std::uint8_t>& bytes) {
                 "Known classic ROFL header fields were not recognized. Metadata was recovered by scanning for the embedded JSON block instead."
             );
         }
-
-        summary.warnings.push_back(
-            "Payload header and segment table parsing are currently available only for the known classic ROFL layout. Payload decoding is not implemented yet."
-        );
     }
 
     summary.capabilities.metadata_available = !summary.metadata_json.empty();
@@ -845,9 +1075,46 @@ ReplaySummary parse_replay_bytes(const std::vector<std::uint8_t>& bytes) {
         throw std::runtime_error("Failed while parsing statsJson from embedded metadata: " + std::string(exception.what()));
     }
 
+    if (!has_classic_container && summary.container.metadata_source == "footer-size") {
+        const auto footer_records = find_footer_zstd_records(bytes, summary.container.metadata_offset);
+        if (populate_footer_zstd_segments(footer_records, summary)) {
+            bool raw_footer_decompression_available = false;
+            for (const ReplaySegmentSummary& segment : summary.container.segments) {
+                if (segment.codec != "zstd") {
+                    continue;
+                }
+
+                std::vector<std::uint8_t> decompressed;
+                std::string error;
+                if (try_decompress_zstd_segment(bytes, segment, decompressed, error)) {
+                    raw_footer_decompression_available = true;
+                    break;
+                }
+            }
+
+            summary.capabilities.payload_decoding_available = raw_footer_decompression_available;
+            if (raw_footer_decompression_available) {
+                summary.warnings.push_back(
+                    "Footer-style zstd records were indexed from the pre-metadata payload region, and raw zstd decompression is available. Packet decoding is still not implemented."
+                );
+            } else {
+                summary.warnings.push_back(
+                    "Footer-style zstd records were indexed from the pre-metadata payload region, but raw zstd decompression could not be verified yet. Packet decoding is still not implemented."
+                );
+            }
+        } else {
+            summary.warnings.push_back(
+                "Payload header and segment table parsing are currently available only for the known classic ROFL layout. Payload decoding is not implemented yet."
+            );
+        }
+    } else if (!has_classic_container) {
+        summary.warnings.push_back(
+            "Payload header and segment table parsing are currently available only for the known classic ROFL layout. Payload decoding is not implemented yet."
+        );
+    }
+
     return summary;
 }
-
 std::string probe_replay_bytes(const std::vector<std::uint8_t>& bytes) {
     std::ostringstream output;
     output << "Replay probe\n";
@@ -996,6 +1263,34 @@ std::string probe_replay_bytes(const std::vector<std::uint8_t>& bytes) {
                << ", firstDataOffset=" << candidate.first_data_offset << '\n';
     }
 
+    if (summary_available && summary.capabilities.segment_table_available) {
+        int decompressed_preview_count = 0;
+        for (const ReplaySegmentSummary& segment : summary.container.segments) {
+            if (segment.codec != "zstd") {
+                continue;
+            }
+
+            std::vector<std::uint8_t> decompressed;
+            std::string error;
+            if (try_decompress_zstd_segment(bytes, segment, decompressed, error)) {
+                output << "Decompressed segment: id=" << segment.id
+                       << ", type=" << segment.type
+                       << ", bytes=" << decompressed.size()
+                       << ", hex=" << format_hex_preview(decompressed, 24)
+                       << ", ascii=\"" << format_ascii_preview(decompressed, 48) << "\"" << '\n';
+            } else {
+                output << "Decompressed segment failed: id=" << segment.id
+                       << ", type=" << segment.type
+                       << ", error=" << error << '\n';
+            }
+
+            ++decompressed_preview_count;
+            if (decompressed_preview_count >= 3) {
+                break;
+            }
+        }
+    }
+
     return output.str();
 }
 
@@ -1046,7 +1341,11 @@ std::string replay_summary_to_json(const ReplaySummary& summary) {
         output << "\"type\":\"" << json_escape(segment.type) << "\",";
         output << "\"length\":" << segment.length << ',';
         output << "\"chunkId\":" << segment.chunk_id << ',';
-        output << "\"offset\":" << segment.offset;
+        output << "\"offset\":" << segment.offset << ',';
+        output << "\"headerOffset\":" << segment.header_offset << ',';
+        output << "\"payloadOffset\":" << segment.payload_offset << ',';
+        output << "\"uncompressedLength\":" << segment.uncompressed_length << ',';
+        output << "\"codec\":\"" << json_escape(segment.codec) << "\"";
         output << '}';
     }
     output << "]},";
@@ -1100,5 +1399,6 @@ std::string replay_summary_to_json(const ReplaySummary& summary) {
 }
 
 }  // namespace rofl::core
+
 
 

@@ -37,6 +37,7 @@ That means:
 - `14,903,687 = 15,013,275 - 4 - 109,584`
 
 This is a concrete, validated relationship, not a hypothesis.
+
 ## Native Probe Findings
 
 Running the native CLI probe against `replays/EUW1-7779216102.rofl` currently reports:
@@ -46,6 +47,7 @@ Running the native CLI probe against `replays/EUW1-7779216102.rofl` currently re
 - footer metadata valid: `yes`
 - parser summary available: `yes`
 - timeline hints from metadata: `gameLengthMillis = 1,895,012`, `lastGameChunkId = 66`, `lastKeyFrameId = 32`
+- payload capabilities: `segmentTable = yes`, `payloadDecoding = yes`
 
 The raw classic header words at the legacy offsets are effectively garbage for this sample:
 
@@ -63,9 +65,64 @@ The first generic 17-byte segment-table scan also returned `0` candidates in the
 
 Implication for the next parser step:
 
-- search for a different payload directory/index structure in the footer-style file
-- inspect the regions around early compression-signature hits as possible payload/container boundaries
+- keep the footer-style record indexing path; it is now validated
+- inspect decompressed startup, keyframe, and chunk payloads for packet/frame structure
 - avoid assuming the classic `payload_offset -> 17-byte table -> segment bytes` layout exists in this replay era
+
+## Footer-Style Zstd Record Layout
+
+The local sample now exposes a stable pre-metadata record chain that `rofl-core` can index and decompress without decrypting payloads.
+
+Observed record shape:
+
+- 17-byte header immediately before each zstd frame
+- byte `0`: record id
+- bytes `1..3`: zero padding
+- byte `4`: related chunk id
+- bytes `5..7`: zero padding
+- byte `8`: record kind
+  - `1 = chunk`
+  - `2 = keyframe`
+  - `3 = startup`
+- bytes `9..12`: uncompressed length (`u32`, little-endian)
+- bytes `13..16`: compressed length (`u32`, little-endian)
+- bytes `17..`: payload beginning with zstd frame magic `28 B5 2F FD`
+
+Verified on `replays/EUW1-7779216102.rofl`:
+
+- `97` indexed records before the metadata block
+- `1` startup record
+- `32` keyframe records
+- `64` chunk records
+- startup ends at chunk `2`
+- first regular game chunk is `3`
+- highest chunk record id is `66`
+- highest keyframe record id is `32`
+
+This matches the replay metadata closely enough to treat the record chain as real container structure, not accidental magic-byte hits.
+
+Decompressed payload verification on the local sample:
+
+- startup record `1` decompresses to `12,919` bytes
+- keyframe record `1` decompresses to `122,737` bytes
+- chunk record `3` decompresses to `259,623` bytes
+- all three were verified through `rofl_core_cli --probe` on `2026-03-15`
+- the decompressed bytes are still opaque binary payloads, not yet decoded gameplay events
+
+What this gives us now:
+
+- absolute header offsets for each footer-style record
+- absolute payload offsets for each zstd frame
+- compressed and uncompressed lengths for each record
+- startup / chunk / keyframe classification
+- keyframe-to-chunk association through the related chunk id field
+- raw decompressed byte streams for native inspection
+
+What it does not give us yet:
+
+- packet schema / opcode meaning
+- timestamped movement extraction
+- event timelines or full state reconstruction
 
 ## Classic Segment Table Layout
 
@@ -77,7 +134,7 @@ When the classic header path validates, the parser reads segment headers as 17-b
 - `9..12`: associated chunk id (`u32`, keyframes only)
 - `13..16`: data offset relative to the end of the segment header table (`u32`)
 
-`rofl-core` currently exposes those fields in normalized form but does not decode segment payloads yet.
+`rofl-core` currently exposes those fields in normalized form but does not decode classic segment payloads yet.
 
 ## Current Boundary
 
@@ -89,12 +146,13 @@ What is implemented now:
 - classic payload header parsing when it validates
 - classic segment table parsing when it validates
 - footer-size metadata recovery for newer files like the local sample
+- footer-style zstd record indexing
+- raw zstd decompression of indexed footer-style records
 
 What is not implemented yet:
 
-- payload decryption
-- payload decompression
 - packet decoding
+- semantic event extraction
 - movement/event timeline extraction
 
 ## Confidence Levels
@@ -104,10 +162,12 @@ High confidence:
 - footer-size metadata recovery on the local sample
 - classic 288-byte header field meanings from reference implementations
 - classic segment table structure
+- footer-style zstd record indexing on the local sample
+- raw zstd decompression of indexed footer-style records on the local sample
 
 Lower confidence / still needs verification:
 
 - whether all post-14.11 files use the same footer convention
-- where newer files store payload-header-equivalent information, if at all
-- whether payload compression is uniformly gzip/zlib after decryption across replay eras
-
+- whether all newer files use this same 17-byte zstd record header layout
+- the meaning of the decompressed payload bytes across patches
+- where packet opcode and field mappings diverge by version
