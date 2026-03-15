@@ -2302,7 +2302,7 @@ std::string analyze_sparse_family(
     };
 
     const auto is_coordinate_like = [](float value) {
-        return std::isfinite(value) && value >= -5000.0F && value <= 20000.0F;
+        return std::isfinite(value) && std::fpclassify(value) == FP_NORMAL && value >= -5000.0F && value <= 20000.0F;
     };
 
     auto format_top_byte_counts = [](const std::map<std::uint8_t, std::size_t>& freq, std::size_t limit) {
@@ -2344,6 +2344,8 @@ std::string analyze_sparse_family(
     std::vector<std::size_t> active_elements_per_record;
     active_elements_per_record.reserve(records.size());
     std::map<std::uint8_t, std::size_t> active_first_byte_freq;
+    std::map<std::uint8_t, std::size_t> lane_mask_freq;
+    std::map<std::uint16_t, std::size_t> signature_freq;
     std::size_t total_active_elements = 0;
 
     for (const auto& rec : records) {
@@ -2373,6 +2375,7 @@ std::string analyze_sparse_family(
             std::vector<float> lane_floats(lane_count, 0.0F);
             std::vector<bool> lane_has_non_padding(lane_count, false);
             std::vector<bool> lane_is_coordinate(lane_count, false);
+            std::uint8_t lane_mask = 0;
             for (std::size_t lane_index = 0; lane_index < lane_count; ++lane_index) {
                 const std::size_t lane_offset = start + (lane_index * 4);
                 std::uint32_t value = 0;
@@ -2381,6 +2384,7 @@ std::string analyze_sparse_family(
                 }
 
                 lane_has_non_padding[lane_index] = true;
+                lane_mask |= static_cast<std::uint8_t>(1U << lane_index);
                 lane_stats[lane_index].non_padding_instances++;
                 if (value == 0) {
                     lane_stats[lane_index].zero_u32_count++;
@@ -2392,7 +2396,7 @@ std::string analyze_sparse_family(
                 }
 
                 lane_stats[lane_index].finite_float_count++;
-                if (as_float >= -1.0F && as_float <= 1.0F) {
+                if (std::fpclassify(as_float) == FP_NORMAL && as_float >= -1.0F && as_float <= 1.0F) {
                     lane_stats[lane_index].unit_float_count++;
                 }
                 if (is_coordinate_like(as_float)) {
@@ -2403,6 +2407,9 @@ std::string analyze_sparse_family(
                     lane_is_coordinate[lane_index] = true;
                 }
             }
+
+            lane_mask_freq[lane_mask]++;
+            signature_freq[static_cast<std::uint16_t>((static_cast<std::uint16_t>(lane_mask) << 8U) | rec.payload[start])]++;
 
             for (std::size_t pair_index = 0; pair_index < pair_defs.size(); ++pair_index) {
                 const auto& pair = pair_defs[pair_index];
@@ -2492,6 +2499,54 @@ std::string analyze_sparse_family(
         output << "\n";
     }
 
+    auto append_top_masks = [&](const std::map<std::uint8_t, std::size_t>& freq, std::size_t limit) {
+        std::vector<std::pair<std::uint8_t, std::size_t>> sorted(freq.begin(), freq.end());
+        std::sort(sorted.begin(), sorted.end(), [](const auto& left, const auto& right) {
+            return left.second > right.second;
+        });
+        for (std::size_t i = 0; i < limit && i < sorted.size(); ++i) {
+            output << "  mask=";
+            for (int bit = static_cast<int>(lane_count) - 1; bit >= 0; --bit) {
+                output << (((sorted[i].first >> bit) & 1U) != 0U ? '1' : '0');
+            }
+            output << " count=" << sorted[i].second
+                   << " (" << format_percentage(sorted[i].second, total_active_elements) << ")\n";
+        }
+        if (sorted.empty()) {
+            output << "  none\n";
+        }
+    };
+
+    auto append_top_signatures = [&](const std::map<std::uint16_t, std::size_t>& freq, std::size_t limit) {
+        std::vector<std::pair<std::uint16_t, std::size_t>> sorted(freq.begin(), freq.end());
+        std::sort(sorted.begin(), sorted.end(), [](const auto& left, const auto& right) {
+            return left.second > right.second;
+        });
+        for (std::size_t i = 0; i < limit && i < sorted.size(); ++i) {
+            const std::uint8_t mask = static_cast<std::uint8_t>(sorted[i].first >> 8U);
+            const std::uint8_t first = static_cast<std::uint8_t>(sorted[i].first & 0xFFu);
+            output << "  mask=";
+            for (int bit = static_cast<int>(lane_count) - 1; bit >= 0; --bit) {
+                output << (((mask >> bit) & 1U) != 0U ? '1' : '0');
+            }
+            output << " first=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+                   << static_cast<int>(first) << std::dec << std::setfill(' ')
+                   << " count=" << sorted[i].second
+                   << " (" << format_percentage(sorted[i].second, total_active_elements) << ")\n";
+        }
+        if (sorted.empty()) {
+            output << "  none\n";
+        }
+    };
+
+    output << "Top lane masks:\n";
+    append_top_masks(lane_mask_freq, 8);
+    output << "\n";
+
+    output << "Top mask + first-byte signatures:\n";
+    append_top_signatures(signature_freq, 10);
+    output << "\n";
+
     std::vector<std::pair<std::size_t, std::size_t>> sorted_indices;
     sorted_indices.reserve(element_active_counts.size());
     for (std::size_t index = 0; index < element_active_counts.size(); ++index) {
@@ -2567,7 +2622,142 @@ std::string analyze_sparse_family(
 
     return output.str();
 }
+std::string trace_sparse_slot(
+    const std::string& path,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    std::size_t slot_index,
+    std::size_t max_records
+) {
+    std::ostringstream output;
+    const std::vector<std::uint8_t> bytes = read_file_bytes(path);
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const std::uint8_t padding_byte = static_cast<std::uint8_t>(target_length & 0xFFu);
+    const std::uint32_t padding_u32 = static_cast<std::uint32_t>(padding_byte) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 8U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 16U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 24U);
+
+    auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    output << "Sparse slot trace for slot #" << slot_index << " across " << records.size() << " records\n\n";
+    output << "Record length: " << target_length << " bytes\n";
+    output << "Header size:   " << header_size << " bytes\n";
+    output << "Stride:        " << stride << " bytes\n";
+
+    if (records.empty()) {
+        return output.str();
+    }
+    if (header_size >= target_length) {
+        output << "Header size must be smaller than the target record length.\n";
+        return output.str();
+    }
+    if (stride == 0 || (stride % 4) != 0) {
+        output << "Stride must be a non-zero multiple of 4.\n";
+        return output.str();
+    }
+
+    const std::size_t element_count = (target_length - header_size) / stride;
+    if (slot_index >= element_count) {
+        output << "Slot index " << slot_index << " is out of range for " << element_count << " elements.\n";
+        return output.str();
+    }
+
+    const auto is_coordinate_like = [](float value) {
+        return std::isfinite(value) && std::fpclassify(value) == FP_NORMAL && value >= -5000.0F && value <= 20000.0F;
+    };
+
+    auto describe_lane = [&](const std::vector<std::uint8_t>& payload, std::size_t offset) {
+        std::ostringstream line;
+        std::uint32_t value = 0;
+        if (!read_u32_le(payload, offset, value)) {
+            line << "oob";
+            return line.str();
+        }
+        if (value == padding_u32) {
+            line << "padding";
+            return line.str();
+        }
+
+        line << "u32=0x" << std::hex << std::uppercase << std::setw(8) << std::setfill('0') << value << std::dec << std::setfill(' ');
+        const float as_float = std::bit_cast<float>(value);
+        if (std::isfinite(as_float)) {
+            line << ", f32=" << std::fixed << std::setprecision(2) << as_float;
+            if (is_coordinate_like(as_float)) {
+                line << " [coord-like]";
+            } else if (std::fpclassify(as_float) == FP_NORMAL && as_float >= -1.0F && as_float <= 1.0F) {
+                line << " [unit-like]";
+            }
+        } else {
+            line << ", f32=non-finite";
+        }
+        return line.str();
+    };
+
+    std::size_t active_count = 0;
+    std::size_t shown = 0;
+    for (std::size_t record_index = 0; record_index < records.size(); ++record_index) {
+        const auto& rec = records[record_index];
+        const std::size_t start = header_size + (slot_index * stride);
+        if (start + stride > rec.payload.size()) {
+            continue;
+        }
+
+        bool active = false;
+        for (std::size_t byte_index = 0; byte_index < stride; ++byte_index) {
+            if (rec.payload[start + byte_index] != padding_byte) {
+                active = true;
+                break;
+            }
+        }
+        if (!active) {
+            continue;
+        }
+
+        active_count++;
+        if (shown >= max_records) {
+            continue;
+        }
+
+        std::uint8_t mask = 0;
+        for (std::size_t lane_index = 0; lane_index < std::min<std::size_t>(4, stride / 4); ++lane_index) {
+            std::uint32_t value = 0;
+            if (read_u32_le(rec.payload, start + (lane_index * 4), value) && value != padding_u32) {
+                mask |= static_cast<std::uint8_t>(1U << lane_index);
+            }
+        }
+
+        output << "rec#" << std::setw(3) << std::setfill('0') << record_index << std::setfill(' ')
+               << " chunk=" << rec.chunk_id
+               << " offset=" << rec.chunk_offset
+               << " first=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+               << static_cast<int>(rec.payload[start]) << std::dec << std::setfill(' ')
+               << " mask=";
+        for (int bit = static_cast<int>(std::min<std::size_t>(4, stride / 4)) - 1; bit >= 0; --bit) {
+            output << (((mask >> bit) & 1U) != 0U ? '1' : '0');
+        }
+        output << "\n";
+
+        for (std::size_t lane_index = 0; lane_index < std::min<std::size_t>(4, stride / 4); ++lane_index) {
+            output << "  +" << (lane_index * 4) << ": " << describe_lane(rec.payload, start + (lane_index * 4)) << "\n";
+        }
+        output << "\n";
+        shown++;
+    }
+
+    output << "Active records for slot: " << active_count << " / " << records.size()
+           << " (" << format_percentage(active_count, records.size()) << ")\n";
+    if (active_count > shown) {
+        output << "Trace output truncated to first " << shown << " active records.\n";
+    }
+
+    return output.str();
+}
 }  // namespace rofl::core
+
+
+
 
 
 
