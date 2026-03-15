@@ -4,6 +4,7 @@
 #include <cctype>
 #include <fstream>
 #include <iomanip>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
@@ -1957,7 +1958,10 @@ std::string compare_subrecord_family(const std::string& path, std::size_t target
         output << "Rec #" << std::setw(2) << std::setfill('0') << i << " | ";
         for (std::size_t f = 0; f < u32_count; ++f) {
             std::uint32_t val = 0;
-            read_u32_le(records[i].payload, f * 4, val);
+            const bool has_u32 = read_u32_le(records[i].payload, f * 4, val);
+            if (!has_u32) {
+                continue;
+            }
             output << std::setw(11) << std::setfill(' ') << val << " ";
         }
         output << "\n";
@@ -1966,7 +1970,257 @@ std::string compare_subrecord_family(const std::string& path, std::size_t target
     return output.str();
 }
 
+std::string guess_stride(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size) {
+    std::ostringstream output;
+    const std::vector<std::uint8_t> bytes = read_file_bytes(path);
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const std::uint8_t padding_byte = static_cast<std::uint8_t>(target_length & 0xFFu);
+
+    auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    output << "Guessing stride for " << records.size() << " records of size " << target_length
+           << " starting with 0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << static_cast<int>(target_first_byte) << std::dec
+           << " (header_size=" << header_size << ")\n\n";
+
+    output << "Derived padding byte from length: 0x" << std::hex << std::uppercase << std::setw(2)
+           << std::setfill('0') << static_cast<int>(padding_byte) << std::dec;
+    if (padding_byte != target_first_byte) {
+        output << " (selection byte differs from padding byte)";
+    }
+    output << "\n\n";
+
+    if (records.empty()) {
+        return output.str();
+    }
+    if (header_size >= target_length) {
+        output << "Header size must be smaller than the target record length.\n";
+        return output.str();
+    }
+
+    std::size_t total_non_padding = 0;
+    std::size_t min_non_padding = target_length;
+    std::size_t max_non_padding = 0;
+    std::vector<std::size_t> non_padding_offsets;
+    for (const auto& rec : records) {
+        std::size_t rec_non_padding = 0;
+        for (std::size_t offset = header_size; offset < rec.payload.size(); ++offset) {
+            if (rec.payload[offset] != padding_byte) {
+                non_padding_offsets.push_back(offset);
+                rec_non_padding++;
+            }
+        }
+        total_non_padding += rec_non_padding;
+        min_non_padding = std::min(min_non_padding, rec_non_padding);
+        max_non_padding = std::max(max_non_padding, rec_non_padding);
+    }
+
+    output << "Density Analysis (after header, padding=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << static_cast<int>(padding_byte) << std::dec << "):\n";
+    output << "  Average: " << (total_non_padding / records.size()) << " (" << format_percentage(total_non_padding / records.size(), target_length - header_size) << ")\n";
+    output << "  Min:     " << min_non_padding << " (" << format_percentage(min_non_padding, target_length - header_size) << ")\n";
+    output << "  Max:     " << max_non_padding << " (" << format_percentage(max_non_padding, target_length - header_size) << ")\n\n";
+
+    for (std::size_t stride : {8, 16}) {
+        const std::size_t num_elements = (target_length - header_size) / stride;
+        const std::size_t total_elements = num_elements * records.size();
+        std::size_t active_elements = 0;
+        std::size_t fully_active_elements = 0;
+        std::size_t partially_active_elements = 0;
+
+        for (const auto& rec : records) {
+            for (std::size_t i = 0; i < num_elements; ++i) {
+                const std::size_t start = header_size + (i * stride);
+                std::size_t non_padding_count = 0;
+                for (std::size_t j = 0; j < stride; ++j) {
+                    if (rec.payload[start + j] != padding_byte) {
+                        non_padding_count++;
+                    }
+                }
+
+                if (non_padding_count > 0) {
+                    active_elements++;
+                    if (non_padding_count == stride) {
+                        fully_active_elements++;
+                    } else {
+                        partially_active_elements++;
+                    }
+                }
+            }
+        }
+
+        output << "Element Analysis (stride " << stride << "):\n";
+        output << "  Total Elements:    " << total_elements << "\n";
+        output << "  Active Elements:   " << active_elements << " (" << format_percentage(active_elements, total_elements) << ")\n";
+        output << "  Fully Active:      " << fully_active_elements << " (" << format_percentage(fully_active_elements, active_elements) << " of active)\n";
+        output << "  Partially Active:  " << partially_active_elements << " (" << format_percentage(partially_active_elements, active_elements) << " of active)\n\n";
+    }
+
+    std::map<std::uint8_t, std::size_t> freq;
+    for (const auto& rec : records) {
+        for (std::uint8_t b : rec.payload) {
+            freq[b]++;
+        }
+    }
+    std::vector<std::pair<std::uint8_t, std::size_t>> sorted_freq(freq.begin(), freq.end());
+    std::sort(sorted_freq.begin(), sorted_freq.end(), [](const auto& a, const auto& b) {
+        return a.second > b.second;
+    });
+
+    output << "Top 10 Byte Frequencies:\n";
+    for (std::size_t i = 0; i < 10 && i < sorted_freq.size(); ++i) {
+        output << "  0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << static_cast<int>(sorted_freq[i].first) << std::dec
+               << ": " << sorted_freq[i].second << " (" << format_percentage(sorted_freq[i].second, records.size() * target_length) << ")\n";
+    }
+    output << "\n";
+
+    const std::size_t stab_stride = 16;
+    const std::size_t num_elements_16 = (target_length - header_size) / stab_stride;
+    output << "Element Stability (stride 16, first 64 elements):\n";
+    for (std::size_t i = 0; i < 64 && i < num_elements_16; ++i) {
+        std::map<std::uint32_t, std::size_t> first_u32_freq;
+        std::size_t active_count = 0;
+        for (const auto& rec : records) {
+            const std::size_t start = header_size + (i * stab_stride);
+            bool active = false;
+            for (std::size_t j = 0; j < stab_stride; ++j) {
+                if (rec.payload[start + j] != padding_byte) {
+                    active = true;
+                    break;
+                }
+            }
+            if (active) {
+                std::uint32_t val = 0;
+                const bool has_u32 = read_u32_le(rec.payload, start, val);
+                if (!has_u32) {
+                    continue;
+                }
+                active_count++;
+                first_u32_freq[val]++;
+            }
+        }
+        if (active_count > 0) {
+            output << "  Elem #" << std::setw(2) << i << " | Active: " << std::setw(3) << active_count
+                   << " | Top U32: ";
+            std::vector<std::pair<std::uint32_t, std::size_t>> sorted_u32(first_u32_freq.begin(), first_u32_freq.end());
+            std::sort(sorted_u32.begin(), sorted_u32.end(), [](const auto& a, const auto& b) {
+                return a.second > b.second;
+            });
+            for (std::size_t k = 0; k < 2 && k < sorted_u32.size(); ++k) {
+                output << "0x" << std::hex << std::uppercase << std::setw(8) << std::setfill('0') << sorted_u32[k].first << std::dec
+                       << " (" << sorted_u32[k].second << ") ";
+            }
+            output << "\n";
+        }
+    }
+    output << "\n";
+
+    std::map<std::uint8_t, std::size_t> first_byte_freq_off0;
+    std::map<std::size_t, std::size_t> elem_active_freq;
+    for (const auto& rec : records) {
+        for (std::size_t i = 0; i < num_elements_16; ++i) {
+            const std::size_t start = header_size + (i * stab_stride);
+            const std::size_t off0_start = i * stab_stride;
+            if (off0_start < rec.payload.size()) {
+                first_byte_freq_off0[rec.payload[off0_start]]++;
+            }
+
+            bool active = false;
+            for (std::size_t j = 0; j < stab_stride; ++j) {
+                if (rec.payload[start + j] != padding_byte) {
+                    active = true;
+                    break;
+                }
+            }
+            if (active) {
+                elem_active_freq[i]++;
+            }
+        }
+    }
+
+    std::vector<std::pair<std::size_t, std::size_t>> sorted_elem_act(elem_active_freq.begin(), elem_active_freq.end());
+    std::sort(sorted_elem_act.begin(), sorted_elem_act.end(), [](const auto& a, const auto& b) {
+        return a.second > b.second;
+    });
+
+    output << "Top 10 Most Active Element Indices (stride 16):\n";
+    for (std::size_t i = 0; i < 10 && i < sorted_elem_act.size(); ++i) {
+        output << "  Elem #" << std::setw(4) << sorted_elem_act[i].first << ": " << sorted_elem_act[i].second << " records (" << format_percentage(sorted_elem_act[i].second, records.size()) << ")\n";
+    }
+    output << "\n";
+
+    std::vector<std::pair<std::uint8_t, std::size_t>> sorted_fb_off0(first_byte_freq_off0.begin(), first_byte_freq_off0.end());
+    std::sort(sorted_fb_off0.begin(), sorted_fb_off0.end(), [](const auto& a, const auto& b) {
+        return a.second > b.second;
+    });
+    output << "Top 10 First-Byte-of-Element Frequencies (stride 16, start=0):\n";
+    for (std::size_t i = 0; i < 10 && i < sorted_fb_off0.size(); ++i) {
+        output << "  0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << static_cast<int>(sorted_fb_off0[i].first) << std::dec
+               << ": " << sorted_fb_off0[i].second << " (" << format_percentage(sorted_fb_off0[i].second, records.size() * num_elements_16) << ")\n";
+    }
+    output << "\n";
+
+    if (non_padding_offsets.empty()) {
+        output << "No non-padding bytes found in records (after header).\n";
+        return output.str();
+    }
+
+    std::sort(non_padding_offsets.begin(), non_padding_offsets.end());
+    non_padding_offsets.erase(std::unique(non_padding_offsets.begin(), non_padding_offsets.end()), non_padding_offsets.end());
+
+    output << "Found " << non_padding_offsets.size() << " unique non-padding byte offsets.\n";
+
+    std::map<std::size_t, std::size_t> distance_freq;
+    for (const auto& rec : records) {
+        std::size_t last_off = 0;
+        bool first = true;
+        for (std::size_t off = header_size; off < rec.payload.size(); ++off) {
+            if (rec.payload[off] != padding_byte) {
+                if (!first) {
+                    distance_freq[off - last_off]++;
+                }
+                last_off = off;
+                first = false;
+            }
+        }
+    }
+    std::vector<std::pair<std::size_t, std::size_t>> sorted_dist(distance_freq.begin(), distance_freq.end());
+    std::sort(sorted_dist.begin(), sorted_dist.end(), [](const auto& a, const auto& b) {
+        return a.second > b.second;
+    });
+    output << "\nTop 10 Distances between consecutive non-padding bytes:\n";
+    for (std::size_t i = 0; i < 10 && i < sorted_dist.size(); ++i) {
+        output << "  " << std::setw(2) << sorted_dist[i].first << " bytes: " << sorted_dist[i].second << "\n";
+    }
+
+    const std::vector<std::size_t> strides = {4, 8, 12, 16, 20, 24, 32, 48, 64};
+    output << "\nStride analysis (offsets - header_size) % stride:\n";
+    for (std::size_t stride : strides) {
+        std::map<std::size_t, std::size_t> distribution;
+        for (std::size_t off : non_padding_offsets) {
+            distribution[(off - header_size) % stride]++;
+        }
+
+        output << "Stride " << std::setw(2) << stride << " | unique mods: " << std::setw(2) << distribution.size() << " | mods: ";
+        for (auto const& [mod, count] : distribution) {
+            output << mod << " (" << count << ") ";
+        }
+        output << "\n";
+    }
+
+    output << "\nNon-padding Heatmap (first 256 bytes):\n";
+    for (std::size_t i = 0; i < 256 && i < target_length; i += 32) {
+        output << std::setw(4) << std::setfill('0') << i << " | ";
+        for (std::size_t j = 0; j < 32 && (i + j) < target_length; ++j) {
+            const std::size_t off = i + j;
+            const bool active = std::find(non_padding_offsets.begin(), non_padding_offsets.end(), off) != non_padding_offsets.end();
+            output << (active ? '#' : '.');
+        }
+        output << "\n";
+    }
+
+    return output.str();
+}
+
 }  // namespace rofl::core
+
 
 
 

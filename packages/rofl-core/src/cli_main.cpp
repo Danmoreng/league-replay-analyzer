@@ -89,6 +89,30 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (first_arg == "--guess-stride" && argc > 2) {
+        try {
+            std::string path = argv[2];
+            std::size_t length = 0;
+            std::uint8_t first_byte = 0;
+            std::size_t header_size = 0;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view arg = argv[i];
+                if (arg == "--length" && i + 1 < argc) {
+                    length = std::stoull(argv[++i]);
+                } else if (arg == "--first-byte" && i + 1 < argc) {
+                    first_byte = static_cast<std::uint8_t>(std::stoul(argv[++i], nullptr, 0));
+                } else if (arg == "--header-size" && i + 1 < argc) {
+                    header_size = std::stoull(argv[++i]);
+                }
+            }
+            std::cout << rofl::core::guess_stride(path, length, first_byte, header_size);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
     std::cout << "rofl_core_cli scaffold\n";
     std::cout << "Use --version for build metadata.\n";
     std::cout << "Use --summary <path-to-rofl> to print a parsed replay summary.\n";
@@ -96,6 +120,7 @@ int main(int argc, char** argv) {
     std::cout << "Use --inspect <path-to-rofl> to inspect decompressed footer-style payload records.\n";
     std::cout << "Use --dump-subrecord-family <path-to-rofl> --length <len> --first-byte <byte> to dump matching records.\n";
     std::cout << "Use --compare-subrecord-family <path-to-rofl> --length <len> --first-byte <byte> [--prefix-bytes <len>] to analyze stable fields.\n";
+    std::cout << "Use --guess-stride <path-to-rofl> --length <len> --first-byte <byte> [--header-size <len>] to detect repeating patterns.\n";
     return 0;
 }
 
