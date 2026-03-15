@@ -1896,6 +1896,52 @@ struct ExtractedSubrecord {
     return results;
 }
 
+std::string dump_chunk_subrecords(const std::string& path, int chunk_id) {
+    std::ostringstream output;
+    const std::vector<std::uint8_t> bytes = read_file_bytes(path);
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+
+    const auto it = std::find_if(summary.container.segments.begin(), summary.container.segments.end(), [&](const ReplaySegmentSummary& s) {
+        return s.type == "chunk" && s.chunk_id == chunk_id;
+    });
+
+    if (it == summary.container.segments.end()) {
+        throw std::runtime_error("Chunk ID " + std::to_string(chunk_id) + " not found in replay.");
+    }
+
+    const ReplaySegmentSummary& segment = *it;
+    std::vector<std::uint8_t> decompressed;
+    std::string error;
+    if (!try_decompress_zstd_segment(bytes, segment, decompressed, error)) {
+        throw std::runtime_error("Failed to decompress chunk: " + error);
+    }
+
+    const auto best_u16 = analyze_le_length_prefix(decompressed, 2);
+    if (best_u16.record_count < 2) {
+        output << "No LE-u16 framed subrecords found in chunk " << chunk_id << ".\n";
+        return output.str();
+    }
+
+    auto records = extract_le_framed_subrecords(decompressed, 2, best_u16.start_offset, 1000000);
+    output << "Found " << records.size() << " subrecords in chunk " << chunk_id << " (decompressed size=" << decompressed.size() << " bytes)\n\n";
+
+    for (std::size_t i = 0; i < records.size(); ++i) {
+        const auto& rec = records[i];
+        if (rec.length == 0) continue;
+        
+        std::vector<std::uint8_t> payload(
+            decompressed.begin() + static_cast<std::ptrdiff_t>(rec.payload_offset),
+            decompressed.begin() + static_cast<std::ptrdiff_t>(rec.payload_offset + rec.length)
+        );
+
+        output << "Subrecord #" << i + 1 << " (offset=" << rec.payload_offset << ", length=" << rec.length << ")\n";
+        output << "  Hex: " << format_hex_preview(payload, 128) << "\n";
+        output << "  Ascii: \"" << format_ascii_preview(payload, 128) << "\"\n\n";
+    }
+
+    return output.str();
+}
+
 std::string dump_subrecord_family(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte) {
     std::ostringstream output;
     const std::vector<std::uint8_t> bytes = read_file_bytes(path);

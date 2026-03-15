@@ -174,11 +174,34 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (first_arg == "--dump-chunk-subrecords" && argc > 2) {
+        try {
+            std::string path = argv[2];
+            int chunk_id = -1;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view arg = argv[i];
+                if (arg == "--chunk-id" && i + 1 < argc) {
+                    chunk_id = std::stoi(argv[++i]);
+                }
+            }
+            if (chunk_id == -1) {
+                std::cerr << "Missing --chunk-id\n";
+                return 1;
+            }
+            std::cout << rofl::core::dump_chunk_subrecords(path, chunk_id);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
     std::cout << "rofl_core_cli scaffold\n";
     std::cout << "Use --version for build metadata.\n";
     std::cout << "Use --summary <path-to-rofl> to print a parsed replay summary.\n";
     std::cout << "Use --probe <path-to-rofl> to inspect likely payload/index regions.\n";
     std::cout << "Use --inspect <path-to-rofl> to inspect decompressed footer-style payload records.\n";
+    std::cout << "Use --dump-chunk-subrecords <path-to-rofl> --chunk-id <id> to dump subrecords for a chunk.\n";
     std::cout << "Use --dump-subrecord-family <path-to-rofl> --length <len> --first-byte <byte> to dump matching records.\n";
     std::cout << "Use --compare-subrecord-family <path-to-rofl> --length <len> --first-byte <byte> [--prefix-bytes <len>] to analyze stable fields.\n";
     std::cout << "Use --guess-stride <path-to-rofl> --length <len> --first-byte <byte> [--header-size <len>] to detect repeating patterns.\n";
