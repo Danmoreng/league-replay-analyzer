@@ -1,165 +1,298 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import process from "node:process";
-
-/**
- * PAYLOAD PATTERN HUNTER
- * 
- * This script compares chunks that contain specific Riot API events (e.g. kills)
- * against "quiet" chunks to find unique subrecord signatures.
- */
 
 function parseArgs() {
   const args = process.argv.slice(2);
   const params = {
     replay: "",
     event: "CHAMPION_KILL",
-    quietChunk: 5, // Default quiet laning chunk
-    cliPath: "./build/packages/rofl-core/Debug/rofl_core_cli.exe"
+    quietChunk: null,
+    cliPath: null,
+    top: 15,
   };
 
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--replay" && i + 1 < args.length) params.replay = args[++i];
-    if (args[i] === "--event" && i + 1 < args.length) params.event = args[++i];
-    if (args[i] === "--quiet" && i + 1 < args.length) params.quietChunk = parseInt(args[++i], 10);
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--replay" && index + 1 < args.length) {
+      params.replay = args[++index];
+      continue;
+    }
+    if (arg === "--event" && index + 1 < args.length) {
+      params.event = args[++index];
+      continue;
+    }
+    if (arg === "--quiet" && index + 1 < args.length) {
+      params.quietChunk = Number.parseInt(args[++index], 10);
+      continue;
+    }
+    if (arg === "--cli" && index + 1 < args.length) {
+      params.cliPath = resolve(args[++index]);
+      continue;
+    }
+    if (arg === "--top" && index + 1 < args.length) {
+      params.top = Number.parseInt(args[++index], 10);
+      continue;
+    }
+    throw new Error(`Unknown argument: ${arg}`);
+  }
+
+  if (!params.replay) {
+    throw new Error("Usage: node ./scripts/payload-pattern-hunter.mjs --replay <path-to-rofl> [--event CHAMPION_KILL] [--quiet <chunk-id>] [--cli <path>] [--top <n>]");
+  }
+  if (!Number.isFinite(params.top) || params.top <= 0) {
+    throw new Error("--top must be a positive integer");
   }
 
   return params;
 }
 
-function getSubrecords(cliPath, replayPath, chunkId) {
-  try {
-    const output = execFileSync(cliPath, ["--dump-chunk-subrecords", replayPath, "--chunk-id", chunkId.toString()], { encoding: "utf8" });
-    const records = [];
-    const blocks = output.split(/Subrecord #\d+/);
-    
-    for (const block of blocks) {
-      const match = block.match(/Hex: ([0-9A-F ]+)/);
-      if (match) {
-        const hex = match[1].trim();
-        const bytes = hex.split(" ");
-        records.push({
-          sig: bytes[0],
-          size: bytes.length,
-          hex: hex
-        });
-      }
+function resolveCliPath(explicitPath) {
+  if (explicitPath) {
+    if (!existsSync(explicitPath)) {
+      throw new Error(`rofl_core_cli.exe not found at ${explicitPath}`);
     }
-    return records;
-  } catch (e) {
-    console.error(`Error dumping chunk ${chunkId}:`, e.message);
-    return [];
+    return explicitPath;
   }
+
+  const candidates = [
+    resolve("build", "packages", "rofl-core", "Debug", "rofl_core_cli.exe"),
+    resolve("build", "packages", "rofl-core", "Release", "rofl_core_cli.exe"),
+    resolve("build", "packages", "rofl-core", "rofl_core_cli.exe"),
+  ];
+
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (!found) {
+    throw new Error(`rofl_core_cli.exe not found. Checked: ${candidates.join(", ")}`);
+  }
+  return found;
+}
+
+function psQuote(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function runCli(cliPath, args) {
+  const command = `& ${psQuote(cliPath)} ${args.map(psQuote).join(" ")}`;
+  return execFileSync("pwsh", ["-NoProfile", "-Command", command], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+}
+
+function deriveMatchId(replayPath) {
+  const replayName = basename(replayPath);
+  const match = replayName.match(/^([A-Za-z0-9]+)-(\d+)\.rofl$/);
+  if (!match) {
+    throw new Error(`Could not derive Match ID from ${replayName}`);
+  }
+  return `${match[1].toUpperCase()}_${match[2]}`;
+}
+
+function loadTimeline(matchId) {
+  const timelinePath = resolve("replays", "api", matchId, "timeline.json");
+  if (!existsSync(timelinePath)) {
+    throw new Error(`Riot timeline not found at ${timelinePath}`);
+  }
+  return JSON.parse(readFileSync(timelinePath, "utf8"));
+}
+
+function loadSummary(cliPath, replayPath) {
+  return JSON.parse(runCli(cliPath, ["--summary", replayPath]));
+}
+
+function dumpChunk(cliPath, replayPath, chunkId) {
+  return runCli(cliPath, ["--dump-chunk-subrecords", replayPath, "--chunk-id", String(chunkId)]);
+}
+
+function parseSubrecords(dumpText) {
+  const records = [];
+  const regex = /Subrecord #(\d+) \(offset=(\d+), length=(\d+)\)\r?\n  Hex: ([0-9A-F ]+)\r?\n  Ascii: "([^"]*)"/g;
+  for (const match of dumpText.matchAll(regex)) {
+    const hex = match[4].trim();
+    const firstByte = hex.split(" ", 1)[0];
+    records.push({
+      index: Number.parseInt(match[1], 10),
+      offset: Number.parseInt(match[2], 10),
+      length: Number.parseInt(match[3], 10),
+      firstByte,
+      familyKey: `${firstByte}:${match[3]}`,
+      hexPreview: hex,
+    });
+  }
+  return records;
+}
+
+function collectChunkFamilies(cliPath, replayPath, chunkIds) {
+  const result = new Map();
+  for (const chunkId of chunkIds) {
+    const dump = dumpChunk(cliPath, replayPath, chunkId);
+    const records = parseSubrecords(dump);
+    result.set(chunkId, records);
+  }
+  return result;
+}
+
+function findQuietChunk(summary, eventChunkSet, explicitQuietChunk) {
+  if (explicitQuietChunk != null) {
+    return explicitQuietChunk;
+  }
+
+  const chunkIds = (summary.container.segments ?? [])
+    .filter((segment) => segment.type === "chunk")
+    .map((segment) => segment.chunkId)
+    .sort((left, right) => left - right);
+
+  const quietChunk = chunkIds.find((chunkId) => !eventChunkSet.has(chunkId));
+  if (quietChunk == null) {
+    throw new Error("Could not find a quiet chunk with zero target events. Pass --quiet explicitly.");
+  }
+  return quietChunk;
+}
+
+function eventChunksFromTimeline(summary, timeline, eventType) {
+  const firstRegularChunkId = (summary.container.segments ?? [])
+    .filter((segment) => segment.type === "chunk")
+    .map((segment) => segment.chunkId)
+    .sort((left, right) => left - right)[0];
+
+  if (firstRegularChunkId == null) {
+    throw new Error("Replay summary does not expose any chunk segments.");
+  }
+
+  const events = [];
+  for (const frame of timeline.info.frames ?? []) {
+    for (const event of frame.events ?? []) {
+      if (event.type !== eventType) {
+        continue;
+      }
+      const chunkId = firstRegularChunkId + Math.floor(event.timestamp / 30000);
+      events.push({ ...event, chunkId });
+    }
+  }
+  return { firstRegularChunkId, events };
+}
+
+function tallyFamilies(records) {
+  const counts = new Map();
+  for (const record of records) {
+    counts.set(record.familyKey, (counts.get(record.familyKey) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function describeFamily(familyKey) {
+  const [firstByte, length] = familyKey.split(":");
+  return `0x${firstByte}/${length}`;
 }
 
 function main() {
   const params = parseArgs();
-  if (!params.replay) {
-    console.error("Usage: node payload-pattern-hunter.mjs --replay <path-to-rofl> [--event CHAMPION_KILL] [--quiet <chunk-id>]");
-    process.exit(1);
-  }
-
   const replayPath = resolve(params.replay);
-  const matchIdMatch = params.replay.match(/(?:EUW1|NA1|KR|BR1|EUN1|LA1|LA2|OC1|TR1|PH2|SG2|TH2|TW2|VN2)-(\d+)/);
-  if (!matchIdMatch) {
-    console.error("Could not derive Match ID from replay filename.");
-    process.exit(1);
-  }
-  const matchId = matchIdMatch[0].replace("-", "_");
-  const timelinePath = resolve(`./replays/api/${matchId}/timeline.json`);
+  const cliPath = resolveCliPath(params.cliPath);
+  const matchId = deriveMatchId(replayPath);
+  const timeline = loadTimeline(matchId);
+  const summary = loadSummary(cliPath, replayPath);
+  const { firstRegularChunkId, events } = eventChunksFromTimeline(summary, timeline, params.event);
+  const eventChunkIds = [...new Set(events.map((event) => event.chunkId))].sort((left, right) => left - right);
+  const eventChunkSet = new Set(eventChunkIds);
+  const quietChunkId = findQuietChunk(summary, eventChunkSet, params.quietChunk);
+  const allNeededChunkIds = [...new Set([quietChunkId, ...eventChunkIds])].sort((left, right) => left - right);
+  const chunkFamilies = collectChunkFamilies(cliPath, replayPath, allNeededChunkIds);
+  const quietCounts = tallyFamilies(chunkFamilies.get(quietChunkId) ?? []);
 
-  if (!existsSync(timelinePath)) {
-    console.error(`Riot Timeline not found at ${timelinePath}`);
-    process.exit(1);
-  }
-
-  const timeline = JSON.parse(readFileSync(timelinePath, "utf8"));
-  
-  // 1. Find chunks containing the target event
-  const eventChunks = new Set();
-  const eventDetails = [];
-
-  timeline.info.frames.forEach((frame, frameIdx) => {
-    frame.events.forEach(event => {
-      if (event.type === params.event) {
-        // Chunks are 30s long.
-        const chunkId = Math.floor(event.timestamp / 30000) + 1;
-        eventChunks.add(chunkId);
-        eventDetails.push({ chunkId, timestamp: event.timestamp, event });
+  const familyStats = new Map();
+  for (const chunkId of eventChunkIds) {
+    const records = chunkFamilies.get(chunkId) ?? [];
+    const chunkCounts = tallyFamilies(records);
+    const chunkEventCount = events.filter((event) => event.chunkId === chunkId).length;
+    for (const [familyKey, count] of chunkCounts.entries()) {
+      if (!familyStats.has(familyKey)) {
+        familyStats.set(familyKey, {
+          familyKey,
+          eventfulChunks: new Set(),
+          totalCount: 0,
+          maxCountInChunk: 0,
+          matchingEventCountChunks: 0,
+          quietCount: quietCounts.get(familyKey) ?? 0,
+        });
       }
-    });
-  });
-
-  console.log(`\nTarget Event: ${params.event}`);
-  console.log(`Found ${eventDetails.length} events in chunks: ${Array.from(eventChunks).join(", ")}`);
-
-  // 2. Get "Quiet" baseline
-  console.log(`\nAnalyzing Quiet Baseline (Chunk ${params.quietChunk})...`);
-  const quietRecords = getSubrecords(params.cliPath, replayPath, params.quietChunk);
-  const quietSignatures = new Set(quietRecords.map(r => `${r.sig}:${r.size}`));
-  
-  console.log(`Quiet baseline has ${quietRecords.length} subrecords with ${quietSignatures.size} unique (sig:size) pairs.`);
-
-  // 3. Analyze eventful chunks for UNIQUE signatures
-  console.log(`\nHunting for unique signatures in eventful chunks...\n`);
-
-  const globalCandidates = new Map(); // key -> { chunkIds: Set, totalCount: 0 }
-
-  for (const chunkId of eventChunks) {
-    const chunkRecords = getSubrecords(params.cliPath, replayPath, chunkId);
-    const uniqueToChunk = chunkRecords.filter(r => !quietSignatures.has(`${r.sig}:${r.size}`));
-    
-    // Group by signature and size
-    const candidates = new Map();
-    uniqueToChunk.forEach(r => {
-      const key = `${r.sig}:${r.size}`;
-      if (!candidates.has(key)) candidates.set(key, { count: 0, examples: [] });
-      const entry = candidates.get(key);
-      entry.count++;
-      if (entry.examples.length < 1) entry.examples.push(r.hex);
-
-      // Global tracking
-      if (!globalCandidates.has(key)) globalCandidates.set(key, { chunkIds: new Set(), totalCount: 0, sig: r.sig, size: r.size });
-      const g = globalCandidates.get(key);
-      g.chunkIds.add(chunkId);
-      g.totalCount++;
-    });
-
-    const relevantEvents = eventDetails.filter(d => d.chunkId === chunkId);
-    console.log(`--- Chunk ${chunkId} (${relevantEvents.length} events) ---`);
-    console.log(`Candidate signatures (not in quiet chunk): ${candidates.size}`);
-
-    const sorted = Array.from(candidates.entries()).sort((a, b) => a[1].count - b[1].count);
-    sorted.slice(0, 10).forEach(([key, data]) => {
-      const [sig, size] = key.split(":");
-      const isHot = data.count === relevantEvents.length;
-      const marker = isHot ? " [🔥 HOT CANDIDATE]" : "";
-      console.log(`  - Sig 0x${sig}, Size ${size}: count=${data.count}${marker}`);
-    });
-    console.log("");
+      const stat = familyStats.get(familyKey);
+      stat.eventfulChunks.add(chunkId);
+      stat.totalCount += count;
+      stat.maxCountInChunk = Math.max(stat.maxCountInChunk, count);
+      if (count === chunkEventCount) {
+        stat.matchingEventCountChunks += 1;
+      }
+    }
   }
 
-  console.log("\n=== UNIVERSAL EVENT CANDIDATES ===");
-  console.log("Signatures appearing in MANY eventful chunks but ZERO quiet chunks:");
-  
-  const universal = Array.from(globalCandidates.values())
-    .filter(g => g.chunkIds.size > 1)
-    .sort((a, b) => b.chunkIds.size - a.chunkIds.size);
+  const ubiquitousFamilies = [];
+  const eventBiasedFamilies = [];
+  for (const stat of familyStats.values()) {
+    const presentInAllEventful = stat.eventfulChunks.size === eventChunkIds.length;
+    const absentInQuiet = stat.quietCount === 0;
+    const quietComparable = stat.quietCount > 0;
+    if (presentInAllEventful && quietComparable) {
+      ubiquitousFamilies.push(stat);
+    }
+    if (presentInAllEventful && absentInQuiet) {
+      eventBiasedFamilies.push(stat);
+    }
+  }
 
-  const totalEventCount = eventDetails.length;
-  console.log(`Total match-wide ${params.event} count: ${totalEventCount}`);
+  eventBiasedFamilies.sort((left, right) =>
+    right.eventfulChunks.size - left.eventfulChunks.size ||
+    right.totalCount - left.totalCount ||
+    left.familyKey.localeCompare(right.familyKey),
+  );
+  ubiquitousFamilies.sort((left, right) =>
+    right.totalCount - left.totalCount ||
+    left.familyKey.localeCompare(right.familyKey),
+  );
 
-  universal.forEach(g => {
-    const presence = Math.round((g.chunkIds.size / eventChunks.size) * 100);
-    const countMatch = g.totalCount === totalEventCount;
-    const countNearMatch = Math.abs(g.totalCount - totalEventCount) < (totalEventCount * 0.1);
-    const marker = countMatch ? " [🔥🔥 TOTAL MATCH]" : (countNearMatch ? " [🔥 NEAR TOTAL MATCH]" : "");
-    
-    console.log(`- Sig 0x${g.sig}, Size ${g.size}: Present in ${g.chunkIds.size}/${eventChunks.size} chunks (${presence}%) | Total: ${g.totalCount}${marker}`);
-  });
+  console.log(`Replay: ${basename(replayPath)}`);
+  console.log(`CLI: ${cliPath}`);
+  console.log(`Event type: ${params.event}`);
+  console.log(`First regular chunkId: ${firstRegularChunkId}`);
+  console.log(`Target events: ${events.length}`);
+  console.log(`Eventful chunks: ${eventChunkIds.join(", ") || "(none)"}`);
+  console.log(`Quiet chunk: ${quietChunkId}`);
+  console.log("");
+  console.log(`Quiet chunk family count: ${(chunkFamilies.get(quietChunkId) ?? []).length} records, ${quietCounts.size} unique families`);
+  console.log("");
+
+  if (eventBiasedFamilies.length === 0) {
+    console.log("Event-biased families present in every eventful chunk and absent from the quiet chunk: none");
+  } else {
+    console.log("Event-biased families present in every eventful chunk and absent from the quiet chunk:");
+    for (const stat of eventBiasedFamilies.slice(0, params.top)) {
+      console.log(`  ${describeFamily(stat.familyKey)} | totalInEventfulChunks=${stat.totalCount} | maxPerChunk=${stat.maxCountInChunk} | eventCountMatches=${stat.matchingEventCountChunks}/${eventChunkIds.length}`);
+    }
+  }
+
+  console.log("");
+  console.log("Ubiquitous families present in every eventful chunk and also present in the quiet chunk:");
+  for (const stat of ubiquitousFamilies.slice(0, params.top)) {
+    console.log(`  ${describeFamily(stat.familyKey)} | totalInEventfulChunks=${stat.totalCount} | quietChunkCount=${stat.quietCount} | maxPerChunk=${stat.maxCountInChunk}`);
+  }
+
+  console.log("");
+  console.log("Per-eventful-chunk unique families vs quiet baseline:");
+  for (const chunkId of eventChunkIds) {
+    const chunkCounts = tallyFamilies(chunkFamilies.get(chunkId) ?? []);
+    const uniqueFamilies = [...chunkCounts.keys()].filter((familyKey) => !quietCounts.has(familyKey));
+    const eventCount = events.filter((event) => event.chunkId === chunkId).length;
+    console.log(`  Chunk ${chunkId}: events=${eventCount}, uniqueFamilies=${uniqueFamilies.length}, totalFamilies=${chunkCounts.size}`);
+  }
 }
 
-main();
+try {
+  main();
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}

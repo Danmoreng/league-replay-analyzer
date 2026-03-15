@@ -14,7 +14,7 @@ Options:
   --replay <path>         Replay file path. Can be provided multiple times.
   --all                   Analyze every .rofl file under ./replays.
   --api-root <path>       Riot fixture root. Defaults to ./replays/api.
-  --cli <path>            Path to rofl_core_cli.exe. Defaults to ./build/packages/rofl-core/rofl_core_cli.exe.
+  --cli <path>            Path to rofl_core_cli.exe. Defaults to the first existing Debug/Release/root build output.
   --top-windows <count>   Number of eventful chunk windows to print. Defaults to 8.
   --json                  Emit machine-readable JSON instead of text.
   --help                  Show this help text.
@@ -26,7 +26,7 @@ function parseArgs(argv) {
     replayPaths: [],
     analyzeAll: false,
     apiRoot: resolve("replays", "api"),
-    cliPath: resolve("build", "packages", "rofl-core", "rofl_core_cli.exe"),
+    cliPath: null,
     topWindows: 8,
     json: false,
   };
@@ -83,11 +83,41 @@ function parseArgs(argv) {
   if (!args.analyzeAll && args.replayPaths.length === 0) {
     throw new Error("Pass at least one --replay path or use --all.");
   }
-  if (!existsSync(args.cliPath)) {
-    throw new Error(`rofl_core_cli.exe not found at ${args.cliPath}`);
-  }
+  args.cliPath = resolveCliPath(args.cliPath);
 
   return args;
+}
+
+function resolveCliPath(explicitPath) {
+  if (explicitPath) {
+    if (!existsSync(explicitPath)) {
+      throw new Error(`rofl_core_cli.exe not found at ${explicitPath}`);
+    }
+    return explicitPath;
+  }
+
+  const candidates = [
+    resolve("build", "packages", "rofl-core", "Debug", "rofl_core_cli.exe"),
+    resolve("build", "packages", "rofl-core", "Release", "rofl_core_cli.exe"),
+    resolve("build", "packages", "rofl-core", "rofl_core_cli.exe"),
+  ];
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (!found) {
+    throw new Error(`rofl_core_cli.exe not found. Checked: ${candidates.join(", ")}`);
+  }
+  return found;
+}
+
+function psQuote(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function runCli(cliPath, args) {
+  const command = `& ${psQuote(cliPath)} ${args.map(psQuote).join(" ")}`;
+  return execFileSync("pwsh", ["-NoProfile", "-Command", command], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
 }
 
 function deriveMatchIdFromReplayPath(replayPath) {
@@ -104,11 +134,7 @@ function readJson(path) {
 }
 
 function loadReplaySummary(cliPath, replayPath) {
-  const raw = execFileSync(cliPath, ["--summary", replayPath], {
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  return JSON.parse(raw);
+  return JSON.parse(runCli(cliPath, ["--summary", replayPath]));
 }
 
 function flattenTimelineEvents(timeline) {
@@ -512,3 +538,4 @@ try {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 }
+

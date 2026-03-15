@@ -240,3 +240,28 @@ Lower confidence / still needs verification:
 - where packet opcode and field mappings diverge by version
 
 
+## Event-Family Correlation Update
+
+On March 15, 2026, we reran chunk-family correlation against the local Riot API fixtures using the corrected chunk window mapping:
+
+- first regular gameplay chunk id is `4` in `replays/EUW1-7779216102.rofl`
+- event timestamps map to replay chunks as `chunkId = firstRegularChunkId + floor(timestamp / 30000)`
+- the native CLI path in this repo currently resolves to `build/packages/rofl-core/Debug/rofl_core_cli.exe`
+
+Using the corrected `payload-pattern-hunter` flow on the local sample:
+
+- `CHAMPION_KILL` events occur in `27` different chunks, but there is no single subrecord family that appears in every kill-bearing chunk while being absent from the quiet baseline chunk
+- `ELITE_MONSTER_KILL` and `BUILDING_KILL` show the same result: no universal event-only family across all eventful chunks
+- the only family that appears in every checked kill/objective/building chunk and also in the quiet baseline is the sparse family `firstByte = 0xD2`, `length = 53,970`
+- in the kill scan, that `0xD2/53,970` family appears `301` times across `27` eventful chunks and also appears `12` times in quiet chunk `6`
+
+Implication:
+
+- the dominant `53,970` family is not a simple one-record-per-event packet
+- it behaves like recurring world-state or entity-slab data that is present in quiet and eventful windows alike
+- chunk semantics are likely mixed: each chunk contains several subrecord families, and visible gameplay events probably emerge either from smaller chunk-local families or from state transitions inside the recurrent sparse slabs
+
+This is the strongest current answer to what later chunk payloads represent:
+
+- not a flat event log with one stable kill/objective opcode family
+- more likely a bundle of heterogeneous state/update records, where the sparse fixed-size families carry broad world/entity state and other families carry additional specialized delta data
