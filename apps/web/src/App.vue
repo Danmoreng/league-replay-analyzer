@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
-import { parseReplayBuffer, type PlayerSummary, type ReplaySummary } from "./replayParser";
+import { type PlayerSummary, type ReplaySummary } from "./replayParser";
+import { parseReplayBufferWithWasm } from "./wasmReplayParser";
 
 const summary = ref<ReplaySummary | null>(null);
-const status = ref("Pick a replay from the repo's replays folder to parse it in the browser.");
+const parserEngine = ref("C++/Wasm");
+const status = ref("Pick a replay file to parse it with the C++/Wasm replay parser.");
 const errorMessage = ref("");
 const isLoading = ref(false);
 
@@ -64,12 +66,12 @@ function percentage(value: number, max: number): string {
 async function loadReplay(file: File): Promise<void> {
   isLoading.value = true;
   errorMessage.value = "";
-  status.value = `Parsing ${file.name}...`;
+  status.value = `Parsing ${file.name} with ${parserEngine.value}...`;
 
   try {
     const buffer = await file.arrayBuffer();
-    summary.value = parseReplayBuffer(buffer);
-    status.value = `Parsed ${file.name}. Embedded stats for ${summary.value.playerCount} players are available.`;
+    summary.value = await parseReplayBufferWithWasm(buffer);
+    status.value = `Parsed ${file.name} with ${parserEngine.value}. Embedded stats for ${summary.value.playerCount} players are available.`;
   } catch (error) {
     summary.value = null;
     errorMessage.value = error instanceof Error ? error.message : String(error);
@@ -93,17 +95,20 @@ function onFileChange(event: Event): void {
     <section class="hero">
       <div>
         <p class="eyebrow">League Replay Analyzer</p>
-        <h1>Fast metadata MVP from real replay bytes.</h1>
+        <h1>Real C++ replay parsing in the browser.</h1>
         <p class="lede">
-          This first pass parses the embedded match metadata block inside a `.rofl` file and renders
-          player stats directly in the browser. It is intentionally narrow, but it gives us a real
-          replay-backed UI to iterate on.
+          The frontend now loads the generated Wasm module and parses the replay in-browser through
+          the shared C++ core. This still targets the embedded metadata block, but the data path is
+          now the real Wasm parser rather than the temporary TypeScript fallback.
         </p>
       </div>
-      <label class="picker">
-        <span>Load replay</span>
-        <input type="file" accept=".rofl" @change="onFileChange" />
-      </label>
+      <div class="hero-controls">
+        <div class="engine-pill">{{ parserEngine }}</div>
+        <label class="picker">
+          <span>Load replay</span>
+          <input type="file" accept=".rofl" @change="onFileChange" />
+        </label>
+      </div>
       <p class="status" :class="{ error: errorMessage }">{{ errorMessage || status }}</p>
     </section>
 
@@ -124,6 +129,10 @@ function onFileChange(event: Event): void {
         <article class="metric">
           <span>Keyframes</span>
           <strong>{{ summary.lastKeyFrameId }}</strong>
+        </article>
+        <article class="metric">
+          <span>Players</span>
+          <strong>{{ summary.playerCount }}</strong>
         </article>
       </section>
 
@@ -201,13 +210,25 @@ function onFileChange(event: Event): void {
           </div>
         </article>
       </section>
+
+      <section class="note">
+        <h2>Parsed output</h2>
+        <p>
+          The browser is showing the JSON produced by the C++ replay core compiled to Wasm. The UI
+          above is derived from this payload.
+        </p>
+        <details class="json-details">
+          <summary>Show raw parsed JSON</summary>
+          <pre>{{ JSON.stringify(summary, null, 2) }}</pre>
+        </details>
+      </section>
     </template>
 
     <section class="note">
       <h2>Current parser scope</h2>
       <p>
-        This MVP is reading the replay container's embedded metadata block and the per-player
-        `statsJson` payload. The next layer is chunk parsing and timeline extraction.
+        The Wasm parser currently extracts the replay container's embedded metadata block and the
+        per-player `statsJson` payload. The next layer is chunk parsing and timeline extraction.
       </p>
       <p v-if="isLoading">Parsing in progress.</p>
     </section>

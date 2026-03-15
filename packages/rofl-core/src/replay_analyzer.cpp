@@ -361,14 +361,22 @@ ReplaySummary parse_replay_bytes(const std::vector<std::uint8_t>& bytes) {
         throw std::runtime_error("Could not locate embedded metadata JSON in replay.");
     }
 
-    summary.metadata_json = extract_balanced_json(bytes, metadata_offset);
-    summary.game_length_millis = parse_int_field(summary.metadata_json, "gameLength");
-    summary.last_game_chunk_id = parse_int_field(summary.metadata_json, "lastGameChunkId");
-    summary.last_keyframe_id = parse_int_field(summary.metadata_json, "lastKeyFrameId");
+    try {
+        summary.metadata_json = extract_balanced_json(bytes, metadata_offset);
+        summary.game_length_millis = parse_int_field(summary.metadata_json, "gameLength");
+        summary.last_game_chunk_id = parse_int_field(summary.metadata_json, "lastGameChunkId");
+        summary.last_keyframe_id = parse_int_field(summary.metadata_json, "lastKeyFrameId");
+    } catch (const std::exception& exception) {
+        throw std::runtime_error("Failed while extracting embedded metadata JSON: " + std::string(exception.what()));
+    }
 
-    const std::string stats_json = parse_string_field(summary.metadata_json, "statsJson");
-    if (!stats_json.empty()) {
-        summary.players = parse_players_from_stats_json(stats_json);
+    try {
+        const std::string stats_json = parse_string_field(summary.metadata_json, "statsJson");
+        if (!stats_json.empty()) {
+            summary.players = parse_players_from_stats_json(stats_json);
+        }
+    } catch (const std::exception& exception) {
+        throw std::runtime_error("Failed while parsing statsJson from embedded metadata: " + std::string(exception.what()));
     }
 
     return summary;
@@ -418,4 +426,3 @@ std::string replay_summary_to_json(const ReplaySummary& summary) {
 }
 
 }  // namespace rofl::core
-
