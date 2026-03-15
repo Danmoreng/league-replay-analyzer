@@ -19,3 +19,4 @@ build-wasm/
 CMakeUserPresets.json
 tools/emsdk/
 apps/web/src/generated/wasm/
+thirdparty/reference/

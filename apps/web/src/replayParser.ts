@@ -13,6 +13,44 @@ export interface PlayerSummary {
   visionScore: number;
 }
 
+export interface ReplaySegmentSummary {
+  id: number;
+  type: string;
+  length: number;
+  chunkId: number;
+  offset: number;
+}
+
+export interface ReplayContainerSummary {
+  format: string;
+  metadataSource: string;
+  metadataOffset: number;
+  metadataSize: number;
+  payloadHeaderOffset: number;
+  payloadHeaderSize: number;
+  payloadOffset: number;
+  matchId: number;
+  keyframeCount: number;
+  chunkCount: number;
+  startupChunkEndId: number;
+  gameStartChunkId: number;
+  keyframeIntervalMillis: number;
+  binaryHeaderPresent: boolean;
+  payloadHeaderPresent: boolean;
+  segmentTablePresent: boolean;
+  segments: ReplaySegmentSummary[];
+}
+
+export interface ReplayCapabilities {
+  metadataAvailable: boolean;
+  playerStatsAvailable: boolean;
+  binaryHeaderAvailable: boolean;
+  payloadHeaderAvailable: boolean;
+  segmentTableAvailable: boolean;
+  payloadDecodingAvailable: boolean;
+  movementTimelineAvailable: boolean;
+}
+
 export interface ReplaySummary {
   gameVersion: string;
   fileSize: number;
@@ -20,11 +58,18 @@ export interface ReplaySummary {
   lastGameChunkId: number;
   lastKeyFrameId: number;
   playerCount: number;
+  container: ReplayContainerSummary;
+  capabilities: ReplayCapabilities;
+  warnings: string[];
   players: PlayerSummary[];
   metadataJson: string;
 }
 
 const metadataMarker = new TextEncoder().encode('{"gameLength":');
+const knownHeaderLength = 288;
+const knownPayloadHeaderMinimumSize = 34;
+const knownSegmentHeaderLength = 17;
+const footerLengthFieldSize = 4;
 
 function findSubsequence(bytes: Uint8Array, needle: Uint8Array): number {
   outer: for (let offset = 0; offset <= bytes.length - needle.length; offset += 1) {
@@ -91,6 +136,42 @@ function extractBalancedJson(bytes: Uint8Array, startOffset: number): string {
   throw new Error("Could not extract embedded metadata JSON from replay.");
 }
 
+function readU16LE(bytes: Uint8Array, offset: number): number | null {
+  if (offset < 0 || offset + 2 > bytes.length) {
+    return null;
+  }
+
+  return bytes[offset] | (bytes[offset + 1] << 8);
+}
+
+function readU32LE(bytes: Uint8Array, offset: number): number | null {
+  if (offset < 0 || offset + 4 > bytes.length) {
+    return null;
+  }
+
+  return (
+    (bytes[offset] |
+      (bytes[offset + 1] << 8) |
+      (bytes[offset + 2] << 16) |
+      (bytes[offset + 3] << 24)) >>>
+    0
+  );
+}
+
+function readU64LE(bytes: Uint8Array, offset: number): number | null {
+  const lo = readU32LE(bytes, offset);
+  const hi = readU32LE(bytes, offset + 4);
+  if (lo === null || hi === null) {
+    return null;
+  }
+
+  return hi * 2 ** 32 + lo;
+}
+
+function isRangeValid(offset: number, length: number, totalSize: number): boolean {
+  return offset >= 0 && length >= 0 && offset + length <= totalSize;
+}
+
 function toNumber(value: unknown): number {
   if (typeof value === "number") {
     return value;
@@ -128,18 +209,222 @@ function normalizePlayer(raw: Record<string, unknown>): PlayerSummary {
   };
 }
 
-export function parseReplayBuffer(buffer: ArrayBuffer): ReplaySummary {
-  const bytes = new Uint8Array(buffer);
-  const metadataOffset = findSubsequence(bytes, metadataMarker);
-  if (metadataOffset === -1) {
-    throw new Error("Could not locate embedded metadata JSON in replay.");
+function buildEmptyContainer(
+  format: string,
+  metadataSource: string,
+  metadataOffset: number,
+  metadataSize: number,
+): ReplayContainerSummary {
+  return {
+    format,
+    metadataSource,
+    metadataOffset,
+    metadataSize,
+    payloadHeaderOffset: 0,
+    payloadHeaderSize: 0,
+    payloadOffset: 0,
+    matchId: 0,
+    keyframeCount: 0,
+    chunkCount: 0,
+    startupChunkEndId: 0,
+    gameStartChunkId: 0,
+    keyframeIntervalMillis: 0,
+    binaryHeaderPresent: false,
+    payloadHeaderPresent: false,
+    segmentTablePresent: false,
+    segments: [],
+  };
+}
+
+function buildEmptyCapabilities(): ReplayCapabilities {
+  return {
+    metadataAvailable: false,
+    playerStatsAvailable: false,
+    binaryHeaderAvailable: false,
+    payloadHeaderAvailable: false,
+    segmentTableAvailable: false,
+    payloadDecodingAvailable: false,
+    movementTimelineAvailable: false,
+  };
+}
+
+function tryParseClassicContainer(bytes: Uint8Array): ReplayContainerSummary | null {
+  if (bytes.length < knownHeaderLength) {
+    return null;
   }
 
-  const metadataJson = extractBalancedJson(bytes, metadataOffset);
+  if (new TextDecoder().decode(bytes.slice(0, 4)) !== "RIOT") {
+    return null;
+  }
+
+  const headerLength = readU16LE(bytes, 262);
+  const metadataOffset = readU32LE(bytes, 268);
+  const metadataSize = readU32LE(bytes, 272);
+  const payloadHeaderOffset = readU32LE(bytes, 276);
+  const payloadHeaderSize = readU32LE(bytes, 280);
+  const payloadOffset = readU32LE(bytes, 284);
+
+  if (
+    headerLength !== knownHeaderLength ||
+    metadataOffset === null ||
+    metadataSize === null ||
+    payloadHeaderOffset === null ||
+    payloadHeaderSize === null ||
+    payloadOffset === null ||
+    metadataSize === 0 ||
+    payloadHeaderSize < knownPayloadHeaderMinimumSize
+  ) {
+    return null;
+  }
+
+  if (
+    !isRangeValid(metadataOffset, metadataSize, bytes.length) ||
+    !isRangeValid(payloadHeaderOffset, payloadHeaderSize, bytes.length) ||
+    payloadOffset > bytes.length ||
+    metadataOffset < headerLength ||
+    payloadHeaderOffset < metadataOffset ||
+    payloadOffset < payloadHeaderOffset + payloadHeaderSize
+  ) {
+    return null;
+  }
+
+  const matchId = readU64LE(bytes, payloadHeaderOffset) ?? 0;
+  const keyframeCount = readU32LE(bytes, payloadHeaderOffset + 12) ?? 0;
+  const chunkCount = readU32LE(bytes, payloadHeaderOffset + 16) ?? 0;
+  const startupChunkEndId = readU32LE(bytes, payloadHeaderOffset + 20) ?? 0;
+  const gameStartChunkId = readU32LE(bytes, payloadHeaderOffset + 24) ?? 0;
+  const keyframeIntervalMillis = readU32LE(bytes, payloadHeaderOffset + 28) ?? 0;
+  const encryptionKeyLength = readU16LE(bytes, payloadHeaderOffset + 32) ?? 0;
+  const payloadHeaderPresent =
+    knownPayloadHeaderMinimumSize + encryptionKeyLength <= payloadHeaderSize;
+
+  const segments: ReplaySegmentSummary[] = [];
+  let segmentTablePresent = false;
+  if (payloadHeaderPresent) {
+    const segmentCount = keyframeCount + chunkCount;
+    const tableSize = segmentCount * knownSegmentHeaderLength;
+    if (isRangeValid(payloadOffset, tableSize, bytes.length)) {
+      segmentTablePresent = true;
+      for (let index = 0; index < segmentCount; index += 1) {
+        const entryOffset = payloadOffset + index * knownSegmentHeaderLength;
+        const id = readU32LE(bytes, entryOffset) ?? 0;
+        const typeByte = bytes[entryOffset + 4] ?? 0;
+        const length = readU32LE(bytes, entryOffset + 5) ?? 0;
+        const chunkId = readU32LE(bytes, entryOffset + 9) ?? 0;
+        const offset = readU32LE(bytes, entryOffset + 13) ?? 0;
+        segments.push({
+          id,
+          type: typeByte === 1 ? "chunk" : typeByte === 2 ? "keyframe" : "unknown",
+          length,
+          chunkId,
+          offset,
+        });
+      }
+    }
+  }
+
+  return {
+    format: "classic-rofl",
+    metadataSource: "binary-header",
+    metadataOffset,
+    metadataSize,
+    payloadHeaderOffset,
+    payloadHeaderSize,
+    payloadOffset,
+    matchId,
+    keyframeCount,
+    chunkCount,
+    startupChunkEndId,
+    gameStartChunkId,
+    keyframeIntervalMillis,
+    binaryHeaderPresent: true,
+    payloadHeaderPresent,
+    segmentTablePresent,
+    segments,
+  };
+}
+
+function extractFooterMetadata(
+  bytes: Uint8Array,
+): { offset: number; size: number; json: string } | null {
+  const metadataSize = readU32LE(bytes, bytes.length - footerLengthFieldSize);
+  if (metadataSize === null) {
+    return null;
+  }
+
+  const metadataOffset = bytes.length - footerLengthFieldSize - metadataSize;
+  if (!isRangeValid(metadataOffset, metadataSize, bytes.length) || bytes[metadataOffset] !== 0x7b) {
+    return null;
+  }
+
+  const json = new TextDecoder().decode(bytes.slice(metadataOffset, metadataOffset + metadataSize));
+  if (!json.startsWith('{"gameLength":')) {
+    return null;
+  }
+
+  return { offset: metadataOffset, size: metadataSize, json };
+}
+
+export function parseReplayBuffer(buffer: ArrayBuffer): ReplaySummary {
+  const bytes = new Uint8Array(buffer);
+  const classicContainer = tryParseClassicContainer(bytes);
+
+  let metadataJson = "";
+  let container: ReplayContainerSummary;
+  const capabilities = buildEmptyCapabilities();
+  const warnings: string[] = [];
+
+  if (classicContainer) {
+    metadataJson = new TextDecoder().decode(
+      bytes.slice(
+        classicContainer.metadataOffset,
+        classicContainer.metadataOffset + classicContainer.metadataSize,
+      ),
+    );
+    container = classicContainer;
+    capabilities.binaryHeaderAvailable = true;
+    capabilities.payloadHeaderAvailable = classicContainer.payloadHeaderPresent;
+    capabilities.segmentTableAvailable = classicContainer.segmentTablePresent;
+  } else {
+    const footerMetadata = extractFooterMetadata(bytes);
+    if (footerMetadata) {
+      metadataJson = footerMetadata.json;
+      container = buildEmptyContainer(
+        "rofl2-like-footer",
+        "footer-size",
+        footerMetadata.offset,
+        footerMetadata.size,
+      );
+      warnings.push(
+        "Metadata was recovered via footer size parsing after the known classic ROFL header layout did not validate.",
+      );
+    } else {
+      const metadataOffset = findSubsequence(bytes, metadataMarker);
+      if (metadataOffset === -1) {
+        throw new Error("Could not locate embedded metadata JSON in replay.");
+      }
+      metadataJson = extractBalancedJson(bytes, metadataOffset);
+      container = buildEmptyContainer(
+        metadataOffset > bytes.length / 2 ? "footer-metadata-only" : "metadata-scanned",
+        "marker-scan",
+        metadataOffset,
+        metadataJson.length,
+      );
+      warnings.push(
+        "Known classic ROFL header fields were not recognized. Metadata was recovered by scanning for the embedded JSON block instead.",
+      );
+    }
+
+    warnings.push(
+      "Payload header and segment table parsing are currently available only for the known classic ROFL layout. Payload decoding is not implemented yet.",
+    );
+  }
+
   const metadata = JSON.parse(metadataJson) as {
     gameLength?: number;
     lastGameChunkId?: number;
     lastKeyFrameId?: number;
+    gameVersion?: string;
     statsJson?: string;
   };
 
@@ -147,13 +432,19 @@ export function parseReplayBuffer(buffer: ArrayBuffer): ReplaySummary {
     ? (JSON.parse(metadata.statsJson) as Record<string, unknown>[]).map(normalizePlayer)
     : [];
 
+  capabilities.metadataAvailable = true;
+  capabilities.playerStatsAvailable = players.length > 0;
+
   return {
-    gameVersion: scanGameVersion(bytes),
+    gameVersion: scanGameVersion(bytes) || metadata.gameVersion || "unknown",
     fileSize: bytes.length,
     gameLengthMillis: metadata.gameLength ?? 0,
     lastGameChunkId: metadata.lastGameChunkId ?? 0,
     lastKeyFrameId: metadata.lastKeyFrameId ?? 0,
     playerCount: players.length,
+    container,
+    capabilities,
+    warnings,
     players,
     metadataJson,
   };

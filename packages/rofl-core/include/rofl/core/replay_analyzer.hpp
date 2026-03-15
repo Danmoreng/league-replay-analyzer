@@ -29,6 +29,44 @@ struct PlayerSummary {
     int vision_score = 0;
 };
 
+struct ReplaySegmentSummary {
+    int id = 0;
+    std::string type;
+    int length = 0;
+    int chunk_id = 0;
+    int offset = 0;
+};
+
+struct ReplayContainerSummary {
+    std::string format;
+    std::string metadata_source;
+    std::size_t metadata_offset = 0;
+    std::size_t metadata_size = 0;
+    std::size_t payload_header_offset = 0;
+    std::size_t payload_header_size = 0;
+    std::size_t payload_offset = 0;
+    std::uint64_t match_id = 0;
+    int keyframe_count = 0;
+    int chunk_count = 0;
+    int startup_chunk_end_id = 0;
+    int game_start_chunk_id = 0;
+    int keyframe_interval_millis = 0;
+    bool binary_header_present = false;
+    bool payload_header_present = false;
+    bool segment_table_present = false;
+    std::vector<ReplaySegmentSummary> segments;
+};
+
+struct ReplayCapabilities {
+    bool metadata_available = false;
+    bool player_stats_available = false;
+    bool binary_header_available = false;
+    bool payload_header_available = false;
+    bool segment_table_available = false;
+    bool payload_decoding_available = false;
+    bool movement_timeline_available = false;
+};
+
 struct ReplaySummary {
     std::string game_version;
     std::string metadata_json;
@@ -36,6 +74,9 @@ struct ReplaySummary {
     int game_length_millis = 0;
     int last_game_chunk_id = 0;
     int last_keyframe_id = 0;
+    ReplayContainerSummary container;
+    ReplayCapabilities capabilities;
+    std::vector<std::string> warnings;
     std::vector<PlayerSummary> players;
 };
 
