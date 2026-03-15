@@ -3036,6 +3036,497 @@ std::string profile_position_slots(
 
     return output.str();
 }
+std::string compare_position_classes(
+    const std::string& path,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    std::size_t top_slots,
+    std::size_t top_classes,
+    float move_epsilon,
+    float smooth_threshold
+) {
+    std::ostringstream output;
+    const std::vector<std::uint8_t> bytes = read_file_bytes(path);
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const std::uint8_t padding_byte = static_cast<std::uint8_t>(target_length & 0xFFu);
+    const std::uint32_t padding_u32 = static_cast<std::uint32_t>(padding_byte) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 8U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 16U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 24U);
+
+    auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    output << "Position class comparer for " << records.size() << " records of size " << target_length
+           << " starting with 0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+           << static_cast<int>(target_first_byte) << std::dec << "\n\n";
+    output << "Header size:      " << header_size << " bytes\n";
+    output << "Stride:           " << stride << " bytes\n";
+    output << "Move epsilon:     " << std::fixed << std::setprecision(2) << move_epsilon << "\n";
+    output << "Smooth threshold: " << smooth_threshold << "\n";
+
+    if (records.empty()) {
+        return output.str();
+    }
+    if (header_size >= target_length) {
+        output << "Header size must be smaller than the target record length.\n";
+        return output.str();
+    }
+    if (stride == 0 || (stride % 4) != 0) {
+        output << "Stride must be a non-zero multiple of 4 for lane analysis.\n";
+        return output.str();
+    }
+    if (smooth_threshold <= 0.0F) {
+        output << "Smooth threshold must be positive.\n";
+        return output.str();
+    }
+    if (move_epsilon < 0.0F) {
+        output << "Move epsilon must be non-negative.\n";
+        return output.str();
+    }
+
+    const std::size_t usable_bytes = target_length - header_size;
+    const std::size_t element_count = usable_bytes / stride;
+    const std::size_t lane_count = std::min<std::size_t>(4, stride / 4);
+    if (lane_count < 2) {
+        output << "Need at least two 32-bit lanes to compare position-like classes.\n";
+        return output.str();
+    }
+
+    struct PairDefinition {
+        std::size_t left_lane = 0;
+        std::size_t right_lane = 0;
+        std::string label;
+    };
+
+    struct PreviousSample {
+        bool valid = false;
+        std::size_t record_index = 0;
+        float x = 0.0F;
+        float y = 0.0F;
+    };
+
+    struct SlotPairProfile {
+        std::size_t slot_index = 0;
+        std::size_t pair_index = 0;
+        std::size_t coordinate_samples = 0;
+        std::size_t transitions = 0;
+        std::size_t smooth_transitions = 0;
+        std::size_t moving_transitions = 0;
+        std::size_t active_records = 0;
+        double total_distance = 0.0;
+        float max_distance = 0.0F;
+        float min_x = std::numeric_limits<float>::infinity();
+        float max_x = -std::numeric_limits<float>::infinity();
+        float min_y = std::numeric_limits<float>::infinity();
+        float max_y = -std::numeric_limits<float>::infinity();
+        int min_chunk_id = std::numeric_limits<int>::max();
+        int max_chunk_id = 0;
+        std::map<std::uint8_t, std::size_t> first_byte_freq;
+        std::map<std::uint8_t, std::size_t> mask_freq;
+    };
+
+    struct RankedCandidate {
+        std::size_t profile_index = 0;
+        double score = 0.0;
+        double smooth_ratio = 0.0;
+        double moving_ratio = 0.0;
+        double coverage = 0.0;
+        float x_range = 0.0F;
+        float y_range = 0.0F;
+        std::size_t chunk_span = 0;
+    };
+
+    struct ClassAggregate {
+        std::string key;
+        std::string pair_label;
+        std::size_t members = 0;
+        double best_score = 0.0;
+        double total_score = 0.0;
+        double total_smooth_ratio = 0.0;
+        double total_moving_ratio = 0.0;
+        double total_coverage = 0.0;
+        double total_x_range = 0.0;
+        double total_y_range = 0.0;
+        double total_chunk_span = 0.0;
+        std::size_t champion_votes = 0;
+        std::size_t stationary_votes = 0;
+        std::size_t transient_votes = 0;
+        std::vector<std::size_t> example_slots;
+    };
+
+    std::vector<PairDefinition> pair_defs;
+    pair_defs.push_back({0, 1, "+0/+4"});
+    if (lane_count >= 3) {
+        pair_defs.push_back({1, 2, "+4/+8"});
+        pair_defs.push_back({0, 2, "+0/+8"});
+    }
+    if (lane_count >= 4) {
+        pair_defs.push_back({2, 3, "+8/+12"});
+        pair_defs.push_back({0, 3, "+0/+12"});
+    }
+
+    const auto is_coordinate_like = [](float value) {
+        return std::isfinite(value) && std::fpclassify(value) == FP_NORMAL && value >= -5000.0F && value <= 20000.0F;
+    };
+
+    const auto format_mask = [lane_count](std::uint8_t mask) {
+        std::ostringstream line;
+        for (int bit = static_cast<int>(lane_count) - 1; bit >= 0; --bit) {
+            line << (((mask >> bit) & 1U) != 0U ? '1' : '0');
+        }
+        return line.str();
+    };
+
+    const auto top_freq_entry = [](const std::map<std::uint8_t, std::size_t>& freq) {
+        if (freq.empty()) {
+            return std::pair<std::uint8_t, std::size_t>{0, 0};
+        }
+        const auto it = std::max_element(freq.begin(), freq.end(), [](const auto& left, const auto& right) {
+            if (left.second != right.second) {
+                return left.second < right.second;
+            }
+            return left.first > right.first;
+        });
+        return std::pair<std::uint8_t, std::size_t>{it->first, it->second};
+    };
+
+    const std::size_t profile_count = element_count * pair_defs.size();
+    std::vector<SlotPairProfile> profiles(profile_count);
+    std::vector<PreviousSample> previous_samples(profile_count);
+    for (std::size_t slot_index = 0; slot_index < element_count; ++slot_index) {
+        for (std::size_t pair_index = 0; pair_index < pair_defs.size(); ++pair_index) {
+            auto& profile = profiles[(slot_index * pair_defs.size()) + pair_index];
+            profile.slot_index = slot_index;
+            profile.pair_index = pair_index;
+        }
+    }
+
+    for (std::size_t record_index = 0; record_index < records.size(); ++record_index) {
+        const auto& rec = records[record_index];
+        for (std::size_t slot_index = 0; slot_index < element_count; ++slot_index) {
+            const std::size_t start = header_size + (slot_index * stride);
+            if (start + stride > rec.payload.size()) {
+                break;
+            }
+
+            std::array<bool, 4> lane_is_coordinate = {false, false, false, false};
+            std::array<float, 4> lane_floats = {0.0F, 0.0F, 0.0F, 0.0F};
+            std::uint8_t mask = 0;
+            bool active = false;
+
+            for (std::size_t lane_index = 0; lane_index < lane_count; ++lane_index) {
+                const std::size_t lane_offset = start + (lane_index * 4);
+                std::uint32_t value = 0;
+                if (!read_u32_le(rec.payload, lane_offset, value) || value == padding_u32) {
+                    continue;
+                }
+
+                active = true;
+                mask |= static_cast<std::uint8_t>(1U << lane_index);
+                const float as_float = std::bit_cast<float>(value);
+                if (is_coordinate_like(as_float)) {
+                    lane_is_coordinate[lane_index] = true;
+                    lane_floats[lane_index] = as_float;
+                }
+            }
+
+            if (!active) {
+                continue;
+            }
+
+            for (std::size_t pair_index = 0; pair_index < pair_defs.size(); ++pair_index) {
+                const auto& pair = pair_defs[pair_index];
+                auto& profile = profiles[(slot_index * pair_defs.size()) + pair_index];
+                profile.active_records++;
+
+                if (!lane_is_coordinate[pair.left_lane] || !lane_is_coordinate[pair.right_lane]) {
+                    continue;
+                }
+
+                profile.coordinate_samples++;
+                profile.first_byte_freq[rec.payload[start]]++;
+                profile.mask_freq[mask]++;
+                profile.min_x = std::min(profile.min_x, lane_floats[pair.left_lane]);
+                profile.max_x = std::max(profile.max_x, lane_floats[pair.left_lane]);
+                profile.min_y = std::min(profile.min_y, lane_floats[pair.right_lane]);
+                profile.max_y = std::max(profile.max_y, lane_floats[pair.right_lane]);
+                profile.min_chunk_id = std::min(profile.min_chunk_id, rec.chunk_id);
+                profile.max_chunk_id = std::max(profile.max_chunk_id, rec.chunk_id);
+
+                auto& previous = previous_samples[(slot_index * pair_defs.size()) + pair_index];
+                if (previous.valid && previous.record_index + 1 == record_index) {
+                    const float dx = lane_floats[pair.left_lane] - previous.x;
+                    const float dy = lane_floats[pair.right_lane] - previous.y;
+                    const float distance = std::hypot(dx, dy);
+                    profile.transitions++;
+                    profile.total_distance += distance;
+                    profile.max_distance = std::max(profile.max_distance, distance);
+                    if (distance <= smooth_threshold) {
+                        profile.smooth_transitions++;
+                        if (distance >= move_epsilon) {
+                            profile.moving_transitions++;
+                        }
+                    }
+                }
+
+                previous.valid = true;
+                previous.record_index = record_index;
+                previous.x = lane_floats[pair.left_lane];
+                previous.y = lane_floats[pair.right_lane];
+            }
+        }
+    }
+
+    std::vector<RankedCandidate> ranked_candidates;
+    ranked_candidates.reserve(profile_count);
+    for (std::size_t profile_index = 0; profile_index < profiles.size(); ++profile_index) {
+        const auto& profile = profiles[profile_index];
+        if (profile.coordinate_samples < 8 || profile.transitions < 4 || profile.smooth_transitions == 0) {
+            continue;
+        }
+
+        const float x_range = std::isfinite(profile.min_x) && std::isfinite(profile.max_x)
+            ? profile.max_x - profile.min_x
+            : 0.0F;
+        const float y_range = std::isfinite(profile.min_y) && std::isfinite(profile.max_y)
+            ? profile.max_y - profile.min_y
+            : 0.0F;
+        const double smooth_ratio = static_cast<double>(profile.smooth_transitions) / static_cast<double>(profile.transitions);
+        const double moving_ratio = static_cast<double>(profile.moving_transitions) / static_cast<double>(profile.transitions);
+        const double coverage = static_cast<double>(profile.coordinate_samples) / static_cast<double>(records.size());
+        const double range_score = std::min<double>(3.0, static_cast<double>(x_range + y_range) / 4000.0);
+        const double score = (static_cast<double>(profile.moving_transitions) + 0.5 * static_cast<double>(profile.smooth_transitions))
+            * (0.5 + smooth_ratio)
+            * (0.25 + coverage)
+            * (0.25 + range_score);
+        const std::size_t chunk_span = profile.max_chunk_id >= profile.min_chunk_id
+            ? static_cast<std::size_t>(profile.max_chunk_id - profile.min_chunk_id + 1)
+            : 0;
+
+        ranked_candidates.push_back({profile_index, score, smooth_ratio, moving_ratio, coverage, x_range, y_range, chunk_span});
+    }
+
+    std::sort(ranked_candidates.begin(), ranked_candidates.end(), [&](const auto& left, const auto& right) {
+        if (left.score != right.score) {
+            return left.score > right.score;
+        }
+        if (left.moving_ratio != right.moving_ratio) {
+            return left.moving_ratio > right.moving_ratio;
+        }
+        if (left.smooth_ratio != right.smooth_ratio) {
+            return left.smooth_ratio > right.smooth_ratio;
+        }
+        return profiles[left.profile_index].coordinate_samples > profiles[right.profile_index].coordinate_samples;
+    });
+
+    output << "Candidate slot/pair profiles: " << ranked_candidates.size() << "\n";
+    if (ranked_candidates.empty()) {
+        output << "No position-like candidates met the minimum sample/transition thresholds.\n";
+        return output.str();
+    }
+
+    if (top_slots == 0) {
+        top_slots = 120;
+    }
+    if (top_classes == 0) {
+        top_classes = 12;
+    }
+    const std::size_t shown_slots = std::min<std::size_t>(top_slots, ranked_candidates.size());
+
+    std::map<std::string, ClassAggregate> class_map;
+    for (std::size_t rank_index = 0; rank_index < shown_slots; ++rank_index) {
+        const auto& ranked = ranked_candidates[rank_index];
+        const auto& profile = profiles[ranked.profile_index];
+        const auto& pair = pair_defs[profile.pair_index];
+        const auto top_first = top_freq_entry(profile.first_byte_freq);
+        const auto top_mask = top_freq_entry(profile.mask_freq);
+        std::ostringstream key_builder;
+        key_builder << pair.label << "|first=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+                    << static_cast<int>(top_first.first) << std::dec << std::setfill(' ')
+                    << "|mask=" << format_mask(top_mask.first);
+        const std::string class_key = key_builder.str();
+
+        auto& aggregate = class_map[class_key];
+        aggregate.key = class_key;
+        aggregate.pair_label = pair.label;
+        aggregate.members++;
+        aggregate.best_score = std::max(aggregate.best_score, ranked.score);
+        aggregate.total_score += ranked.score;
+        aggregate.total_smooth_ratio += ranked.smooth_ratio;
+        aggregate.total_moving_ratio += ranked.moving_ratio;
+        aggregate.total_coverage += ranked.coverage;
+        aggregate.total_x_range += ranked.x_range;
+        aggregate.total_y_range += ranked.y_range;
+        aggregate.total_chunk_span += static_cast<double>(ranked.chunk_span);
+        if (aggregate.example_slots.size() < 6) {
+            aggregate.example_slots.push_back(profile.slot_index);
+        }
+
+        const bool champion_like_vote = ranked.coverage >= 0.12 && ranked.smooth_ratio >= 0.90 && ranked.moving_ratio >= 0.05 && ranked.moving_ratio <= 0.35 && ranked.chunk_span >= 20 && (ranked.x_range + ranked.y_range) >= 2500.0F;
+        const bool stationary_vote = ranked.coverage >= 0.10 && ranked.smooth_ratio >= 0.90 && ranked.moving_ratio <= 0.08 && ranked.chunk_span >= 20;
+        const bool transient_vote = ranked.moving_ratio >= 0.25 && ranked.chunk_span <= 12;
+        if (champion_like_vote) {
+            aggregate.champion_votes++;
+        }
+        if (stationary_vote) {
+            aggregate.stationary_votes++;
+        }
+        if (transient_vote) {
+            aggregate.transient_votes++;
+        }
+    }
+
+    struct ClassSummary {
+        std::string key;
+        std::string label;
+        std::size_t members = 0;
+        std::size_t champion_distance = 0;
+        double best_score = 0.0;
+        double avg_score = 0.0;
+        double avg_smooth_ratio = 0.0;
+        double avg_moving_ratio = 0.0;
+        double avg_coverage = 0.0;
+        double avg_x_range = 0.0;
+        double avg_y_range = 0.0;
+        double avg_chunk_span = 0.0;
+        std::size_t champion_votes = 0;
+        std::size_t stationary_votes = 0;
+        std::size_t transient_votes = 0;
+        std::vector<std::size_t> example_slots;
+    };
+
+    std::vector<ClassSummary> classes;
+    classes.reserve(class_map.size());
+    for (const auto& [key, aggregate] : class_map) {
+        const double member_count = static_cast<double>(aggregate.members);
+        const double avg_score = aggregate.total_score / member_count;
+        const double avg_smooth_ratio = aggregate.total_smooth_ratio / member_count;
+        const double avg_moving_ratio = aggregate.total_moving_ratio / member_count;
+        const double avg_coverage = aggregate.total_coverage / member_count;
+        const double avg_x_range = aggregate.total_x_range / member_count;
+        const double avg_y_range = aggregate.total_y_range / member_count;
+        const double avg_chunk_span = aggregate.total_chunk_span / member_count;
+        std::string label = "mixed state candidate";
+        if (aggregate.champion_votes * 2 >= aggregate.members && aggregate.members >= 6 && aggregate.members <= 18) {
+            label = "champion-like candidate";
+        } else if (aggregate.stationary_votes * 2 >= aggregate.members) {
+            label = "stationary/object-like candidate";
+        } else if (aggregate.transient_votes * 2 >= aggregate.members) {
+            label = "transient/mobile candidate";
+        }
+
+        classes.push_back({
+            key,
+            label,
+            aggregate.members,
+            aggregate.members > 10 ? aggregate.members - 10 : 10 - aggregate.members,
+            aggregate.best_score,
+            avg_score,
+            avg_smooth_ratio,
+            avg_moving_ratio,
+            avg_coverage,
+            avg_x_range,
+            avg_y_range,
+            avg_chunk_span,
+            aggregate.champion_votes,
+            aggregate.stationary_votes,
+            aggregate.transient_votes,
+            aggregate.example_slots
+        });
+    }
+
+    auto render_examples = [](const std::vector<std::size_t>& example_slots) {
+        std::ostringstream line;
+        for (std::size_t index = 0; index < example_slots.size(); ++index) {
+            if (index > 0) {
+                line << ',';
+            }
+            line << example_slots[index];
+        }
+        return line.str();
+    };
+
+    auto render_class = [&](const ClassSummary& cls) {
+        output << "  " << cls.key
+               << " | label=" << cls.label
+               << " | slots=" << cls.members
+               << " | championDistance=" << cls.champion_distance
+               << " | bestScore=" << std::fixed << std::setprecision(2) << cls.best_score
+               << " | avgScore=" << cls.avg_score
+               << " | avgCoverage=" << cls.avg_coverage
+               << " | avgSmooth=" << cls.avg_smooth_ratio
+               << " | avgMoving=" << cls.avg_moving_ratio
+               << " | avgChunkSpan=" << cls.avg_chunk_span
+               << " | votes C/S/T=" << cls.champion_votes << '/' << cls.stationary_votes << '/' << cls.transient_votes
+               << " | exampleSlots=" << render_examples(cls.example_slots)
+               << "\n";
+    };
+
+    std::vector<ClassSummary> champion_sorted = classes;
+    std::sort(champion_sorted.begin(), champion_sorted.end(), [](const auto& left, const auto& right) {
+        const bool left_champion = left.label == "champion-like candidate";
+        const bool right_champion = right.label == "champion-like candidate";
+        if (left_champion != right_champion) {
+            return left_champion > right_champion;
+        }
+        if (left.champion_distance != right.champion_distance) {
+            return left.champion_distance < right.champion_distance;
+        }
+        if (left.champion_votes != right.champion_votes) {
+            return left.champion_votes > right.champion_votes;
+        }
+        return left.best_score > right.best_score;
+    });
+
+    std::vector<ClassSummary> stationary_sorted = classes;
+    std::sort(stationary_sorted.begin(), stationary_sorted.end(), [](const auto& left, const auto& right) {
+        if (left.stationary_votes != right.stationary_votes) {
+            return left.stationary_votes > right.stationary_votes;
+        }
+        if (left.avg_moving_ratio != right.avg_moving_ratio) {
+            return left.avg_moving_ratio < right.avg_moving_ratio;
+        }
+        return left.avg_coverage > right.avg_coverage;
+    });
+
+    std::vector<ClassSummary> transient_sorted = classes;
+    std::sort(transient_sorted.begin(), transient_sorted.end(), [](const auto& left, const auto& right) {
+        if (left.transient_votes != right.transient_votes) {
+            return left.transient_votes > right.transient_votes;
+        }
+        if (left.avg_moving_ratio != right.avg_moving_ratio) {
+            return left.avg_moving_ratio > right.avg_moving_ratio;
+        }
+        return left.avg_chunk_span < right.avg_chunk_span;
+    });
+
+    output << "Top slot/pair candidates considered: " << shown_slots << "\n";
+    output << "Discovered classes in that window: " << classes.size() << "\n\n";
+
+    output << "Classes nearest champion-count shape (10 slots):\n";
+    for (std::size_t index = 0; index < std::min<std::size_t>(top_classes, champion_sorted.size()); ++index) {
+        render_class(champion_sorted[index]);
+    }
+
+    output << "\nMost stationary/object-like classes:\n";
+    for (std::size_t index = 0; index < std::min<std::size_t>(std::min<std::size_t>(top_classes, 6), stationary_sorted.size()); ++index) {
+        render_class(stationary_sorted[index]);
+    }
+
+    output << "\nMost transient/mobile classes:\n";
+    for (std::size_t index = 0; index < std::min<std::size_t>(std::min<std::size_t>(top_classes, 6), transient_sorted.size()); ++index) {
+        render_class(transient_sorted[index]);
+    }
+
+    output << "\nInterpretation note:\n";
+    output << "  These labels are heuristic comparisons, not decoded semantics.\n";
+    output << "  A champion-like class should converge toward roughly 10 persistent slots with broad chunk coverage and smooth motion.\n";
+    output << "  Stationary classes are better candidates for wards, static objects, or anchor state.\n";
+    output << "  Transient classes are better candidates for missiles, short-lived deltas, or burst-only entities.\n";
+
+    return output.str();
+}
 std::string trace_sparse_slot(
     const std::string& path,
     std::size_t target_length,
@@ -3169,6 +3660,7 @@ std::string trace_sparse_slot(
     return output.str();
 }
 }  // namespace rofl::core
+
 
 
 

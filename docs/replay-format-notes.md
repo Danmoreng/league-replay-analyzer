@@ -287,6 +287,100 @@ The decoding focus should therefore be:
 This direction is now backed by the native slot profiler command:
 
 - `rofl_core_cli --profile-position-slots <path> --length 53970 --first-byte 0xD2 --header-size 2 --stride 16`
+- `rofl_core_cli --compare-position-classes <path> --length 53970 --first-byte 0xD2 --header-size 2 --stride 16`
 
 That command is intended to surface candidate position/state slots before we try to assign specific semantic identities such as champion, ward, missile, or minion.
 
+
+
+## Cross-Patch Sparse Family Comparison
+
+On March 16, 2026, we ran the native position-class comparer across representative local replays from five replay versions:
+
+- `15.22.724.5161` via `replays/EUW1-7596231295.rofl`
+- `15.23.728.3286` via `replays/EUW1-7617298409.rofl`
+- `15.24.733.6673` via `replays/EUW1-7648140653.rofl`
+- `16.1.737.4870` via `replays/EUW1-7678536418.rofl`
+- `16.5.752.7101` via `replays/EUW1-7779216102.rofl`
+
+The first important negative result is that the previously useful `16.5` sparse family is not portable:
+
+- `length = 53,970`, `firstByte = 0xD2`, `headerSize = 2` produced strong results on `16.5`
+- the same family produced `0` matching records on the checked `15.22`, `15.23`, `15.24`, and `16.1` samples
+
+That means the sparse world/entity slab hypothesis survives, but the exact subrecord family carrying that slab is version-sensitive.
+
+### Large Recurring Families Found Per Version
+
+Using real chunk-subrecord dumps rather than the lower-level heuristic `--inspect` framing output, the large recurring families that actually exist in each sample were:
+
+- `15.22`: `firstByte = 0x41`, `length = 16,705`
+- `15.23`: `firstByte = 0xA8`, `length = 43,176`
+- `15.24`: `firstByte = 0xFE`, `length = 65,278`
+- `16.1`: `firstByte = 0xC2`, `length = 49,858`
+- `16.5`: `firstByte = 0xD2`, `length = 53,970`
+
+Not all large families are equally useful:
+
+- some are analyzable sparse tables with smooth multi-slot motion
+- some are mostly repeated-fill slabs that the comparer can scan but that do not yield useful candidate classes
+
+### Results By Patch
+
+`15.22` on `0x41 / 16,705`:
+
+- the strongest classes were only `5`, `5`, and `4` slots
+- all top classes remained `mixed state candidate`
+- this does not look like a clean persistent 10-entity class
+
+`15.23` on `0xA8 / 43,176`:
+
+- the comparer produced useful output
+- strongest classes were `13`, `13`, and `6` slots
+- these behaved like a real sparse table, but less cleanly than later versions
+
+`15.24` on `0xFE / 65,278`:
+
+- this was the strongest pre-`16.x` result
+- best classes were `11`, `12`, `8`, `15`, and `16` slots
+- this is consistent with a persistent state slab that can produce champion-like class sizes
+
+`16.1` on `0xC2 / 49,858`:
+
+- the family was analyzable, but the output was noisier
+- nearest class was `11` slots, with broader mixed-state classes around it
+- motion looked more mobile and less cleanly separated than `16.5`
+
+`16.5` on `0xD2 / 53,970`:
+
+- still the cleanest sample so far
+- strongest classes remained `9`, `11`, and `7` slots
+- this is still the best evidence that one sparse family is carrying broad entity/world state rather than event-only packets
+
+### Interpretation
+
+Cross-patch comparison strengthens two conclusions:
+
+- the replay payload is still better explained as version-specific spectator/state-delta transport than as a stable event packet stream
+- the broad sparse-slot-table idea appears to survive across patches, but the concrete family signature changes by version
+
+So the current problem is no longer just `decode 0xD2 / 53,970`. The real problem is:
+
+1. find the candidate sparse families for a given replay version
+2. rank them by smooth-motion and persistence
+3. run slot-class comparison only on the best families
+4. then try to separate champion-like classes from wards, minions, missiles, and broader mixed world state
+
+### Updated Workflow
+
+The manual cross-patch pass showed that one hard-coded `length / firstByte / headerSize` triple is not enough for corpus work.
+
+The next tooling step should therefore be an automated family-discovery pipeline:
+
+1. dump chunk subrecords for representative chunks in the replay
+2. identify large recurring families that appear across many chunks
+3. reject obvious filler-only slabs
+4. rank surviving families by coordinate-like smooth motion and slot persistence
+5. run `--compare-position-classes` only on the top candidates
+
+This is now the recommended path for batch-scanning the local replay corpus. The earlier `0xD2 / 53,970` workflow should be treated as a successful version-specific case study, not as a universal replay-era invariant.
