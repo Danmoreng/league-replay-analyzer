@@ -1,19 +1,23 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
+import DataBrowser from "./components/DataBrowser.vue";
 import Minimap from "./components/Minimap.vue";
 import Timeline from "./components/Timeline.vue";
 import { usePlayback } from "./composables/usePlayback";
+import { buildReplayBrowserModel, type ReplayBrowserModel } from "./replayBrowser";
 import { type PlayerSummary, type ReplaySummary } from "./replayParser";
 import { parseReplayBufferWithWasm } from "./wasmReplayParser";
 
 const { seek, setDuration } = usePlayback();
 const summary = ref<ReplaySummary | null>(null);
+const browserModel = ref<ReplayBrowserModel | null>(null);
 const parserEngine = ref("C++/Wasm");
 const loadedReplayName = ref("");
 const status = ref("Pick a replay file to parse it with the C++/Wasm replay parser.");
 const errorMessage = ref("");
 const isLoading = ref(false);
+const activePage = ref<"summary" | "browser">("summary");
 
 const teams = computed(() => {
   const players = summary.value?.players ?? [];
@@ -195,12 +199,16 @@ async function loadReplay(file: File): Promise<void> {
 
   try {
     const buffer = await file.arrayBuffer();
-    summary.value = await parseReplayBufferWithWasm(buffer);
-    setDuration(summary.value.gameLengthMillis);
+    const bytes = new Uint8Array(buffer);
+    const parsedSummary = await parseReplayBufferWithWasm(buffer);
+    summary.value = parsedSummary;
+    browserModel.value = buildReplayBrowserModel(bytes, parsedSummary);
+    setDuration(parsedSummary.gameLengthMillis);
     seek(0);
-    status.value = `Parsed ${file.name}. Metadata source: ${summary.value.container.metadataSource}. Player stats: ${summary.value.playerCount}. Indexed segments: ${summary.value.container.segments.length}.`;
+    status.value = `Parsed ${file.name}. Metadata source: ${parsedSummary.container.metadataSource}. Player stats: ${parsedSummary.playerCount}. Indexed segments: ${parsedSummary.container.segments.length}.`;
   } catch (error) {
     summary.value = null;
+    browserModel.value = null;
     errorMessage.value = error instanceof Error ? error.message : String(error);
     status.value = "Replay parsing failed.";
   } finally {
@@ -224,9 +232,9 @@ function onFileChange(event: Event): void {
         <p class="eyebrow">League Replay Analyzer</p>
         <h1>Current parser output, directly from the replay file.</h1>
         <p class="lede">
-          This view is limited to what the parser actually extracts today: metadata, player stat
-          summaries, container details, and parser capability state. Movement, wards, and event
-          frames are intentionally shown as unavailable until payload decoding exists.
+          Use the summary page for normalized parser output, then switch to the data browser page to
+          inspect the underlying record structure, offsets, and raw byte previews the app can derive
+          today.
         </p>
       </div>
       <div class="hero-controls">
@@ -247,207 +255,234 @@ function onFileChange(event: Event): void {
         </article>
       </section>
 
-      <div class="analyzer-layout">
-        <div class="visual-pane">
-          <section class="note visual-card">
-            <div class="visual-header">
-              <div>
-                <h2>Timeline Surface</h2>
+      <nav class="page-nav" aria-label="Replay views">
+        <button
+          class="page-button"
+          :class="{ active: activePage === 'summary' }"
+          type="button"
+          @click="activePage = 'summary'"
+        >
+          Summary View
+        </button>
+        <button
+          class="page-button"
+          :class="{ active: activePage === 'browser' }"
+          type="button"
+          @click="activePage = 'browser'"
+        >
+          Data Browser
+        </button>
+      </nav>
+
+      <template v-if="activePage === 'summary'">
+        <div class="analyzer-layout">
+          <div class="visual-pane">
+            <section class="note visual-card">
+              <div class="visual-header">
+                <div>
+                  <h2>Timeline Surface</h2>
+                  <p>
+                    The scrubber currently reflects match duration from metadata only. No decoded
+                    movement frames are available yet.
+                  </p>
+                </div>
+                <div class="availability-pill unavailable">Movement unavailable</div>
+              </div>
+              <Minimap
+                :player-data="[]"
+                label="Movement Map"
+                empty-message="Current parser output does not include champion coordinates yet."
+              />
+              <Timeline class="main-timeline" />
+              <p class="visual-note">
+                Once payload packets are decoded, this pane will switch from a duration-only shell
+                to a real movement timeline.
+              </p>
+            </section>
+
+            <section v-if="summary.warnings.length > 0" class="note warning-card">
+              <h2>Parser Warnings</h2>
+              <ul class="warning-list">
+                <li v-for="warning in summary.warnings" :key="warning">{{ warning }}</li>
+              </ul>
+            </section>
+
+            <section v-if="segmentPreview.length > 0" class="note">
+              <div class="section-head">
+                <h2>Segment Preview</h2>
+                <p>First {{ segmentPreview.length }} segment headers currently available.</p>
+              </div>
+              <div class="segment-table-wrap">
+                <table class="segment-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Type</th>
+                      <th>Codec</th>
+                      <th>Compressed</th>
+                      <th>Uncompressed</th>
+                      <th>Chunk ID</th>
+                      <th>Header Offset</th>
+                      <th>Payload Offset</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="segment in segmentPreview"
+                      :key="`${segment.id}-${segment.headerOffset}`"
+                    >
+                      <td>{{ segment.id }}</td>
+                      <td>{{ segment.type }}</td>
+                      <td>{{ segment.codec || "unknown" }}</td>
+                      <td>{{ formatNumber(segment.length) }}</td>
+                      <td>{{ formatOptionalNumber(segment.uncompressedLength) }}</td>
+                      <td>{{ formatNumber(segment.chunkId) }}</td>
+                      <td>{{ formatNumber(segment.headerOffset) }}</td>
+                      <td>{{ formatNumber(segment.payloadOffset) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <aside class="sidebar">
+            <section class="note">
+              <div class="section-head">
+                <h2>Parser Capabilities</h2>
+                <p>Live status of what the replay parser can currently prove or extract.</p>
+              </div>
+              <div class="capability-grid">
+                <article
+                  v-for="item in capabilityItems"
+                  :key="item.label"
+                  class="capability-card"
+                  :class="item.available ? 'available' : 'unavailable'"
+                >
+                  <div class="capability-state">
+                    {{ item.available ? "Available" : "Unavailable" }}
+                  </div>
+                  <h3>{{ item.label }}</h3>
+                  <p>{{ item.detail }}</p>
+                </article>
+              </div>
+            </section>
+
+            <section class="note">
+              <div class="section-head">
+                <h2>Container Details</h2>
                 <p>
-                  The scrubber currently reflects match duration from metadata only. No decoded
-                  movement frames are available yet.
+                  Everything the current parser can describe about file layout and metadata
+                  placement.
                 </p>
               </div>
-              <div class="availability-pill unavailable">Movement unavailable</div>
-            </div>
-            <Minimap
-              :player-data="[]"
-              label="Movement Map"
-              empty-message="Current parser output does not include champion coordinates yet."
-            />
-            <Timeline class="main-timeline" />
-            <p class="visual-note">
-              Once payload packets are decoded, this pane will switch from a duration-only shell to
-              a real movement timeline.
-            </p>
-          </section>
+              <dl class="detail-grid">
+                <template v-for="row in containerRows" :key="row.label">
+                  <dt>{{ row.label }}</dt>
+                  <dd>{{ row.value }}</dd>
+                </template>
+              </dl>
+            </section>
 
-          <section v-if="summary.warnings.length > 0" class="note warning-card">
-            <h2>Parser Warnings</h2>
-            <ul class="warning-list">
-              <li v-for="warning in summary.warnings" :key="warning">{{ warning }}</li>
-            </ul>
-          </section>
-
-          <section v-if="segmentPreview.length > 0" class="note">
-            <div class="section-head">
-              <h2>Segment Preview</h2>
-              <p>First {{ segmentPreview.length }} segment headers currently available.</p>
-            </div>
-            <div class="segment-table-wrap">
-              <table class="segment-table">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Type</th>
-                    <th>Codec</th>
-                    <th>Compressed</th>
-                    <th>Uncompressed</th>
-                    <th>Chunk ID</th>
-                    <th>Header Offset</th>
-                    <th>Payload Offset</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="segment in segmentPreview" :key="`${segment.id}-${segment.headerOffset}`">
-                    <td>{{ segment.id }}</td>
-                    <td>{{ segment.type }}</td>
-                    <td>{{ segment.codec || "unknown" }}</td>
-                    <td>{{ formatNumber(segment.length) }}</td>
-                    <td>{{ formatOptionalNumber(segment.uncompressedLength) }}</td>
-                    <td>{{ formatNumber(segment.chunkId) }}</td>
-                    <td>{{ formatNumber(segment.headerOffset) }}</td>
-                    <td>{{ formatNumber(segment.payloadOffset) }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
+            <section class="note raw-note">
+              <div class="section-head">
+                <h2>Metadata JSON</h2>
+                <p>The full embedded metadata block extracted from the replay.</p>
+              </div>
+              <details class="json-details">
+                <summary>Show extracted metadata JSON</summary>
+                <pre>{{ summary.metadataJson }}</pre>
+              </details>
+            </section>
+          </aside>
         </div>
 
-        <aside class="sidebar">
-          <section class="note">
-            <div class="section-head">
-              <h2>Parser Capabilities</h2>
-              <p>Live status of what the replay parser can currently prove or extract.</p>
-            </div>
-            <div class="capability-grid">
+        <section class="team-grid player-section">
+          <article
+            v-for="team in teams"
+            :key="team.id"
+            class="team-panel"
+            :class="{ winner: team.winner }"
+          >
+            <header class="team-header">
+              <div>
+                <p class="team-label">Team {{ team.id }}</p>
+                <h2>{{ team.winner ? "Winner" : "Defeat" }}</h2>
+              </div>
+              <div class="team-totals">
+                <span>{{ team.totalGold.toLocaleString() }} gold</span>
+                <span>{{ team.totalDamage.toLocaleString() }} damage</span>
+                <span>{{ team.totalVision.toLocaleString() }} vision</span>
+              </div>
+            </header>
+
+            <div class="player-list">
               <article
-                v-for="item in capabilityItems"
-                :key="item.label"
-                class="capability-card"
-                :class="item.available ? 'available' : 'unavailable'"
+                v-for="player in team.members"
+                :key="`${team.id}-${player.teamPosition}-${player.riotIdGameName}`"
+                class="player-card"
               >
-                <div class="capability-state">
-                  {{ item.available ? "Available" : "Unavailable" }}
+                <div class="player-main">
+                  <div>
+                    <p class="player-role">{{ player.teamPosition || "UNKNOWN" }}</p>
+                    <h3>{{ player.champion || "Unknown Champion" }}</h3>
+                    <p class="player-id">{{ formatRiotId(player) || "Unknown Riot ID" }}</p>
+                  </div>
+                  <p class="player-kda">
+                    {{ player.kills }}/{{ player.deaths }}/{{ player.assists }}
+                  </p>
                 </div>
-                <h3>{{ item.label }}</h3>
-                <p>{{ item.detail }}</p>
+
+                <div class="stat-row">
+                  <span>Gold</span>
+                  <div class="bar-track">
+                    <div
+                      class="bar-fill gold"
+                      :style="{ width: percentage(player.goldEarned, maxGold) }"
+                    ></div>
+                  </div>
+                  <strong>{{ player.goldEarned.toLocaleString() }}</strong>
+                </div>
+
+                <div class="stat-row">
+                  <span>Damage</span>
+                  <div class="bar-track">
+                    <div
+                      class="bar-fill damage"
+                      :style="{ width: percentage(player.totalDamageToChampions, maxDamage) }"
+                    ></div>
+                  </div>
+                  <strong>{{ player.totalDamageToChampions.toLocaleString() }}</strong>
+                </div>
+
+                <div class="stat-row">
+                  <span>Vision</span>
+                  <div class="bar-track">
+                    <div
+                      class="bar-fill vision"
+                      :style="{ width: percentage(player.visionScore, maxVision) }"
+                    ></div>
+                  </div>
+                  <strong>{{ player.visionScore.toLocaleString() }}</strong>
+                </div>
               </article>
             </div>
-          </section>
+          </article>
+        </section>
 
-          <section class="note">
-            <div class="section-head">
-              <h2>Container Details</h2>
-              <p>
-                Everything the current parser can describe about file layout and metadata placement.
-              </p>
-            </div>
-            <dl class="detail-grid">
-              <template v-for="row in containerRows" :key="row.label">
-                <dt>{{ row.label }}</dt>
-                <dd>{{ row.value }}</dd>
-              </template>
-            </dl>
-          </section>
-
-          <section class="note raw-note">
-            <div class="section-head">
-              <h2>Metadata JSON</h2>
-              <p>The full embedded metadata block extracted from the replay.</p>
-            </div>
-            <details class="json-details">
-              <summary>Show extracted metadata JSON</summary>
-              <pre>{{ summary.metadataJson }}</pre>
-            </details>
-          </section>
-        </aside>
-      </div>
-
-      <section class="team-grid player-section">
-        <article
-          v-for="team in teams"
-          :key="team.id"
-          class="team-panel"
-          :class="{ winner: team.winner }"
-        >
-          <header class="team-header">
-            <div>
-              <p class="team-label">Team {{ team.id }}</p>
-              <h2>{{ team.winner ? "Winner" : "Defeat" }}</h2>
-            </div>
-            <div class="team-totals">
-              <span>{{ team.totalGold.toLocaleString() }} gold</span>
-              <span>{{ team.totalDamage.toLocaleString() }} damage</span>
-              <span>{{ team.totalVision.toLocaleString() }} vision</span>
-            </div>
-          </header>
-
-          <div class="player-list">
-            <article
-              v-for="player in team.members"
-              :key="`${team.id}-${player.teamPosition}-${player.riotIdGameName}`"
-              class="player-card"
-            >
-              <div class="player-main">
-                <div>
-                  <p class="player-role">{{ player.teamPosition || "UNKNOWN" }}</p>
-                  <h3>{{ player.champion || "Unknown Champion" }}</h3>
-                  <p class="player-id">{{ formatRiotId(player) || "Unknown Riot ID" }}</p>
-                </div>
-                <p class="player-kda">
-                  {{ player.kills }}/{{ player.deaths }}/{{ player.assists }}
-                </p>
-              </div>
-
-              <div class="stat-row">
-                <span>Gold</span>
-                <div class="bar-track">
-                  <div
-                    class="bar-fill gold"
-                    :style="{ width: percentage(player.goldEarned, maxGold) }"
-                  ></div>
-                </div>
-                <strong>{{ player.goldEarned.toLocaleString() }}</strong>
-              </div>
-
-              <div class="stat-row">
-                <span>Damage</span>
-                <div class="bar-track">
-                  <div
-                    class="bar-fill damage"
-                    :style="{ width: percentage(player.totalDamageToChampions, maxDamage) }"
-                  ></div>
-                </div>
-                <strong>{{ player.totalDamageToChampions.toLocaleString() }}</strong>
-              </div>
-
-              <div class="stat-row">
-                <span>Vision</span>
-                <div class="bar-track">
-                  <div
-                    class="bar-fill vision"
-                    :style="{ width: percentage(player.visionScore, maxVision) }"
-                  ></div>
-                </div>
-                <strong>{{ player.visionScore.toLocaleString() }}</strong>
-              </div>
-            </article>
+        <section class="note raw-note">
+          <div class="section-head">
+            <h2>Normalized Replay Summary</h2>
+            <p>The JSON payload returned by the parser after normalization in the web app.</p>
           </div>
-        </article>
-      </section>
+          <details class="json-details">
+            <summary>Show normalized replay summary</summary>
+            <pre>{{ JSON.stringify(summary, null, 2) }}</pre>
+          </details>
+        </section>
+      </template>
 
-      <section class="note raw-note">
-        <div class="section-head">
-          <h2>Normalized Replay Summary</h2>
-          <p>The JSON payload returned by the parser after normalization in the web app.</p>
-        </div>
-        <details class="json-details">
-          <summary>Show normalized replay summary</summary>
-          <pre>{{ JSON.stringify(summary, null, 2) }}</pre>
-        </details>
-      </section>
+      <DataBrowser v-else :browser="browserModel" :replay-name="loadedReplayName" />
     </template>
 
     <section v-else-if="!isLoading" class="welcome-hint">
@@ -468,6 +503,30 @@ function onFileChange(event: Event): void {
 </template>
 
 <style>
+.page-nav {
+  display: flex;
+  gap: 12px;
+  margin-top: 22px;
+  flex-wrap: wrap;
+}
+
+.page-button {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--accent);
+  padding: 12px 16px;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.page-button.active {
+  background: var(--surface-accent);
+  border-color: #bfccd7;
+}
+
 .analyzer-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
