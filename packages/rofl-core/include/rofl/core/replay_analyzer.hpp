@@ -85,6 +85,10 @@ struct ReplaySummary {
 [[nodiscard]] std::string normalize_version_label(std::string_view version);
 [[nodiscard]] ReplaySummary parse_replay_bytes(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] ReplaySummary parse_replay_file(const std::string& path);
+[[nodiscard]] std::string probe_replay_bytes(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] std::string probe_replay_file(const std::string& path);
 [[nodiscard]] std::string replay_summary_to_json(const ReplaySummary& summary);
 
 }  // namespace rofl::core
+
+

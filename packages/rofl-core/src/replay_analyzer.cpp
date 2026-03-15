@@ -539,6 +539,175 @@ struct MetadataRegion {
     return true;
 }
 
+struct SegmentTableCandidate {
+    std::size_t offset = 0;
+    int score = 0;
+    int sample_entries = 0;
+    int first_id = 0;
+    int last_id = 0;
+    int chunk_entries = 0;
+    int keyframe_entries = 0;
+    int first_data_offset = 0;
+};
+
+[[nodiscard]] std::string format_offset(std::size_t offset) {
+    std::ostringstream output;
+    output << offset << " (0x" << std::hex << std::uppercase << offset << std::nouppercase << std::dec << ")";
+    return output.str();
+}
+
+[[nodiscard]] std::vector<std::size_t> find_signature_hits(
+    const std::vector<std::uint8_t>& bytes,
+    const std::vector<std::uint8_t>& signature,
+    std::size_t max_hits
+) {
+    std::vector<std::size_t> hits;
+    if (signature.empty() || bytes.size() < signature.size()) {
+        return hits;
+    }
+
+    for (std::size_t offset = 0; offset + signature.size() <= bytes.size() && hits.size() < max_hits; ++offset) {
+        bool match = true;
+        for (std::size_t index = 0; index < signature.size(); ++index) {
+            if (bytes[offset + index] != signature[index]) {
+                match = false;
+                break;
+            }
+        }
+        if (match) {
+            hits.push_back(offset);
+        }
+    }
+
+    return hits;
+}
+
+[[nodiscard]] std::vector<SegmentTableCandidate> find_segment_table_candidates(
+    const std::vector<std::uint8_t>& bytes,
+    int expected_entries,
+    std::size_t max_candidates
+) {
+    const std::size_t sample_entries = expected_entries > 0
+        ? std::min<std::size_t>(12, static_cast<std::size_t>(expected_entries))
+        : 12;
+    const std::size_t minimum_span = sample_entries * kKnownSegmentHeaderLength;
+    std::vector<SegmentTableCandidate> candidates;
+
+    if (bytes.size() < minimum_span) {
+        return candidates;
+    }
+
+    for (std::size_t offset = 0; offset + minimum_span <= bytes.size(); ++offset) {
+        const std::uint8_t type = bytes[offset + 4];
+        if (type != 1 && type != 2) {
+            continue;
+        }
+
+        std::uint32_t first_id = 0;
+        std::uint32_t first_length = 0;
+        std::uint32_t first_chunk_id = 0;
+        std::uint32_t first_data_offset = 0;
+        if (!read_u32_le(bytes, offset, first_id) ||
+            !read_u32_le(bytes, offset + 5, first_length) ||
+            !read_u32_le(bytes, offset + 9, first_chunk_id) ||
+            !read_u32_le(bytes, offset + 13, first_data_offset)) {
+            continue;
+        }
+
+        if (first_id > 4 || first_length == 0 || first_length > bytes.size()) {
+            continue;
+        }
+
+        SegmentTableCandidate candidate;
+        candidate.offset = offset;
+        candidate.first_id = static_cast<int>(first_id);
+        candidate.first_data_offset = static_cast<int>(first_data_offset);
+
+        std::uint32_t previous_id = first_id;
+        std::uint32_t previous_data_offset = 0;
+        for (std::size_t entry_index = 0; entry_index < sample_entries; ++entry_index) {
+            const std::size_t entry_offset = offset + (entry_index * kKnownSegmentHeaderLength);
+            const std::uint8_t entry_type = bytes[entry_offset + 4];
+            if (entry_type != 1 && entry_type != 2) {
+                break;
+            }
+
+            std::uint32_t id = 0;
+            std::uint32_t length = 0;
+            std::uint32_t chunk_id = 0;
+            std::uint32_t data_offset = 0;
+            if (!read_u32_le(bytes, entry_offset, id) ||
+                !read_u32_le(bytes, entry_offset + 5, length) ||
+                !read_u32_le(bytes, entry_offset + 9, chunk_id) ||
+                !read_u32_le(bytes, entry_offset + 13, data_offset)) {
+                break;
+            }
+
+            candidate.sample_entries += 1;
+            candidate.score += 3;
+            if (entry_index == 0) {
+                candidate.score += id <= 4 ? 2 : 0;
+            } else if (id == previous_id + 1) {
+                candidate.score += 2;
+            }
+            if (length > 0 && length < bytes.size() / 2) {
+                candidate.score += 1;
+            }
+            if (entry_index == 0 || data_offset >= previous_data_offset) {
+                candidate.score += 1;
+            }
+            if (entry_type == 1) {
+                candidate.chunk_entries += 1;
+                if (chunk_id == 0) {
+                    candidate.score += 1;
+                }
+            } else {
+                candidate.keyframe_entries += 1;
+            }
+
+            candidate.last_id = static_cast<int>(id);
+            previous_id = id;
+            previous_data_offset = data_offset;
+        }
+
+        if (candidate.sample_entries >= 6 && candidate.score >= 28) {
+            candidates.push_back(candidate);
+        }
+    }
+
+    std::sort(candidates.begin(), candidates.end(), [](const SegmentTableCandidate& left, const SegmentTableCandidate& right) {
+        if (left.score != right.score) {
+            return left.score > right.score;
+        }
+        if (left.sample_entries != right.sample_entries) {
+            return left.sample_entries > right.sample_entries;
+        }
+        return left.offset < right.offset;
+    });
+
+    std::vector<SegmentTableCandidate> filtered;
+    for (const SegmentTableCandidate& candidate : candidates) {
+        bool too_close = false;
+        for (const SegmentTableCandidate& existing : filtered) {
+            const std::size_t distance = candidate.offset > existing.offset
+                ? candidate.offset - existing.offset
+                : existing.offset - candidate.offset;
+            if (distance < (kKnownSegmentHeaderLength * 4)) {
+                too_close = true;
+                break;
+            }
+        }
+
+        if (!too_close) {
+            filtered.push_back(candidate);
+            if (filtered.size() >= max_candidates) {
+                break;
+            }
+        }
+    }
+
+    return filtered;
+}
 [[nodiscard]] MetadataRegion extract_metadata_region(const std::vector<std::uint8_t>& bytes) {
     MetadataRegion region;
     if (try_extract_footer_metadata(bytes, region)) {
@@ -679,6 +848,161 @@ ReplaySummary parse_replay_bytes(const std::vector<std::uint8_t>& bytes) {
     return summary;
 }
 
+std::string probe_replay_bytes(const std::vector<std::uint8_t>& bytes) {
+    std::ostringstream output;
+    output << "Replay probe\n";
+    output << "File size: " << bytes.size() << " bytes\n";
+    output << "Scanned version: " << scan_game_version(bytes) << '\n';
+
+    ReplaySummary summary;
+    bool summary_available = false;
+    std::string summary_error;
+    try {
+        summary = parse_replay_bytes(bytes);
+        summary_available = true;
+    } catch (const std::exception& exception) {
+        summary_error = exception.what();
+    }
+
+    std::uint16_t raw_header_length = 0;
+    std::uint32_t raw_file_length = 0;
+    std::uint32_t raw_metadata_offset = 0;
+    std::uint32_t raw_metadata_length = 0;
+    std::uint32_t raw_payload_header_offset = 0;
+    std::uint32_t raw_payload_header_length = 0;
+    std::uint32_t raw_payload_offset = 0;
+    const bool raw_classic_fields_available =
+        read_u16_le(bytes, 262, raw_header_length) &&
+        read_u32_le(bytes, 264, raw_file_length) &&
+        read_u32_le(bytes, 268, raw_metadata_offset) &&
+        read_u32_le(bytes, 272, raw_metadata_length) &&
+        read_u32_le(bytes, 276, raw_payload_header_offset) &&
+        read_u32_le(bytes, 280, raw_payload_header_length) &&
+        read_u32_le(bytes, 284, raw_payload_offset);
+
+    KnownBinaryHeader binary_header;
+    const bool classic_header_valid = parse_known_binary_header(bytes, binary_header);
+    output << "Classic header valid: " << (classic_header_valid ? "yes" : "no") << '\n';
+    if (raw_classic_fields_available) {
+        output << "Classic raw fields: "
+               << "headerLength=" << raw_header_length
+               << ", fileLength=" << raw_file_length
+               << ", metadataOffset=" << raw_metadata_offset
+               << ", metadataLength=" << raw_metadata_length
+               << ", payloadHeaderOffset=" << raw_payload_header_offset
+               << ", payloadHeaderLength=" << raw_payload_header_length
+               << ", payloadOffset=" << raw_payload_offset << '\n';
+    } else {
+        output << "Classic raw fields: unavailable\n";
+    }
+
+    KnownPayloadHeader payload_header;
+    const bool classic_payload_header_valid = classic_header_valid && parse_known_payload_header(bytes, binary_header, payload_header);
+    output << "Classic payload header valid: " << (classic_payload_header_valid ? "yes" : "no") << '\n';
+    if (classic_payload_header_valid) {
+        output << "Classic payload counts: "
+               << "chunks=" << payload_header.chunk_count
+               << ", keyframes=" << payload_header.keyframe_count
+               << ", startupChunkEndId=" << payload_header.startup_chunk_end_id
+               << ", gameStartChunkId=" << payload_header.game_start_chunk_id
+               << ", keyframeIntervalMillis=" << payload_header.keyframe_interval
+               << ", encryptionKeyLength=" << payload_header.encryption_key_length << '\n';
+    }
+
+    std::uint32_t footer_metadata_size = 0;
+    const bool footer_size_available = bytes.size() >= kFooterLengthFieldSize &&
+        read_u32_le(bytes, bytes.size() - kFooterLengthFieldSize, footer_metadata_size);
+    output << "Footer raw size field: ";
+    if (footer_size_available) {
+        output << footer_metadata_size;
+        const std::size_t footer_metadata_length = static_cast<std::size_t>(footer_metadata_size);
+        if (bytes.size() >= kFooterLengthFieldSize + footer_metadata_length) {
+            output << " -> candidate offset " << format_offset(bytes.size() - kFooterLengthFieldSize - footer_metadata_length);
+        } else {
+            output << " -> out of range";
+        }
+        output << '\n';
+    } else {
+        output << "unavailable\n";
+    }
+
+    MetadataRegion footer_region;
+    const bool footer_metadata_valid = try_extract_footer_metadata(bytes, footer_region);
+    output << "Footer metadata valid: " << (footer_metadata_valid ? "yes" : "no") << '\n';
+    if (footer_metadata_valid) {
+        output << "Footer metadata region: offset=" << format_offset(footer_region.offset)
+               << ", size=" << footer_region.size
+               << ", format=" << footer_region.format << '\n';
+    }
+
+    output << "Parser summary available: " << (summary_available ? "yes" : "no") << '\n';
+    if (summary_available) {
+        output << "Container format: " << summary.container.format << '\n';
+        output << "Metadata source: " << summary.container.metadata_source << '\n';
+        output << "Metadata region: offset=" << format_offset(summary.container.metadata_offset)
+               << ", size=" << summary.container.metadata_size << '\n';
+        output << "Timeline hints: gameLengthMillis=" << summary.game_length_millis
+               << ", lastGameChunkId=" << summary.last_game_chunk_id
+               << ", lastKeyFrameId=" << summary.last_keyframe_id << '\n';
+        output << "Capabilities: binaryHeader=" << (summary.capabilities.binary_header_available ? "yes" : "no")
+               << ", payloadHeader=" << (summary.capabilities.payload_header_available ? "yes" : "no")
+               << ", segmentTable=" << (summary.capabilities.segment_table_available ? "yes" : "no")
+               << ", payloadDecoding=" << (summary.capabilities.payload_decoding_available ? "yes" : "no") << '\n';
+    } else {
+        output << "Parser error: " << summary_error << '\n';
+    }
+
+    const auto zlib_default_hits = find_signature_hits(bytes, {0x78, 0x9C}, 8);
+    const auto zlib_best_hits = find_signature_hits(bytes, {0x78, 0xDA}, 8);
+    const auto gzip_hits = find_signature_hits(bytes, {0x1F, 0x8B}, 8);
+    const auto zstd_hits = find_signature_hits(bytes, {0x28, 0xB5, 0x2F, 0xFD}, 8);
+
+    const auto print_hits = [&output](std::string_view label, const std::vector<std::size_t>& hits) {
+        output << label << ": " << hits.size();
+        if (!hits.empty()) {
+            output << " [";
+            for (std::size_t index = 0; index < hits.size(); ++index) {
+                if (index > 0) {
+                    output << ", ";
+                }
+                output << format_offset(hits[index]);
+            }
+            output << "]";
+        }
+        output << '\n';
+    };
+
+    print_hits("Signature hits (zlib 78 9C)", zlib_default_hits);
+    print_hits("Signature hits (zlib 78 DA)", zlib_best_hits);
+    print_hits("Signature hits (gzip 1F 8B)", gzip_hits);
+    print_hits("Signature hits (zstd 28 B5 2F FD)", zstd_hits);
+
+    int expected_entries = 0;
+    if (summary_available) {
+        expected_entries = std::max(expected_entries, summary.last_game_chunk_id + summary.last_keyframe_id);
+        expected_entries = std::max(expected_entries, summary.container.chunk_count + summary.container.keyframe_count);
+    }
+
+    const auto candidates = find_segment_table_candidates(bytes, expected_entries, 5);
+    output << "17-byte segment table candidates: " << candidates.size() << '\n';
+    for (const SegmentTableCandidate& candidate : candidates) {
+        output << "  - offset=" << format_offset(candidate.offset)
+               << ", score=" << candidate.score
+               << ", sampleEntries=" << candidate.sample_entries
+               << ", firstId=" << candidate.first_id
+               << ", lastId=" << candidate.last_id
+               << ", chunkEntries=" << candidate.chunk_entries
+               << ", keyframeEntries=" << candidate.keyframe_entries
+               << ", firstDataOffset=" << candidate.first_data_offset << '\n';
+    }
+
+    return output.str();
+}
+
+std::string probe_replay_file(const std::string& path) {
+    return probe_replay_bytes(read_file_bytes(path));
+}
+
 ReplaySummary parse_replay_file(const std::string& path) {
     return parse_replay_bytes(read_file_bytes(path));
 }
@@ -776,3 +1100,5 @@ std::string replay_summary_to_json(const ReplaySummary& summary) {
 }
 
 }  // namespace rofl::core
+
+

@@ -122,7 +122,11 @@ bool test_classic_fixture() {
     }
 
     const std::string json = rofl::core::replay_summary_to_json(summary);
-    return json.find("\"segmentTableAvailable\":true") != std::string::npos;
+    const std::string probe = rofl::core::probe_replay_bytes(build_classic_rofl_fixture());
+    return json.find("\"segmentTableAvailable\":true") != std::string::npos &&
+           probe.find("Classic header valid: yes") != std::string::npos &&
+           probe.find("Container format: classic-rofl") != std::string::npos &&
+           probe.find("Metadata source: binary-header") != std::string::npos;
 }
 
 bool test_footer_fixture() {
@@ -144,7 +148,11 @@ bool test_footer_fixture() {
     }
 
     const std::string json = rofl::core::replay_summary_to_json(summary);
-    return json.find("\"metadataSource\":\"footer-size\"") != std::string::npos;
+    const std::string probe = rofl::core::probe_replay_bytes(build_footer_fixture());
+    return json.find("\"metadataSource\":\"footer-size\"") != std::string::npos &&
+           probe.find("Classic header valid: no") != std::string::npos &&
+           probe.find("Metadata source: footer-size") != std::string::npos &&
+           probe.find("Parser summary available: yes") != std::string::npos;
 }
 
 }  // namespace
@@ -160,3 +168,4 @@ int main() {
 
     return EXIT_SUCCESS;
 }
+

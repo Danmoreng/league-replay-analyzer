@@ -24,8 +24,20 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (first_arg == "--probe" && argc > 2) {
+        try {
+            std::cout << rofl::core::probe_replay_file(argv[2]);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
     std::cout << "rofl_core_cli scaffold\n";
     std::cout << "Use --version for build metadata.\n";
     std::cout << "Use --summary <path-to-rofl> to print a parsed replay summary.\n";
+    std::cout << "Use --probe <path-to-rofl> to inspect likely payload/index regions.\n";
     return 0;
 }
+

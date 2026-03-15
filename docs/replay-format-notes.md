@@ -37,6 +37,35 @@ That means:
 - `14,903,687 = 15,013,275 - 4 - 109,584`
 
 This is a concrete, validated relationship, not a hypothesis.
+## Native Probe Findings
+
+Running the native CLI probe against `replays/EUW1-7779216102.rofl` currently reports:
+
+- classic header valid: `no`
+- classic payload header valid: `no`
+- footer metadata valid: `yes`
+- parser summary available: `yes`
+- timeline hints from metadata: `gameLengthMillis = 1,895,012`, `lastGameChunkId = 66`, `lastKeyFrameId = 32`
+
+The raw classic header words at the legacy offsets are effectively garbage for this sample:
+
+- `headerLength = 55094`
+- `fileLength = 986342294`
+- `metadataOffset = 2350193029`
+- `metadataLength = 2421270161`
+- `payloadHeaderOffset = 3605654821`
+- `payloadHeaderLength = 3076487740`
+- `payloadOffset = 3068108477`
+
+That is useful negative evidence: the newer sample is not just a classic header with one or two changed fields.
+
+The first generic 17-byte segment-table scan also returned `0` candidates in the live sample. That does not prove the newer replay has no index; it does prove that a naive search for the classic segment-table shape is not enough.
+
+Implication for the next parser step:
+
+- search for a different payload directory/index structure in the footer-style file
+- inspect the regions around early compression-signature hits as possible payload/container boundaries
+- avoid assuming the classic `payload_offset -> 17-byte table -> segment bytes` layout exists in this replay era
 
 ## Classic Segment Table Layout
 
@@ -81,3 +110,4 @@ Lower confidence / still needs verification:
 - whether all post-14.11 files use the same footer convention
 - where newer files store payload-header-equivalent information, if at all
 - whether payload compression is uniformly gzip/zlib after decryption across replay eras
+
