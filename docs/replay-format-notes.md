@@ -155,6 +155,40 @@ What is not implemented yet:
 - semantic event extraction
 - movement/event timeline extraction
 
+## Initial Decompressed Payload Heuristics
+
+Using `rofl_core_cli --inspect` on `replays/EUW1-7779216102.rofl`:
+
+General observations:
+
+- startup record `1` is `12,919` bytes and is unusually printable for binary data (`45.0%`), but it does not show a convincing simple `u16`-length framing
+- keyframe record `1` is `122,737` bytes with a high zero-byte ratio (`23.5%`), which suggests dense binary state data rather than text-like payloads
+- startup and keyframe payloads do not currently look like the same layout as later chunk payloads
+- a naive `u32` framing candidate appears in the startup record, but it is almost certainly a false positive because it degenerates into one tiny record plus one file-sized record
+
+Chunk observations:
+
+- chunk record `3` is `259,623` bytes and does not show a useful simple `u16` or `u32` framing pattern
+- chunk record `4` is `341,891` bytes and the heuristic scanner found a strong `u16` little-endian length-prefixed candidate from offset `0` covering `336,397 / 341,891` bytes across `9` records
+- chunk record `5` is `1,377,638` bytes and shows an even stronger `u16` little-endian candidate from offset `0` covering `1,364,148 / 1,377,638` bytes across `33` records
+- chunk record `6` is `1,484,890` bytes and shows the same pattern, but starting at offset `1`, covering `1,443,920 / 1,484,890` bytes across `33` records
+
+Subrecord observations from those chunk candidates:
+
+- chunks `5` and `6` contain many large candidate subrecords clustered around `53,970` bytes
+- chunk `4` also contains multiple large candidate subrecords, including `53,970`, `64,836`, `47,277`, and `23,526` byte regions
+- the repeated `53,970`-byte size across multiple adjacent chunks is unlikely to be random noise and suggests a real internal chunk payload structure
+- chunk `6` requiring a start offset of `1` may indicate a one-byte flag or discriminator before the concatenated subrecords begin
+- the subrecord payloads are still opaque binary blobs; repeated size alone does not yet identify them as packets, frames, or entity streams
+
+Current interpretation:
+
+- later chunk payloads likely contain concatenated subrecords with a length-prefixed binary framing layer
+- startup and keyframe records likely use a different higher-level layout, or they contain state/bootstrap blobs that are not packetized in the same way
+- the next useful decoder step is to parse these candidate chunk subrecords consistently and compare their leading bytes across several neighboring chunks to find repeated headers, counters, timestamps, or entity identifiers
+
+These are still heuristics, not a verified packet schema, but they are strong enough to justify building the next inspection layer around chunk-subrecord extraction.
+
 ## Confidence Levels
 
 High confidence:
@@ -171,3 +205,5 @@ Lower confidence / still needs verification:
 - whether all newer files use this same 17-byte zstd record header layout
 - the meaning of the decompressed payload bytes across patches
 - where packet opcode and field mappings diverge by version
+
+

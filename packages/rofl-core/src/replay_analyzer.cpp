@@ -789,6 +789,308 @@ struct SegmentTableCandidate {
     return preview;
 }
 
+struct LengthPrefixCandidate {
+    std::size_t width = 0;
+    std::size_t start_offset = 0;
+    std::size_t record_count = 0;
+    std::size_t consumed = 0;
+    std::size_t largest_record = 0;
+};
+
+struct FramedSubrecord {
+    std::size_t offset = 0;
+    std::size_t payload_offset = 0;
+    std::size_t length = 0;
+};
+
+
+struct SubrecordGroup {
+    std::size_t size = 0;
+    std::uint8_t sig = 0;
+    int count = 0;
+    std::vector<std::vector<std::uint8_t>> examples;
+};
+
+[[nodiscard]] std::string format_percentage(std::size_t value, std::size_t total) {
+    std::ostringstream output;
+    const double percent = total == 0 ? 0.0 : (static_cast<double>(value) * 100.0) / static_cast<double>(total);
+    output << std::fixed << std::setprecision(1) << percent << '%';
+    return output.str();
+}
+
+[[nodiscard]] std::string format_u32_preview(const std::vector<std::uint8_t>& bytes, std::size_t limit) {
+    const std::size_t value_count = std::min(limit, bytes.size() / sizeof(std::uint32_t));
+    if (value_count == 0) {
+        return "none";
+    }
+
+    std::ostringstream output;
+    for (std::size_t index = 0; index < value_count; ++index) {
+        std::uint32_t value = 0;
+        if (!read_u32_le(bytes, index * sizeof(std::uint32_t), value)) {
+            break;
+        }
+        if (index > 0) {
+            output << ", ";
+        }
+        output << '[' << index << "]=" << value;
+    }
+    return output.str();
+}
+
+[[nodiscard]] std::string format_u16_preview(const std::vector<std::uint8_t>& bytes, std::size_t limit) {
+    const std::size_t value_count = std::min(limit, bytes.size() / sizeof(std::uint16_t));
+    if (value_count == 0) {
+        return "none";
+    }
+
+    std::ostringstream output;
+    for (std::size_t index = 0; index < value_count; ++index) {
+        std::uint16_t value = 0;
+        if (!read_u16_le(bytes, index * sizeof(std::uint16_t), value)) {
+            break;
+        }
+        if (index > 0) {
+            output << ", ";
+        }
+        output << '[' << index << "]=" << value;
+    }
+    return output.str();
+}
+
+[[nodiscard]] LengthPrefixCandidate analyze_le_length_prefix(const std::vector<std::uint8_t>& bytes, std::size_t width) {
+    LengthPrefixCandidate best;
+    best.width = width;
+
+    if (width != 2 && width != 4) {
+        return best;
+    }
+
+    for (std::size_t start_offset = 0; start_offset < width && start_offset < bytes.size(); ++start_offset) {
+        std::size_t cursor = start_offset;
+        std::size_t record_count = 0;
+        std::size_t largest_record = 0;
+
+        while (cursor + width <= bytes.size()) {
+            std::size_t record_length = 0;
+            if (width == 2) {
+                std::uint16_t value = 0;
+                if (!read_u16_le(bytes, cursor, value)) {
+                    break;
+                }
+                record_length = value;
+            } else {
+                std::uint32_t value = 0;
+                if (!read_u32_le(bytes, cursor, value)) {
+                    break;
+                }
+                record_length = value;
+            }
+
+            if (record_length == 0 || record_length > (bytes.size() - cursor - width)) {
+                break;
+            }
+
+            cursor += width + record_length;
+            largest_record = std::max(largest_record, record_length);
+            record_count += 1;
+        }
+
+        const bool better_candidate =
+            record_count > best.record_count ||
+            (record_count == best.record_count && cursor > best.consumed) ||
+            (record_count == best.record_count && cursor == best.consumed && largest_record > best.largest_record);
+        if (better_candidate) {
+            best.start_offset = start_offset;
+            best.record_count = record_count;
+            best.consumed = cursor;
+            best.largest_record = largest_record;
+        }
+    }
+
+    return best;
+}
+
+[[nodiscard]] std::string describe_length_prefix_candidate(const LengthPrefixCandidate& candidate, std::size_t total_size) {
+    if (candidate.record_count < 2) {
+        return "none";
+    }
+
+    std::ostringstream output;
+    output << "start=" << candidate.start_offset
+           << ", records=" << candidate.record_count
+           << ", consumed=" << candidate.consumed << '/' << total_size
+           << " (" << format_percentage(candidate.consumed, total_size) << ')'
+           << ", largestRecord=" << candidate.largest_record;
+    return output.str();
+}
+
+[[nodiscard]] std::vector<FramedSubrecord> extract_le_framed_subrecords(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t width,
+    std::size_t start_offset,
+    std::size_t max_records
+) {
+    std::vector<FramedSubrecord> records;
+    if ((width != 2 && width != 4) || start_offset >= bytes.size()) {
+        return records;
+    }
+
+    std::size_t cursor = start_offset;
+    while (cursor + width <= bytes.size() && records.size() < max_records) {
+        std::size_t record_length = 0;
+        if (width == 2) {
+            std::uint16_t value = 0;
+            if (!read_u16_le(bytes, cursor, value)) {
+                break;
+            }
+            record_length = value;
+        } else {
+            std::uint32_t value = 0;
+            if (!read_u32_le(bytes, cursor, value)) {
+                break;
+            }
+            record_length = value;
+        }
+
+        if (record_length == 0 || record_length > (bytes.size() - cursor - width)) {
+            break;
+        }
+
+        FramedSubrecord record;
+        record.offset = cursor;
+        record.payload_offset = cursor + width;
+        record.length = record_length;
+        records.push_back(record);
+        cursor += width + record_length;
+    }
+
+    return records;
+}
+
+[[nodiscard]] std::string describe_framed_subrecords(
+    const std::vector<std::uint8_t>& bytes,
+    const LengthPrefixCandidate& candidate,
+    std::size_t width,
+    std::size_t max_records
+) {
+    if (candidate.record_count < 2) {
+        return "none";
+    }
+
+    const auto records = extract_le_framed_subrecords(bytes, width, candidate.start_offset, max_records);
+    if (records.empty()) {
+        return "none";
+    }
+
+    std::ostringstream output;
+    for (std::size_t index = 0; index < records.size(); ++index) {
+        const FramedSubrecord& record = records[index];
+        const std::size_t preview_length = std::min(record.length, static_cast<std::size_t>(24));
+        std::vector<std::uint8_t> preview(
+            bytes.begin() + static_cast<std::ptrdiff_t>(record.payload_offset),
+            bytes.begin() + static_cast<std::ptrdiff_t>(record.payload_offset + preview_length)
+        );
+        if (index > 0) {
+            output << " | ";
+        }
+        output << '#' << index
+               << " off=" << record.payload_offset
+               << " len=" << record.length
+               << " hex=" << format_hex_preview(preview, preview.size())
+               << " ascii=\"" << format_ascii_preview(preview, preview.size()) << "\"";
+    }
+    return output.str();
+}
+
+[[nodiscard]] std::vector<std::string> collect_ascii_runs(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t minimum_length,
+    std::size_t max_runs,
+    std::size_t max_preview_length
+) {
+    std::vector<std::string> runs;
+    std::size_t cursor = 0;
+    while (cursor < bytes.size() && runs.size() < max_runs) {
+        while (cursor < bytes.size() && std::isprint(static_cast<unsigned char>(bytes[cursor])) == 0) {
+            ++cursor;
+        }
+
+        const std::size_t start = cursor;
+        while (cursor < bytes.size() && std::isprint(static_cast<unsigned char>(bytes[cursor])) != 0) {
+            ++cursor;
+        }
+
+        const std::size_t length = cursor - start;
+        if (length >= minimum_length) {
+            const std::size_t preview_length = std::min(length, max_preview_length);
+            std::string run(reinterpret_cast<const char*>(bytes.data() + start), preview_length);
+            if (preview_length < length) {
+                run += "...";
+            }
+            runs.push_back(std::move(run));
+        }
+    }
+
+    return runs;
+}
+
+[[nodiscard]] std::string inspect_decompressed_segment(
+    const ReplaySegmentSummary& segment,
+    const std::vector<std::uint8_t>& decompressed
+) {
+    std::ostringstream output;
+    const std::size_t zero_bytes = static_cast<std::size_t>(std::count(decompressed.begin(), decompressed.end(), static_cast<std::uint8_t>(0)));
+    std::size_t printable_bytes = 0;
+    for (const std::uint8_t value : decompressed) {
+        printable_bytes += std::isprint(static_cast<unsigned char>(value)) != 0 ? 1U : 0U;
+    }
+
+    const auto best_u16 = analyze_le_length_prefix(decompressed, 2);
+    const auto best_u32 = analyze_le_length_prefix(decompressed, 4);
+    const auto ascii_runs = collect_ascii_runs(decompressed, 4, 6, 48);
+    const bool useful_u16_framing = best_u16.record_count >= 2 && best_u16.consumed >= (decompressed.size() / 2);
+    const bool useful_u32_framing = best_u32.record_count >= 2 && best_u32.consumed >= (decompressed.size() / 2);
+    const std::string u16_subrecords = useful_u16_framing
+        ? describe_framed_subrecords(decompressed, best_u16, 2, 6)
+        : "none";
+    const std::string u32_subrecords = useful_u32_framing
+        ? describe_framed_subrecords(decompressed, best_u32, 4, 6)
+        : "none";
+
+    output << "Segment " << segment.type << '#' << segment.id;
+    if (segment.chunk_id > 0) {
+        output << " (chunkId=" << segment.chunk_id << ')';
+    }
+    output << '\n';
+    output << "  Offsets: header=" << segment.header_offset << ", payload=" << segment.payload_offset << '\n';
+    output << "  Sizes: compressed=" << segment.length << ", uncompressed=" << decompressed.size() << '\n';
+    output << "  Byte stats: zero=" << zero_bytes << " (" << format_percentage(zero_bytes, decompressed.size())
+           << "), printable=" << printable_bytes << " (" << format_percentage(printable_bytes, decompressed.size()) << ")\n";
+    output << "  First u32 values: " << format_u32_preview(decompressed, 8) << '\n';
+    output << "  First u16 values: " << format_u16_preview(decompressed, 12) << '\n';
+    output << "  Best u16 LE length framing: " << describe_length_prefix_candidate(best_u16, decompressed.size()) << '\n';
+    output << "  Best u32 LE length framing: " << describe_length_prefix_candidate(best_u32, decompressed.size()) << '\n';
+    output << "  Candidate u16 subrecords: " << u16_subrecords << '\n';
+    output << "  Candidate u32 subrecords: " << u32_subrecords << '\n';
+    output << "  Hex preview: " << format_hex_preview(decompressed, 32) << '\n';
+    output << "  ASCII preview: \"" << format_ascii_preview(decompressed, 64) << "\"\n";
+    output << "  ASCII runs: ";
+    if (ascii_runs.empty()) {
+        output << "none\n";
+    } else {
+        for (std::size_t index = 0; index < ascii_runs.size(); ++index) {
+            if (index > 0) {
+                output << ", ";
+            }
+            output << '\"' << ascii_runs[index] << '\"';
+        }
+        output << '\n';
+    }
+
+    return output.str();
+}
+
 [[nodiscard]] std::vector<std::size_t> find_signature_hits(
     const std::vector<std::uint8_t>& bytes,
     const std::vector<std::uint8_t>& signature,
@@ -964,8 +1266,8 @@ struct SegmentTableCandidate {
 
 BuildInfo get_build_info() {
     return {
-        .version = "0.5.0-footer-zstd-decompression",
-        .parser_state = "footer-zstd-records-plus-decompression",
+        .version = "0.6.0-footer-payload-inspector",
+        .parser_state = "footer-zstd-records-plus-inspector",
         .wasm_state = "scaffolded-not-built"
     };
 }
@@ -1298,6 +1600,147 @@ std::string probe_replay_file(const std::string& path) {
     return probe_replay_bytes(read_file_bytes(path));
 }
 
+std::string inspect_replay_bytes(const std::vector<std::uint8_t>& bytes) {
+    std::ostringstream output;
+    output << "Replay inspect\n";
+
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    output << "Container format: " << summary.container.format << '\n';
+    output << "Metadata source: " << summary.container.metadata_source << '\n';
+    output << "Timeline hints: gameLengthMillis=" << summary.game_length_millis
+           << ", lastGameChunkId=" << summary.last_game_chunk_id
+           << ", lastKeyFrameId=" << summary.last_keyframe_id << '\n';
+    output << "Capabilities: segmentTable=" << (summary.capabilities.segment_table_available ? "yes" : "no")
+           << ", payloadDecoding=" << (summary.capabilities.payload_decoding_available ? "yes" : "no") << '\n';
+
+    if (!summary.capabilities.segment_table_available) {
+        output << "No indexed payload records are available for inspection.\n";
+        return output.str();
+    }
+    if (!summary.capabilities.payload_decoding_available) {
+        output << "Payload decompression is not available for this replay.\n";
+        return output.str();
+    }
+
+    bool inspected_startup = false;
+    bool inspected_keyframe = false;
+    int inspected_chunks = 0;
+    int inspected_segments = 0;
+    for (const ReplaySegmentSummary& segment : summary.container.segments) {
+        if (segment.codec != "zstd") {
+            continue;
+        }
+
+        bool inspect_segment = false;
+        if (segment.type == "startup" && !inspected_startup) {
+            inspected_startup = true;
+            inspect_segment = true;
+        } else if (segment.type == "keyframe" && !inspected_keyframe) {
+            inspected_keyframe = true;
+            inspect_segment = true;
+        } else if (segment.type == "chunk" && inspected_chunks < 4) {
+            inspected_chunks += 1;
+            inspect_segment = true;
+        }
+
+        if (!inspect_segment) {
+            continue;
+        }
+
+        std::vector<std::uint8_t> decompressed;
+        std::string error;
+        if (try_decompress_zstd_segment(bytes, segment, decompressed, error)) {
+            output << inspect_decompressed_segment(segment, decompressed);
+        } else {
+            output << "Segment " << segment.type << '#' << segment.id << " failed to decompress: " << error << '\n';
+        }
+
+        output << '\n';
+        inspected_segments += 1;
+        if (inspected_segments >= 6) {
+            break;
+        }
+    }
+
+    if (inspected_segments == 0) {
+        output << "No zstd-backed segments were selected for inspection.\n";
+    }
+
+    output << "--- Subrecord Grouping Analysis (Chunks 4-6) ---\n";
+    std::vector<SubrecordGroup> groups;
+    int total_subrecords = 0;
+
+    for (const ReplaySegmentSummary& segment : summary.container.segments) {
+        if (segment.codec != "zstd" || segment.type != "chunk") continue;
+        if (segment.chunk_id >= 4 && segment.chunk_id <= 6) {
+            std::vector<std::uint8_t> decompressed;
+            std::string error;
+            if (try_decompress_zstd_segment(bytes, segment, decompressed, error)) {
+                const auto best_u16 = analyze_le_length_prefix(decompressed, 2);
+                if (best_u16.record_count >= 2) {
+                    auto records = extract_le_framed_subrecords(decompressed, 2, best_u16.start_offset, 1000000);
+                    total_subrecords += static_cast<int>(records.size());
+                    for (const auto& rec : records) {
+                        if (rec.length == 0) continue;
+                        std::uint8_t sig = decompressed[rec.payload_offset];
+                        
+                        auto it = std::find_if(groups.begin(), groups.end(), [&](const SubrecordGroup& g) {
+                            return g.size == rec.length && g.sig == sig;
+                        });
+                        
+                        if (it == groups.end()) {
+                            SubrecordGroup g;
+                            g.size = rec.length;
+                            g.sig = sig;
+                            g.count = 1;
+                            std::vector<std::uint8_t> preview;
+                            std::size_t p_len = std::min(rec.length, static_cast<std::size_t>(32));
+                            preview.assign(decompressed.begin() + static_cast<std::ptrdiff_t>(rec.payload_offset), 
+                                           decompressed.begin() + static_cast<std::ptrdiff_t>(rec.payload_offset + p_len));
+                            g.examples.push_back(std::move(preview));
+                            groups.push_back(std::move(g));
+                        } else {
+                            it->count++;
+                            if (it->examples.size() < 3) {
+                                std::vector<std::uint8_t> preview;
+                                std::size_t p_len = std::min(rec.length, static_cast<std::size_t>(32));
+                                preview.assign(decompressed.begin() + static_cast<std::ptrdiff_t>(rec.payload_offset), 
+                                               decompressed.begin() + static_cast<std::ptrdiff_t>(rec.payload_offset + p_len));
+                                it->examples.push_back(std::move(preview));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    std::sort(groups.begin(), groups.end(), [](const SubrecordGroup& a, const SubrecordGroup& b) {
+        if (a.count != b.count) return a.count > b.count;
+        if (a.size != b.size) return a.size > b.size;
+        return a.sig > b.sig;
+    });
+
+    output << "Extracted " << total_subrecords << " subrecords from chunks 4-6.\n";
+    output << "Distinct signature/size groups: " << groups.size() << "\n\n";
+
+    for (const auto& g : groups) {
+        output << "Group [sig=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << static_cast<int>(g.sig) 
+               << std::dec << std::nouppercase << " (ascii: " << (std::isprint(g.sig) ? std::string(1, static_cast<char>(g.sig)) : ".") 
+               << "), size=" << g.size << "]: " << g.count << " records\n";
+        for (std::size_t i = 0; i < g.examples.size(); ++i) {
+            output << "  ex " << i + 1 << " hex: " << format_hex_preview(g.examples[i], g.examples[i].size()) << "\n";
+            output << "  ex " << i + 1 << " asc: \"" << format_ascii_preview(g.examples[i], g.examples[i].size()) << "\"\n";
+        }
+    }
+
+    return output.str();
+}
+
+std::string inspect_replay_file(const std::string& path) {
+    return inspect_replay_bytes(read_file_bytes(path));
+}
+
 ReplaySummary parse_replay_file(const std::string& path) {
     return parse_replay_bytes(read_file_bytes(path));
 }
@@ -1399,6 +1842,11 @@ std::string replay_summary_to_json(const ReplaySummary& summary) {
 }
 
 }  // namespace rofl::core
+
+
+
+
+
 
 
 

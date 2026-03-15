@@ -318,14 +318,18 @@ bool test_footer_zstd_fixture() {
         return false;
     }
 
-    const std::string json = rofl::core::replay_summary_to_json(summary);
+        const std::string json = rofl::core::replay_summary_to_json(summary);
     const std::string probe = rofl::core::probe_replay_bytes(build_footer_zstd_fixture());
+    const std::string inspect = rofl::core::inspect_replay_bytes(build_footer_zstd_fixture());
     return json.find("\"segmentTablePresent\":true") != std::string::npos &&
            json.find("\"codec\":\"zstd\"") != std::string::npos &&
            json.find("\"payloadDecodingAvailable\":true") != std::string::npos &&
            summary.warnings.back().find("raw zstd decompression is available") != std::string::npos &&
            probe.find("Decompressed segment: id=1, type=startup") != std::string::npos &&
-           probe.find("startup:hello") != std::string::npos;
+           probe.find("startup:hello") != std::string::npos &&
+           inspect.find("Replay inspect") != std::string::npos &&
+           inspect.find("Segment startup#1") != std::string::npos &&
+           inspect.find("ASCII runs: \"startup:hello\"") != std::string::npos;
 }
 
 }  // namespace
@@ -345,4 +349,6 @@ int main() {
 
     return EXIT_SUCCESS;
 }
+
+
 
