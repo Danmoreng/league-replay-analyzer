@@ -1,4 +1,9 @@
 #include "rofl/core/replay_analyzer.hpp"
+#include <array>
+#include <bit>
+#include <cmath>
+#include <limits>
+#include <numeric>
 
 #include <algorithm>
 #include <cctype>
@@ -2219,7 +2224,353 @@ std::string guess_stride(const std::string& path, std::size_t target_length, std
     return output.str();
 }
 
+std::string analyze_sparse_family(
+    const std::string& path,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    std::size_t top_elements
+) {
+    std::ostringstream output;
+    const std::vector<std::uint8_t> bytes = read_file_bytes(path);
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const std::uint8_t padding_byte = static_cast<std::uint8_t>(target_length & 0xFFu);
+    const std::uint32_t padding_u32 = static_cast<std::uint32_t>(padding_byte) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 8U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 16U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 24U);
+
+    auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    output << "Sparse family analysis for " << records.size() << " records of size " << target_length
+           << " starting with 0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+           << static_cast<int>(target_first_byte) << std::dec << "\n\n";
+    output << "Derived padding byte: 0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+           << static_cast<int>(padding_byte) << std::dec << "\n";
+    output << "Header size: " << header_size << " bytes\n";
+    output << "Stride:      " << stride << " bytes\n";
+
+    if (records.empty()) {
+        return output.str();
+    }
+    if (header_size >= target_length) {
+        output << "Header size must be smaller than the target record length.\n";
+        return output.str();
+    }
+    if (stride == 0 || (stride % 4) != 0) {
+        output << "Stride must be a non-zero multiple of 4 for lane analysis.\n";
+        return output.str();
+    }
+
+    const std::size_t usable_bytes = target_length - header_size;
+    const std::size_t element_count = usable_bytes / stride;
+    const std::size_t trailing_bytes = usable_bytes % stride;
+    const std::size_t lane_count = std::min<std::size_t>(4, stride / 4);
+    output << "Element count: " << element_count << "\n";
+    output << "Trailing bytes after stride partition: " << trailing_bytes << "\n\n";
+
+    struct LaneAggregate {
+        std::size_t non_padding_instances = 0;
+        std::size_t zero_u32_count = 0;
+        std::size_t finite_float_count = 0;
+        std::size_t coordinate_like_count = 0;
+        std::size_t unit_float_count = 0;
+        float coord_min = std::numeric_limits<float>::infinity();
+        float coord_max = -std::numeric_limits<float>::infinity();
+    };
+
+    struct PairAggregate {
+        std::size_t non_padding_pairs = 0;
+        std::size_t coordinate_like_pairs = 0;
+        float left_min = std::numeric_limits<float>::infinity();
+        float left_max = -std::numeric_limits<float>::infinity();
+        float right_min = std::numeric_limits<float>::infinity();
+        float right_max = -std::numeric_limits<float>::infinity();
+    };
+
+    struct PairDefinition {
+        std::size_t left_lane = 0;
+        std::size_t right_lane = 0;
+        std::string label;
+    };
+
+    struct TopElementProfile {
+        std::size_t index = 0;
+        std::size_t active_count = 0;
+        std::vector<std::size_t> lane_non_padding_counts;
+        std::map<std::uint8_t, std::size_t> first_byte_freq;
+    };
+
+    const auto is_coordinate_like = [](float value) {
+        return std::isfinite(value) && value >= -5000.0F && value <= 20000.0F;
+    };
+
+    auto format_top_byte_counts = [](const std::map<std::uint8_t, std::size_t>& freq, std::size_t limit) {
+        std::vector<std::pair<std::uint8_t, std::size_t>> sorted(freq.begin(), freq.end());
+        std::sort(sorted.begin(), sorted.end(), [](const auto& left, const auto& right) {
+            return left.second > right.second;
+        });
+
+        std::ostringstream line;
+        for (std::size_t i = 0; i < limit && i < sorted.size(); ++i) {
+            if (i > 0) {
+                line << ", ";
+            }
+            line << "0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+                 << static_cast<int>(sorted[i].first) << std::dec << '=' << sorted[i].second;
+        }
+        if (sorted.empty()) {
+            line << "none";
+        }
+        return line.str();
+    };
+
+    std::vector<PairDefinition> pair_defs;
+    if (lane_count >= 2) {
+        pair_defs.push_back({0, 1, "+0/+4"});
+    }
+    if (lane_count >= 3) {
+        pair_defs.push_back({1, 2, "+4/+8"});
+        pair_defs.push_back({0, 2, "+0/+8"});
+    }
+    if (lane_count >= 4) {
+        pair_defs.push_back({2, 3, "+8/+12"});
+        pair_defs.push_back({0, 3, "+0/+12"});
+    }
+
+    std::vector<LaneAggregate> lane_stats(lane_count);
+    std::vector<PairAggregate> pair_stats(pair_defs.size());
+    std::vector<std::size_t> element_active_counts(element_count, 0);
+    std::vector<std::size_t> active_elements_per_record;
+    active_elements_per_record.reserve(records.size());
+    std::map<std::uint8_t, std::size_t> active_first_byte_freq;
+    std::size_t total_active_elements = 0;
+
+    for (const auto& rec : records) {
+        std::size_t record_active = 0;
+        for (std::size_t element_index = 0; element_index < element_count; ++element_index) {
+            const std::size_t start = header_size + (element_index * stride);
+            if (start + stride > rec.payload.size()) {
+                break;
+            }
+
+            bool active = false;
+            for (std::size_t byte_index = 0; byte_index < stride; ++byte_index) {
+                if (rec.payload[start + byte_index] != padding_byte) {
+                    active = true;
+                    break;
+                }
+            }
+            if (!active) {
+                continue;
+            }
+
+            record_active++;
+            total_active_elements++;
+            element_active_counts[element_index]++;
+            active_first_byte_freq[rec.payload[start]]++;
+
+            std::vector<float> lane_floats(lane_count, 0.0F);
+            std::vector<bool> lane_has_non_padding(lane_count, false);
+            std::vector<bool> lane_is_coordinate(lane_count, false);
+            for (std::size_t lane_index = 0; lane_index < lane_count; ++lane_index) {
+                const std::size_t lane_offset = start + (lane_index * 4);
+                std::uint32_t value = 0;
+                if (!read_u32_le(rec.payload, lane_offset, value) || value == padding_u32) {
+                    continue;
+                }
+
+                lane_has_non_padding[lane_index] = true;
+                lane_stats[lane_index].non_padding_instances++;
+                if (value == 0) {
+                    lane_stats[lane_index].zero_u32_count++;
+                }
+
+                const float as_float = std::bit_cast<float>(value);
+                if (!std::isfinite(as_float)) {
+                    continue;
+                }
+
+                lane_stats[lane_index].finite_float_count++;
+                if (as_float >= -1.0F && as_float <= 1.0F) {
+                    lane_stats[lane_index].unit_float_count++;
+                }
+                if (is_coordinate_like(as_float)) {
+                    lane_stats[lane_index].coordinate_like_count++;
+                    lane_stats[lane_index].coord_min = std::min(lane_stats[lane_index].coord_min, as_float);
+                    lane_stats[lane_index].coord_max = std::max(lane_stats[lane_index].coord_max, as_float);
+                    lane_floats[lane_index] = as_float;
+                    lane_is_coordinate[lane_index] = true;
+                }
+            }
+
+            for (std::size_t pair_index = 0; pair_index < pair_defs.size(); ++pair_index) {
+                const auto& pair = pair_defs[pair_index];
+                auto& stats = pair_stats[pair_index];
+                if (!lane_has_non_padding[pair.left_lane] || !lane_has_non_padding[pair.right_lane]) {
+                    continue;
+                }
+
+                stats.non_padding_pairs++;
+                if (!lane_is_coordinate[pair.left_lane] || !lane_is_coordinate[pair.right_lane]) {
+                    continue;
+                }
+
+                stats.coordinate_like_pairs++;
+                stats.left_min = std::min(stats.left_min, lane_floats[pair.left_lane]);
+                stats.left_max = std::max(stats.left_max, lane_floats[pair.left_lane]);
+                stats.right_min = std::min(stats.right_min, lane_floats[pair.right_lane]);
+                stats.right_max = std::max(stats.right_max, lane_floats[pair.right_lane]);
+            }
+        }
+
+        active_elements_per_record.push_back(record_active);
+    }
+
+    const std::size_t min_active = active_elements_per_record.empty()
+        ? 0
+        : *std::min_element(active_elements_per_record.begin(), active_elements_per_record.end());
+    const std::size_t max_active = active_elements_per_record.empty()
+        ? 0
+        : *std::max_element(active_elements_per_record.begin(), active_elements_per_record.end());
+    const std::size_t avg_active = active_elements_per_record.empty()
+        ? 0
+        : std::accumulate(active_elements_per_record.begin(), active_elements_per_record.end(), std::size_t{0}) / active_elements_per_record.size();
+    const std::size_t unique_active_indices = std::count_if(
+        element_active_counts.begin(),
+        element_active_counts.end(),
+        [](std::size_t count) { return count > 0; }
+    );
+
+    output << "Activity profile:\n";
+    output << "  Active elements per record: avg=" << avg_active << ", min=" << min_active << ", max=" << max_active << "\n";
+    output << "  Active element instances:   " << total_active_elements << "\n";
+    output << "  Unique active indices:      " << unique_active_indices << " / " << element_count
+           << " (" << format_percentage(unique_active_indices, element_count) << ")\n\n";
+
+    output << "Global first-byte signatures among active elements:\n";
+    output << "  " << format_top_byte_counts(active_first_byte_freq, 8) << "\n\n";
+
+    output << "Lane profile:\n";
+    for (std::size_t lane_index = 0; lane_index < lane_count; ++lane_index) {
+        const auto& lane = lane_stats[lane_index];
+        output << "  Lane +" << (lane_index * 4) << " | non-padding=" << lane.non_padding_instances
+               << " (" << format_percentage(lane.non_padding_instances, total_active_elements) << " of active)"
+               << ", zero-u32=" << lane.zero_u32_count
+               << " (" << format_percentage(lane.zero_u32_count, lane.non_padding_instances) << " of non-padding)"
+               << ", finite-f32=" << lane.finite_float_count
+               << " (" << format_percentage(lane.finite_float_count, lane.non_padding_instances) << " of non-padding)"
+               << ", coord-like=" << lane.coordinate_like_count
+               << " (" << format_percentage(lane.coordinate_like_count, lane.non_padding_instances) << " of non-padding)"
+               << ", unit-f32=" << lane.unit_float_count
+               << " (" << format_percentage(lane.unit_float_count, lane.non_padding_instances) << " of non-padding)";
+        if (lane.coordinate_like_count > 0) {
+            output << ", coord-range=[" << std::fixed << std::setprecision(2) << lane.coord_min << ", " << lane.coord_max << "]";
+        }
+        output << "\n";
+    }
+    output << "\n";
+
+    output << "Coordinate-pair candidates:\n";
+    if (pair_defs.empty()) {
+        output << "  none\n\n";
+    } else {
+        for (std::size_t pair_index = 0; pair_index < pair_defs.size(); ++pair_index) {
+            const auto& pair = pair_defs[pair_index];
+            const auto& stats = pair_stats[pair_index];
+            output << "  " << pair.label << " | non-padding-pairs=" << stats.non_padding_pairs
+                   << " (" << format_percentage(stats.non_padding_pairs, total_active_elements) << " of active)"
+                   << ", coord-like-pairs=" << stats.coordinate_like_pairs
+                   << " (" << format_percentage(stats.coordinate_like_pairs, stats.non_padding_pairs) << " of non-padding pairs)";
+            if (stats.coordinate_like_pairs > 0) {
+                output << ", left-range=[" << std::fixed << std::setprecision(2) << stats.left_min << ", " << stats.left_max
+                       << "]"
+                       << ", right-range=[" << stats.right_min << ", " << stats.right_max << "]";
+            }
+            output << "\n";
+        }
+        output << "\n";
+    }
+
+    std::vector<std::pair<std::size_t, std::size_t>> sorted_indices;
+    sorted_indices.reserve(element_active_counts.size());
+    for (std::size_t index = 0; index < element_active_counts.size(); ++index) {
+        if (element_active_counts[index] > 0) {
+            sorted_indices.push_back({index, element_active_counts[index]});
+        }
+    }
+    std::sort(sorted_indices.begin(), sorted_indices.end(), [](const auto& left, const auto& right) {
+        return left.second > right.second;
+    });
+
+    if (top_elements == 0) {
+        top_elements = 12;
+    }
+    const std::size_t top_count = std::min<std::size_t>(top_elements, sorted_indices.size());
+    std::vector<TopElementProfile> top_profiles;
+    top_profiles.reserve(top_count);
+    std::map<std::size_t, std::size_t> top_index_lookup;
+    for (std::size_t i = 0; i < top_count; ++i) {
+        TopElementProfile profile;
+        profile.index = sorted_indices[i].first;
+        profile.active_count = sorted_indices[i].second;
+        profile.lane_non_padding_counts.assign(lane_count, 0);
+        top_index_lookup[profile.index] = i;
+        top_profiles.push_back(std::move(profile));
+    }
+
+    for (const auto& rec : records) {
+        for (const auto& [element_index, profile_index] : top_index_lookup) {
+            const std::size_t start = header_size + (element_index * stride);
+            if (start + stride > rec.payload.size()) {
+                continue;
+            }
+
+            bool active = false;
+            for (std::size_t byte_index = 0; byte_index < stride; ++byte_index) {
+                if (rec.payload[start + byte_index] != padding_byte) {
+                    active = true;
+                    break;
+                }
+            }
+            if (!active) {
+                continue;
+            }
+
+            auto& profile = top_profiles[profile_index];
+            profile.first_byte_freq[rec.payload[start]]++;
+            for (std::size_t lane_index = 0; lane_index < lane_count; ++lane_index) {
+                std::uint32_t value = 0;
+                if (!read_u32_le(rec.payload, start + (lane_index * 4), value) || value == padding_u32) {
+                    continue;
+                }
+                profile.lane_non_padding_counts[lane_index]++;
+            }
+        }
+    }
+
+    output << "Top active element indices:\n";
+    for (const auto& profile : top_profiles) {
+        output << "  Elem #" << std::setw(4) << std::setfill('0') << profile.index << std::setfill(' ')
+               << " | active=" << profile.active_count << '/' << records.size()
+               << " (" << format_percentage(profile.active_count, records.size()) << ")"
+               << " | first-bytes=" << format_top_byte_counts(profile.first_byte_freq, 3)
+               << " | lane-non-padding=";
+        for (std::size_t lane_index = 0; lane_index < profile.lane_non_padding_counts.size(); ++lane_index) {
+            if (lane_index > 0) {
+                output << ", ";
+            }
+            output << '+' << (lane_index * 4) << '=' << format_percentage(profile.lane_non_padding_counts[lane_index], profile.active_count);
+        }
+        output << "\n";
+    }
+
+    return output.str();
+}
 }  // namespace rofl::core
+
+
+
 
 
 

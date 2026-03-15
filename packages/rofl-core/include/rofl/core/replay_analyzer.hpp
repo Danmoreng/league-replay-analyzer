@@ -97,6 +97,7 @@ struct ReplaySummary {
 [[nodiscard]] std::string dump_subrecord_family(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte);
 [[nodiscard]] std::string compare_subrecord_family(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t prefix_bytes);
 [[nodiscard]] std::string guess_stride(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size);
+[[nodiscard]] std::string analyze_sparse_family(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_elements);
 
 }  // namespace rofl::core
 
