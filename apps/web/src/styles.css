@@ -1,21 +1,29 @@
 :root {
-  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
-  color: #f7f0df;
+  font-family: "Segoe UI Variable", "Segoe UI", "Helvetica Neue", sans-serif;
+  color: #171b20;
   background:
-    radial-gradient(circle at top left, rgba(201, 169, 95, 0.28), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(40, 81, 117, 0.32), transparent 34%),
-    linear-gradient(165deg, #11151b 0%, #161d25 46%, #0b0f14 100%);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.78)),
+    linear-gradient(
+      90deg,
+      rgba(23, 27, 32, 0.035) 0,
+      rgba(23, 27, 32, 0.035) 1px,
+      transparent 1px,
+      transparent 32px
+    ),
+    linear-gradient(#f6f4ef, #f6f4ef);
   line-height: 1.5;
   font-weight: 400;
-  color-scheme: dark;
-  --surface: rgba(16, 21, 28, 0.8);
-  --surface-strong: rgba(21, 28, 36, 0.94);
-  --border: rgba(201, 169, 95, 0.24);
-  --accent: #c9a95f;
-  --accent-2: #6db0ff;
-  --text-muted: #d0c5b0;
-  --good: #77d37e;
-  --bad: #db6e5f;
+  color-scheme: light;
+  --surface: #fffdf9;
+  --surface-strong: #f8f4ec;
+  --surface-accent: #eef3f7;
+  --border: #d8d1c3;
+  --border-strong: #b9af9b;
+  --accent: #2c526f;
+  --accent-2: #b88b35;
+  --text-muted: #5d6670;
+  --good: #4d7d57;
+  --bad: #b34f43;
 }
 
 * {
@@ -31,6 +39,7 @@ body,
 
 body {
   min-height: 100vh;
+  background: transparent;
 }
 
 .shell {
@@ -46,7 +55,6 @@ body {
 .player-card {
   border: 1px solid var(--border);
   background: var(--surface);
-  backdrop-filter: blur(18px);
 }
 
 .hero {
@@ -56,7 +64,7 @@ body {
   align-items: end;
   padding: 28px;
   border-radius: 28px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+  border-top: 4px solid var(--accent);
 }
 
 .hero-controls {
@@ -71,17 +79,18 @@ body {
   align-self: end;
   padding: 8px 12px;
   border-radius: 999px;
-  background: rgba(109, 176, 255, 0.16);
-  border: 1px solid rgba(109, 176, 255, 0.3);
-  color: #d7ebff;
+  background: var(--surface-accent);
+  border: 1px solid #bfccd7;
+  color: var(--accent);
   font-size: 0.84rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  font-weight: 700;
 }
 
 .eyebrow {
   margin: 0 0 10px;
-  color: var(--accent);
+  color: var(--accent-2);
   text-transform: uppercase;
   letter-spacing: 0.2em;
   font-size: 0.74rem;
@@ -123,8 +132,9 @@ summary {
   gap: 10px;
   padding: 16px 18px;
   border-radius: 18px;
-  background: linear-gradient(180deg, rgba(201, 169, 95, 0.18), rgba(201, 169, 95, 0.06));
-  color: #fff7e4;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -138,7 +148,7 @@ summary {
 }
 
 .status.error {
-  color: #ff9b8c;
+  color: var(--bad);
 }
 
 .summary-grid {
@@ -151,6 +161,16 @@ summary {
 .metric {
   padding: 18px 20px;
   border-radius: 20px;
+}
+
+.metric::before {
+  content: "";
+  display: block;
+  width: 42px;
+  height: 3px;
+  margin-bottom: 14px;
+  border-radius: 999px;
+  background: var(--accent-2);
 }
 
 .metric span {
@@ -177,14 +197,13 @@ summary {
 .team-panel {
   padding: 22px;
   border-radius: 24px;
-  background:
-    linear-gradient(180deg, rgba(201, 169, 95, 0.08), rgba(201, 169, 95, 0.02)),
-    var(--surface-strong);
+  background: var(--surface-strong);
+  border-top: 4px solid var(--border-strong);
 }
 
 .team-panel.winner {
-  border-color: rgba(119, 211, 126, 0.42);
-  box-shadow: inset 0 0 0 1px rgba(119, 211, 126, 0.16);
+  border-color: rgba(77, 125, 87, 0.35);
+  border-top-color: var(--good);
 }
 
 .team-header {
@@ -223,6 +242,7 @@ summary {
 .player-card {
   padding: 16px;
   border-radius: 18px;
+  background: #fff;
 }
 
 .player-main {
@@ -235,6 +255,7 @@ summary {
 .player-main h3 {
   margin-top: 4px;
   font-size: 1.24rem;
+  color: #111418;
 }
 
 .player-id {
@@ -245,6 +266,7 @@ summary {
   font-size: 1.2rem;
   font-weight: 700;
   white-space: nowrap;
+  color: var(--accent);
 }
 
 .stat-row {
@@ -259,7 +281,7 @@ summary {
 .bar-track {
   height: 10px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: #ece7dc;
   overflow: hidden;
 }
 
@@ -269,21 +291,22 @@ summary {
 }
 
 .bar-fill.gold {
-  background: linear-gradient(90deg, #c9a95f, #f0d48b);
+  background: linear-gradient(90deg, #b88b35, #ddbc74);
 }
 
 .bar-fill.damage {
-  background: linear-gradient(90deg, #d76a5a, #ff8f7f);
+  background: linear-gradient(90deg, #b85d4e, #dd8a7c);
 }
 
 .bar-fill.vision {
-  background: linear-gradient(90deg, #5f9ddf, #7fc5ff);
+  background: linear-gradient(90deg, #557f9b, #7ca9c7);
 }
 
 .note {
   margin-top: 22px;
   padding: 20px 22px;
   border-radius: 20px;
+  background: var(--surface);
 }
 
 .note h2 {
@@ -306,8 +329,9 @@ summary {
   margin-top: 12px;
   padding: 16px;
   border-radius: 16px;
-  background: rgba(0, 0, 0, 0.26);
-  color: #dfe6ef;
+  background: #f3efe6;
+  border: 1px solid var(--border);
+  color: #23303c;
   font-family: Consolas, "Cascadia Code", monospace;
   font-size: 0.82rem;
   line-height: 1.45;
