@@ -6,6 +6,7 @@
 - npm
 - CMake
 - Visual Studio 2022 with MSVC C++ tools
+- Vite+ installed at `C:\Users\User\.vite-plus\0.1.11\bin\vp.exe`
 
 ## Recommended Tools
 
@@ -13,43 +14,64 @@
 - Ninja
 - Emscripten SDK for the WebAssembly build
 
-## Node Version
+## Machine Status
 
-Use the latest active LTS release, not an odd-numbered Current release.
+This machine is already set up well enough to build the current project state.
 
-This machine currently has Node `v25.2.1`, which is not an LTS line. That is good enough for experiments, but it is not the stable default I would use for a new repo.
+Known working assumptions:
+
+- the repo is using the user's current Node installation
+- Vite+ commands may be easier to run outside the sandbox
+- Emscripten is installed locally under `tools/emsdk`
+- `scripts/build-wasm.ps1` can import `tools/emsdk/emsdk_env.ps1` automatically when needed
+
+## Common Commands
+
+Install JavaScript dependencies:
+
+```powershell
+vp install
+```
+
+Run the web app:
+
+```powershell
+vp run dev --filter @lra/web
+```
+
+Run the Vite+ validation loop:
+
+```powershell
+vp check --fix
+vp test
+```
+
+Build the native parser:
+
+```powershell
+pwsh -File .\scripts\build-native.ps1 -Configuration Debug
+```
+
+Build the Wasm module and publish it into the frontend source tree:
+
+```powershell
+pwsh -File .\scripts\build-wasm.ps1 -Configuration Release
+```
 
 ## Emscripten
 
-Emscripten is not required to start the native parser core. It is required once we want to compile the C++ core to WebAssembly for in-browser parsing.
+Emscripten is required for the browser Wasm target and is already installed locally in this repo.
 
-Official install flow on Windows is through `emsdk`.
-
-Typical install commands:
+If the environment needs to be loaded manually in a fresh shell, use:
 
 ```powershell
-git clone https://github.com/emscripten-core/emsdk.git
-Set-Location .\emsdk
-.\emsdk install latest
-.\emsdk activate latest
+Set-Location .\tools\emsdk
 .\emsdk_env.ps1
-```
-
-After that, verify with:
-
-```powershell
 emcc -v
 ```
 
-## Recommended Next Steps On This Machine
+## Notes
 
-1. Install a current Node LTS release.
-2. Keep Visual Studio 2022 C++ tools installed.
-3. Install Ninja if you want faster CMake iteration.
-4. Install Emscripten only when we are ready to build `packages/rofl-wasm`.
-5. Run PowerShell project scripts outside the sandbox when they matter, because this environment has been unreliable for sandboxed `.ps1` execution.
-
-## Vite+
-
-Vite+ is installed on this machine at C:\Users\User\.vite-plus\0.1.11\bin\vp.exe.
-If p is not visible inside the sandbox, run it outside the sandbox or call that absolute path directly.
+- Prefer running important `.ps1` scripts outside the sandbox on this machine.
+- If `vp` is not visible inside the sandbox, call `C:\Users\User\.vite-plus\0.1.11\bin\vp.exe` explicitly or run it outside the sandbox.
+- The current Wasm build publishes generated files into `apps/web/src/generated/wasm` so the frontend can import them directly.

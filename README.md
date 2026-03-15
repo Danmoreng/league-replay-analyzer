@@ -4,16 +4,16 @@ Local-first replay analysis for League of Legends `.rofl` files.
 
 ## Current Direction
 
-The project is built around a shared C++ replay/analytics core with two intended targets:
+The project is built around a shared C++ replay/analytics core with two working targets:
 
 - native executable/test harness for parser development
 - WebAssembly module for browser-side parsing
 
-The frontend is a Vue 3 + TypeScript app and the JavaScript toolchain is now managed through Vite+.
+The frontend is a Vue 3 + TypeScript app and the JavaScript toolchain is managed through Vite+.
 
 ## Repo Layout
 
-- `apps/web` - Vue frontend and replay metadata dashboard
+- `apps/web` - Vue frontend and current replay dashboard
 - `packages/rofl-core` - native C++ parser core and replay metadata extraction
 - `packages/rofl-wasm` - browser Wasm bridge target for the C++ parser
 - `scripts` - Windows/PowerShell automation
@@ -43,7 +43,7 @@ vp run build --filter @lra/web
 Run the Vite+ validation loop:
 
 ```powershell
-vp check
+vp check --fix
 vp test
 ```
 
@@ -59,25 +59,36 @@ Print a replay summary from the native parser:
 .\build\packages\rofl-core\Debug\rofl_core_cli.exe --summary .\replays\EUW1-7779216102.rofl
 ```
 
-Build Wasm once emsdk is installed:
+Build and publish Wasm into the frontend source tree:
 
 ```powershell
-pwsh -File .\scripts\build-wasm.ps1
-# if emsdk is cloned into .\tools\emsdk, the script will import it automatically
+pwsh -File .\scripts\build-wasm.ps1 -Configuration Release
 ```
 
 ## Current MVP
 
-The first parser pass extracts the embedded match metadata block already present inside the replay file. That currently gives us:
+The current vertical slice is working end-to-end in the browser.
+
+The parser currently extracts the embedded match metadata block already present inside the replay file. That currently gives us:
 
 - game version
 - game length
 - last chunk/keyframe ids
 - per-player stats from the embedded `statsJson` payload
 
-This is enough to render an immediate browser dashboard while the lower-level chunk parser is still being built.
+The web app can load a local `.rofl` file, parse it through the real C++ Wasm module, and render a basic match summary plus raw parsed JSON.
+
+## Next Focus
+
+The next parser layer is lower-level chunk parsing and timeline extraction so the UI can move beyond metadata cards into:
+
+- timeline scrubbing
+- player movement on a 2D map
+- wards and objective events
+- richer state snapshots over time
 
 ## Setup Notes
 
-- Read [docs/setup/windows.md](/C:/Development/league-replay-analyzer/docs/setup/windows.md) before adding the Wasm build.
+- Read [docs/setup/windows.md](/C:/Development/league-replay-analyzer/docs/setup/windows.md) for this machine's current setup.
 - Read [docs/chat.md](/C:/Development/league-replay-analyzer/docs/chat.md) for the original product and architecture discussion.
+- Read [AGENTS.md](/C:/Development/league-replay-analyzer/AGENTS.md) for repo-specific working instructions.

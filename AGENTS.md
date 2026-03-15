@@ -28,7 +28,7 @@ The intended product is not a standalone 3D replay client. The target is an anal
 Unless the user explicitly changes direction, optimize for this architecture:
 
 - frontend: Vue 3 + TypeScript
-- tooling: Vite+ / Vite
+- tooling: Vite+
 - parser core: C++
 - deployment targets for parser core:
   - native build for tests, corpus inspection, and tooling
@@ -45,13 +45,27 @@ Do not start by building a mandatory backend unless the user asks for shared sto
 
 ## Current Repo Reality
 
-At the moment this repo is early-stage but already scaffolded. `docs/chat.md` contains the product and architecture discussion that defines the current direction. `scripts/reference/example_build.ps1` is a reference for how PowerShell-based CMake build scripts should be written for this user’s Windows setup.
+This repo is already scaffolded and has a working vertical slice.
+
+Current state:
+
+- `apps/web` is a Vue 3 + TypeScript frontend managed with Vite+.
+- `packages/rofl-core` contains the shared C++ replay parser core.
+- `packages/rofl-wasm` builds the C++ parser to WebAssembly.
+- `scripts/build-native.ps1` builds the native target.
+- `scripts/build-wasm.ps1` builds the Wasm target and publishes generated artifacts into `apps/web/src/generated/wasm`.
+- `replays/` contains local replay samples for manual testing.
+- the current parser MVP extracts the embedded replay metadata block and per-player `statsJson` payload
+- the current web app can load a `.rofl` file in the browser and render the parsed result through the real Wasm parser
+
+Near-term engineering focus should move from metadata extraction to chunk parsing, frame/timeline extraction, movement data, and event normalization.
 
 When starting a future session:
 
 1. read this file
-2. read `docs/chat.md` if product/architecture context is needed
-3. inspect the actual repo state before assuming the planned structure already exists
+2. read `docs/chat.md` if product context is needed
+3. inspect the actual repo state before assuming planned work is still unfinished
+4. prefer continuing from the current Wasm-backed frontend rather than rebuilding scaffolding
 
 ## Windows and Shell Assumptions
 
@@ -59,15 +73,18 @@ When starting a future session:
 - shell: PowerShell 7
 - repo path: `C:\Development\league-replay-analyzer`
 - the user has seen PowerShell scripts fail inside the sandbox on this machine
+- the user wants PowerShell scripts run outside the sandbox when they matter
 
 Because of that, follow these rules:
 
 - If a task requires executing a PowerShell build/setup/test script (`.ps1`), prefer running it outside the sandbox with escalated permissions.
 - If a script is important and fails inside the sandbox, rerun it outside the sandbox instead of trying to work around the environment.
-- Use PowerShell-native commands and paths in examples and automation unless there is a strong reason not to.`r`n- Vite+ is installed for this user, but the sandbox PATH may not expose `vp`; prefer running Vite+ outside the sandbox, and if needed call `C:\Users\User\.vite-plus\0.1.11\bin\vp.exe` explicitly.
+- Use PowerShell-native commands and paths in examples and automation unless there is a strong reason not to.
+- Vite+ is installed for this user, but the sandbox PATH may not expose `vp`; prefer running Vite+ outside the sandbox, and if needed call `C:\Users\User\.vite-plus\0.1.11\bin\vp.exe` explicitly.
+- Emscripten is installed locally under `tools/emsdk`; `scripts/build-wasm.ps1` can import `tools/emsdk/emsdk_env.ps1` automatically.
 - Assume Visual Studio C++ tools and CMake are the primary native toolchain on this machine.
+- Ninja is available and is the practical default generator here.
 - Prefer build scripts that bootstrap the MSVC environment through `vswhere.exe` + `vcvars64.bat` when needed.
-- Support Ninja as an option, but keep Visual Studio generator support available unless the user removes that requirement.
 
 ## Build Script Expectations
 
@@ -112,16 +129,16 @@ Important: do not tightly couple UI code to raw replay format details. Keep patc
 
 ## Suggested Repo Shape
 
-If the repo is scaffolded from scratch, prefer a layout close to:
+The current repo already follows this layout:
 
 - `apps/web` for the Vue frontend
 - `packages/rofl-core` for the C++ parser and analytics core
-- `packages/rofl-wasm` or equivalent wrapper/build glue for Wasm exposure
+- `packages/rofl-wasm` for Wasm exposure
 - `scripts` for PowerShell automation
 - `docs` for format notes, reverse-engineering notes, and architecture decisions
-- `fixtures` or `testdata` for replay samples if the user can legally store them here
+- `replays` for local replay samples
 
-This is a preference, not a hard rule. Follow the actual repo if it already diverges intentionally.
+Follow the actual repo structure unless the user explicitly wants to reorganize it.
 
 ## Reverse-Engineering Guidance
 
@@ -142,7 +159,7 @@ If a replay cannot provide every stat stream, the product should still be able t
 
 ## Research and Dependency Guidance
 
-- Prefer first-party docs and the repo’s own notes for decisions.
+- Prefer first-party docs and the repo's own notes for decisions.
 - If external research is needed, use community replay parsers as references for file format behavior, but do not copy them in as dependencies unless the user explicitly changes the rule.
 - Keep third-party runtime dependencies lean, especially in the parser layer.
 - Favor maintainable, testable code over clever reverse-engineering shortcuts.
