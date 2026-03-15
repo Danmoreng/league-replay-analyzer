@@ -6,12 +6,19 @@ import Minimap from "./components/Minimap.vue";
 import Timeline from "./components/Timeline.vue";
 import { usePlayback } from "./composables/usePlayback";
 import { buildReplayBrowserModel, type ReplayBrowserModel } from "./replayBrowser";
+import {
+  deriveRiotMatchIdFromReplayName,
+  loadRiotFixtureBundle,
+  type RiotFixtureBundle,
+} from "./riotApiFixtures";
 import { type PlayerSummary, type ReplaySummary } from "./replayParser";
 import { parseReplayBufferWithWasm } from "./wasmReplayParser";
 
 const { seek, setDuration } = usePlayback();
 const summary = ref<ReplaySummary | null>(null);
 const browserModel = ref<ReplayBrowserModel | null>(null);
+const riotBundle = ref<RiotFixtureBundle | null>(null);
+const riotFixtureStatus = ref("No Riot fixture loaded yet.");
 const parserEngine = ref("C++/Wasm");
 const loadedReplayName = ref("");
 const status = ref("Pick a replay file to parse it with the C++/Wasm replay parser.");
@@ -201,14 +208,34 @@ async function loadReplay(file: File): Promise<void> {
     const buffer = await file.arrayBuffer();
     const bytes = new Uint8Array(buffer);
     const parsedSummary = await parseReplayBufferWithWasm(buffer);
+    const derivedMatchId = deriveRiotMatchIdFromReplayName(file.name);
+
     summary.value = parsedSummary;
     browserModel.value = buildReplayBrowserModel(bytes, parsedSummary);
+    riotBundle.value = null;
+    if (derivedMatchId) {
+      try {
+        riotBundle.value = await loadRiotFixtureBundle(derivedMatchId);
+        riotFixtureStatus.value = riotBundle.value
+          ? `Loaded Riot fixture bundle for ${derivedMatchId}.`
+          : `No published Riot fixture bundle found for ${derivedMatchId}.`;
+      } catch (fixtureError) {
+        riotFixtureStatus.value =
+          fixtureError instanceof Error ? fixtureError.message : String(fixtureError);
+      }
+    } else {
+      riotFixtureStatus.value =
+        "Replay filename does not match PLATFORM-GAMEID.rofl, so Riot fixture auto-loading is unavailable.";
+    }
+
     setDuration(parsedSummary.gameLengthMillis);
     seek(0);
     status.value = `Parsed ${file.name}. Metadata source: ${parsedSummary.container.metadataSource}. Player stats: ${parsedSummary.playerCount}. Indexed segments: ${parsedSummary.container.segments.length}.`;
   } catch (error) {
     summary.value = null;
     browserModel.value = null;
+    riotBundle.value = null;
+    riotFixtureStatus.value = "No Riot fixture loaded yet.";
     errorMessage.value = error instanceof Error ? error.message : String(error);
     status.value = "Replay parsing failed.";
   } finally {
@@ -482,7 +509,13 @@ function onFileChange(event: Event): void {
         </section>
       </template>
 
-      <DataBrowser v-else :browser="browserModel" :replay-name="loadedReplayName" />
+      <DataBrowser
+        v-else
+        :browser="browserModel"
+        :replay-name="loadedReplayName"
+        :riot-bundle="riotBundle"
+        :riot-fixture-status="riotFixtureStatus"
+      />
     </template>
 
     <section v-else-if="!isLoading" class="welcome-hint">

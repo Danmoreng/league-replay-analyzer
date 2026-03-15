@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 
+import type { RiotFixtureBundle, RiotTimelineEvent, RiotTimelineFrame } from "../riotApiFixtures";
 import type {
   ReplayBrowserModel,
   ReplayBrowserRegion,
@@ -10,6 +11,8 @@ import type {
 const props = defineProps<{
   browser: ReplayBrowserModel | null;
   replayName: string;
+  riotBundle: RiotFixtureBundle | null;
+  riotFixtureStatus: string;
 }>();
 
 const typeFilter = ref<string>("all");
@@ -19,6 +22,108 @@ const selectedKey = ref("");
 const totalBytes = computed(() => {
   const regions = props.browser?.regions ?? [];
   return Math.max(1, ...regions.map((region) => region.end));
+});
+
+const participantNameById = computed(() => {
+  const participants = props.riotBundle?.match.info.participants ?? [];
+  return new Map(
+    participants.map((participant) => [
+      participant.participantId,
+      `${participant.championName} (${participant.riotIdGameName || `P${participant.participantId}`})`,
+    ]),
+  );
+});
+
+const riotMatchFacts = computed(() => {
+  const bundle = props.riotBundle;
+  if (!bundle) {
+    return [] as Array<{ label: string; value: string }>;
+  }
+
+  return [
+    { label: "Match ID", value: bundle.match.metadata.matchId },
+    { label: "Game ID", value: String(bundle.match.info.gameId) },
+    { label: "Queue", value: String(bundle.match.info.queueId ?? "n/a") },
+    { label: "Mode", value: bundle.match.info.gameMode },
+    { label: "Duration", value: `${bundle.match.info.gameDuration}s` },
+    { label: "Patch", value: bundle.match.info.gameVersion },
+    { label: "Map", value: String(bundle.match.info.mapId) },
+    { label: "Frame Interval", value: `${bundle.timeline.info.frameInterval} ms` },
+  ];
+});
+
+const interestingTimelineEvents = computed(() => {
+  const bundle = props.riotBundle;
+  if (!bundle) {
+    return [] as Array<{ key: string; timestamp: number; label: string; detail: string }>;
+  }
+
+  const importantTypes = new Set([
+    "CHAMPION_KILL",
+    "ELITE_MONSTER_KILL",
+    "BUILDING_KILL",
+    "GAME_END",
+    "PAUSE_END",
+  ]);
+
+  const events = bundle.timeline.info.frames.flatMap((frame: RiotTimelineFrame, frameIndex) =>
+    frame.events.map((event: RiotTimelineEvent, eventIndex) => ({
+      frame,
+      frameIndex,
+      event,
+      eventIndex,
+    })),
+  );
+
+  const filtered = events.filter(({ event }) => importantTypes.has(event.type));
+  const source =
+    filtered.length > 0 ? filtered : events.filter(({ event }) => event.type !== "ITEM_PURCHASED");
+
+  return source.slice(0, 80).map(({ event, frameIndex, eventIndex }) => {
+    const killer = event.killerId ? participantNameById.value.get(event.killerId) : null;
+    const victim = event.victimId ? participantNameById.value.get(event.victimId) : null;
+    const participant = event.participantId
+      ? participantNameById.value.get(event.participantId)
+      : null;
+    let detail = "";
+
+    if (event.type === "CHAMPION_KILL") {
+      detail = `${killer || "Unknown killer"} -> ${victim || "Unknown victim"}`;
+    } else if (event.type === "ELITE_MONSTER_KILL") {
+      detail = `${event.monsterType || "monster"}${event.monsterSubType ? ` (${event.monsterSubType})` : ""} by ${killer || participant || "unknown"}`;
+    } else if (event.type === "BUILDING_KILL") {
+      detail = `${event.buildingType || "building"}${event.towerType ? ` / ${event.towerType}` : ""} by ${killer || participant || "unknown"}`;
+    } else if (participant) {
+      detail = participant;
+    }
+
+    return {
+      key: `${frameIndex}-${eventIndex}-${event.type}-${event.timestamp}`,
+      timestamp: event.timestamp,
+      label: event.type,
+      detail,
+    };
+  });
+});
+
+const timelineFrameSummary = computed(() => {
+  const bundle = props.riotBundle;
+  if (!bundle) {
+    return [] as Array<{ label: string; value: string }>;
+  }
+
+  const frames = bundle.timeline.info.frames;
+  const firstFrame = frames[0];
+  const lastFrame = frames[frames.length - 1];
+  return [
+    { label: "Frames", value: String(frames.length) },
+    { label: "First Frame TS", value: String(firstFrame?.timestamp ?? 0) },
+    { label: "Last Frame TS", value: String(lastFrame?.timestamp ?? 0) },
+    {
+      label: "First Frame Events",
+      value: String(firstFrame?.events?.length ?? 0),
+    },
+  ];
 });
 
 const visibleSegments = computed(() => {
@@ -100,6 +205,13 @@ function formatNumber(value: number | null): string {
 
   return new Intl.NumberFormat().format(value);
 }
+
+function formatTimelineTimestamp(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
 </script>
 
 <template>
@@ -112,8 +224,8 @@ function formatNumber(value: number | null): string {
             <h2>{{ replayName || "Loaded replay" }}</h2>
             <p>
               This page shows transport-level structure the app can prove today: indexed records,
-              byte ranges, raw header bytes, and payload previews. These are ordered container
-              records, not decoded gameplay frames yet.
+              byte ranges, raw header bytes, payload previews, and any matching official Riot
+              match/timeline anchors published into the frontend.
             </p>
           </div>
           <div class="browser-badges">
@@ -141,6 +253,99 @@ function formatNumber(value: number | null): string {
               </template>
             </dl>
           </div>
+        </div>
+      </section>
+
+      <section class="note riot-card">
+        <div class="section-head">
+          <div>
+            <h2>Official Riot Match Anchor</h2>
+            <p>
+              Local fixture data fetched from Match-V5 and timeline endpoints. Use this as a truth
+              source for event timing and participant identity while reverse engineering replay
+              payloads.
+            </p>
+          </div>
+        </div>
+
+        <p class="riot-status" :class="{ available: riotBundle, unavailable: !riotBundle }">
+          {{ riotFixtureStatus }}
+        </p>
+
+        <template v-if="riotBundle">
+          <div class="stat-columns">
+            <div>
+              <h3>Match Facts</h3>
+              <dl class="browser-stats">
+                <template v-for="fact in riotMatchFacts" :key="fact.label">
+                  <dt>{{ fact.label }}</dt>
+                  <dd>{{ fact.value }}</dd>
+                </template>
+              </dl>
+            </div>
+            <div>
+              <h3>Timeline Facts</h3>
+              <dl class="browser-stats">
+                <template v-for="fact in timelineFrameSummary" :key="fact.label">
+                  <dt>{{ fact.label }}</dt>
+                  <dd>{{ fact.value }}</dd>
+                </template>
+              </dl>
+            </div>
+          </div>
+
+          <div class="browser-table-wrap participant-wrap">
+            <table class="segment-table browser-table">
+              <thead>
+                <tr>
+                  <th>PID</th>
+                  <th>Champion</th>
+                  <th>Riot ID</th>
+                  <th>Team</th>
+                  <th>Lane</th>
+                  <th>K / D / A</th>
+                  <th>Win</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="participant in riotBundle.match.info.participants"
+                  :key="participant.participantId"
+                >
+                  <td>{{ participant.participantId }}</td>
+                  <td>{{ participant.championName }}</td>
+                  <td>{{ participant.riotIdGameName || "unknown" }}</td>
+                  <td>{{ participant.teamId }}</td>
+                  <td>{{ participant.lane || participant.role || "n/a" }}</td>
+                  <td>
+                    {{ participant.kills }}/{{ participant.deaths }}/{{ participant.assists }}
+                  </td>
+                  <td>{{ participant.win ? "yes" : "no" }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+      </section>
+
+      <section class="note" v-if="riotBundle">
+        <div class="section-head">
+          <div>
+            <h2>Timeline Event Anchors</h2>
+            <p>
+              Curated event list from the official timeline. These are the strongest candidates for
+              aligning replay chunks and subrecord families with known game-time changes.
+            </p>
+          </div>
+        </div>
+        <div class="event-list">
+          <article v-for="event in interestingTimelineEvents" :key="event.key" class="event-card">
+            <div class="event-time">{{ formatTimelineTimestamp(event.timestamp) }}</div>
+            <div>
+              <h3>{{ event.label }}</h3>
+              <p>{{ event.detail || "No extra detail" }}</p>
+            </div>
+          </article>
         </div>
       </section>
 
@@ -326,7 +531,7 @@ function formatNumber(value: number | null): string {
       <h3>Ready to inspect raw structure</h3>
       <p>
         Load a `.rofl` file, then switch to the data browser page to inspect indexed records,
-        offsets, and raw byte previews.
+        offsets, raw byte previews, and any matching Riot fixture data.
       </p>
     </div>
   </section>
@@ -339,7 +544,8 @@ function formatNumber(value: number | null): string {
   gap: 24px;
 }
 
-.browser-hero {
+.browser-hero,
+.riot-card {
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -381,6 +587,24 @@ function formatNumber(value: number | null): string {
   text-transform: uppercase;
 }
 
+.riot-status {
+  margin-top: -4px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: #fff;
+}
+
+.riot-status.available {
+  border-color: rgba(77, 125, 87, 0.3);
+  background: rgba(77, 125, 87, 0.08);
+}
+
+.riot-status.unavailable {
+  border-color: rgba(179, 79, 67, 0.2);
+  background: rgba(179, 79, 67, 0.05);
+}
+
 .stat-columns,
 .detail-grid-browser,
 .preview-grid {
@@ -390,7 +614,6 @@ function formatNumber(value: number | null): string {
 }
 
 .preview-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-top: 18px;
 }
 
@@ -522,12 +745,47 @@ function formatNumber(value: number | null): string {
   margin-top: 16px;
 }
 
+.participant-wrap {
+  margin-top: 18px;
+}
+
 .browser-table tbody tr {
   cursor: pointer;
 }
 
 .browser-table tbody tr.selected {
   background: rgba(44, 82, 111, 0.08);
+}
+
+.event-list {
+  display: grid;
+  gap: 10px;
+}
+
+.event-card {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: #fff;
+}
+
+.event-time {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.event-card h3 {
+  margin: 0 0 4px;
+  font-size: 0.98rem;
+}
+
+.event-card p {
+  margin: 0;
+  color: var(--text-muted);
 }
 
 .detail-block,
@@ -560,7 +818,8 @@ function formatNumber(value: number | null): string {
 
   .stat-columns,
   .detail-grid-browser,
-  .preview-grid {
+  .preview-grid,
+  .event-card {
     grid-template-columns: 1fr;
   }
 }
