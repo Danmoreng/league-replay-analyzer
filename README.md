@@ -9,7 +9,7 @@ The project is built around a shared C++ replay/analytics core with two working 
 - native executable/test harness for parser development
 - WebAssembly module for browser-side parsing
 
-The frontend is a Vue 3 + TypeScript app and the JavaScript toolchain is managed through Vite+.
+The frontend is a Vue 3 + TypeScript app in `apps/web`, and that folder owns the Vite+ config and validation workflow.
 
 ## Repo Layout
 
@@ -22,41 +22,55 @@ The frontend is a Vue 3 + TypeScript app and the JavaScript toolchain is managed
 
 ## Quick Start
 
-Install dependencies with Vite+:
+Install dependencies from the repo root:
 
 ```powershell
-vp install
+npm install
 ```
 
-Run the web app:
+Run the web app from the repo root:
 
 ```powershell
-vp run dev --filter @lra/web
+npm run dev:web
 ```
 
-Build the web app:
+Or work directly inside the web app:
 
 ```powershell
-vp run build --filter @lra/web
+Set-Location .\apps\web
+vp dev
 ```
 
-Run the Vite+ validation loop:
+Build the web app from the repo root:
 
 ```powershell
-vp check --fix
-vp test
+npm run build:web
+```
+
+Run the frontend validation loop:
+
+```powershell
+npm run check:web
+npm run test:web
+npm run typecheck:web
 ```
 
 Build the native parser:
 
 ```powershell
-pwsh -File .\scripts\build-native.ps1 -RunSmokeTest
+pwsh -File .\scripts\build-native.ps1 -UseNinja -RunSmokeTest
+```
+
+Run the native tests:
+
+```powershell
+pwsh -File .\scripts\test-native.ps1 -UseNinja
 ```
 
 Print a replay summary from the native parser:
 
 ```powershell
-.\build\packages\rofl-core\Debug\rofl_core_cli.exe --summary .\replays\EUW1-7779216102.rofl
+.\build\packages\rofl-core\rofl_core_cli.exe --summary .\replays\EUW1-7779216102.rofl
 ```
 
 Build and publish Wasm into the frontend source tree:

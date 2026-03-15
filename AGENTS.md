@@ -50,6 +50,7 @@ This repo is already scaffolded and has a working vertical slice.
 Current state:
 
 - `apps/web` is a Vue 3 + TypeScript frontend managed with Vite+.
+- the Vite+ project/configuration is scoped to `apps/web`; the repo root is a workspace/build orchestration layer, not the frontend project root
 - `packages/rofl-core` contains the shared C++ replay parser core.
 - `packages/rofl-wasm` builds the C++ parser to WebAssembly.
 - `scripts/build-native.ps1` builds the native target.
@@ -81,6 +82,7 @@ Because of that, follow these rules:
 - If a script is important and fails inside the sandbox, rerun it outside the sandbox instead of trying to work around the environment.
 - Use PowerShell-native commands and paths in examples and automation unless there is a strong reason not to.
 - Vite+ is installed for this user, but the sandbox PATH may not expose `vp`; prefer running Vite+ outside the sandbox, and if needed call `C:\Users\User\.vite-plus\0.1.11\bin\vp.exe` explicitly.
+- when running Vite+ commands, prefer `apps/web` as the working directory or use the root `npm run *:web` wrappers rather than treating the repo root as the Vite+ project
 - Emscripten is installed locally under `tools/emsdk`; `scripts/build-wasm.ps1` can import `tools/emsdk/emsdk_env.ps1` automatically.
 - Assume Visual Studio C++ tools and CMake are the primary native toolchain on this machine.
 - Ninja is available and is the practical default generator here.

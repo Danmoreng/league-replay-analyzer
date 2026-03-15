@@ -6,13 +6,14 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:web": "vp run dev --filter @lra/web",
-    "build:web": "vp run build --filter @lra/web",
-    "typecheck:web": "vp run typecheck --filter @lra/web",
-    "build:native": "pwsh -File ./scripts/build-native.ps1",
+    "dev:web": "npm --workspace @lra/web run dev",
+    "build:web": "npm --workspace @lra/web run build",
+    "check:web": "npm --workspace @lra/web run check",
+    "test:web": "npm --workspace @lra/web run test",
+    "typecheck:web": "npm --workspace @lra/web run typecheck",
+    "build:native": "pwsh -File ./scripts/build-native.ps1 -UseNinja",
     "build:wasm": "pwsh -File ./scripts/build-wasm.ps1",
-    "test:native": "ctest --test-dir build --output-on-failure",
-    "prepare": "vp config"
+    "test:native": "pwsh -File ./scripts/test-native.ps1 -UseNinja"
   },
   "devDependencies": {
     "vite-plus": "latest"
