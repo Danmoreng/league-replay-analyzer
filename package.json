@@ -1,0 +1,25 @@
+{
+  "name": "league-replay-analyzer",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "vp run dev --filter @lra/web",
+    "build:web": "vp run build --filter @lra/web",
+    "typecheck:web": "vp run typecheck --filter @lra/web",
+    "build:native": "pwsh -File ./scripts/build-native.ps1",
+    "build:wasm": "pwsh -File ./scripts/build-wasm.ps1",
+    "test:native": "ctest --test-dir build --output-on-failure",
+    "prepare": "vp config"
+  },
+  "devDependencies": {
+    "vite-plus": "latest"
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@latest",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@latest"
+  },
+  "packageManager": "npm@11.11.1"
+}
