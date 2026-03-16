@@ -65,6 +65,10 @@ export interface RiotTimelineEvent {
   monsterSubType?: string;
   killerTeamId?: number;
   assistingParticipantIds?: number[];
+  position?: {
+    x: number;
+    y: number;
+  };
 }
 
 export interface RiotTimelineFrame {

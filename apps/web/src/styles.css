@@ -33,17 +33,6 @@ body,
   background: rgba(255, 255, 255, 0.2);
 }
 
-/* Minimap Custom Styles */
-.minimap-container {
-  aspect-ratio: 1;
-  max-width: 400px;
-  margin: 0 auto;
-  position: relative;
-  background: #000;
-  border-radius: 8px;
-  overflow: hidden;
-}
-
 /* Timeline Custom Styles */
 .main-timeline {
   height: 40px;

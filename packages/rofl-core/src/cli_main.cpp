@@ -1,5 +1,6 @@
 #include <exception>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <string_view>
 
@@ -247,6 +248,101 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (first_arg == "--export-positions-json" && argc > 2) {
+        try {
+            std::string path = argv[2];
+            std::size_t length = 0;
+            std::uint8_t first_byte = 0;
+            std::size_t header_size = 0;
+            std::size_t stride = 16;
+            std::vector<std::size_t> slots;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view arg = argv[i];
+                if (arg == "--length" && i + 1 < argc) {
+                    length = std::stoull(argv[++i]);
+                } else if (arg == "--first-byte" && i + 1 < argc) {
+                    first_byte = static_cast<std::uint8_t>(std::stoul(argv[++i], nullptr, 0));
+                } else if (arg == "--header-size" && i + 1 < argc) {
+                    header_size = std::stoull(argv[++i]);
+                } else if (arg == "--stride" && i + 1 < argc) {
+                    stride = std::stoull(argv[++i]);
+                } else if (arg == "--slots" && i + 1 < argc) {
+                    std::string slots_str = argv[++i];
+                    std::stringstream ss(slots_str);
+                    std::string item;
+                    while (std::getline(ss, item, ',')) {
+                        slots.push_back(std::stoull(item));
+                    }
+                }
+            }
+            std::cout << rofl::core::export_positions_json(path, length, first_byte, header_size, stride, slots);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
+
+    if (first_arg == "--compare-positions-with-api" && argc > 3) {
+        try {
+            std::string replay_path = argv[2];
+            std::string api_positions_path = argv[3];
+            std::size_t length = 0;
+            std::uint8_t first_byte = 0;
+            std::size_t header_size = 0;
+            std::size_t stride = 16;
+            std::size_t top_slots = 120;
+            float move_epsilon = 25.0F;
+            float smooth_threshold = 1200.0F;
+            int chunk_time_millis = 30000;
+            int chunk_base_id = -1;
+            int max_time_offsets = 5;
+            for (int i = 4; i < argc; ++i) {
+                std::string_view arg = argv[i];
+                if (arg == "--length" && i + 1 < argc) {
+                    length = std::stoull(argv[++i]);
+                } else if (arg == "--first-byte" && i + 1 < argc) {
+                    first_byte = static_cast<std::uint8_t>(std::stoul(argv[++i], nullptr, 0));
+                } else if (arg == "--header-size" && i + 1 < argc) {
+                    header_size = std::stoull(argv[++i]);
+                } else if (arg == "--stride" && i + 1 < argc) {
+                    stride = std::stoull(argv[++i]);
+                } else if (arg == "--top-slots" && i + 1 < argc) {
+                    top_slots = std::stoull(argv[++i]);
+                } else if (arg == "--move-epsilon" && i + 1 < argc) {
+                    move_epsilon = std::stof(argv[++i]);
+                } else if (arg == "--smooth-threshold" && i + 1 < argc) {
+                    smooth_threshold = std::stof(argv[++i]);
+                } else if (arg == "--chunk-time-ms" && i + 1 < argc) {
+                    chunk_time_millis = std::stoi(argv[++i]);
+                } else if (arg == "--chunk-base-id" && i + 1 < argc) {
+                    chunk_base_id = std::stoi(argv[++i]);
+                } else if (arg == "--max-time-offsets" && i + 1 < argc) {
+                    max_time_offsets = std::stoi(argv[++i]);
+                }
+            }
+            std::cout << rofl::core::compare_positions_with_api(
+                replay_path,
+                api_positions_path,
+                length,
+                first_byte,
+                header_size,
+                stride,
+                top_slots,
+                move_epsilon,
+                smooth_threshold,
+                chunk_time_millis,
+                chunk_base_id,
+                max_time_offsets
+            );
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
     if (first_arg == "--dump-chunk-subrecords" && argc > 2) {
         try {
             std::string path = argv[2];
@@ -282,6 +378,8 @@ int main(int argc, char** argv) {
     std::cout << "Use --trace-sparse-slot <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slot-index <n> [--stride <len>] [--max-records <n>] to trace one sparse slot over time.\n";
     std::cout << "Use --profile-position-slots <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--move-epsilon <f>] [--smooth-threshold <f>] to rank position-like sparse slots.\n";
     std::cout << "Use --compare-position-classes <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--top-classes <n>] [--move-epsilon <f>] [--smooth-threshold <f>] to compare discovered slot classes against entity archetypes.\n";
+    std::cout << "Use --export-positions-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] to export sparse slot positions as JSON.\n";
+    std::cout << "Use --compare-positions-with-api <path-to-rofl> <path-to-api-positions-json> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--move-epsilon <f>] [--smooth-threshold <f>] [--chunk-time-ms <ms>] [--chunk-base-id <id>] [--max-time-offsets <n>] to rank sparse slot tracks against Riot API positions.\n";
     return 0;
 }
 

@@ -8,8 +8,10 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <map>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
@@ -3659,6 +3661,609 @@ std::string trace_sparse_slot(
 
     return output.str();
 }
+
+std::string export_positions_json(
+    const std::string& path,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    const std::vector<std::size_t>& slots
+) {
+    std::ostringstream output;
+    const std::vector<std::uint8_t> bytes = read_file_bytes(path);
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const std::uint8_t padding_byte = static_cast<std::uint8_t>(target_length & 0xFFu);
+    const std::uint32_t padding_u32 = static_cast<std::uint32_t>(padding_byte) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 8U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 16U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 24U);
+
+    auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+
+    output << "[\n";
+    for (std::size_t i = 0; i < slots.size(); ++i) {
+        std::size_t slot_index = slots[i];
+        output << "  {\n";
+        output << "    \"slot\": " << slot_index << ",\n";
+        output << "    \"positions\": [\n";
+
+        bool first_pos = true;
+        for (std::size_t record_index = 0; record_index < records.size(); ++record_index) {
+            const auto& rec = records[record_index];
+            const std::size_t start = header_size + (slot_index * stride);
+            if (start + stride > rec.payload.size()) {
+                continue;
+            }
+
+            bool active = false;
+            for (std::size_t byte_index = 0; byte_index < stride; ++byte_index) {
+                if (rec.payload[start + byte_index] != padding_byte) {
+                    active = true;
+                    break;
+                }
+            }
+            if (!active) {
+                continue;
+            }
+
+            std::array<float, 4> lane_floats = {0.0F, 0.0F, 0.0F, 0.0F};
+            std::array<bool, 4> lane_valid = {false, false, false, false};
+            for (std::size_t lane_index = 0; lane_index < std::min<std::size_t>(4, stride / 4); ++lane_index) {
+                std::uint32_t value = 0;
+                if (read_u32_le(rec.payload, start + (lane_index * 4), value) && value != padding_u32) {
+                    const float as_float = std::bit_cast<float>(value);
+                    if (std::isfinite(as_float)) {
+                        lane_floats[lane_index] = as_float;
+                        lane_valid[lane_index] = true;
+                    }
+                }
+            }
+            
+            if (first_pos) {
+                first_pos = false;
+            } else {
+                output << ",\n";
+            }
+            output << "      { \"chunk\": " << rec.chunk_id;
+            for (std::size_t lane_index = 0; lane_index < std::min<std::size_t>(4, stride / 4); ++lane_index) {
+                if (lane_valid[lane_index]) {
+                    output << ", \"lane" << lane_index << "\": " << std::fixed << std::setprecision(2) << lane_floats[lane_index];
+                }
+            }
+            output << " }";
+        }
+        output << "\n    ]\n";
+        output << "  }";
+        if (i < slots.size() - 1) {
+            output << ",";
+        }
+        output << "\n";
+    }
+    output << "]\n";
+
+    return output.str();
+}
+std::string compare_positions_with_api(
+    const std::string& replay_path,
+    const std::string& api_positions_path,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    std::size_t top_slots,
+    float move_epsilon,
+    float smooth_threshold,
+    int chunk_time_millis,
+    int chunk_base_id,
+    int max_time_offsets
+) {
+    std::ostringstream output;
+    const std::vector<std::uint8_t> bytes = read_file_bytes(replay_path);
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const std::uint8_t padding_byte = static_cast<std::uint8_t>(target_length & 0xFFu);
+    const std::uint32_t padding_u32 = static_cast<std::uint32_t>(padding_byte) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 8U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 16U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 24U);
+    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+
+    output << "ROFL/API position comparer for " << records.size() << " records of size " << target_length
+           << " starting with 0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+           << static_cast<int>(target_first_byte) << std::dec << "\n\n";
+    output << "Header size:      " << header_size << " bytes\n";
+    output << "Stride:           " << stride << " bytes\n";
+    output << "Move epsilon:     " << std::fixed << std::setprecision(2) << move_epsilon << "\n";
+    output << "Smooth threshold: " << smooth_threshold << "\n";
+    output << "Chunk time:       " << chunk_time_millis << " ms\n";
+    output << "Chunk base id:    " << chunk_base_id << " (negative means auto)\n";
+    output << "Max time offsets: " << max_time_offsets << " chunk steps\n";
+
+    if (records.empty()) {
+        output << "No matching sparse-family records were found.\n";
+        return output.str();
+    }
+    if (header_size >= target_length) {
+        output << "Header size must be smaller than the target record length.\n";
+        return output.str();
+    }
+    if (stride == 0 || (stride % 4) != 0) {
+        output << "Stride must be a non-zero multiple of 4 for lane analysis.\n";
+        return output.str();
+    }
+    if (smooth_threshold <= 0.0F) {
+        output << "Smooth threshold must be positive.\n";
+        return output.str();
+    }
+    if (move_epsilon < 0.0F) {
+        output << "Move epsilon must be non-negative.\n";
+        return output.str();
+    }
+    if (chunk_time_millis <= 0) {
+        output << "Chunk time must be positive.\n";
+        return output.str();
+    }
+
+    const std::size_t usable_bytes = target_length - header_size;
+    const std::size_t element_count = usable_bytes / stride;
+    const std::size_t lane_count = std::min<std::size_t>(4, stride / 4);
+    if (lane_count < 2) {
+        output << "Need at least two 32-bit lanes to compare position-like tracks.\n";
+        return output.str();
+    }
+
+    struct PairDefinition {
+        std::size_t left_lane = 0;
+        std::size_t right_lane = 0;
+        std::string label;
+    };
+    struct PreviousSample {
+        bool valid = false;
+        std::size_t record_index = 0;
+        float x = 0.0F;
+        float y = 0.0F;
+    };
+    struct SlotPairProfile {
+        std::size_t slot_index = 0;
+        std::size_t pair_index = 0;
+        std::size_t coordinate_samples = 0;
+        std::size_t transitions = 0;
+        std::size_t smooth_transitions = 0;
+        std::size_t moving_transitions = 0;
+        std::size_t active_records = 0;
+        float min_x = std::numeric_limits<float>::infinity();
+        float max_x = -std::numeric_limits<float>::infinity();
+        float min_y = std::numeric_limits<float>::infinity();
+        float max_y = -std::numeric_limits<float>::infinity();
+        int min_chunk_id = std::numeric_limits<int>::max();
+        int max_chunk_id = std::numeric_limits<int>::min();
+        std::map<std::uint8_t, std::size_t> first_byte_freq;
+        std::map<std::uint8_t, std::size_t> mask_freq;
+    };
+    struct RankedCandidate {
+        std::size_t profile_index = 0;
+        double score = 0.0;
+        double smooth_ratio = 0.0;
+        double moving_ratio = 0.0;
+        double coverage = 0.0;
+    };
+    struct ApiPoint {
+        double timestamp = 0.0;
+        double x = 0.0;
+        double y = 0.0;
+    };
+    struct ApiParticipant {
+        int participant_id = 0;
+        std::vector<ApiPoint> positions;
+    };
+    struct TrackPoint {
+        int chunk_id = 0;
+        double timestamp = 0.0;
+        double x = 0.0;
+        double y = 0.0;
+    };
+    struct CandidateTrack {
+        const SlotPairProfile* profile = nullptr;
+        std::vector<TrackPoint> points;
+        std::uint8_t top_first = 0;
+        std::uint8_t top_mask = 0;
+    };
+    struct MatchScore {
+        std::size_t slot_index = 0;
+        std::string pair_label;
+        int participant_id = 0;
+        int offset_ms = 0;
+        double rmse = 0.0;
+        double mean_distance = 0.0;
+        std::size_t overlap = 0;
+        std::size_t chunk_points = 0;
+        double internal_score = 0.0;
+        double smooth_ratio = 0.0;
+        double moving_ratio = 0.0;
+        double coverage = 0.0;
+        std::uint8_t top_first = 0;
+        std::uint8_t top_mask = 0;
+    };
+
+    std::vector<PairDefinition> pair_defs = {{0, 1, "+0/+4"}};
+    if (lane_count >= 3) {
+        pair_defs.push_back({1, 2, "+4/+8"});
+        pair_defs.push_back({0, 2, "+0/+8"});
+    }
+    if (lane_count >= 4) {
+        pair_defs.push_back({2, 3, "+8/+12"});
+        pair_defs.push_back({0, 3, "+0/+12"});
+    }
+
+    const auto is_coordinate_like = [](float value) {
+        return std::isfinite(value) && std::fpclassify(value) == FP_NORMAL && value >= -5000.0F && value <= 20000.0F;
+    };
+    const auto format_mask = [lane_count](std::uint8_t mask) {
+        std::ostringstream line;
+        for (int bit = static_cast<int>(lane_count) - 1; bit >= 0; --bit) {
+            line << (((mask >> bit) & 1U) != 0U ? '1' : '0');
+        }
+        return line.str();
+    };
+    const auto top_freq_entry = [](const std::map<std::uint8_t, std::size_t>& freq) {
+        if (freq.empty()) {
+            return std::pair<std::uint8_t, std::size_t>{0, 0};
+        }
+        const auto it = std::max_element(freq.begin(), freq.end(), [](const auto& left, const auto& right) {
+            if (left.second != right.second) {
+                return left.second < right.second;
+            }
+            return left.first > right.first;
+        });
+        return std::pair<std::uint8_t, std::size_t>{it->first, it->second};
+    };
+    const auto extract_number = [](const std::string& line) {
+        const std::size_t colon = line.find(':');
+        if (colon == std::string::npos) {
+            return 0.0;
+        }
+        const std::size_t start = line.find_first_of("-0123456789", colon + 1);
+        if (start == std::string::npos) {
+            return 0.0;
+        }
+        const std::size_t end = line.find_first_not_of("-+0123456789.eE", start);
+        return std::stod(line.substr(start, end == std::string::npos ? std::string::npos : end - start));
+    };
+    const auto median = [](std::vector<float> values) {
+        if (values.empty()) {
+            return 0.0;
+        }
+        std::sort(values.begin(), values.end());
+        const std::size_t middle = values.size() / 2;
+        if ((values.size() % 2U) != 0U) {
+            return static_cast<double>(values[middle]);
+        }
+        return (static_cast<double>(values[middle - 1]) + static_cast<double>(values[middle])) / 2.0;
+    };
+
+    const std::size_t profile_count = element_count * pair_defs.size();
+    std::vector<SlotPairProfile> profiles(profile_count);
+    std::vector<PreviousSample> previous_samples(profile_count);
+    for (std::size_t slot_index = 0; slot_index < element_count; ++slot_index) {
+        for (std::size_t pair_index = 0; pair_index < pair_defs.size(); ++pair_index) {
+            auto& profile = profiles[(slot_index * pair_defs.size()) + pair_index];
+            profile.slot_index = slot_index;
+            profile.pair_index = pair_index;
+        }
+    }
+
+    for (std::size_t record_index = 0; record_index < records.size(); ++record_index) {
+        const auto& rec = records[record_index];
+        for (std::size_t slot_index = 0; slot_index < element_count; ++slot_index) {
+            const std::size_t start = header_size + (slot_index * stride);
+            if (start + stride > rec.payload.size()) {
+                break;
+            }
+            std::array<bool, 4> lane_is_coordinate = {false, false, false, false};
+            std::array<float, 4> lane_floats = {0.0F, 0.0F, 0.0F, 0.0F};
+            std::uint8_t mask = 0;
+            bool active = false;
+            for (std::size_t lane_index = 0; lane_index < lane_count; ++lane_index) {
+                std::uint32_t value = 0;
+                if (!read_u32_le(rec.payload, start + (lane_index * 4), value) || value == padding_u32) {
+                    continue;
+                }
+                active = true;
+                mask |= static_cast<std::uint8_t>(1U << lane_index);
+                const float as_float = std::bit_cast<float>(value);
+                if (is_coordinate_like(as_float)) {
+                    lane_is_coordinate[lane_index] = true;
+                    lane_floats[lane_index] = as_float;
+                }
+            }
+            if (!active) {
+                continue;
+            }
+            for (std::size_t pair_index = 0; pair_index < pair_defs.size(); ++pair_index) {
+                const auto& pair = pair_defs[pair_index];
+                auto& profile = profiles[(slot_index * pair_defs.size()) + pair_index];
+                profile.active_records++;
+                if (!lane_is_coordinate[pair.left_lane] || !lane_is_coordinate[pair.right_lane]) {
+                    continue;
+                }
+                profile.coordinate_samples++;
+                profile.first_byte_freq[rec.payload[start]]++;
+                profile.mask_freq[mask]++;
+                profile.min_x = std::min(profile.min_x, lane_floats[pair.left_lane]);
+                profile.max_x = std::max(profile.max_x, lane_floats[pair.left_lane]);
+                profile.min_y = std::min(profile.min_y, lane_floats[pair.right_lane]);
+                profile.max_y = std::max(profile.max_y, lane_floats[pair.right_lane]);
+                profile.min_chunk_id = std::min(profile.min_chunk_id, rec.chunk_id);
+                profile.max_chunk_id = std::max(profile.max_chunk_id, rec.chunk_id);
+                auto& previous = previous_samples[(slot_index * pair_defs.size()) + pair_index];
+                if (previous.valid && previous.record_index + 1 == record_index) {
+                    const float distance = std::hypot(lane_floats[pair.left_lane] - previous.x, lane_floats[pair.right_lane] - previous.y);
+                    profile.transitions++;
+                    if (distance <= smooth_threshold) {
+                        profile.smooth_transitions++;
+                        if (distance >= move_epsilon) {
+                            profile.moving_transitions++;
+                        }
+                    }
+                }
+                previous.valid = true;
+                previous.record_index = record_index;
+                previous.x = lane_floats[pair.left_lane];
+                previous.y = lane_floats[pair.right_lane];
+            }
+        }
+    }
+
+    std::vector<RankedCandidate> ranked_candidates;
+    for (std::size_t profile_index = 0; profile_index < profiles.size(); ++profile_index) {
+        const auto& profile = profiles[profile_index];
+        if (profile.coordinate_samples < 8 || profile.transitions < 4 || profile.smooth_transitions == 0) {
+            continue;
+        }
+        const double smooth_ratio = static_cast<double>(profile.smooth_transitions) / static_cast<double>(profile.transitions);
+        const double moving_ratio = static_cast<double>(profile.moving_transitions) / static_cast<double>(profile.transitions);
+        const double coverage = static_cast<double>(profile.coordinate_samples) / static_cast<double>(records.size());
+        const float x_range = std::isfinite(profile.min_x) && std::isfinite(profile.max_x) ? profile.max_x - profile.min_x : 0.0F;
+        const float y_range = std::isfinite(profile.min_y) && std::isfinite(profile.max_y) ? profile.max_y - profile.min_y : 0.0F;
+        const double score = (static_cast<double>(profile.moving_transitions) + (0.5 * static_cast<double>(profile.smooth_transitions))) * (0.5 + smooth_ratio) * (0.25 + coverage) * (0.25 + std::min<double>(3.0, static_cast<double>(x_range + y_range) / 4000.0));
+        ranked_candidates.push_back({profile_index, score, smooth_ratio, moving_ratio, coverage});
+    }
+    std::sort(ranked_candidates.begin(), ranked_candidates.end(), [&](const auto& left, const auto& right) {
+        if (left.score != right.score) {
+            return left.score > right.score;
+        }
+        return profiles[left.profile_index].coordinate_samples > profiles[right.profile_index].coordinate_samples;
+    });
+    output << "Candidate slot/pair profiles: " << ranked_candidates.size() << "\n";
+    if (ranked_candidates.empty()) {
+        output << "No position-like candidates met the minimum sample/transition thresholds.\n";
+        return output.str();
+    }
+    if (top_slots == 0) {
+        top_slots = 120;
+    }
+    const std::size_t shown_slots = std::min<std::size_t>(top_slots, ranked_candidates.size());
+    output << "Top internal candidates compared: " << shown_slots << "\n";
+
+    const std::vector<std::uint8_t> api_bytes = read_file_bytes(api_positions_path);
+    std::istringstream api_stream(std::string(api_bytes.begin(), api_bytes.end()));
+    std::vector<ApiParticipant> participants;
+    ApiParticipant current_participant;
+    for (std::string line; std::getline(api_stream, line); ) {
+        if (line.find("\"participantId\"") != std::string::npos) {
+            if (current_participant.participant_id != 0 && !current_participant.positions.empty()) {
+                participants.push_back(current_participant);
+                current_participant = {};
+            }
+            current_participant.participant_id = static_cast<int>(std::lround(extract_number(line)));
+        } else if (line.find("\"timestamp\"") != std::string::npos) {
+            ApiPoint point;
+            point.timestamp = extract_number(line);
+            if (!std::getline(api_stream, line)) {
+                break;
+            }
+            point.x = extract_number(line);
+            if (!std::getline(api_stream, line)) {
+                break;
+            }
+            point.y = extract_number(line);
+            current_participant.positions.push_back(point);
+        }
+    }
+    if (current_participant.participant_id != 0 && !current_participant.positions.empty()) {
+        participants.push_back(current_participant);
+    }
+    output << "API participants loaded: " << participants.size() << "\n";
+    if (participants.empty()) {
+        output << "No participant positions were found in the API positions JSON.\n";
+        return output.str();
+    }
+
+    int derived_chunk_base_id = chunk_base_id;
+    if (derived_chunk_base_id < 0) {
+        derived_chunk_base_id = summary.container.game_start_chunk_id > 0 ? summary.container.game_start_chunk_id : profiles[ranked_candidates.front().profile_index].min_chunk_id;
+    }
+    output << "Derived chunk base id: " << derived_chunk_base_id << "\n\n";
+
+    const auto interpolate_api = [](const ApiParticipant& participant, double timestamp, double& x, double& y) {
+        if (participant.positions.empty()) {
+            return false;
+        }
+        if (timestamp <= participant.positions.front().timestamp) {
+            x = participant.positions.front().x;
+            y = participant.positions.front().y;
+            return true;
+        }
+        if (timestamp >= participant.positions.back().timestamp) {
+            x = participant.positions.back().x;
+            y = participant.positions.back().y;
+            return true;
+        }
+        for (std::size_t index = 1; index < participant.positions.size(); ++index) {
+            const auto& left = participant.positions[index - 1];
+            const auto& right = participant.positions[index];
+            if (timestamp <= right.timestamp) {
+                const double ratio = (timestamp - left.timestamp) / (right.timestamp - left.timestamp);
+                x = left.x + ((right.x - left.x) * ratio);
+                y = left.y + ((right.y - left.y) * ratio);
+                return true;
+            }
+        }
+        return false;
+    };
+    const auto build_track = [&](const SlotPairProfile& profile) {
+        std::map<int, std::pair<std::vector<float>, std::vector<float>>> per_chunk;
+        const auto& pair = pair_defs[profile.pair_index];
+        for (const auto& rec : records) {
+            const std::size_t start = header_size + (profile.slot_index * stride);
+            if (start + stride > rec.payload.size()) {
+                continue;
+            }
+            std::uint32_t left_value = 0;
+            std::uint32_t right_value = 0;
+            if (!read_u32_le(rec.payload, start + (pair.left_lane * 4), left_value) || left_value == padding_u32) {
+                continue;
+            }
+            if (!read_u32_le(rec.payload, start + (pair.right_lane * 4), right_value) || right_value == padding_u32) {
+                continue;
+            }
+            const float left_float = std::bit_cast<float>(left_value);
+            const float right_float = std::bit_cast<float>(right_value);
+            if (!is_coordinate_like(left_float) || !is_coordinate_like(right_float)) {
+                continue;
+            }
+            auto& bucket = per_chunk[rec.chunk_id];
+            bucket.first.push_back(left_float);
+            bucket.second.push_back(right_float);
+        }
+        std::vector<TrackPoint> points;
+        for (const auto& [chunk_id, coords] : per_chunk) {
+            points.push_back({chunk_id, static_cast<double>(chunk_id - derived_chunk_base_id) * static_cast<double>(chunk_time_millis), median(coords.first), median(coords.second)});
+        }
+        return points;
+    };
+
+    std::vector<CandidateTrack> candidate_tracks;
+    for (std::size_t rank_index = 0; rank_index < shown_slots; ++rank_index) {
+        const auto& ranked = ranked_candidates[rank_index];
+        const auto& profile = profiles[ranked.profile_index];
+        auto points = build_track(profile);
+        if (points.size() < 8) {
+            continue;
+        }
+        const auto top_first = top_freq_entry(profile.first_byte_freq);
+        const auto top_mask = top_freq_entry(profile.mask_freq);
+        candidate_tracks.push_back({&profile, std::move(points), top_first.first, top_mask.first});
+    }
+    output << "Candidate tracks with chunk-collapsed coordinates: " << candidate_tracks.size() << "\n";
+    if (candidate_tracks.empty()) {
+        output << "No candidate tracks survived chunk collapsing.\n";
+        return output.str();
+    }
+
+    std::vector<MatchScore> matches;
+    for (std::size_t rank_index = 0; rank_index < candidate_tracks.size(); ++rank_index) {
+        const auto& track = candidate_tracks[rank_index];
+        const auto& profile = *track.profile;
+        const auto& pair = pair_defs[profile.pair_index];
+        const auto& ranked = ranked_candidates[rank_index];
+        for (const auto& participant : participants) {
+            for (int offset_step = -max_time_offsets; offset_step <= max_time_offsets; ++offset_step) {
+                const int offset_ms = offset_step * chunk_time_millis;
+                double sum_distance = 0.0;
+                double sum_square_distance = 0.0;
+                std::size_t overlap = 0;
+                for (const auto& point : track.points) {
+                    double api_x = 0.0;
+                    double api_y = 0.0;
+                    if (!interpolate_api(participant, point.timestamp + static_cast<double>(offset_ms), api_x, api_y)) {
+                        continue;
+                    }
+                    const double distance = std::hypot(point.x - api_x, point.y - api_y);
+                    sum_distance += distance;
+                    sum_square_distance += distance * distance;
+                    overlap++;
+                }
+                if (overlap == 0) {
+                    continue;
+                }
+                matches.push_back({profile.slot_index, pair.label, participant.participant_id, offset_ms, std::sqrt(sum_square_distance / static_cast<double>(overlap)), sum_distance / static_cast<double>(overlap), overlap, track.points.size(), ranked.score, ranked.smooth_ratio, ranked.moving_ratio, ranked.coverage, track.top_first, track.top_mask});
+            }
+        }
+    }
+    std::sort(matches.begin(), matches.end(), [](const auto& left, const auto& right) {
+        if (left.rmse != right.rmse) {
+            return left.rmse < right.rmse;
+        }
+        if (left.mean_distance != right.mean_distance) {
+            return left.mean_distance < right.mean_distance;
+        }
+        if (left.overlap != right.overlap) {
+            return left.overlap > right.overlap;
+        }
+        return left.internal_score > right.internal_score;
+    });
+    output << "Total candidate/API comparisons: " << matches.size() << "\n\n";
+    if (matches.empty()) {
+        output << "No candidate/API comparisons were possible.\n";
+        return output.str();
+    }
+
+    output << "Best overall matches:\n";
+    for (std::size_t index = 0; index < std::min<std::size_t>(25, matches.size()); ++index) {
+        const auto& match = matches[index];
+        output << "  #" << index + 1
+               << " | slot=" << std::setw(4) << std::setfill('0') << match.slot_index << std::setfill(' ')
+               << " | pair=" << match.pair_label
+               << " | participant=" << match.participant_id
+               << " | offsetMs=" << match.offset_ms
+               << " | rmse=" << std::fixed << std::setprecision(2) << match.rmse
+               << " | mean=" << match.mean_distance
+               << " | overlap=" << match.overlap << '/' << match.chunk_points
+               << " | internalScore=" << match.internal_score
+               << " | smooth=" << match.smooth_ratio
+               << " | moving=" << match.moving_ratio
+               << " | coverage=" << match.coverage
+               << " | first=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << static_cast<int>(match.top_first)
+               << std::dec << std::setfill(' ') << " | mask=" << format_mask(match.top_mask)
+               << "\n";
+    }
+
+    std::set<int> used_participants;
+    std::set<std::string> used_candidates;
+    output << "\nGreedy participant assignment:\n";
+    for (const auto& match : matches) {
+        std::ostringstream candidate_key;
+        candidate_key << match.slot_index << '|' << match.pair_label;
+        if (used_participants.find(match.participant_id) != used_participants.end()) {
+            continue;
+        }
+        if (used_candidates.find(candidate_key.str()) != used_candidates.end()) {
+            continue;
+        }
+        used_participants.insert(match.participant_id);
+        used_candidates.insert(candidate_key.str());
+        output << "  P" << match.participant_id
+               << " -> slot=" << std::setw(4) << std::setfill('0') << match.slot_index << std::setfill(' ')
+               << " pair=" << match.pair_label
+               << " offsetMs=" << match.offset_ms
+               << " rmse=" << std::fixed << std::setprecision(2) << match.rmse
+               << " mean=" << match.mean_distance
+               << " overlap=" << match.overlap << '/' << match.chunk_points
+               << " first=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << static_cast<int>(match.top_first)
+               << std::dec << std::setfill(' ') << " mask=" << format_mask(match.top_mask)
+               << "\n";
+        if (used_participants.size() >= participants.size()) {
+            break;
+        }
+    }
+
+    output << "\nInterpretation note:\n";
+    output << "  Lower RMSE means the chunk-collapsed sparse slot track stays closer to the Riot timeline path.\n";
+    output << "  If the best RMSE values remain in the several-thousand range, the current slot/pair extraction is still not decoding champion world positions cleanly.\n";
+    return output.str();
+}
+
 }  // namespace rofl::core
 
 

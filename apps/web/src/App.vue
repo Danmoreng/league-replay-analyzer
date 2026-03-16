@@ -5,7 +5,7 @@ import DataBrowser from "./components/DataBrowser.vue";
 import Minimap from "./components/Minimap.vue";
 import Timeline from "./components/Timeline.vue";
 import Sidebar from "./components/Sidebar.vue";
-import { usePlayback } from "./composables/usePlayback";
+import { usePlayback, type PlayerMovementData } from "./composables/usePlayback";
 import { buildReplayBrowserModel, type ReplayBrowserModel } from "./replayBrowser";
 import {
   deriveRiotMatchIdFromReplayName,
@@ -19,6 +19,7 @@ const { seek, setDuration } = usePlayback();
 const summary = ref<ReplaySummary | null>(null);
 const browserModel = ref<ReplayBrowserModel | null>(null);
 const riotBundle = ref<RiotFixtureBundle | null>(null);
+const apiMovement = ref<PlayerMovementData[]>([]);
 const riotFixtureStatus = ref("No Riot fixture loaded yet.");
 const parserEngine = ref("C++/Wasm");
 const loadedReplayName = ref("");
@@ -26,6 +27,38 @@ const status = ref("Pick a replay file to parse it with the C++/Wasm replay pars
 const errorMessage = ref("");
 const isLoading = ref(false);
 const activePage = ref<"summary" | "browser">("summary");
+function toDdragonVersion(version: string): string {
+  const match = version.match(/^(\d+)\.(\d+)/);
+  if (!match) {
+    return "16.5.1";
+  }
+
+  return `${match[1]}.${match[2]}.1`;
+}
+
+function getChampionIconSrc(champion: string, version: string): string {
+  return `https://ddragon.leagueoflegends.com/cdn/${toDdragonVersion(version)}/img/champion/${encodeURIComponent(champion)}.png`;
+}
+
+function getPlayerDisplayName(gameName?: string, tagline?: string): string {
+  if (!gameName) {
+    return "Unknown Player";
+  }
+
+  return tagline ? `${gameName}#${tagline}` : gameName;
+}
+
+function getRoleLabel(primary?: string, secondary?: string): string {
+  const value = primary || secondary || "";
+  if (!value) {
+    return "Unknown";
+  }
+
+  return value
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
 
 const teams = computed(() => {
   const players = summary.value?.players ?? [];
@@ -49,6 +82,194 @@ const teams = computed(() => {
     };
   });
 });
+
+
+const eventAnchoredTypes = new Set(["CHAMPION_KILL", "ELITE_MONSTER_KILL", "BUILDING_KILL"]);
+
+function createMovementPlayer(participantId: number, bundle: RiotFixtureBundle): PlayerMovementData {
+  const participant = bundle.match.info.participants.find((entry) => entry.participantId === participantId);
+  return {
+    champion: participant?.championName ?? `P${participantId}`,
+    team: participant?.teamId ?? 100,
+    playerName: getPlayerDisplayName(participant?.riotIdGameName, participant?.riotIdTagline),
+    championIconSrc: getChampionIconSrc(participant?.championName ?? `P${participantId}`, bundle.match.info.gameVersion),
+    roleLabel: getRoleLabel(participant?.lane, participant?.role),
+    positions: [],
+  };
+}
+
+function appendMovementPoint(
+  movement: Map<number, PlayerMovementData>,
+  participantId: number | undefined,
+  x: number,
+  y: number,
+  timestamp: number,
+  source: "frame" | "event",
+): void {
+  if (!participantId || participantId <= 0) {
+    return;
+  }
+
+  const player = movement.get(participantId);
+  if (!player) {
+    return;
+  }
+
+  player.positions.push({ x, y, timestamp, source });
+}
+
+function normalizeMovementPositions(positions: PlayerMovementData["positions"]): PlayerMovementData["positions"] {
+  const sourceRank = { frame: 0, event: 1 } as const;
+  const sorted = [...positions].sort(
+    (left, right) =>
+      left.timestamp - right.timestamp ||
+      sourceRank[left.source ?? "frame"] - sourceRank[right.source ?? "frame"],
+  );
+  const deduped: PlayerMovementData["positions"] = [];
+
+  for (const position of sorted) {
+    const previous = deduped[deduped.length - 1];
+    if (!previous) {
+      deduped.push(position);
+      continue;
+    }
+
+    if (previous.timestamp !== position.timestamp) {
+      if (previous.x !== position.x || previous.y !== position.y) {
+        deduped.push(position);
+      }
+      continue;
+    }
+
+    if (previous.x === position.x && previous.y === position.y) {
+      continue;
+    }
+
+    if ((previous.source ?? "frame") === "frame" && position.source === "event") {
+      deduped[deduped.length - 1] = position;
+    }
+  }
+
+  return deduped;
+}
+
+function buildApiMovementFromBundle(bundle: RiotFixtureBundle): PlayerMovementData[] {
+  const movement = new Map<number, PlayerMovementData>(
+    bundle.match.info.participants.map((participant) => [
+      participant.participantId,
+      createMovementPlayer(participant.participantId, bundle),
+    ]),
+  );
+
+  for (const frame of bundle.timeline.info.frames) {
+    const participantFrames = frame.participantFrames as Record<string, { position?: { x: number; y: number } }>;
+    for (const [rawParticipantId, participantFrame] of Object.entries(participantFrames)) {
+      if (!participantFrame.position) {
+        continue;
+      }
+
+      appendMovementPoint(
+        movement,
+        Number(rawParticipantId),
+        participantFrame.position.x,
+        participantFrame.position.y,
+        frame.timestamp,
+        "frame",
+      );
+    }
+
+    for (const event of frame.events) {
+      if (!eventAnchoredTypes.has(event.type) || !event.position) {
+        continue;
+      }
+
+      const anchoredParticipants = new Set<number>();
+      if (event.participantId && event.participantId > 0) {
+        anchoredParticipants.add(event.participantId);
+      }
+      if (event.killerId && event.killerId > 0) {
+        anchoredParticipants.add(event.killerId);
+      }
+      if (event.victimId && event.victimId > 0) {
+        anchoredParticipants.add(event.victimId);
+      }
+      for (const assistingParticipantId of event.assistingParticipantIds ?? []) {
+        if (assistingParticipantId > 0) {
+          anchoredParticipants.add(assistingParticipantId);
+        }
+      }
+
+      for (const participantId of anchoredParticipants) {
+        appendMovementPoint(
+          movement,
+          participantId,
+          event.position.x,
+          event.position.y,
+          event.timestamp,
+          "event",
+        );
+      }
+    }
+  }
+
+  return Array.from(movement.values())
+    .map((player) => ({
+      ...player,
+      positions: normalizeMovementPositions(player.positions),
+    }))
+    .filter((player) => player.positions.length > 0)
+    .sort((left, right) => {
+      if (left.team !== right.team) {
+        return left.team - right.team;
+      }
+      return left.champion.localeCompare(right.champion);
+    });
+}
+
+async function loadMovementData(): Promise<string> {
+  apiMovement.value = [];
+
+  if (riotBundle.value) {
+    apiMovement.value = buildApiMovementFromBundle(riotBundle.value);
+    const apiValid = apiMovement.value.filter((player) => player.positions.length > 0).length;
+    return apiValid > 0
+      ? `(Loaded Riot timeline movement plus event anchors for ${apiValid} players)`
+      : "(Riot timeline fixture did not contain participant positions)";
+  }
+
+  try {
+    const apiRes = await fetch(`api-positions.json?t=${Date.now()}`);
+    if (!apiRes.ok) {
+      return `(No API movement fixture available: ${apiRes.status})`;
+    }
+
+    const apiRaw = await apiRes.json();
+    const players = summary.value?.players ?? [];
+    apiMovement.value = apiRaw.map((player: any) => {
+      const summaryPlayer = players[player.participantId - 1];
+      return {
+        champion: summaryPlayer?.champion ?? `P${player.participantId}`,
+        team: Number(summaryPlayer?.team ?? 100),
+        playerName: getPlayerDisplayName(summaryPlayer?.riotIdGameName, summaryPlayer?.riotIdTagLine),
+        championIconSrc: getChampionIconSrc(summaryPlayer?.champion ?? `P${player.participantId}`, summary.value?.gameVersion ?? "16.5.1"),
+        roleLabel: getRoleLabel(summaryPlayer?.teamPosition),
+        positions: player.positions.map((position: any) => ({
+          x: position.x,
+          y: position.y,
+          timestamp: position.timestamp,
+        })),
+      };
+    });
+
+    const apiValid = apiMovement.value.filter((player) => player.positions.length > 0).length;
+    return apiValid > 0
+      ? `(Loaded fallback API movement for ${apiValid} players)`
+      : "(Fallback API movement fixture had no positions)";
+  } catch (error) {
+    apiMovement.value = [];
+    return `(API movement unavailable: ${error instanceof Error ? error.message : String(error)})`;
+  }
+}
 
 const maxGold = computed(() =>
   Math.max(1, ...(summary.value?.players ?? []).map((player) => Number(player.goldEarned ?? 0))),
@@ -194,7 +415,8 @@ async function loadReplay(file: File): Promise<void> {
 
     setDuration(parsedSummary.gameLengthMillis);
     seek(0);
-    status.value = `Parsed ${file.name} successfully.`;
+    const movementStatus = await loadMovementData();
+    status.value = `Parsed ${file.name} successfully. ${movementStatus}`;
   } catch (error) {
     summary.value = null;
     browserModel.value = null;
@@ -269,17 +491,18 @@ function onFileChange(event: Event): void {
                 <div class="d-flex justify-content-between align-items-start">
                   <div>
                     <h2 class="fs-5 mb-1">Match Timeline</h2>
-                    <p class="text-muted small">No decoded movement frames are available yet.</p>
+                    <p class="text-muted small" v-if="apiMovement.length">Riot timeline frame positions plus combat and objective event anchors rendered on the original Summoner&apos;s Rift minimap.</p>
+                    <p class="text-muted small" v-else>No decoded movement frames are available yet.</p>
                   </div>
-                  <span class="badge bg-warning-subtle text-warning-emphasis">Movement Unavailable</span>
+                  <span v-if="apiMovement.length" class="badge bg-success-subtle text-success-emphasis">API Movement Ready</span>
+                  <span v-else class="badge bg-warning-subtle text-warning-emphasis">Movement Unavailable</span>
                 </div>
                 
-                <div class="d-flex justify-content-center bg-black bg-opacity-25 rounded-3 p-3 border border-secondary border-opacity-10">
+                <div class="movement-map-frame d-flex justify-content-center bg-black bg-opacity-25 rounded-3 p-2 p-xl-3 border border-secondary border-opacity-10">
                   <Minimap
-                    :player-data="[]"
-                    label="Movement Map"
-                    empty-message="Current parser output does not include champion coordinates yet."
-                    style="max-width: 400px;"
+                    class="movement-map"
+                    :player-data="apiMovement"
+                    empty-message="No Riot timeline movement fixture is available for this replay."
                   />
                 </div>
                 <Timeline class="main-timeline" />
@@ -460,6 +683,14 @@ function onFileChange(event: Event): void {
 pre {
   white-space: pre-wrap;
   word-wrap: break-word;
+}
+
+.movement-map-frame {
+  width: 100%;
+}
+
+.movement-map {
+  width: 100%;
 }
 
 code {

@@ -102,6 +102,8 @@ struct ReplaySummary {
 [[nodiscard]] std::string trace_sparse_slot(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t slot_index, std::size_t max_records);
 [[nodiscard]] std::string profile_position_slots(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots, float move_epsilon, float smooth_threshold);
 [[nodiscard]] std::string compare_position_classes(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots, std::size_t top_classes, float move_epsilon, float smooth_threshold);
+[[nodiscard]] std::string export_positions_json(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, const std::vector<std::size_t>& slots);
+[[nodiscard]] std::string compare_positions_with_api(const std::string& replay_path, const std::string& api_positions_path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots, float move_epsilon, float smooth_threshold, int chunk_time_millis, int chunk_base_id, int max_time_offsets);
 
 }  // namespace rofl::core
 
