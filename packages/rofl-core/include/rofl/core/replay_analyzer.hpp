@@ -95,6 +95,7 @@ struct ReplaySummary {
 [[nodiscard]] std::string inspect_replay_file(const std::string& path);
 [[nodiscard]] std::string replay_summary_to_json(const ReplaySummary& summary);
 [[nodiscard]] std::string dump_chunk_subrecords(const std::string& path, int chunk_id);
+[[nodiscard]] std::string summarize_subrecord_families(const std::string& path, std::size_t minimum_length, std::size_t minimum_records, std::size_t top_families);
 [[nodiscard]] std::string dump_subrecord_family(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte);
 [[nodiscard]] std::string compare_subrecord_family(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t prefix_bytes);
 [[nodiscard]] std::string guess_stride(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size);
@@ -104,8 +105,11 @@ struct ReplaySummary {
 [[nodiscard]] std::string compare_position_classes(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots, std::size_t top_classes, float move_epsilon, float smooth_threshold);
 [[nodiscard]] std::string export_positions_json(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, const std::vector<std::size_t>& slots);
 [[nodiscard]] std::string compare_positions_with_api(const std::string& replay_path, const std::string& api_positions_path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots, float move_epsilon, float smooth_threshold, int chunk_time_millis, int chunk_base_id, int max_time_offsets);
+[[nodiscard]] std::string compare_raw_positions_with_api(const std::string& replay_path, const std::string& api_positions_path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots, float move_epsilon, float smooth_threshold, int chunk_time_millis, int chunk_base_id, int max_time_offsets);
+[[nodiscard]] std::string match_event_window(const std::string& replay_path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, double event_x, double event_y, int timestamp_millis, int chunk_time_millis, int chunk_base_id, int chunk_radius, std::size_t top_slots, float move_epsilon, float smooth_threshold);
 
 }  // namespace rofl::core
+
 
 
 

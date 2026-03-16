@@ -45,6 +45,30 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (first_arg == "--summarize-subrecord-families" && argc > 2) {
+        try {
+            std::string path = argv[2];
+            std::size_t minimum_length = 256;
+            std::size_t minimum_records = 4;
+            std::size_t top_families = 20;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view arg = argv[i];
+                if (arg == "--min-length" && i + 1 < argc) {
+                    minimum_length = std::stoull(argv[++i]);
+                } else if (arg == "--min-records" && i + 1 < argc) {
+                    minimum_records = std::stoull(argv[++i]);
+                } else if (arg == "--top-families" && i + 1 < argc) {
+                    top_families = std::stoull(argv[++i]);
+                }
+            }
+            std::cout << rofl::core::summarize_subrecord_families(path, minimum_length, minimum_records, top_families);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
     if (first_arg == "--dump-subrecord-family" && argc > 2) {
         try {
             std::string path = argv[2];
@@ -284,6 +308,131 @@ int main(int argc, char** argv) {
     }
 
 
+    if (first_arg == "--match-event-window" && argc > 2) {
+        try {
+            std::string replay_path = argv[2];
+            std::size_t length = 0;
+            std::uint8_t first_byte = 0;
+            std::size_t header_size = 0;
+            std::size_t stride = 16;
+            double event_x = 0.0;
+            double event_y = 0.0;
+            int timestamp_millis = 0;
+            int chunk_time_millis = 30000;
+            int chunk_base_id = -1;
+            int chunk_radius = 1;
+            std::size_t top_slots = 40;
+            float move_epsilon = 25.0F;
+            float smooth_threshold = 1200.0F;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view arg = argv[i];
+                if (arg == "--length" && i + 1 < argc) {
+                    length = std::stoull(argv[++i]);
+                } else if (arg == "--first-byte" && i + 1 < argc) {
+                    first_byte = static_cast<std::uint8_t>(std::stoul(argv[++i], nullptr, 0));
+                } else if (arg == "--header-size" && i + 1 < argc) {
+                    header_size = std::stoull(argv[++i]);
+                } else if (arg == "--stride" && i + 1 < argc) {
+                    stride = std::stoull(argv[++i]);
+                } else if (arg == "--event-x" && i + 1 < argc) {
+                    event_x = std::stod(argv[++i]);
+                } else if (arg == "--event-y" && i + 1 < argc) {
+                    event_y = std::stod(argv[++i]);
+                } else if (arg == "--timestamp-ms" && i + 1 < argc) {
+                    timestamp_millis = std::stoi(argv[++i]);
+                } else if (arg == "--chunk-time-ms" && i + 1 < argc) {
+                    chunk_time_millis = std::stoi(argv[++i]);
+                } else if (arg == "--chunk-base-id" && i + 1 < argc) {
+                    chunk_base_id = std::stoi(argv[++i]);
+                } else if (arg == "--chunk-radius" && i + 1 < argc) {
+                    chunk_radius = std::stoi(argv[++i]);
+                } else if (arg == "--top-slots" && i + 1 < argc) {
+                    top_slots = std::stoull(argv[++i]);
+                } else if (arg == "--move-epsilon" && i + 1 < argc) {
+                    move_epsilon = std::stof(argv[++i]);
+                } else if (arg == "--smooth-threshold" && i + 1 < argc) {
+                    smooth_threshold = std::stof(argv[++i]);
+                }
+            }
+            std::cout << rofl::core::match_event_window(
+                replay_path,
+                length,
+                first_byte,
+                header_size,
+                stride,
+                event_x,
+                event_y,
+                timestamp_millis,
+                chunk_time_millis,
+                chunk_base_id,
+                chunk_radius,
+                top_slots,
+                move_epsilon,
+                smooth_threshold);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
+    if (first_arg == "--compare-raw-positions-with-api" && argc > 3) {
+        try {
+            std::string replay_path = argv[2];
+            std::string api_positions_path = argv[3];
+            std::size_t length = 0;
+            std::uint8_t first_byte = 0;
+            std::size_t header_size = 0;
+            std::size_t stride = 16;
+            std::size_t top_slots = 120;
+            float move_epsilon = 25.0F;
+            float smooth_threshold = 1200.0F;
+            int chunk_time_millis = 30000;
+            int chunk_base_id = -1;
+            int max_time_offsets = 5;
+            for (int i = 4; i < argc; ++i) {
+                std::string_view arg = argv[i];
+                if (arg == "--length" && i + 1 < argc) {
+                    length = std::stoull(argv[++i]);
+                } else if (arg == "--first-byte" && i + 1 < argc) {
+                    first_byte = static_cast<std::uint8_t>(std::stoul(argv[++i], nullptr, 0));
+                } else if (arg == "--header-size" && i + 1 < argc) {
+                    header_size = std::stoull(argv[++i]);
+                } else if (arg == "--stride" && i + 1 < argc) {
+                    stride = std::stoull(argv[++i]);
+                } else if (arg == "--top-slots" && i + 1 < argc) {
+                    top_slots = std::stoull(argv[++i]);
+                } else if (arg == "--move-epsilon" && i + 1 < argc) {
+                    move_epsilon = std::stof(argv[++i]);
+                } else if (arg == "--smooth-threshold" && i + 1 < argc) {
+                    smooth_threshold = std::stof(argv[++i]);
+                } else if (arg == "--chunk-time-ms" && i + 1 < argc) {
+                    chunk_time_millis = std::stoi(argv[++i]);
+                } else if (arg == "--chunk-base-id" && i + 1 < argc) {
+                    chunk_base_id = std::stoi(argv[++i]);
+                } else if (arg == "--max-time-offsets" && i + 1 < argc) {
+                    max_time_offsets = std::stoi(argv[++i]);
+                }
+            }
+            std::cout << rofl::core::compare_raw_positions_with_api(
+                replay_path,
+                api_positions_path,
+                length,
+                first_byte,
+                header_size,
+                stride,
+                top_slots,
+                move_epsilon,
+                smooth_threshold,
+                chunk_time_millis,
+                chunk_base_id,
+                max_time_offsets);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
     if (first_arg == "--compare-positions-with-api" && argc > 3) {
         try {
             std::string replay_path = argv[2];
@@ -371,6 +520,7 @@ int main(int argc, char** argv) {
     std::cout << "Use --probe <path-to-rofl> to inspect likely payload/index regions.\n";
     std::cout << "Use --inspect <path-to-rofl> to inspect decompressed footer-style payload records.\n";
     std::cout << "Use --dump-chunk-subrecords <path-to-rofl> --chunk-id <id> to dump subrecords for a chunk.\n";
+    std::cout << "Use --summarize-subrecord-families <path-to-rofl> [--min-length <n>] [--min-records <n>] [--top-families <n>] to rank recurring subrecord families across the replay.\n";
     std::cout << "Use --dump-subrecord-family <path-to-rofl> --length <len> --first-byte <byte> to dump matching records.\n";
     std::cout << "Use --compare-subrecord-family <path-to-rofl> --length <len> --first-byte <byte> [--prefix-bytes <len>] to analyze stable fields.\n";
     std::cout << "Use --guess-stride <path-to-rofl> --length <len> --first-byte <byte> [--header-size <len>] to detect repeating patterns.\n";
@@ -380,8 +530,12 @@ int main(int argc, char** argv) {
     std::cout << "Use --compare-position-classes <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--top-classes <n>] [--move-epsilon <f>] [--smooth-threshold <f>] to compare discovered slot classes against entity archetypes.\n";
     std::cout << "Use --export-positions-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] to export sparse slot positions as JSON.\n";
     std::cout << "Use --compare-positions-with-api <path-to-rofl> <path-to-api-positions-json> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--move-epsilon <f>] [--smooth-threshold <f>] [--chunk-time-ms <ms>] [--chunk-base-id <id>] [--max-time-offsets <n>] to rank sparse slot tracks against Riot API positions.\n";
+    std::cout << "Use --compare-raw-positions-with-api <path-to-rofl> <path-to-api-positions-json> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--move-epsilon <f>] [--smooth-threshold <f>] [--chunk-time-ms <ms>] [--chunk-base-id <id>] [--max-time-offsets <n>] to rank raw per-record sparse samples against Riot API positions.\n";
+    std::cout << "Use --match-event-window <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --event-x <x> --event-y <y> --timestamp-ms <ms> [--stride <len>] [--chunk-time-ms <ms>] [--chunk-base-id <id>] [--chunk-radius <n>] [--top-slots <n>] [--move-epsilon <f>] [--smooth-threshold <f>] to rank sparse slot samples near one known event location.\n";
     return 0;
 }
+
+
 
 
 
