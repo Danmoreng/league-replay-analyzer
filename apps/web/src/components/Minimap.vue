@@ -159,7 +159,8 @@ onUnmounted(() => {
   <div class="minimap-shell">
     <div v-if="hasRenderablePlayers" class="team-column team-column-left">
       <div v-for="player in blueTeamPlayers" :key="`${player.team}-${player.champion}-${player.playerName}-left`" class="team-item">
-        <img :src="player.championIconSrc" :alt="player.champion" class="team-icon blue-team" />
+        <img v-if="player.championIconSrc" :src="player.championIconSrc" :alt="player.champion" class="team-icon blue-team" />
+        <div v-else class="team-icon team-fallback blue-team"></div>
         <div class="team-copy team-copy-left">
           <div class="team-role">{{ player.roleLabel }}</div>
           <div class="team-champion">{{ player.champion }}</div>
@@ -185,6 +186,7 @@ onUnmounted(() => {
             class="champion-icon"
             :class="player.team === 100 ? 'blue-team' : 'red-team'"
           />
+          <div v-else class="marker-dot" :class="player.team === 100 ? 'blue-team' : 'red-team'"></div>
         </div>
       </div>
       <div v-if="!hasRenderablePlayers" class="empty-overlay">
@@ -199,7 +201,8 @@ onUnmounted(() => {
           <div class="team-champion">{{ player.champion }}</div>
           <div class="team-player">{{ player.playerName }}</div>
         </div>
-        <img :src="player.championIconSrc" :alt="player.champion" class="team-icon red-team" />
+        <img v-if="player.championIconSrc" :src="player.championIconSrc" :alt="player.champion" class="team-icon red-team" />
+        <div v-else class="team-icon team-fallback red-team"></div>
       </div>
     </div>
   </div>
@@ -316,7 +319,8 @@ onUnmounted(() => {
 }
 
 .champion-icon,
-.team-icon {
+.team-icon,
+.marker-dot {
   display: block;
   object-fit: cover;
   border-radius: 999px;
@@ -329,10 +333,20 @@ onUnmounted(() => {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
 }
 
+.marker-dot {
+  width: 18px;
+  height: 18px;
+  margin: 5px;
+}
+
 .team-icon {
   width: 36px;
   height: 36px;
   flex-shrink: 0;
+}
+
+.team-fallback {
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .blue-team {

@@ -1849,7 +1849,9 @@ std::string replay_summary_to_json(const ReplaySummary& summary) {
 }
 
 struct ExtractedSubrecord {
+    int segment_id = 0;
     int chunk_id = 0;
+    std::string segment_type;
     std::size_t chunk_offset = 0;
     std::vector<std::uint8_t> payload;
 };
@@ -1858,7 +1860,8 @@ struct ExtractedSubrecord {
     const std::vector<std::uint8_t>& bytes,
     const ReplaySummary& summary,
     std::size_t target_length,
-    std::uint8_t target_first_byte
+    std::uint8_t target_first_byte,
+    std::string_view target_segment_type = "chunk"
 ) {
     std::vector<ExtractedSubrecord> results;
 
@@ -1882,7 +1885,9 @@ struct ExtractedSubrecord {
                 for (const auto& rec : records) {
                     if (rec.length == target_length && decompressed[rec.payload_offset] == target_first_byte) {
                         ExtractedSubrecord extracted;
+                        extracted.segment_id = segment.id;
                         extracted.chunk_id = segment.chunk_id;
+                        extracted.segment_type = segment.type;
                         extracted.chunk_offset = rec.payload_offset;
                         extracted.payload.assign(
                             decompressed.begin() + static_cast<std::ptrdiff_t>(rec.payload_offset),
@@ -1979,7 +1984,15 @@ std::string summarize_subrecord_families(
             continue;
         }
 
-        const auto records = extract_le_framed_subrecords(decompressed, 2, best_u16.start_offset, 1000000);
+        std::size_t start_offset = best_u16.start_offset;
+        if (decompressed.size() > 1) {
+            const auto best_u16_offset_1 = analyze_le_length_prefix(std::vector<std::uint8_t>(decompressed.begin() + 1, decompressed.end()), 2);
+            if (best_u16_offset_1.record_count > best_u16.record_count) {
+                start_offset = best_u16_offset_1.start_offset + 1;
+            }
+        }
+
+        const auto records = extract_le_framed_subrecords(decompressed, 2, start_offset, 1000000);
         if (records.empty()) {
             continue;
         }
@@ -4970,6 +4983,1360 @@ std::string compare_raw_positions_with_api(
     output << "  If affineRmse drops sharply while identityRmse stays large, the warp hypothesis becomes much more plausible.\n";
     return output.str();
 }
+struct JsonFamilyAggregate {
+    std::size_t length = 0;
+    std::uint8_t first_byte = 0;
+    std::size_t record_count = 0;
+    std::set<int> chunk_ids;
+};
+
+struct JsonFamilyScanResult {
+    std::size_t scanned_chunk_count = 0;
+    std::vector<JsonFamilyAggregate> ranked_families;
+};
+
+[[nodiscard]] JsonFamilyScanResult collect_ranked_chunk_families(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t minimum_length,
+    std::size_t minimum_records
+) {
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    std::map<std::pair<std::size_t, std::uint8_t>, JsonFamilyAggregate> families;
+    std::size_t scanned_chunk_count = 0;
+
+    for (const ReplaySegmentSummary& segment : summary.container.segments) {
+        if (segment.codec != "zstd" || segment.type != "chunk") {
+            continue;
+        }
+
+        std::vector<std::uint8_t> decompressed;
+        std::string error;
+        if (!try_decompress_zstd_segment(bytes, segment, decompressed, error)) {
+            continue;
+        }
+
+        const auto best_u16 = analyze_le_length_prefix(decompressed, 2);
+        if (best_u16.record_count < 2) {
+            continue;
+        }
+
+        std::size_t start_offset = best_u16.start_offset;
+        if (decompressed.size() > 1) {
+            const auto best_u16_offset_1 = analyze_le_length_prefix(std::vector<std::uint8_t>(decompressed.begin() + 1, decompressed.end()), 2);
+            if (best_u16_offset_1.record_count > best_u16.record_count) {
+                start_offset = best_u16_offset_1.start_offset + 1;
+            }
+        }
+
+        const auto records = extract_le_framed_subrecords(decompressed, 2, start_offset, 1000000);
+        if (records.empty()) {
+            continue;
+        }
+
+        scanned_chunk_count += 1;
+        for (const FramedSubrecord& record : records) {
+            if (record.length < minimum_length || record.payload_offset >= decompressed.size()) {
+                continue;
+            }
+
+            const auto key = std::make_pair(record.length, decompressed[record.payload_offset]);
+            auto& aggregate = families[key];
+            aggregate.length = record.length;
+            aggregate.first_byte = decompressed[record.payload_offset];
+            aggregate.record_count += 1;
+            aggregate.chunk_ids.insert(segment.chunk_id);
+        }
+    }
+
+    std::vector<JsonFamilyAggregate> ranked;
+    ranked.reserve(families.size());
+    for (const auto& entry : families) {
+        if (entry.second.record_count >= minimum_records) {
+            ranked.push_back(entry.second);
+        }
+    }
+
+    std::sort(ranked.begin(), ranked.end(), [](const JsonFamilyAggregate& left, const JsonFamilyAggregate& right) {
+        if (left.chunk_ids.size() != right.chunk_ids.size()) {
+            return left.chunk_ids.size() > right.chunk_ids.size();
+        }
+        if (left.record_count != right.record_count) {
+            return left.record_count > right.record_count;
+        }
+        if (left.length != right.length) {
+            return left.length > right.length;
+        }
+        return left.first_byte < right.first_byte;
+    });
+
+    return {scanned_chunk_count, ranked};
+}
+
+[[nodiscard]] std::string u32_hex(std::uint32_t value) {
+    std::ostringstream output;
+    output << "0x" << std::hex << std::uppercase << std::setw(8) << std::setfill('0') << value;
+    return output.str();
+}
+
+std::string scan_replay_families_json(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t minimum_length,
+    std::size_t minimum_records,
+    std::size_t top_families
+) {
+    const auto scan = collect_ranked_chunk_families(bytes, minimum_length, minimum_records);
+
+    if (top_families == 0) {
+        top_families = 20;
+    }
+    const std::size_t shown = std::min<std::size_t>(top_families, scan.ranked_families.size());
+
+    std::ostringstream output;
+    output << '{';
+    output << "\"scannedChunkCount\":" << scan.scanned_chunk_count << ',';
+    output << "\"minimumLength\":" << minimum_length << ',';
+    output << "\"minimumRecords\":" << minimum_records << ',';
+    output << "\"families\":[";
+    for (std::size_t index = 0; index < shown; ++index) {
+        const JsonFamilyAggregate& family = scan.ranked_families[index];
+        if (index > 0) {
+            output << ',';
+        }
+        output << '{';
+        output << "\"length\":" << family.length << ',';
+        output << "\"firstByte\":" << static_cast<int>(family.first_byte) << ',';
+        output << "\"paddingByte\":" << static_cast<int>(family.length & 0xFFu) << ',';
+        output << "\"recordCount\":" << family.record_count << ',';
+        output << "\"chunkCount\":" << family.chunk_ids.size() << ',';
+        output << "\"chunkSpanStart\":" << (family.chunk_ids.empty() ? 0 : *family.chunk_ids.begin()) << ',';
+        output << "\"chunkSpanEnd\":" << (family.chunk_ids.empty() ? 0 : *family.chunk_ids.rbegin()) << ',';
+        output << "\"recommendedStride\":16,";
+        output << "\"headerSizeCandidates\":[";
+        bool first_candidate = true;
+        int recommended_header_size = -1;
+        for (std::size_t header_size = 0; header_size <= 16; ++header_size) {
+            if (family.length <= header_size || ((family.length - header_size) % 16) != 0) {
+                continue;
+            }
+            if (!first_candidate) {
+                output << ',';
+            }
+            first_candidate = false;
+            if (recommended_header_size < 0) {
+                recommended_header_size = static_cast<int>(header_size);
+            }
+            output << '{';
+            output << "\"headerSize\":" << header_size << ',';
+            output << "\"elementCount\":" << ((family.length - header_size) / 16);
+            output << '}';
+        }
+        output << "],";
+        output << "\"recommendedHeaderSize\":" << recommended_header_size;
+        output << '}';
+    }
+    output << "]}";
+    return output.str();
+}
+
+std::string scan_replay_families_file_json(
+    const std::string& path,
+    std::size_t minimum_length,
+    std::size_t minimum_records,
+    std::size_t top_families
+) {
+    const auto bytes = read_file_bytes(path);
+    return scan_replay_families_json(bytes, minimum_length, minimum_records, top_families);
+}
+
+std::string analyze_sparse_family_json(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    std::size_t top_slots,
+    float move_epsilon,
+    float smooth_threshold
+) {
+    struct PairDefinition {
+        std::size_t left_lane = 0;
+        std::size_t right_lane = 0;
+        std::string label;
+    };
+
+    struct PreviousSample {
+        bool valid = false;
+        std::size_t record_index = 0;
+        float x = 0.0F;
+        float y = 0.0F;
+    };
+
+    struct SlotPairProfile {
+        std::size_t slot_index = 0;
+        std::size_t pair_index = 0;
+        std::size_t coordinate_samples = 0;
+        std::size_t transitions = 0;
+        std::size_t smooth_transitions = 0;
+        std::size_t moving_transitions = 0;
+        std::size_t active_records = 0;
+        double total_distance = 0.0;
+        float max_distance = 0.0F;
+        float min_x = std::numeric_limits<float>::infinity();
+        float max_x = -std::numeric_limits<float>::infinity();
+        float min_y = std::numeric_limits<float>::infinity();
+        float max_y = -std::numeric_limits<float>::infinity();
+        int min_chunk_id = std::numeric_limits<int>::max();
+        int max_chunk_id = std::numeric_limits<int>::min();
+        std::map<std::uint8_t, std::size_t> first_byte_freq;
+        std::map<std::uint8_t, std::size_t> mask_freq;
+    };
+
+    struct RankedCandidate {
+        std::size_t profile_index = 0;
+        double score = 0.0;
+        double smooth_ratio = 0.0;
+        double moving_ratio = 0.0;
+        double coverage = 0.0;
+        float x_range = 0.0F;
+        float y_range = 0.0F;
+    };
+
+    struct TrackPoint {
+        int chunk_id = 0;
+        std::size_t record_index = 0;
+        int timestamp = 0;
+        float x = 0.0F;
+        float y = 0.0F;
+        std::uint8_t mask = 0;
+        std::uint8_t first_byte = 0;
+    };
+
+    struct ClassAggregate {
+        std::size_t members = 0;
+        double best_score = 0.0;
+        std::size_t total_coordinate_samples = 0;
+        std::size_t total_moving_transitions = 0;
+    };
+
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    std::ostringstream output;
+
+    output << '{';
+    output << "\"length\":" << target_length << ',';
+    output << "\"firstByte\":" << static_cast<int>(target_first_byte) << ',';
+    output << "\"recordCount\":" << records.size() << ',';
+    output << "\"headerSize\":" << header_size << ',';
+    output << "\"stride\":" << stride << ',';
+    output << "\"gameLengthMillis\":" << summary.game_length_millis << ',';
+    output << "\"chunkBaseId\":" << (summary.container.game_start_chunk_id > 0 ? summary.container.game_start_chunk_id : 0) << ',';
+
+    if (records.empty()) {
+        output << "\"elementCount\":0,";
+        output << "\"laneCount\":0,";
+        output << "\"candidates\":[],";
+        output << "\"classes\":[]}";
+        return output.str();
+    }
+    if (header_size >= target_length) {
+        output << "\"error\":\"Header size must be smaller than the target record length.\"}";
+        return output.str();
+    }
+    if (stride == 0 || (stride % 4) != 0) {
+        output << "\"error\":\"Stride must be a non-zero multiple of 4 for lane analysis.\"}";
+        return output.str();
+    }
+    if (smooth_threshold <= 0.0F) {
+        output << "\"error\":\"Smooth threshold must be positive.\"}";
+        return output.str();
+    }
+    if (move_epsilon < 0.0F) {
+        output << "\"error\":\"Move epsilon must be non-negative.\"}";
+        return output.str();
+    }
+
+    const std::uint8_t padding_byte = static_cast<std::uint8_t>(target_length & 0xFFu);
+    const std::uint32_t padding_u32 = static_cast<std::uint32_t>(padding_byte) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 8U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 16U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 24U);
+    const std::size_t usable_bytes = target_length - header_size;
+    const std::size_t element_count = usable_bytes / stride;
+    const std::size_t lane_count = std::min<std::size_t>(4, stride / 4);
+
+    output << "\"elementCount\":" << element_count << ',';
+    output << "\"laneCount\":" << lane_count << ',';
+
+    if (lane_count < 2) {
+        output << "\"error\":\"Need at least two 32-bit lanes to compare coordinate pairs.\",\"candidates\":[],\"classes\":[]}";
+        return output.str();
+    }
+
+    std::vector<PairDefinition> pair_defs = {{0, 1, "+0/+4"}};
+    if (lane_count >= 3) {
+        pair_defs.push_back({1, 2, "+4/+8"});
+        pair_defs.push_back({0, 2, "+0/+8"});
+    }
+    if (lane_count >= 4) {
+        pair_defs.push_back({2, 3, "+8/+12"});
+        pair_defs.push_back({0, 3, "+0/+12"});
+    }
+
+    const auto is_coordinate_like = [](float value) {
+        return std::isfinite(value) && std::fpclassify(value) == FP_NORMAL && value >= -5000.0F && value <= 20000.0F;
+    };
+    const auto top_freq_entry = [](const std::map<std::uint8_t, std::size_t>& freq) {
+        if (freq.empty()) {
+            return std::pair<std::uint8_t, std::size_t>{0, 0};
+        }
+        const auto it = std::max_element(freq.begin(), freq.end(), [](const auto& left, const auto& right) {
+            if (left.second != right.second) {
+                return left.second < right.second;
+            }
+            return left.first > right.first;
+        });
+        return std::pair<std::uint8_t, std::size_t>{it->first, it->second};
+    };
+    const auto mask_string = [lane_count](std::uint8_t mask) {
+        std::string bits;
+        bits.reserve(lane_count);
+        for (int bit = static_cast<int>(lane_count) - 1; bit >= 0; --bit) {
+            bits += (((mask >> bit) & 1U) != 0U) ? '1' : '0';
+        }
+        return bits;
+    };
+
+    const std::size_t profile_count = element_count * pair_defs.size();
+    std::vector<SlotPairProfile> profiles(profile_count);
+    std::vector<PreviousSample> previous_samples(profile_count);
+    for (std::size_t slot_index = 0; slot_index < element_count; ++slot_index) {
+        for (std::size_t pair_index = 0; pair_index < pair_defs.size(); ++pair_index) {
+            auto& profile = profiles[(slot_index * pair_defs.size()) + pair_index];
+            profile.slot_index = slot_index;
+            profile.pair_index = pair_index;
+        }
+    }
+
+    for (std::size_t record_index = 0; record_index < records.size(); ++record_index) {
+        const auto& rec = records[record_index];
+        for (std::size_t slot_index = 0; slot_index < element_count; ++slot_index) {
+            const std::size_t start = header_size + (slot_index * stride);
+            if (start + stride > rec.payload.size()) {
+                break;
+            }
+
+            std::array<bool, 4> lane_is_coordinate = {false, false, false, false};
+            std::array<float, 4> lane_floats = {0.0F, 0.0F, 0.0F, 0.0F};
+            std::uint8_t mask = 0;
+            bool active = false;
+
+            for (std::size_t lane_index = 0; lane_index < lane_count; ++lane_index) {
+                std::uint32_t value = 0;
+                if (!read_u32_le(rec.payload, start + (lane_index * 4), value) || value == padding_u32) {
+                    continue;
+                }
+                active = true;
+                mask |= static_cast<std::uint8_t>(1U << lane_index);
+                const float as_float = std::bit_cast<float>(value);
+                if (is_coordinate_like(as_float)) {
+                    lane_is_coordinate[lane_index] = true;
+                    lane_floats[lane_index] = as_float;
+                }
+            }
+
+            if (!active) {
+                continue;
+            }
+
+            for (std::size_t pair_index = 0; pair_index < pair_defs.size(); ++pair_index) {
+                const auto& pair = pair_defs[pair_index];
+                auto& profile = profiles[(slot_index * pair_defs.size()) + pair_index];
+                profile.active_records++;
+                if (!lane_is_coordinate[pair.left_lane] || !lane_is_coordinate[pair.right_lane]) {
+                    continue;
+                }
+
+                profile.coordinate_samples++;
+                profile.first_byte_freq[rec.payload[start]]++;
+                profile.mask_freq[mask]++;
+                profile.min_x = std::min(profile.min_x, lane_floats[pair.left_lane]);
+                profile.max_x = std::max(profile.max_x, lane_floats[pair.left_lane]);
+                profile.min_y = std::min(profile.min_y, lane_floats[pair.right_lane]);
+                profile.max_y = std::max(profile.max_y, lane_floats[pair.right_lane]);
+                profile.min_chunk_id = std::min(profile.min_chunk_id, rec.chunk_id);
+                profile.max_chunk_id = std::max(profile.max_chunk_id, rec.chunk_id);
+
+                auto& previous = previous_samples[(slot_index * pair_defs.size()) + pair_index];
+                if (previous.valid && previous.record_index + 1 == record_index) {
+                    const float distance = std::hypot(lane_floats[pair.left_lane] - previous.x, lane_floats[pair.right_lane] - previous.y);
+                    profile.transitions++;
+                    profile.total_distance += distance;
+                    profile.max_distance = std::max(profile.max_distance, distance);
+                    if (distance <= smooth_threshold) {
+                        profile.smooth_transitions++;
+                        if (distance >= move_epsilon) {
+                            profile.moving_transitions++;
+                        }
+                    }
+                }
+
+                previous.valid = true;
+                previous.record_index = record_index;
+                previous.x = lane_floats[pair.left_lane];
+                previous.y = lane_floats[pair.right_lane];
+            }
+        }
+    }
+
+    std::vector<RankedCandidate> ranked_candidates;
+    ranked_candidates.reserve(profile_count);
+    for (std::size_t profile_index = 0; profile_index < profiles.size(); ++profile_index) {
+        const auto& profile = profiles[profile_index];
+        if (profile.coordinate_samples < 8 || profile.transitions < 4 || profile.smooth_transitions == 0) {
+            continue;
+        }
+
+        const float x_range = std::isfinite(profile.min_x) && std::isfinite(profile.max_x) ? profile.max_x - profile.min_x : 0.0F;
+        const float y_range = std::isfinite(profile.min_y) && std::isfinite(profile.max_y) ? profile.max_y - profile.min_y : 0.0F;
+        const double smooth_ratio = static_cast<double>(profile.smooth_transitions) / static_cast<double>(profile.transitions);
+        const double moving_ratio = static_cast<double>(profile.moving_transitions) / static_cast<double>(profile.transitions);
+        const double coverage = static_cast<double>(profile.coordinate_samples) / static_cast<double>(records.size());
+        const double range_score = std::min<double>(3.0, static_cast<double>(x_range + y_range) / 4000.0);
+        const double score = (static_cast<double>(profile.moving_transitions) + (0.5 * static_cast<double>(profile.smooth_transitions))) *
+                             (0.5 + smooth_ratio) *
+                             (0.25 + coverage) *
+                             (0.25 + range_score);
+        ranked_candidates.push_back({profile_index, score, smooth_ratio, moving_ratio, coverage, x_range, y_range});
+    }
+
+    std::sort(ranked_candidates.begin(), ranked_candidates.end(), [&](const RankedCandidate& left, const RankedCandidate& right) {
+        if (left.score != right.score) {
+            return left.score > right.score;
+        }
+        if (left.moving_ratio != right.moving_ratio) {
+            return left.moving_ratio > right.moving_ratio;
+        }
+        if (left.smooth_ratio != right.smooth_ratio) {
+            return left.smooth_ratio > right.smooth_ratio;
+        }
+        return profiles[left.profile_index].coordinate_samples > profiles[right.profile_index].coordinate_samples;
+    });
+
+    if (top_slots == 0) {
+        top_slots = 24;
+    }
+    const std::size_t shown = std::min<std::size_t>(top_slots, ranked_candidates.size());
+    std::map<std::size_t, std::vector<TrackPoint>> tracks_by_profile;
+    std::vector<std::size_t> selected_profiles;
+    selected_profiles.reserve(shown);
+    for (std::size_t index = 0; index < shown; ++index) {
+        selected_profiles.push_back(ranked_candidates[index].profile_index);
+        tracks_by_profile.emplace(ranked_candidates[index].profile_index, std::vector<TrackPoint>{});
+    }
+
+    const std::size_t max_record_index = records.size() > 1 ? (records.size() - 1) : 1;
+    for (std::size_t record_index = 0; record_index < records.size(); ++record_index) {
+        const auto& rec = records[record_index];
+        const int timestamp = summary.game_length_millis > 0
+            ? static_cast<int>(std::llround((static_cast<double>(summary.game_length_millis) * static_cast<double>(record_index)) / static_cast<double>(max_record_index)))
+            : static_cast<int>(record_index * 1000);
+
+        for (const std::size_t profile_index : selected_profiles) {
+            const auto& profile = profiles[profile_index];
+            const auto& pair = pair_defs[profile.pair_index];
+            const std::size_t start = header_size + (profile.slot_index * stride);
+            if (start + stride > rec.payload.size()) {
+                continue;
+            }
+
+            std::array<bool, 4> lane_is_coordinate = {false, false, false, false};
+            std::array<float, 4> lane_floats = {0.0F, 0.0F, 0.0F, 0.0F};
+            std::uint8_t mask = 0;
+            for (std::size_t lane_index = 0; lane_index < lane_count; ++lane_index) {
+                std::uint32_t value = 0;
+                if (!read_u32_le(rec.payload, start + (lane_index * 4), value) || value == padding_u32) {
+                    continue;
+                }
+                mask |= static_cast<std::uint8_t>(1U << lane_index);
+                const float as_float = std::bit_cast<float>(value);
+                if (is_coordinate_like(as_float)) {
+                    lane_is_coordinate[lane_index] = true;
+                    lane_floats[lane_index] = as_float;
+                }
+            }
+            if (!lane_is_coordinate[pair.left_lane] || !lane_is_coordinate[pair.right_lane]) {
+                continue;
+            }
+
+            tracks_by_profile[profile_index].push_back({
+                rec.chunk_id,
+                record_index,
+                timestamp,
+                lane_floats[pair.left_lane],
+                lane_floats[pair.right_lane],
+                mask,
+                rec.payload[start]
+            });
+        }
+    }
+
+    std::map<std::string, ClassAggregate> class_counts;
+    output << "\"candidates\":[";
+    for (std::size_t rank_index = 0; rank_index < shown; ++rank_index) {
+        const auto& ranked = ranked_candidates[rank_index];
+        const auto& profile = profiles[ranked.profile_index];
+        const auto& pair = pair_defs[profile.pair_index];
+        const auto top_first = top_freq_entry(profile.first_byte_freq);
+        const auto top_mask = top_freq_entry(profile.mask_freq);
+        const double avg_distance = profile.transitions == 0 ? 0.0 : (profile.total_distance / static_cast<double>(profile.transitions));
+        std::ostringstream class_key_builder;
+        class_key_builder << pair.label << "|first=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << static_cast<int>(top_first.first) << std::dec << std::setfill(' ') << "|mask=" << mask_string(top_mask.first);
+        const std::string class_key = class_key_builder.str();
+
+        auto& aggregate = class_counts[class_key];
+        aggregate.members++;
+        aggregate.best_score = std::max(aggregate.best_score, ranked.score);
+        aggregate.total_coordinate_samples += profile.coordinate_samples;
+        aggregate.total_moving_transitions += profile.moving_transitions;
+
+        if (rank_index > 0) {
+            output << ',';
+        }
+        output << '{';
+        output << "\"rank\":" << (rank_index + 1) << ',';
+        output << "\"slotIndex\":" << profile.slot_index << ',';
+        output << "\"pairLabel\":\"" << json_escape(pair.label) << "\",";
+        output << "\"leftLane\":" << pair.left_lane << ',';
+        output << "\"rightLane\":" << pair.right_lane << ',';
+        output << "\"classKey\":\"" << json_escape(class_key) << "\",";
+        output << "\"score\":" << std::fixed << std::setprecision(4) << ranked.score << ',';
+        output << "\"coordinateSamples\":" << profile.coordinate_samples << ',';
+        output << "\"transitions\":" << profile.transitions << ',';
+        output << "\"smoothTransitions\":" << profile.smooth_transitions << ',';
+        output << "\"movingTransitions\":" << profile.moving_transitions << ',';
+        output << "\"smoothRatio\":" << ranked.smooth_ratio << ',';
+        output << "\"movingRatio\":" << ranked.moving_ratio << ',';
+        output << "\"coverage\":" << ranked.coverage << ',';
+        output << "\"avgDistance\":" << avg_distance << ',';
+        output << "\"maxDistance\":" << profile.max_distance << ',';
+        output << "\"xRange\":" << ranked.x_range << ',';
+        output << "\"yRange\":" << ranked.y_range << ',';
+        output << "\"topFirstByte\":" << static_cast<int>(top_first.first) << ',';
+        output << "\"topFirstByteCount\":" << top_first.second << ',';
+        output << "\"topMask\":" << static_cast<int>(top_mask.first) << ',';
+        output << "\"topMaskBits\":\"" << mask_string(top_mask.first) << "\",";
+        output << "\"topMaskCount\":" << top_mask.second << ',';
+        output << "\"chunkSpanStart\":" << (profile.min_chunk_id == std::numeric_limits<int>::max() ? 0 : profile.min_chunk_id) << ',';
+        output << "\"chunkSpanEnd\":" << (profile.max_chunk_id == std::numeric_limits<int>::min() ? 0 : profile.max_chunk_id) << ',';
+        output << "\"samples\":[";
+        const auto& track_points = tracks_by_profile[ranked.profile_index];
+        for (std::size_t point_index = 0; point_index < track_points.size(); ++point_index) {
+            const auto& point = track_points[point_index];
+            if (point_index > 0) {
+                output << ',';
+            }
+            output << '{';
+            output << "\"chunkId\":" << point.chunk_id << ',';
+            output << "\"recordIndex\":" << point.record_index << ',';
+            output << "\"timestamp\":" << point.timestamp << ',';
+            output << "\"x\":" << std::fixed << std::setprecision(2) << point.x << ',';
+            output << "\"y\":" << std::fixed << std::setprecision(2) << point.y << ',';
+            output << "\"mask\":" << static_cast<int>(point.mask) << ',';
+            output << "\"maskBits\":\"" << mask_string(point.mask) << "\",";
+            output << "\"firstByte\":" << static_cast<int>(point.first_byte);
+            output << '}';
+        }
+        output << "]}";
+    }
+    output << "],";
+
+    output << "\"classes\":[";
+    std::vector<std::pair<std::string, ClassAggregate>> sorted_classes(class_counts.begin(), class_counts.end());
+    std::sort(sorted_classes.begin(), sorted_classes.end(), [](const auto& left, const auto& right) {
+        if (left.second.members != right.second.members) {
+            return left.second.members > right.second.members;
+        }
+        if (left.second.best_score != right.second.best_score) {
+            return left.second.best_score > right.second.best_score;
+        }
+        return left.first < right.first;
+    });
+    for (std::size_t index = 0; index < sorted_classes.size(); ++index) {
+        const auto& [key, aggregate] = sorted_classes[index];
+        if (index > 0) {
+            output << ',';
+        }
+        output << '{';
+        output << "\"key\":\"" << json_escape(key) << "\",";
+        output << "\"members\":" << aggregate.members << ',';
+        output << "\"bestScore\":" << std::fixed << std::setprecision(4) << aggregate.best_score << ',';
+        output << "\"totalCoordinateSamples\":" << aggregate.total_coordinate_samples << ',';
+        output << "\"totalMovingTransitions\":" << aggregate.total_moving_transitions;
+        output << '}';
+    }
+    output << "]}";
+    return output.str();
+}
+std::string analyze_scalar_family_json(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    std::size_t top_slots
+) {
+    struct SlotSummary {
+        std::size_t slot_index = 0;
+        std::size_t active_records = 0;
+        std::size_t total_lane_samples = 0;
+        std::size_t max_active_lanes = 0;
+        int min_chunk_id = std::numeric_limits<int>::max();
+        int max_chunk_id = std::numeric_limits<int>::min();
+        std::map<std::uint8_t, std::size_t> first_byte_freq;
+        std::map<std::uint8_t, std::size_t> mask_freq;
+    };
+
+    struct RankedSlot {
+        std::size_t slot_index = 0;
+        double score = 0.0;
+    };
+
+    struct LaneSample {
+        int chunk_id = 0;
+        std::size_t record_index = 0;
+        int timestamp = 0;
+        std::uint32_t raw_u32 = 0;
+        std::uint8_t first_byte = 0;
+        std::uint8_t mask = 0;
+    };
+
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    std::ostringstream output;
+
+    output << '{';
+    output << "\"length\":" << target_length << ',';
+    output << "\"firstByte\":" << static_cast<int>(target_first_byte) << ',';
+    output << "\"recordCount\":" << records.size() << ',';
+    output << "\"headerSize\":" << header_size << ',';
+    output << "\"stride\":" << stride << ',';
+    output << "\"gameLengthMillis\":" << summary.game_length_millis << ',';
+    output << "\"chunkBaseId\":" << (summary.container.game_start_chunk_id > 0 ? summary.container.game_start_chunk_id : 0) << ',';
+
+    if (records.empty()) {
+        output << "\"elementCount\":0,";
+        output << "\"laneCount\":0,";
+        output << "\"slots\":[]}";
+        return output.str();
+    }
+    if (header_size >= target_length) {
+        output << "\"error\":\"Header size must be smaller than the target record length.\"}";
+        return output.str();
+    }
+    if (stride == 0 || (stride % 4) != 0) {
+        output << "\"error\":\"Stride must be a non-zero multiple of 4 for scalar lane analysis.\"}";
+        return output.str();
+    }
+
+    const std::uint8_t padding_byte = static_cast<std::uint8_t>(target_length & 0xFFu);
+    const std::uint32_t padding_u32 = static_cast<std::uint32_t>(padding_byte) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 8U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 16U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 24U);
+    const std::size_t usable_bytes = target_length - header_size;
+    const std::size_t element_count = usable_bytes / stride;
+    const std::size_t lane_count = std::min<std::size_t>(4, stride / 4);
+
+    output << "\"elementCount\":" << element_count << ',';
+    output << "\"laneCount\":" << lane_count << ',';
+
+    if (lane_count == 0) {
+        output << "\"error\":\"Need at least one 32-bit lane to compare scalar values.\",\"slots\":[]}";
+        return output.str();
+    }
+
+    const auto top_freq_entry = [](const std::map<std::uint8_t, std::size_t>& freq) {
+        if (freq.empty()) {
+            return std::pair<std::uint8_t, std::size_t>{0, 0};
+        }
+        const auto it = std::max_element(freq.begin(), freq.end(), [](const auto& left, const auto& right) {
+            if (left.second != right.second) {
+                return left.second < right.second;
+            }
+            return left.first > right.first;
+        });
+        return std::pair<std::uint8_t, std::size_t>{it->first, it->second};
+    };
+    const auto mask_string = [lane_count](std::uint8_t mask) {
+        std::string bits;
+        bits.reserve(lane_count);
+        for (int bit = static_cast<int>(lane_count) - 1; bit >= 0; --bit) {
+            bits += (((mask >> bit) & 1U) != 0U) ? '1' : '0';
+        }
+        return bits;
+    };
+
+    std::vector<SlotSummary> slots(element_count);
+    for (std::size_t slot_index = 0; slot_index < element_count; ++slot_index) {
+        slots[slot_index].slot_index = slot_index;
+    }
+
+    for (const auto& rec : records) {
+        for (std::size_t slot_index = 0; slot_index < element_count; ++slot_index) {
+            const std::size_t start = header_size + (slot_index * stride);
+            if (start + stride > rec.payload.size()) {
+                break;
+            }
+
+            std::uint8_t mask = 0;
+            std::size_t active_lanes = 0;
+            for (std::size_t lane_index = 0; lane_index < lane_count; ++lane_index) {
+                std::uint32_t value = 0;
+                if (!read_u32_le(rec.payload, start + (lane_index * 4), value) || value == padding_u32) {
+                    continue;
+                }
+                mask |= static_cast<std::uint8_t>(1U << lane_index);
+                active_lanes++;
+            }
+            if (active_lanes == 0) {
+                continue;
+            }
+
+            auto& slot = slots[slot_index];
+            slot.active_records++;
+            slot.total_lane_samples += active_lanes;
+            slot.max_active_lanes = std::max(slot.max_active_lanes, active_lanes);
+            slot.min_chunk_id = std::min(slot.min_chunk_id, rec.chunk_id);
+            slot.max_chunk_id = std::max(slot.max_chunk_id, rec.chunk_id);
+            slot.first_byte_freq[rec.payload[start]]++;
+            slot.mask_freq[mask]++;
+        }
+    }
+
+    std::vector<RankedSlot> ranked_slots;
+    ranked_slots.reserve(slots.size());
+    for (const auto& slot : slots) {
+        if (slot.active_records < 4) {
+            continue;
+        }
+        const double average_active_lanes = slot.active_records > 0
+            ? static_cast<double>(slot.total_lane_samples) / static_cast<double>(slot.active_records)
+            : 0.0;
+        const double chunk_span = (slot.min_chunk_id == std::numeric_limits<int>::max() || slot.max_chunk_id == std::numeric_limits<int>::min())
+            ? 0.0
+            : static_cast<double>(slot.max_chunk_id - slot.min_chunk_id + 1);
+        const double score = static_cast<double>(slot.active_records) * (0.5 + average_active_lanes) * (1.0 + (chunk_span / 32.0));
+        ranked_slots.push_back({slot.slot_index, score});
+    }
+
+    std::sort(ranked_slots.begin(), ranked_slots.end(), [&](const RankedSlot& left, const RankedSlot& right) {
+        if (left.score != right.score) {
+            return left.score > right.score;
+        }
+        const auto& left_slot = slots[left.slot_index];
+        const auto& right_slot = slots[right.slot_index];
+        if (left_slot.active_records != right_slot.active_records) {
+            return left_slot.active_records > right_slot.active_records;
+        }
+        if (left_slot.total_lane_samples != right_slot.total_lane_samples) {
+            return left_slot.total_lane_samples > right_slot.total_lane_samples;
+        }
+        return left.slot_index < right.slot_index;
+    });
+
+    if (top_slots == 0) {
+        top_slots = 24;
+    }
+    const std::size_t shown = std::min<std::size_t>(top_slots, ranked_slots.size());
+    const std::size_t max_record_index = records.size() > 1 ? (records.size() - 1) : 1;
+
+    output << "\"slots\":[";
+    for (std::size_t rank_index = 0; rank_index < shown; ++rank_index) {
+        const auto& ranked = ranked_slots[rank_index];
+        const auto& slot_summary = slots[ranked.slot_index];
+        const auto top_first = top_freq_entry(slot_summary.first_byte_freq);
+        const auto top_mask = top_freq_entry(slot_summary.mask_freq);
+        std::vector<std::vector<LaneSample>> lane_samples(lane_count);
+        std::vector<std::size_t> non_zero_samples(lane_count, 0);
+        std::vector<std::size_t> changed_transitions(lane_count, 0);
+        std::vector<std::size_t> transitions(lane_count, 0);
+        std::vector<std::uint32_t> min_u32(lane_count, std::numeric_limits<std::uint32_t>::max());
+        std::vector<std::uint32_t> max_u32(lane_count, 0);
+        std::vector<float> min_f32(lane_count, std::numeric_limits<float>::infinity());
+        std::vector<float> max_f32(lane_count, -std::numeric_limits<float>::infinity());
+        std::vector<std::map<std::uint32_t, std::size_t>> unique_values(lane_count);
+        std::vector<bool> previous_valid(lane_count, false);
+        std::vector<std::uint32_t> previous_values(lane_count, 0);
+
+        for (std::size_t record_index = 0; record_index < records.size(); ++record_index) {
+            const auto& rec = records[record_index];
+            const std::size_t start = header_size + (ranked.slot_index * stride);
+            if (start + stride > rec.payload.size()) {
+                continue;
+            }
+
+            const int timestamp = summary.game_length_millis > 0
+                ? static_cast<int>(std::llround((static_cast<double>(summary.game_length_millis) * static_cast<double>(record_index)) / static_cast<double>(max_record_index)))
+                : static_cast<int>(record_index * 1000);
+
+            std::uint8_t mask = 0;
+            std::array<std::uint32_t, 4> lane_values = {0, 0, 0, 0};
+            for (std::size_t lane_index = 0; lane_index < lane_count; ++lane_index) {
+                std::uint32_t value = 0;
+                if (!read_u32_le(rec.payload, start + (lane_index * 4), value) || value == padding_u32) {
+                    continue;
+                }
+                mask |= static_cast<std::uint8_t>(1U << lane_index);
+                lane_values[lane_index] = value;
+            }
+
+            for (std::size_t lane_index = 0; lane_index < lane_count; ++lane_index) {
+                const std::uint32_t value = lane_values[lane_index];
+                if (((mask >> lane_index) & 1U) == 0U) {
+                    continue;
+                }
+
+                lane_samples[lane_index].push_back({
+                    rec.chunk_id,
+                    record_index,
+                    timestamp,
+                    value,
+                    rec.payload[start],
+                    mask,
+                });
+                unique_values[lane_index][value]++;
+                if (value != 0) {
+                    non_zero_samples[lane_index]++;
+                }
+                min_u32[lane_index] = std::min(min_u32[lane_index], value);
+                max_u32[lane_index] = std::max(max_u32[lane_index], value);
+                const float as_float = std::bit_cast<float>(value);
+                if (std::isfinite(as_float)) {
+                    min_f32[lane_index] = std::min(min_f32[lane_index], as_float);
+                    max_f32[lane_index] = std::max(max_f32[lane_index], as_float);
+                }
+                if (previous_valid[lane_index]) {
+                    transitions[lane_index]++;
+                    if (previous_values[lane_index] != value) {
+                        changed_transitions[lane_index]++;
+                    }
+                }
+                previous_valid[lane_index] = true;
+                previous_values[lane_index] = value;
+            }
+        }
+
+        if (rank_index > 0) {
+            output << ',';
+        }
+        output << '{';
+        output << "\"rank\":" << (rank_index + 1) << ',';
+        output << "\"slotIndex\":" << ranked.slot_index << ',';
+        output << "\"score\":" << std::fixed << std::setprecision(4) << ranked.score << ',';
+        output << "\"activeRecords\":" << slot_summary.active_records << ',';
+        output << "\"totalLaneSamples\":" << slot_summary.total_lane_samples << ',';
+        output << "\"maxActiveLanes\":" << slot_summary.max_active_lanes << ',';
+        output << "\"topFirstByte\":" << static_cast<int>(top_first.first) << ',';
+        output << "\"topFirstByteCount\":" << top_first.second << ',';
+        output << "\"topMask\":" << static_cast<int>(top_mask.first) << ',';
+        output << "\"topMaskBits\":\"" << mask_string(top_mask.first) << "\",";
+        output << "\"topMaskCount\":" << top_mask.second << ',';
+        output << "\"chunkSpanStart\":" << (slot_summary.min_chunk_id == std::numeric_limits<int>::max() ? 0 : slot_summary.min_chunk_id) << ',';
+        output << "\"chunkSpanEnd\":" << (slot_summary.max_chunk_id == std::numeric_limits<int>::min() ? 0 : slot_summary.max_chunk_id) << ',';
+        output << "\"lanes\":[";
+        for (std::size_t lane_index = 0; lane_index < lane_count; ++lane_index) {
+            if (lane_index > 0) {
+                output << ',';
+            }
+            output << '{';
+            output << "\"laneIndex\":" << lane_index << ',';
+            output << "\"activeSamples\":" << lane_samples[lane_index].size() << ',';
+            output << "\"nonZeroSamples\":" << non_zero_samples[lane_index] << ',';
+            output << "\"uniqueValues\":" << unique_values[lane_index].size() << ',';
+            output << "\"transitions\":" << transitions[lane_index] << ',';
+            output << "\"changedTransitions\":" << changed_transitions[lane_index] << ',';
+            output << "\"minU32\":" << (lane_samples[lane_index].empty() ? 0 : min_u32[lane_index]) << ',';
+            output << "\"maxU32\":" << (lane_samples[lane_index].empty() ? 0 : max_u32[lane_index]) << ',';
+            output << "\"minFiniteF32\":" << (std::isfinite(min_f32[lane_index]) ? min_f32[lane_index] : 0.0F) << ',';
+            output << "\"maxFiniteF32\":" << (std::isfinite(max_f32[lane_index]) ? max_f32[lane_index] : 0.0F) << ',';
+            output << "\"samples\":[";
+            for (std::size_t sample_index = 0; sample_index < lane_samples[lane_index].size(); ++sample_index) {
+                const auto& sample = lane_samples[lane_index][sample_index];
+                if (sample_index > 0) {
+                    output << ',';
+                }
+                output << '{';
+                output << "\"chunkId\":" << sample.chunk_id << ',';
+                output << "\"recordIndex\":" << sample.record_index << ',';
+                output << "\"timestamp\":" << sample.timestamp << ',';
+                output << "\"rawU32\":" << sample.raw_u32 << ',';
+                output << "\"firstByte\":" << static_cast<int>(sample.first_byte) << ',';
+                output << "\"mask\":" << static_cast<int>(sample.mask) << ',';
+                output << "\"maskBits\":\"" << mask_string(sample.mask) << "\"";
+                output << '}';
+            }
+            output << "]}";
+        }
+        output << "]}";
+    }
+    output << "]}";
+    return output.str();
+}
+
+std::string analyze_scalar_family_file_json(
+    const std::string& path,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    std::size_t top_slots
+) {
+    const auto bytes = read_file_bytes(path);
+    return analyze_scalar_family_json(bytes, target_length, target_first_byte, header_size, stride, top_slots);
+}
+
+
+std::string analyze_entity_slab_json(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    std::size_t top_slots
+) {
+    struct LaneAggregate {
+        std::size_t active_samples = 0;
+        std::size_t transitions = 0;
+        std::size_t changed_transitions = 0;
+        std::array<std::size_t, 4> family_byte_hits = {0, 0, 0, 0};
+        std::map<std::uint32_t, std::size_t> value_freq;
+        bool previous_valid = false;
+        std::uint32_t previous_value = 0;
+        std::string archetype = "opaque";
+        double handle_score = 0.0;
+        double dynamic_score = 0.0;
+    };
+
+    struct SlotAggregate {
+        std::size_t slot_index = 0;
+        std::size_t active_records = 0;
+        std::size_t total_lane_samples = 0;
+        std::size_t max_active_lanes = 0;
+        int min_chunk_id = std::numeric_limits<int>::max();
+        int max_chunk_id = std::numeric_limits<int>::min();
+        std::size_t handle_like_lanes = 0;
+        std::size_t dynamic_like_lanes = 0;
+        std::size_t mixed_lanes = 0;
+        std::size_t opaque_lanes = 0;
+        double handle_score = 0.0;
+        double dynamic_score = 0.0;
+        std::string archetype = "opaque";
+        std::vector<LaneAggregate> lanes;
+    };
+
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    std::ostringstream output;
+
+    output << '{';
+    output << "\"length\":" << target_length << ',';
+    output << "\"firstByte\":" << static_cast<int>(target_first_byte) << ',';
+    output << "\"recordCount\":" << records.size() << ',';
+    output << "\"headerSize\":" << header_size << ',';
+    output << "\"stride\":" << stride << ',';
+    output << "\"gameLengthMillis\":" << summary.game_length_millis << ',';
+    output << "\"chunkBaseId\":" << (summary.container.game_start_chunk_id > 0 ? summary.container.game_start_chunk_id : 0) << ',';
+
+    if (records.empty()) {
+        output << "\"elementCount\":0,";
+        output << "\"laneCount\":0,";
+        output << "\"knownFirstBytes\":[],";
+        output << "\"recurringFamilies\":[],";
+        output << "\"archetypeCounts\":{},";
+        output << "\"topHandleSlots\":[],";
+        output << "\"topDynamicSlots\":[],";
+        output << "\"topMixedSlots\":[]}";
+        return output.str();
+    }
+    if (header_size >= target_length) {
+        output << "\"error\":\"Header size must be smaller than the target record length.\"}";
+        return output.str();
+    }
+    if (stride == 0 || (stride % 4) != 0) {
+        output << "\"error\":\"Stride must be a non-zero multiple of 4 for entity slab analysis.\"}";
+        return output.str();
+    }
+
+    const std::size_t usable_bytes = target_length - header_size;
+    const std::size_t element_count = usable_bytes / stride;
+    const std::size_t lane_count = std::min<std::size_t>(4, stride / 4);
+    output << "\"elementCount\":" << element_count << ',';
+    output << "\"laneCount\":" << lane_count << ',';
+    if (lane_count == 0) {
+        output << "\"error\":\"Need at least one 32-bit lane to analyze the slab.\",";
+        output << "\"knownFirstBytes\":[],";
+        output << "\"recurringFamilies\":[],";
+        output << "\"archetypeCounts\":{},";
+        output << "\"topHandleSlots\":[],";
+        output << "\"topDynamicSlots\":[],";
+        output << "\"topMixedSlots\":[]}";
+        return output.str();
+    }
+
+    const auto family_scan = collect_ranked_chunk_families(bytes, 256, 2);
+    std::set<std::uint8_t> known_first_bytes;
+    for (const auto& family : family_scan.ranked_families) {
+        known_first_bytes.insert(family.first_byte);
+    }
+
+    output << "\"knownFirstBytes\":[";
+    std::size_t known_index = 0;
+    for (const std::uint8_t value : known_first_bytes) {
+        if (known_index++ > 0) {
+            output << ',';
+        }
+        output << static_cast<int>(value);
+    }
+    output << "],";
+
+    const std::size_t recurring_shown = std::min<std::size_t>(12, family_scan.ranked_families.size());
+    output << "\"recurringFamilies\":[";
+    for (std::size_t family_index = 0; family_index < recurring_shown; ++family_index) {
+        const auto& family = family_scan.ranked_families[family_index];
+        if (family_index > 0) {
+            output << ',';
+        }
+        output << '{';
+        output << "\"length\":" << family.length << ',';
+        output << "\"firstByte\":" << static_cast<int>(family.first_byte) << ',';
+        output << "\"recordCount\":" << family.record_count << ',';
+        output << "\"chunkCount\":" << family.chunk_ids.size();
+        output << '}';
+    }
+    output << "],";
+
+    const std::uint8_t padding_byte = static_cast<std::uint8_t>(target_length & 0xFFu);
+    const std::uint32_t padding_u32 = static_cast<std::uint32_t>(padding_byte) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 8U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 16U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 24U);
+
+    std::vector<SlotAggregate> slots(element_count);
+    for (std::size_t slot_index = 0; slot_index < element_count; ++slot_index) {
+        auto& slot = slots[slot_index];
+        slot.slot_index = slot_index;
+        slot.lanes.resize(lane_count);
+    }
+
+    for (const auto& rec : records) {
+        for (std::size_t slot_index = 0; slot_index < element_count; ++slot_index) {
+            const std::size_t start = header_size + (slot_index * stride);
+            if (start + stride > rec.payload.size()) {
+                break;
+            }
+
+            std::size_t active_lanes = 0;
+            for (std::size_t lane_index = 0; lane_index < lane_count; ++lane_index) {
+                std::uint32_t value = 0;
+                if (!read_u32_le(rec.payload, start + (lane_index * 4), value) || value == padding_u32) {
+                    continue;
+                }
+
+                auto& lane = slots[slot_index].lanes[lane_index];
+                lane.active_samples++;
+                lane.value_freq[value]++;
+                if (lane.previous_valid) {
+                    lane.transitions++;
+                    if (lane.previous_value != value) {
+                        lane.changed_transitions++;
+                    }
+                }
+                lane.previous_valid = true;
+                lane.previous_value = value;
+
+                const std::size_t lane_offset = start + (lane_index * 4);
+                for (std::size_t byte_index = 0; byte_index < 4; ++byte_index) {
+                    if (known_first_bytes.find(rec.payload[lane_offset + byte_index]) != known_first_bytes.end()) {
+                        lane.family_byte_hits[byte_index]++;
+                    }
+                }
+                active_lanes++;
+            }
+
+            if (active_lanes == 0) {
+                continue;
+            }
+
+            auto& slot = slots[slot_index];
+            slot.active_records++;
+            slot.total_lane_samples += active_lanes;
+            slot.max_active_lanes = std::max(slot.max_active_lanes, active_lanes);
+            slot.min_chunk_id = std::min(slot.min_chunk_id, rec.chunk_id);
+            slot.max_chunk_id = std::max(slot.max_chunk_id, rec.chunk_id);
+        }
+    }
+
+    const auto top_count_for_lane = [](const LaneAggregate& lane) -> std::size_t {
+        if (lane.value_freq.empty()) {
+            return 0;
+        }
+        return std::max_element(lane.value_freq.begin(), lane.value_freq.end(), [](const auto& left, const auto& right) {
+            if (left.second != right.second) {
+                return left.second < right.second;
+            }
+            return left.first > right.first;
+        })->second;
+    };
+
+    auto classify_lane = [&](LaneAggregate& lane) {
+        if (lane.active_samples < 4) {
+            lane.archetype = "opaque";
+            lane.handle_score = 0.0;
+            lane.dynamic_score = 0.0;
+            return;
+        }
+
+        const std::size_t unique_values = lane.value_freq.size();
+        const std::size_t repeated_count = top_count_for_lane(lane);
+        const double repeated_ratio = lane.active_samples > 0
+            ? static_cast<double>(repeated_count) / static_cast<double>(lane.active_samples)
+            : 0.0;
+        const double unique_ratio = lane.active_samples > 0
+            ? static_cast<double>(unique_values) / static_cast<double>(lane.active_samples)
+            : 0.0;
+        const double change_ratio = lane.transitions > 0
+            ? static_cast<double>(lane.changed_transitions) / static_cast<double>(lane.transitions)
+            : 0.0;
+        const std::size_t total_family_hits = std::accumulate(lane.family_byte_hits.begin(), lane.family_byte_hits.end(), static_cast<std::size_t>(0));
+        const double family_hit_ratio = lane.active_samples > 0
+            ? static_cast<double>(total_family_hits) / static_cast<double>(lane.active_samples * 4)
+            : 0.0;
+
+        lane.handle_score = (repeated_ratio * 2.0) + family_hit_ratio + (1.0 - change_ratio);
+        lane.dynamic_score = (change_ratio * 2.0) + unique_ratio + (1.0 - repeated_ratio);
+
+        const bool handle_like = repeated_ratio >= 0.5 &&
+                                 unique_values <= std::max<std::size_t>(4, (lane.active_samples + 1) / 2) &&
+                                 family_hit_ratio >= 0.10;
+        const bool dynamic_like = change_ratio >= 0.60 &&
+                                  unique_values >= std::max<std::size_t>(4, lane.active_samples / 2);
+        if (handle_like && dynamic_like) {
+            lane.archetype = "mixed";
+        } else if (handle_like) {
+            lane.archetype = "static_handle_like";
+        } else if (dynamic_like) {
+            lane.archetype = "dynamic_state_like";
+        } else {
+            lane.archetype = "opaque";
+        }
+    };
+
+    std::map<std::string, std::size_t> archetype_counts = {
+        {"static_handle_like", 0},
+        {"dynamic_state_like", 0},
+        {"mixed", 0},
+        {"opaque", 0},
+    };
+    for (auto& slot : slots) {
+        if (slot.active_records < 4) {
+            slot.archetype = "opaque";
+            archetype_counts[slot.archetype]++;
+            continue;
+        }
+        for (auto& lane : slot.lanes) {
+            classify_lane(lane);
+            slot.handle_score += lane.handle_score;
+            slot.dynamic_score += lane.dynamic_score;
+            if (lane.archetype == "static_handle_like") {
+                slot.handle_like_lanes++;
+            } else if (lane.archetype == "dynamic_state_like") {
+                slot.dynamic_like_lanes++;
+            } else if (lane.archetype == "mixed") {
+                slot.mixed_lanes++;
+            } else {
+                slot.opaque_lanes++;
+            }
+        }
+
+        if (slot.handle_like_lanes > 0 && slot.dynamic_like_lanes > 0) {
+            slot.archetype = "mixed";
+        } else if (slot.handle_like_lanes >= std::max<std::size_t>(1, lane_count / 2)) {
+            slot.archetype = "static_handle_like";
+        } else if (slot.dynamic_like_lanes >= std::max<std::size_t>(1, lane_count / 2)) {
+            slot.archetype = "dynamic_state_like";
+        } else {
+            slot.archetype = "opaque";
+        }
+        archetype_counts[slot.archetype]++;
+    }
+
+    auto slot_sort_key = [](const SlotAggregate& left, const SlotAggregate& right, bool handle_mode) {
+        const double left_primary = handle_mode ? left.handle_score : left.dynamic_score;
+        const double right_primary = handle_mode ? right.handle_score : right.dynamic_score;
+        if (left_primary != right_primary) {
+            return left_primary > right_primary;
+        }
+        if (left.active_records != right.active_records) {
+            return left.active_records > right.active_records;
+        }
+        if (left.total_lane_samples != right.total_lane_samples) {
+            return left.total_lane_samples > right.total_lane_samples;
+        }
+        return left.slot_index < right.slot_index;
+    };
+
+    std::vector<const SlotAggregate*> handle_slots;
+    std::vector<const SlotAggregate*> dynamic_slots;
+    std::vector<const SlotAggregate*> mixed_slots;
+    for (const auto& slot : slots) {
+        if (slot.active_records < 4) {
+            continue;
+        }
+        if (slot.archetype == "static_handle_like") {
+            handle_slots.push_back(&slot);
+        } else if (slot.archetype == "dynamic_state_like") {
+            dynamic_slots.push_back(&slot);
+        } else if (slot.archetype == "mixed") {
+            mixed_slots.push_back(&slot);
+        }
+    }
+
+    std::sort(handle_slots.begin(), handle_slots.end(), [&](const SlotAggregate* left, const SlotAggregate* right) {
+        return slot_sort_key(*left, *right, true);
+    });
+    std::sort(dynamic_slots.begin(), dynamic_slots.end(), [&](const SlotAggregate* left, const SlotAggregate* right) {
+        return slot_sort_key(*left, *right, false);
+    });
+    std::sort(mixed_slots.begin(), mixed_slots.end(), [&](const SlotAggregate* left, const SlotAggregate* right) {
+        const double left_score = left->handle_score + left->dynamic_score;
+        const double right_score = right->handle_score + right->dynamic_score;
+        if (left_score != right_score) {
+            return left_score > right_score;
+        }
+        if (left->active_records != right->active_records) {
+            return left->active_records > right->active_records;
+        }
+        return left->slot_index < right->slot_index;
+    });
+
+    output << "\"archetypeCounts\":{";
+    output << "\"staticHandleLike\":" << archetype_counts["static_handle_like"] << ',';
+    output << "\"dynamicStateLike\":" << archetype_counts["dynamic_state_like"] << ',';
+    output << "\"mixed\":" << archetype_counts["mixed"] << ',';
+    output << "\"opaque\":" << archetype_counts["opaque"];
+    output << "},";
+
+    const auto emit_slots = [&](std::ostringstream& stream, const std::vector<const SlotAggregate*>& ranked_slots) {
+        const std::size_t shown = std::min<std::size_t>(top_slots == 0 ? 24 : top_slots, ranked_slots.size());
+        stream << '[';
+        for (std::size_t rank_index = 0; rank_index < shown; ++rank_index) {
+            const SlotAggregate& slot = *ranked_slots[rank_index];
+            if (rank_index > 0) {
+                stream << ',';
+            }
+            stream << '{';
+            stream << "\"rank\":" << (rank_index + 1) << ',';
+            stream << "\"slotIndex\":" << slot.slot_index << ',';
+            stream << "\"archetype\":\"" << json_escape(slot.archetype) << "\",";
+            stream << "\"activeRecords\":" << slot.active_records << ',';
+            stream << "\"totalLaneSamples\":" << slot.total_lane_samples << ',';
+            stream << "\"maxActiveLanes\":" << slot.max_active_lanes << ',';
+            stream << "\"chunkSpanStart\":" << (slot.min_chunk_id == std::numeric_limits<int>::max() ? 0 : slot.min_chunk_id) << ',';
+            stream << "\"chunkSpanEnd\":" << (slot.max_chunk_id == std::numeric_limits<int>::min() ? 0 : slot.max_chunk_id) << ',';
+            stream << "\"handleScore\":" << std::fixed << std::setprecision(4) << slot.handle_score << ',';
+            stream << "\"dynamicScore\":" << std::fixed << std::setprecision(4) << slot.dynamic_score << ',';
+            stream << "\"handleLikeLanes\":" << slot.handle_like_lanes << ',';
+            stream << "\"dynamicLikeLanes\":" << slot.dynamic_like_lanes << ',';
+            stream << "\"mixedLanes\":" << slot.mixed_lanes << ',';
+            stream << "\"opaqueLanes\":" << slot.opaque_lanes << ',';
+            stream << "\"lanes\":[";
+            for (std::size_t lane_index = 0; lane_index < slot.lanes.size(); ++lane_index) {
+                const auto& lane = slot.lanes[lane_index];
+                if (lane_index > 0) {
+                    stream << ',';
+                }
+                const std::size_t repeated_count = top_count_for_lane(lane);
+                const std::size_t total_family_hits = std::accumulate(lane.family_byte_hits.begin(), lane.family_byte_hits.end(), static_cast<std::size_t>(0));
+                const double repeated_ratio = lane.active_samples > 0
+                    ? static_cast<double>(repeated_count) / static_cast<double>(lane.active_samples)
+                    : 0.0;
+                const double change_ratio = lane.transitions > 0
+                    ? static_cast<double>(lane.changed_transitions) / static_cast<double>(lane.transitions)
+                    : 0.0;
+                const double family_hit_ratio = lane.active_samples > 0
+                    ? static_cast<double>(total_family_hits) / static_cast<double>(lane.active_samples * 4)
+                    : 0.0;
+
+                std::vector<std::pair<std::uint32_t, std::size_t>> top_values(lane.value_freq.begin(), lane.value_freq.end());
+                std::sort(top_values.begin(), top_values.end(), [](const auto& left, const auto& right) {
+                    if (left.second != right.second) {
+                        return left.second > right.second;
+                    }
+                    return left.first < right.first;
+                });
+
+                stream << '{';
+                stream << "\"laneIndex\":" << lane_index << ',';
+                stream << "\"archetype\":\"" << json_escape(lane.archetype) << "\",";
+                stream << "\"activeSamples\":" << lane.active_samples << ',';
+                stream << "\"uniqueValues\":" << lane.value_freq.size() << ',';
+                stream << "\"transitions\":" << lane.transitions << ',';
+                stream << "\"changedTransitions\":" << lane.changed_transitions << ',';
+                stream << "\"repeatedRatio\":" << std::fixed << std::setprecision(4) << repeated_ratio << ',';
+                stream << "\"changeRatio\":" << std::fixed << std::setprecision(4) << change_ratio << ',';
+                stream << "\"familyByteHitRatio\":" << std::fixed << std::setprecision(4) << family_hit_ratio << ',';
+                stream << "\"familyByteHitsByOffset\":[";
+                for (std::size_t byte_index = 0; byte_index < lane.family_byte_hits.size(); ++byte_index) {
+                    if (byte_index > 0) {
+                        stream << ',';
+                    }
+                    stream << lane.family_byte_hits[byte_index];
+                }
+                stream << "],";
+                stream << "\"topValues\":[";
+                const std::size_t top_value_limit = std::min<std::size_t>(3, top_values.size());
+                for (std::size_t value_index = 0; value_index < top_value_limit; ++value_index) {
+                    const auto& [value, count] = top_values[value_index];
+                    if (value_index > 0) {
+                        stream << ',';
+                    }
+                    stream << '{';
+                    stream << "\"rawU32\":" << value << ',';
+                    stream << "\"hex\":\"" << u32_hex(value) << "\",";
+                    stream << "\"count\":" << count;
+                    stream << '}';
+                }
+                stream << "]}";
+            }
+            stream << "]}";
+        }
+        stream << ']';
+    };
+
+    output << "\"topHandleSlots\":";
+    emit_slots(output, handle_slots);
+    output << ',';
+    output << "\"topDynamicSlots\":";
+    emit_slots(output, dynamic_slots);
+    output << ',';
+    output << "\"topMixedSlots\":";
+    emit_slots(output, mixed_slots);
+    output << '}';
+    return output.str();
+}
+
+std::string analyze_entity_slab_file_json(
+    const std::string& path,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    std::size_t top_slots
+) {
+    const auto bytes = read_file_bytes(path);
+    return analyze_entity_slab_json(bytes, target_length, target_first_byte, header_size, stride, top_slots);
+}
+
 std::string match_event_window(
     const std::string& replay_path,
     std::size_t target_length,
@@ -5341,6 +6708,16 @@ std::string match_event_window(
 }
 
 }  // namespace rofl::core
+
+
+
+
+
+
+
+
+
+
 
 
 

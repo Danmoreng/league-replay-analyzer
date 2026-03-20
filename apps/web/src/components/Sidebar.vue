@@ -1,11 +1,11 @@
 <script setup lang="ts">
 defineProps<{
-  activePage: 'summary' | 'browser';
+  activePage: "summary" | "browser" | "inspector";
   isLoaded: boolean;
 }>();
 
 const emit = defineEmits<{
-  (e: 'update:activePage', page: 'summary' | 'browser'): void;
+  (e: "update:activePage", page: "summary" | "browser" | "inspector"): void;
 }>();
 </script>
 
@@ -20,7 +20,7 @@ const emit = defineEmits<{
       <h6 class="mb-2 px-1 x-small text-uppercase fw-bold text-muted">Analysis</h6>
       <ul class="nav nav-pills flex-column gap-1">
         <li class="nav-item">
-          <button 
+          <button
             class="nav-link w-100 text-start d-flex align-items-center px-3 py-2"
             :class="{ active: activePage === 'summary' }"
             @click="emit('update:activePage', 'summary')"
@@ -30,9 +30,22 @@ const emit = defineEmits<{
           </button>
         </li>
         <li class="nav-item">
-          <button 
+          <button
             class="nav-link w-100 text-start d-flex align-items-center px-3 py-2"
-            :class="{ 
+            :class="{
+              active: activePage === 'inspector',
+              disabled: !isLoaded
+            }"
+            @click="isLoaded && emit('update:activePage', 'inspector')"
+          >
+            <i class="bi bi-diagram-3 me-2"></i>
+            Decoder Inspector
+          </button>
+        </li>
+        <li class="nav-item">
+          <button
+            class="nav-link w-100 text-start d-flex align-items-center px-3 py-2"
+            :class="{
               active: activePage === 'browser',
               disabled: !isLoaded
             }"

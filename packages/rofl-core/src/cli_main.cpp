@@ -143,6 +143,90 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
+    if (first_arg == "--scan-families-json" && argc > 2) {
+        try {
+            std::string path = argv[2];
+            std::size_t minimum_length = 256;
+            std::size_t minimum_records = 4;
+            std::size_t top_families = 20;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view arg = argv[i];
+                if (arg == "--min-length" && i + 1 < argc) {
+                    minimum_length = std::stoull(argv[++i]);
+                } else if (arg == "--min-records" && i + 1 < argc) {
+                    minimum_records = std::stoull(argv[++i]);
+                } else if (arg == "--top-families" && i + 1 < argc) {
+                    top_families = std::stoull(argv[++i]);
+                }
+            }
+            std::cout << rofl::core::scan_replay_families_file_json(path, minimum_length, minimum_records, top_families);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
+    if (first_arg == "--analyze-scalar-family-json" && argc > 2) {
+        try {
+            std::string path = argv[2];
+            std::size_t length = 0;
+            std::uint8_t first_byte = 0;
+            std::size_t header_size = 0;
+            std::size_t stride = 16;
+            std::size_t top_slots = 24;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view arg = argv[i];
+                if (arg == "--length" && i + 1 < argc) {
+                    length = std::stoull(argv[++i]);
+                } else if (arg == "--first-byte" && i + 1 < argc) {
+                    first_byte = static_cast<std::uint8_t>(std::stoul(argv[++i], nullptr, 0));
+                } else if (arg == "--header-size" && i + 1 < argc) {
+                    header_size = std::stoull(argv[++i]);
+                } else if (arg == "--stride" && i + 1 < argc) {
+                    stride = std::stoull(argv[++i]);
+                } else if (arg == "--top-slots" && i + 1 < argc) {
+                    top_slots = std::stoull(argv[++i]);
+                }
+            }
+            std::cout << rofl::core::analyze_scalar_family_file_json(path, length, first_byte, header_size, stride, top_slots);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
+    if (first_arg == "--analyze-entity-slab-json" && argc > 2) {
+        try {
+            std::string path = argv[2];
+            std::size_t length = 0;
+            std::uint8_t first_byte = 0;
+            std::size_t header_size = 0;
+            std::size_t stride = 16;
+            std::size_t top_slots = 24;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view arg = argv[i];
+                if (arg == "--length" && i + 1 < argc) {
+                    length = std::stoull(argv[++i]);
+                } else if (arg == "--first-byte" && i + 1 < argc) {
+                    first_byte = static_cast<std::uint8_t>(std::stoul(argv[++i], nullptr, 0));
+                } else if (arg == "--header-size" && i + 1 < argc) {
+                    header_size = std::stoull(argv[++i]);
+                } else if (arg == "--stride" && i + 1 < argc) {
+                    stride = std::stoull(argv[++i]);
+                } else if (arg == "--top-slots" && i + 1 < argc) {
+                    top_slots = std::stoull(argv[++i]);
+                }
+            }
+            std::cout << rofl::core::analyze_entity_slab_file_json(path, length, first_byte, header_size, stride, top_slots);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
     if (first_arg == "--trace-sparse-slot" && argc > 2) {
         try {
             std::string path = argv[2];
@@ -525,6 +609,9 @@ int main(int argc, char** argv) {
     std::cout << "Use --compare-subrecord-family <path-to-rofl> --length <len> --first-byte <byte> [--prefix-bytes <len>] to analyze stable fields.\n";
     std::cout << "Use --guess-stride <path-to-rofl> --length <len> --first-byte <byte> [--header-size <len>] to detect repeating patterns.\n";
     std::cout << "Use --analyze-sparse-family <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-elements <n>] to profile 16-byte sparse records.\n";
+    std::cout << "Use --scan-families-json <path-to-rofl> [--min-length <n>] [--min-records <n>] [--top-families <n>] to emit recurring family scan results as JSON.\n";
+    std::cout << "Use --analyze-scalar-family-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] to emit scalar lane candidates as JSON.\n";
+    std::cout << "Use --analyze-entity-slab-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] to classify a sparse family into handle-like vs dynamic-state-like rows.\n";
     std::cout << "Use --trace-sparse-slot <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slot-index <n> [--stride <len>] [--max-records <n>] to trace one sparse slot over time.\n";
     std::cout << "Use --profile-position-slots <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--move-epsilon <f>] [--smooth-threshold <f>] to rank position-like sparse slots.\n";
     std::cout << "Use --compare-position-classes <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--top-classes <n>] [--move-epsilon <f>] [--smooth-threshold <f>] to compare discovered slot classes against entity archetypes.\n";

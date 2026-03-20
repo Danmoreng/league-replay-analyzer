@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 
 import DataBrowser from "./components/DataBrowser.vue";
+import ReplayInspector from "./components/ReplayInspector.vue";
 import Minimap from "./components/Minimap.vue";
 import Timeline from "./components/Timeline.vue";
 import Sidebar from "./components/Sidebar.vue";
@@ -22,11 +23,12 @@ const riotBundle = ref<RiotFixtureBundle | null>(null);
 const apiMovement = ref<PlayerMovementData[]>([]);
 const riotFixtureStatus = ref("No Riot fixture loaded yet.");
 const parserEngine = ref("C++/Wasm");
+const replayBuffer = ref<ArrayBuffer | null>(null);
 const loadedReplayName = ref("");
 const status = ref("Pick a replay file to parse it with the C++/Wasm replay parser.");
 const errorMessage = ref("");
 const isLoading = ref(false);
-const activePage = ref<"summary" | "browser">("summary");
+const activePage = ref<"summary" | "browser" | "inspector">("summary");
 function toDdragonVersion(version: string): string {
   const match = version.match(/^(\d+)\.(\d+)/);
   if (!match) {
@@ -394,6 +396,7 @@ async function loadReplay(file: File): Promise<void> {
 
   try {
     const buffer = await file.arrayBuffer();
+    replayBuffer.value = buffer;
     const bytes = new Uint8Array(buffer);
     const parsedSummary = await parseReplayBufferWithWasm(buffer);
     const derivedMatchId = deriveRiotMatchIdFromReplayName(file.name);
@@ -421,6 +424,7 @@ async function loadReplay(file: File): Promise<void> {
     summary.value = null;
     browserModel.value = null;
     riotBundle.value = null;
+    replayBuffer.value = null;
     errorMessage.value = error instanceof Error ? error.message : String(error);
     status.value = "Replay parsing failed.";
   } finally {
@@ -621,12 +625,20 @@ function onFileChange(event: Event): void {
 
         <!-- Data Browser View -->
         <DataBrowser
-          v-else
+          v-else-if="activePage === 'browser'"
           class="flex-grow-1"
           :browser="browserModel"
           :replay-name="loadedReplayName"
           :riot-bundle="riotBundle"
           :riot-fixture-status="riotFixtureStatus"
+        />
+
+        <ReplayInspector
+          v-else
+          class="flex-grow-1"
+          :replay-buffer="replayBuffer"
+          :summary="summary"
+          :riot-bundle="riotBundle"
         />
 
       </div>
@@ -713,3 +725,9 @@ code {
   background: rgba(255, 255, 255, 0.2);
 }
 </style>
+
+
+
+
+
+

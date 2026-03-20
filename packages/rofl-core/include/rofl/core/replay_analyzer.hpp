@@ -94,6 +94,13 @@ struct ReplaySummary {
 [[nodiscard]] std::string inspect_replay_bytes(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] std::string inspect_replay_file(const std::string& path);
 [[nodiscard]] std::string replay_summary_to_json(const ReplaySummary& summary);
+[[nodiscard]] std::string scan_replay_families_json(const std::vector<std::uint8_t>& bytes, std::size_t minimum_length, std::size_t minimum_records, std::size_t top_families);
+[[nodiscard]] std::string scan_replay_families_file_json(const std::string& path, std::size_t minimum_length, std::size_t minimum_records, std::size_t top_families);
+[[nodiscard]] std::string analyze_sparse_family_json(const std::vector<std::uint8_t>& bytes, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots, float move_epsilon, float smooth_threshold);
+[[nodiscard]] std::string analyze_scalar_family_json(const std::vector<std::uint8_t>& bytes, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots);
+[[nodiscard]] std::string analyze_scalar_family_file_json(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots);
+[[nodiscard]] std::string analyze_entity_slab_json(const std::vector<std::uint8_t>& bytes, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots);
+[[nodiscard]] std::string analyze_entity_slab_file_json(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots);
 [[nodiscard]] std::string dump_chunk_subrecords(const std::string& path, int chunk_id);
 [[nodiscard]] std::string summarize_subrecord_families(const std::string& path, std::size_t minimum_length, std::size_t minimum_records, std::size_t top_families);
 [[nodiscard]] std::string dump_subrecord_family(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte);
@@ -109,6 +116,10 @@ struct ReplaySummary {
 [[nodiscard]] std::string match_event_window(const std::string& replay_path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, double event_x, double event_y, int timestamp_millis, int chunk_time_millis, int chunk_base_id, int chunk_radius, std::size_t top_slots, float move_epsilon, float smooth_threshold);
 
 }  // namespace rofl::core
+
+
+
+
 
 
 
