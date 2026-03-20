@@ -6337,6 +6337,1940 @@ std::string analyze_entity_slab_file_json(
     return analyze_entity_slab_json(bytes, target_length, target_first_byte, header_size, stride, top_slots);
 }
 
+std::string analyze_row_offsets_json(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    const std::vector<std::size_t>& slot_indices,
+    std::size_t top_fields
+) {
+    struct FieldProfile {
+        std::size_t offset = 0;
+        std::size_t width = 0;
+        std::string decode_label;
+        std::size_t active_samples = 0;
+        std::size_t non_zero_samples = 0;
+        std::size_t transitions = 0;
+        std::size_t changed_transitions = 0;
+        std::size_t increasing_transitions = 0;
+        std::size_t decreasing_transitions = 0;
+        std::size_t stable_transitions = 0;
+        double min_value = std::numeric_limits<double>::infinity();
+        double max_value = -std::numeric_limits<double>::infinity();
+        bool previous_valid = false;
+        std::uint64_t previous_raw = 0;
+        double previous_value = 0.0;
+        std::map<std::uint64_t, std::size_t> value_freq;
+        double score = 0.0;
+    };
+
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    std::ostringstream output;
+
+    output << '{';
+    output << "\"length\":" << target_length << ',';
+    output << "\"firstByte\":" << static_cast<int>(target_first_byte) << ',';
+    output << "\"recordCount\":" << records.size() << ',';
+    output << "\"headerSize\":" << header_size << ',';
+    output << "\"stride\":" << stride << ',';
+    output << "\"gameLengthMillis\":" << summary.game_length_millis << ',';
+    output << "\"chunkBaseId\":" << (summary.container.game_start_chunk_id > 0 ? summary.container.game_start_chunk_id : 0) << ',';
+    output << "\"selectedSlots\":[";
+    for (std::size_t index = 0; index < slot_indices.size(); ++index) {
+        if (index > 0) {
+            output << ',';
+        }
+        output << slot_indices[index];
+    }
+    output << "],";
+
+    if (records.empty()) {
+        output << "\"elementCount\":0,\"slots\":[]}";
+        return output.str();
+    }
+    if (slot_indices.empty()) {
+        output << "\"error\":\"At least one slot must be provided.\",\"slots\":[]}";
+        return output.str();
+    }
+    if (header_size >= target_length) {
+        output << "\"error\":\"Header size must be smaller than the target record length.\",\"slots\":[]}";
+        return output.str();
+    }
+    if (stride == 0) {
+        output << "\"error\":\"Stride must be positive.\",\"slots\":[]}";
+        return output.str();
+    }
+
+    const std::uint8_t padding_byte = static_cast<std::uint8_t>(target_length & 0xFFu);
+    const std::uint32_t padding_u32 = static_cast<std::uint32_t>(padding_byte) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 8U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 16U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 24U);
+    const std::size_t usable_bytes = target_length - header_size;
+    const std::size_t element_count = usable_bytes / stride;
+    output << "\"elementCount\":" << element_count << ',';
+
+    const auto value_hex = [](std::uint64_t value, std::size_t width) {
+        std::ostringstream stream;
+        stream << "0x" << std::hex << std::uppercase << std::setw(static_cast<int>(width * 2)) << std::setfill('0') << value;
+        return stream.str();
+    };
+
+    auto update_profile = [](FieldProfile& profile, std::uint64_t raw_value, double decoded_value) {
+        profile.active_samples++;
+        profile.value_freq[raw_value]++;
+        if (raw_value != 0) {
+            profile.non_zero_samples++;
+        }
+        profile.min_value = std::min(profile.min_value, decoded_value);
+        profile.max_value = std::max(profile.max_value, decoded_value);
+        if (profile.previous_valid) {
+            profile.transitions++;
+            if (profile.previous_raw != raw_value) {
+                profile.changed_transitions++;
+            }
+            if (decoded_value > profile.previous_value) {
+                profile.increasing_transitions++;
+            } else if (decoded_value < profile.previous_value) {
+                profile.decreasing_transitions++;
+            } else {
+                profile.stable_transitions++;
+            }
+        }
+        profile.previous_valid = true;
+        profile.previous_raw = raw_value;
+        profile.previous_value = decoded_value;
+    };
+
+    if (top_fields == 0) {
+        top_fields = 24;
+    }
+
+    output << "\"slots\":[";
+    bool first_slot_output = true;
+    for (const std::size_t slot_index : slot_indices) {
+        if (!first_slot_output) {
+            output << ',';
+        }
+        first_slot_output = false;
+
+        output << '{';
+        output << "\"slotIndex\":" << slot_index;
+        if (slot_index >= element_count) {
+            output << ",\"error\":\"Slot index exceeds element count.\",\"fields\":[]}";
+            continue;
+        }
+
+        std::vector<FieldProfile> profiles;
+        profiles.reserve((stride * 1) + ((stride > 1 ? stride - 1 : 0) * 2) + ((stride > 3 ? stride - 3 : 0) * 3));
+        for (std::size_t offset = 0; offset < stride; ++offset) {
+            profiles.push_back({offset, 1, "u8"});
+        }
+        for (std::size_t offset = 0; offset + 2 <= stride; ++offset) {
+            profiles.push_back({offset, 2, "u16"});
+            profiles.push_back({offset, 2, "i16"});
+        }
+        for (std::size_t offset = 0; offset + 4 <= stride; ++offset) {
+            profiles.push_back({offset, 4, "u32"});
+            profiles.push_back({offset, 4, "i32"});
+            profiles.push_back({offset, 4, "f32"});
+        }
+
+        std::size_t row_active_records = 0;
+        int min_chunk_id = std::numeric_limits<int>::max();
+        int max_chunk_id = std::numeric_limits<int>::min();
+
+        for (std::size_t record_index = 0; record_index < records.size(); ++record_index) {
+            const auto& rec = records[record_index];
+            const std::size_t start = header_size + (slot_index * stride);
+            if (start + stride > rec.payload.size()) {
+                continue;
+            }
+
+            bool row_active = false;
+            if ((stride % 4) == 0) {
+                for (std::size_t lane_offset = 0; lane_offset + 4 <= stride; lane_offset += 4) {
+                    std::uint32_t lane_value = 0;
+                    if (read_u32_le(rec.payload, start + lane_offset, lane_value) && lane_value != padding_u32) {
+                        row_active = true;
+                        break;
+                    }
+                }
+            } else {
+                for (std::size_t byte_offset = 0; byte_offset < stride; ++byte_offset) {
+                    if (rec.payload[start + byte_offset] != padding_byte) {
+                        row_active = true;
+                        break;
+                    }
+                }
+            }
+            if (!row_active) {
+                continue;
+            }
+
+            row_active_records++;
+            min_chunk_id = std::min(min_chunk_id, rec.chunk_id);
+            max_chunk_id = std::max(max_chunk_id, rec.chunk_id);
+
+            for (auto& profile : profiles) {
+                const std::size_t field_offset = start + profile.offset;
+                if (profile.width == 1) {
+                    const std::uint8_t raw = rec.payload[field_offset];
+                    update_profile(profile, raw, static_cast<double>(raw));
+                } else if (profile.width == 2) {
+                    const std::uint16_t raw = static_cast<std::uint16_t>(rec.payload[field_offset]) |
+                                              (static_cast<std::uint16_t>(rec.payload[field_offset + 1]) << 8U);
+                    if (profile.decode_label == "u16") {
+                        update_profile(profile, raw, static_cast<double>(raw));
+                    } else {
+                        const std::int16_t signed_value = static_cast<std::int16_t>(raw);
+                        update_profile(profile, raw, static_cast<double>(signed_value));
+                    }
+                } else {
+                    std::uint32_t raw = 0;
+                    if (!read_u32_le(rec.payload, field_offset, raw)) {
+                        continue;
+                    }
+                    if (profile.decode_label == "u32") {
+                        update_profile(profile, raw, static_cast<double>(raw));
+                    } else if (profile.decode_label == "i32") {
+                        const std::int32_t signed_value = static_cast<std::int32_t>(raw);
+                        update_profile(profile, raw, static_cast<double>(signed_value));
+                    } else {
+                        const float as_float = std::bit_cast<float>(raw);
+                        if (!std::isfinite(as_float)) {
+                            continue;
+                        }
+                        update_profile(profile, raw, static_cast<double>(as_float));
+                    }
+                }
+            }
+        }
+
+        for (auto& profile : profiles) {
+            if (profile.active_samples < 4) {
+                profile.score = 0.0;
+                continue;
+            }
+            const double unique_ratio = static_cast<double>(profile.value_freq.size()) / static_cast<double>(profile.active_samples);
+            const double change_ratio = profile.transitions > 0
+                ? static_cast<double>(profile.changed_transitions) / static_cast<double>(profile.transitions)
+                : 0.0;
+            const double monotonic_ratio = profile.transitions > 0
+                ? static_cast<double>(std::max(profile.increasing_transitions, profile.decreasing_transitions)) / static_cast<double>(profile.transitions)
+                : 0.0;
+            const double coverage = records.empty()
+                ? 0.0
+                : static_cast<double>(profile.active_samples) / static_cast<double>(records.size());
+            profile.score = static_cast<double>(profile.active_samples) *
+                            (0.15 + unique_ratio) *
+                            (0.20 + change_ratio) *
+                            (0.25 + coverage) *
+                            (0.25 + monotonic_ratio);
+        }
+
+        std::sort(profiles.begin(), profiles.end(), [](const FieldProfile& left, const FieldProfile& right) {
+            if (left.score != right.score) {
+                return left.score > right.score;
+            }
+            if (left.active_samples != right.active_samples) {
+                return left.active_samples > right.active_samples;
+            }
+            if (left.width != right.width) {
+                return left.width > right.width;
+            }
+            if (left.offset != right.offset) {
+                return left.offset < right.offset;
+            }
+            return left.decode_label < right.decode_label;
+        });
+
+        output << ",\"activeRecords\":" << row_active_records << ',';
+        output << "\"chunkSpanStart\":" << (min_chunk_id == std::numeric_limits<int>::max() ? 0 : min_chunk_id) << ',';
+        output << "\"chunkSpanEnd\":" << (max_chunk_id == std::numeric_limits<int>::min() ? 0 : max_chunk_id) << ',';
+        output << "\"fields\":[";
+        std::size_t emitted = 0;
+        for (const auto& profile : profiles) {
+            if (emitted >= top_fields) {
+                break;
+            }
+            if (profile.active_samples < 4 || profile.score <= 0.0) {
+                continue;
+            }
+            if (emitted++ > 0) {
+                output << ',';
+            }
+            const double unique_ratio = static_cast<double>(profile.value_freq.size()) / static_cast<double>(profile.active_samples);
+            const double change_ratio = profile.transitions > 0
+                ? static_cast<double>(profile.changed_transitions) / static_cast<double>(profile.transitions)
+                : 0.0;
+            const double monotonic_ratio = profile.transitions > 0
+                ? static_cast<double>(std::max(profile.increasing_transitions, profile.decreasing_transitions)) / static_cast<double>(profile.transitions)
+                : 0.0;
+            const char* direction = "mixed";
+            if (profile.increasing_transitions > profile.decreasing_transitions && monotonic_ratio >= 0.6) {
+                direction = "increasing";
+            } else if (profile.decreasing_transitions > profile.increasing_transitions && monotonic_ratio >= 0.6) {
+                direction = "decreasing";
+            }
+
+            std::vector<std::pair<std::uint64_t, std::size_t>> top_values(profile.value_freq.begin(), profile.value_freq.end());
+            std::sort(top_values.begin(), top_values.end(), [](const auto& left, const auto& right) {
+                if (left.second != right.second) {
+                    return left.second > right.second;
+                }
+                return left.first < right.first;
+            });
+
+            output << '{';
+            output << "\"offset\":" << profile.offset << ',';
+            output << "\"width\":" << profile.width << ',';
+            output << "\"decodeLabel\":\"" << json_escape(profile.decode_label) << "\",";
+            output << "\"score\":" << std::fixed << std::setprecision(4) << profile.score << ',';
+            output << "\"activeSamples\":" << profile.active_samples << ',';
+            output << "\"nonZeroSamples\":" << profile.non_zero_samples << ',';
+            output << "\"uniqueValues\":" << profile.value_freq.size() << ',';
+            output << "\"transitions\":" << profile.transitions << ',';
+            output << "\"changedTransitions\":" << profile.changed_transitions << ',';
+            output << "\"increasingTransitions\":" << profile.increasing_transitions << ',';
+            output << "\"decreasingTransitions\":" << profile.decreasing_transitions << ',';
+            output << "\"stableTransitions\":" << profile.stable_transitions << ',';
+            output << "\"uniqueRatio\":" << unique_ratio << ',';
+            output << "\"changeRatio\":" << change_ratio << ',';
+            output << "\"monotonicRatio\":" << monotonic_ratio << ',';
+            output << "\"directionHint\":\"" << direction << "\",";
+            output << "\"minValue\":" << (std::isfinite(profile.min_value) ? profile.min_value : 0.0) << ',';
+            output << "\"maxValue\":" << (std::isfinite(profile.max_value) ? profile.max_value : 0.0) << ',';
+            output << "\"topValues\":[";
+            const std::size_t top_value_limit = std::min<std::size_t>(3, top_values.size());
+            for (std::size_t value_index = 0; value_index < top_value_limit; ++value_index) {
+                const auto& [raw_value, count] = top_values[value_index];
+                if (value_index > 0) {
+                    output << ',';
+                }
+                output << '{';
+                output << "\"raw\":" << raw_value << ',';
+                output << "\"hex\":\"" << value_hex(raw_value, profile.width) << "\",";
+                output << "\"count\":" << count;
+                output << '}';
+            }
+            output << "]}";
+        }
+        output << "]}";
+    }
+    output << "]}";
+    return output.str();
+}
+
+std::string analyze_row_offsets_file_json(
+    const std::string& path,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    const std::vector<std::size_t>& slot_indices,
+    std::size_t top_fields
+) {
+    const auto bytes = read_file_bytes(path);
+    return analyze_row_offsets_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_fields);
+}
+
+std::string analyze_handle_links_json(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    const std::vector<std::size_t>& slot_indices,
+    std::size_t top_links,
+    std::size_t top_families
+) {
+    struct FamilyDescriptor {
+        std::size_t length = 0;
+        std::uint8_t first_byte = 0;
+        std::vector<std::size_t> element_counts;
+        std::string label;
+    };
+
+    struct LinkHypothesis {
+        std::size_t slot_index = 0;
+        std::size_t offset = 0;
+        std::size_t family_index = 0;
+        std::size_t family_byte_offset = 0;
+        std::size_t index_offset = 0;
+        std::size_t index_width = 0;
+        std::size_t row_active_records = 0;
+        std::size_t family_byte_matches = 0;
+        std::size_t in_range_count = 0;
+        std::size_t transitions = 0;
+        std::size_t changed_transitions = 0;
+        std::uint32_t best_element_count = 0;
+        std::uint32_t min_index = std::numeric_limits<std::uint32_t>::max();
+        std::uint32_t max_index = 0;
+        bool previous_valid = false;
+        std::uint32_t previous_index = 0;
+        std::map<std::uint32_t, std::size_t> index_freq;
+        std::map<std::uint32_t, std::size_t> token_freq;
+        std::map<std::uint32_t, std::size_t> element_count_hits;
+        double score = 0.0;
+    };
+
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    std::ostringstream output;
+
+    output << '{';
+    output << "\"length\":" << target_length << ',';
+    output << "\"firstByte\":" << static_cast<int>(target_first_byte) << ',';
+    output << "\"recordCount\":" << records.size() << ',';
+    output << "\"headerSize\":" << header_size << ',';
+    output << "\"stride\":" << stride << ',';
+    output << "\"selectedSlots\":[";
+    for (std::size_t index = 0; index < slot_indices.size(); ++index) {
+        if (index > 0) {
+            output << ',';
+        }
+        output << slot_indices[index];
+    }
+    output << "],";
+
+    if (records.empty()) {
+        output << "\"families\":[],\"topHypotheses\":[],\"slots\":[]}";
+        return output.str();
+    }
+    if (slot_indices.empty()) {
+        output << "\"error\":\"At least one slot must be provided.\",\"families\":[],\"topHypotheses\":[],\"slots\":[]}";
+        return output.str();
+    }
+    if (header_size >= target_length) {
+        output << "\"error\":\"Header size must be smaller than the target record length.\",\"families\":[],\"topHypotheses\":[],\"slots\":[]}";
+        return output.str();
+    }
+    if (stride < 4) {
+        output << "\"error\":\"Stride must be at least 4 bytes.\",\"families\":[],\"topHypotheses\":[],\"slots\":[]}";
+        return output.str();
+    }
+
+    const std::size_t usable_bytes = target_length - header_size;
+    const std::size_t element_count = usable_bytes / stride;
+    output << "\"elementCount\":" << element_count << ',';
+
+    const auto family_scan = collect_ranked_chunk_families(bytes, 256, 2);
+    if (top_families == 0) {
+        top_families = 16;
+    }
+
+    std::vector<FamilyDescriptor> families;
+    families.reserve(std::min<std::size_t>(top_families, family_scan.ranked_families.size()));
+    for (const auto& family : family_scan.ranked_families) {
+        if (family.length == target_length && family.first_byte == target_first_byte) {
+            continue;
+        }
+        if (family.first_byte == 0) {
+            continue;
+        }
+        FamilyDescriptor descriptor;
+        descriptor.length = family.length;
+        descriptor.first_byte = family.first_byte;
+        std::ostringstream label;
+        label << family.length << " / 0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << static_cast<int>(family.first_byte);
+        descriptor.label = label.str();
+        for (std::size_t candidate_header = 0; candidate_header <= 16; ++candidate_header) {
+            if (family.length <= candidate_header || ((family.length - candidate_header) % 16) != 0) {
+                continue;
+            }
+            descriptor.element_counts.push_back((family.length - candidate_header) / 16);
+        }
+        if (descriptor.element_counts.empty()) {
+            continue;
+        }
+        std::sort(descriptor.element_counts.begin(), descriptor.element_counts.end());
+        descriptor.element_counts.erase(std::unique(descriptor.element_counts.begin(), descriptor.element_counts.end()), descriptor.element_counts.end());
+        families.push_back(std::move(descriptor));
+        if (families.size() >= top_families) {
+            break;
+        }
+    }
+
+    output << "\"families\":[";
+    for (std::size_t family_index = 0; family_index < families.size(); ++family_index) {
+        const auto& family = families[family_index];
+        if (family_index > 0) {
+            output << ',';
+        }
+        output << '{';
+        output << "\"length\":" << family.length << ',';
+        output << "\"firstByte\":" << static_cast<int>(family.first_byte) << ',';
+        output << "\"label\":\"" << json_escape(family.label) << "\",";
+        output << "\"elementCounts\":[";
+        for (std::size_t count_index = 0; count_index < family.element_counts.size(); ++count_index) {
+            if (count_index > 0) {
+                output << ',';
+            }
+            output << family.element_counts[count_index];
+        }
+        output << "]}";
+    }
+    output << "],";
+
+    auto read_index = [](std::uint32_t raw_value, std::size_t byte_offset, std::size_t width) -> std::uint32_t {
+        if (width == 1) {
+            return (raw_value >> (byte_offset * 8U)) & 0xFFu;
+        }
+        if (width == 2) {
+            return (raw_value >> (byte_offset * 8U)) & 0xFFFFu;
+        }
+        return (raw_value >> (byte_offset * 8U)) & 0xFFFFFFu;
+    };
+
+    auto u32_hex_u = [](std::uint32_t value) {
+        return u32_hex(value);
+    };
+
+    if (top_links == 0) {
+        top_links = 24;
+    }
+
+    std::vector<LinkHypothesis> global_ranked;
+    output << "\"slots\":[";
+    bool first_slot_output = true;
+    for (const std::size_t slot_index : slot_indices) {
+        if (!first_slot_output) {
+            output << ',';
+        }
+        first_slot_output = false;
+
+        output << '{';
+        output << "\"slotIndex\":" << slot_index;
+        if (slot_index >= element_count) {
+            output << ",\"error\":\"Slot index exceeds element count.\",\"topHypotheses\":[]}";
+            continue;
+        }
+
+        std::vector<LinkHypothesis> hypotheses;
+        for (std::size_t offset = 0; offset + 4 <= stride; ++offset) {
+            for (std::size_t family_index = 0; family_index < families.size(); ++family_index) {
+                for (std::size_t family_byte_offset = 0; family_byte_offset < 4; ++family_byte_offset) {
+                    for (std::size_t index_offset = 0; index_offset < 4; ++index_offset) {
+                        if (index_offset == family_byte_offset) {
+                            continue;
+                        }
+                        hypotheses.push_back({slot_index, offset, family_index, family_byte_offset, index_offset, 1});
+                    }
+                    for (std::size_t index_offset = 0; index_offset + 2 <= 4; ++index_offset) {
+                        if (family_byte_offset >= index_offset && family_byte_offset < index_offset + 2) {
+                            continue;
+                        }
+                        hypotheses.push_back({slot_index, offset, family_index, family_byte_offset, index_offset, 2});
+                    }
+                    for (std::size_t index_offset = 0; index_offset + 3 <= 4; ++index_offset) {
+                        if (family_byte_offset >= index_offset && family_byte_offset < index_offset + 3) {
+                            continue;
+                        }
+                        hypotheses.push_back({slot_index, offset, family_index, family_byte_offset, index_offset, 3});
+                    }
+                }
+            }
+        }
+
+        std::size_t row_active_records = 0;
+        for (const auto& rec : records) {
+            const std::size_t start = header_size + (slot_index * stride);
+            if (start + stride > rec.payload.size()) {
+                continue;
+            }
+
+            bool row_active = false;
+            for (std::size_t lane_offset = 0; lane_offset + 4 <= stride; lane_offset += 4) {
+                std::uint32_t lane_value = 0;
+                if (read_u32_le(rec.payload, start + lane_offset, lane_value)) {
+                    row_active = true;
+                    break;
+                }
+            }
+            if (!row_active) {
+                continue;
+            }
+            row_active_records++;
+
+            for (auto& hypothesis : hypotheses) {
+                std::uint32_t raw_value = 0;
+                if (!read_u32_le(rec.payload, start + hypothesis.offset, raw_value)) {
+                    continue;
+                }
+                const std::uint8_t family_byte = static_cast<std::uint8_t>((raw_value >> (hypothesis.family_byte_offset * 8U)) & 0xFFu);
+                if (family_byte != families[hypothesis.family_index].first_byte) {
+                    continue;
+                }
+                hypothesis.family_byte_matches++;
+                hypothesis.token_freq[raw_value]++;
+
+                const std::uint32_t index_value = read_index(raw_value, hypothesis.index_offset, hypothesis.index_width);
+                std::uint32_t matched_element_count = 0;
+                for (const std::size_t element_count_candidate : families[hypothesis.family_index].element_counts) {
+                    if (index_value < element_count_candidate) {
+                        matched_element_count = static_cast<std::uint32_t>(element_count_candidate);
+                        break;
+                    }
+                }
+                if (matched_element_count == 0) {
+                    continue;
+                }
+
+                hypothesis.in_range_count++;
+                hypothesis.element_count_hits[matched_element_count]++;
+                hypothesis.index_freq[index_value]++;
+                hypothesis.min_index = std::min(hypothesis.min_index, index_value);
+                hypothesis.max_index = std::max(hypothesis.max_index, index_value);
+                if (hypothesis.previous_valid) {
+                    hypothesis.transitions++;
+                    if (hypothesis.previous_index != index_value) {
+                        hypothesis.changed_transitions++;
+                    }
+                }
+                hypothesis.previous_valid = true;
+                hypothesis.previous_index = index_value;
+            }
+        }
+
+        for (auto& hypothesis : hypotheses) {
+            hypothesis.row_active_records = row_active_records;
+            if (hypothesis.family_byte_matches < 3 || hypothesis.in_range_count < 3 || row_active_records == 0) {
+                hypothesis.score = 0.0;
+                continue;
+            }
+            const double byte_match_ratio = static_cast<double>(hypothesis.family_byte_matches) / static_cast<double>(row_active_records);
+            const double in_range_ratio = static_cast<double>(hypothesis.in_range_count) / static_cast<double>(hypothesis.family_byte_matches);
+            const double unique_ratio = static_cast<double>(hypothesis.index_freq.size()) / static_cast<double>(hypothesis.in_range_count);
+            const double changed_ratio = hypothesis.transitions > 0
+                ? static_cast<double>(hypothesis.changed_transitions) / static_cast<double>(hypothesis.transitions)
+                : 0.0;
+            if (!hypothesis.element_count_hits.empty()) {
+                const auto best = std::max_element(hypothesis.element_count_hits.begin(), hypothesis.element_count_hits.end(), [](const auto& left, const auto& right) {
+                    if (left.second != right.second) {
+                        return left.second < right.second;
+                    }
+                    return left.first > right.first;
+                });
+                hypothesis.best_element_count = best->first;
+            }
+            hypothesis.score = static_cast<double>(hypothesis.in_range_count) *
+                               (0.50 + byte_match_ratio) *
+                               (0.50 + in_range_ratio) *
+                               (0.25 + unique_ratio) *
+                               (0.25 + changed_ratio);
+        }
+
+        std::sort(hypotheses.begin(), hypotheses.end(), [](const LinkHypothesis& left, const LinkHypothesis& right) {
+            if (left.score != right.score) {
+                return left.score > right.score;
+            }
+            if (left.in_range_count != right.in_range_count) {
+                return left.in_range_count > right.in_range_count;
+            }
+            if (left.family_byte_matches != right.family_byte_matches) {
+                return left.family_byte_matches > right.family_byte_matches;
+            }
+            if (left.offset != right.offset) {
+                return left.offset < right.offset;
+            }
+            return left.index_offset < right.index_offset;
+        });
+
+        output << ",\"rowActiveRecords\":" << row_active_records << ',';
+        output << "\"topHypotheses\":[";
+        std::size_t emitted = 0;
+        for (const auto& hypothesis : hypotheses) {
+            if (emitted >= top_links) {
+                break;
+            }
+            if (hypothesis.score <= 0.0) {
+                continue;
+            }
+            if (emitted++ > 0) {
+                output << ',';
+            }
+            global_ranked.push_back(hypothesis);
+            const auto& family = families[hypothesis.family_index];
+            const double byte_match_ratio = static_cast<double>(hypothesis.family_byte_matches) / static_cast<double>(std::max<std::size_t>(1, hypothesis.row_active_records));
+            const double in_range_ratio = static_cast<double>(hypothesis.in_range_count) / static_cast<double>(std::max<std::size_t>(1, hypothesis.family_byte_matches));
+            const double changed_ratio = hypothesis.transitions > 0
+                ? static_cast<double>(hypothesis.changed_transitions) / static_cast<double>(hypothesis.transitions)
+                : 0.0;
+
+            std::vector<std::pair<std::uint32_t, std::size_t>> top_indices(hypothesis.index_freq.begin(), hypothesis.index_freq.end());
+            std::sort(top_indices.begin(), top_indices.end(), [](const auto& left, const auto& right) {
+                if (left.second != right.second) {
+                    return left.second > right.second;
+                }
+                return left.first < right.first;
+            });
+            std::vector<std::pair<std::uint32_t, std::size_t>> top_tokens(hypothesis.token_freq.begin(), hypothesis.token_freq.end());
+            std::sort(top_tokens.begin(), top_tokens.end(), [](const auto& left, const auto& right) {
+                if (left.second != right.second) {
+                    return left.second > right.second;
+                }
+                return left.first < right.first;
+            });
+
+            output << '{';
+            output << "\"offset\":" << hypothesis.offset << ',';
+            output << "\"familyLabel\":\"" << json_escape(family.label) << "\",";
+            output << "\"familyLength\":" << family.length << ',';
+            output << "\"familyFirstByte\":" << static_cast<int>(family.first_byte) << ',';
+            output << "\"familyByteOffset\":" << hypothesis.family_byte_offset << ',';
+            output << "\"indexOffset\":" << hypothesis.index_offset << ',';
+            output << "\"indexWidth\":" << hypothesis.index_width << ',';
+            output << "\"bestElementCount\":" << hypothesis.best_element_count << ',';
+            output << "\"score\":" << std::fixed << std::setprecision(4) << hypothesis.score << ',';
+            output << "\"familyByteMatches\":" << hypothesis.family_byte_matches << ',';
+            output << "\"inRangeCount\":" << hypothesis.in_range_count << ',';
+            output << "\"byteMatchRatio\":" << byte_match_ratio << ',';
+            output << "\"inRangeRatio\":" << in_range_ratio << ',';
+            output << "\"uniqueIndices\":" << hypothesis.index_freq.size() << ',';
+            output << "\"transitions\":" << hypothesis.transitions << ',';
+            output << "\"changedTransitions\":" << hypothesis.changed_transitions << ',';
+            output << "\"changedRatio\":" << changed_ratio << ',';
+            output << "\"minIndex\":" << (hypothesis.min_index == std::numeric_limits<std::uint32_t>::max() ? 0 : hypothesis.min_index) << ',';
+            output << "\"maxIndex\":" << hypothesis.max_index << ',';
+            output << "\"topIndices\":[";
+            const std::size_t top_index_limit = std::min<std::size_t>(3, top_indices.size());
+            for (std::size_t index = 0; index < top_index_limit; ++index) {
+                const auto& [value, count] = top_indices[index];
+                if (index > 0) {
+                    output << ',';
+                }
+                output << '{';
+                output << "\"value\":" << value << ',';
+                output << "\"count\":" << count;
+                output << '}';
+            }
+            output << "],\"topTokens\":[";
+            const std::size_t top_token_limit = std::min<std::size_t>(3, top_tokens.size());
+            for (std::size_t index = 0; index < top_token_limit; ++index) {
+                const auto& [value, count] = top_tokens[index];
+                if (index > 0) {
+                    output << ',';
+                }
+                output << '{';
+                output << "\"rawU32\":" << value << ',';
+                output << "\"hex\":\"" << u32_hex_u(value) << "\",";
+                output << "\"count\":" << count;
+                output << '}';
+            }
+            output << "]}";
+        }
+        output << "]}";
+    }
+    output << "],";
+
+    std::sort(global_ranked.begin(), global_ranked.end(), [](const LinkHypothesis& left, const LinkHypothesis& right) {
+        if (left.score != right.score) {
+            return left.score > right.score;
+        }
+        if (left.in_range_count != right.in_range_count) {
+            return left.in_range_count > right.in_range_count;
+        }
+        return left.slot_index < right.slot_index;
+    });
+
+    output << "\"topHypotheses\":[";
+    std::size_t emitted = 0;
+    for (const auto& hypothesis : global_ranked) {
+        if (emitted >= top_links) {
+            break;
+        }
+        if (hypothesis.score <= 0.0) {
+            continue;
+        }
+        if (emitted++ > 0) {
+            output << ',';
+        }
+        const auto& family = families[hypothesis.family_index];
+        const double byte_match_ratio = static_cast<double>(hypothesis.family_byte_matches) / static_cast<double>(std::max<std::size_t>(1, hypothesis.row_active_records));
+        const double in_range_ratio = static_cast<double>(hypothesis.in_range_count) / static_cast<double>(std::max<std::size_t>(1, hypothesis.family_byte_matches));
+        output << '{';
+        output << "\"slotIndex\":" << hypothesis.slot_index << ',';
+        output << "\"offset\":" << hypothesis.offset << ',';
+        output << "\"familyLabel\":\"" << json_escape(family.label) << "\",";
+        output << "\"familyByteOffset\":" << hypothesis.family_byte_offset << ',';
+        output << "\"indexOffset\":" << hypothesis.index_offset << ',';
+        output << "\"indexWidth\":" << hypothesis.index_width << ',';
+        output << "\"bestElementCount\":" << hypothesis.best_element_count << ',';
+        output << "\"score\":" << std::fixed << std::setprecision(4) << hypothesis.score << ',';
+        output << "\"familyByteMatches\":" << hypothesis.family_byte_matches << ',';
+        output << "\"inRangeCount\":" << hypothesis.in_range_count << ',';
+        output << "\"byteMatchRatio\":" << byte_match_ratio << ',';
+        output << "\"inRangeRatio\":" << in_range_ratio;
+        output << '}';
+    }
+    output << "]}";
+    return output.str();
+}
+
+std::string analyze_handle_links_file_json(
+    const std::string& path,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    const std::vector<std::size_t>& slot_indices,
+    std::size_t top_links,
+    std::size_t top_families
+) {
+    const auto bytes = read_file_bytes(path);
+    return analyze_handle_links_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_links, top_families);
+}
+
+std::string analyze_token_bitfields_json(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    const std::vector<std::size_t>& slot_indices,
+    std::size_t top_slices,
+    std::size_t top_families
+) {
+    struct FamilyDescriptor {
+        std::size_t length = 0;
+        std::uint8_t first_byte = 0;
+        std::vector<std::size_t> element_counts;
+        std::string label;
+    };
+
+    struct SliceCandidate {
+        std::size_t slot_index = 0;
+        std::size_t offset = 0;
+        std::size_t bit_start = 0;
+        std::size_t bit_width = 0;
+        std::size_t family_index = 0;
+        std::size_t active_samples = 0;
+        std::size_t transitions = 0;
+        std::size_t changed_transitions = 0;
+        std::size_t in_range_count = 0;
+        std::size_t best_element_count = 0;
+        std::uint32_t min_index = std::numeric_limits<std::uint32_t>::max();
+        std::uint32_t max_index = 0;
+        bool previous_valid = false;
+        std::uint32_t previous_index = 0;
+        std::map<std::uint32_t, std::size_t> index_freq;
+        std::map<std::uint32_t, std::size_t> residual_freq;
+        double score = 0.0;
+    };
+
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    std::ostringstream output;
+
+    output << '{';
+    output << "\"length\":" << target_length << ',';
+    output << "\"firstByte\":" << static_cast<int>(target_first_byte) << ',';
+    output << "\"recordCount\":" << records.size() << ',';
+    output << "\"headerSize\":" << header_size << ',';
+    output << "\"stride\":" << stride << ',';
+    output << "\"selectedSlots\":[";
+    for (std::size_t index = 0; index < slot_indices.size(); ++index) {
+        if (index > 0) {
+            output << ',';
+        }
+        output << slot_indices[index];
+    }
+    output << "],";
+
+    if (records.empty()) {
+        output << "\"families\":[],\"topSlices\":[],\"slots\":[]}";
+        return output.str();
+    }
+    if (slot_indices.empty()) {
+        output << "\"error\":\"At least one slot must be provided.\",\"families\":[],\"topSlices\":[],\"slots\":[]}";
+        return output.str();
+    }
+    if (header_size >= target_length) {
+        output << "\"error\":\"Header size must be smaller than the target record length.\",\"families\":[],\"topSlices\":[],\"slots\":[]}";
+        return output.str();
+    }
+    if (stride < 4) {
+        output << "\"error\":\"Stride must be at least 4 bytes.\",\"families\":[],\"topSlices\":[],\"slots\":[]}";
+        return output.str();
+    }
+
+    const std::size_t usable_bytes = target_length - header_size;
+    const std::size_t element_count = usable_bytes / stride;
+    output << "\"elementCount\":" << element_count << ',';
+
+    const auto family_scan = collect_ranked_chunk_families(bytes, 256, 2);
+    if (top_families == 0) {
+        top_families = 16;
+    }
+
+    std::vector<FamilyDescriptor> families;
+    for (const auto& family : family_scan.ranked_families) {
+        if (family.length == target_length && family.first_byte == target_first_byte) {
+            continue;
+        }
+        if (family.first_byte == 0) {
+            continue;
+        }
+        FamilyDescriptor descriptor;
+        descriptor.length = family.length;
+        descriptor.first_byte = family.first_byte;
+        std::ostringstream label;
+        label << family.length << " / 0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << static_cast<int>(family.first_byte);
+        descriptor.label = label.str();
+        for (std::size_t candidate_header = 0; candidate_header <= 16; ++candidate_header) {
+            if (family.length <= candidate_header || ((family.length - candidate_header) % 16) != 0) {
+                continue;
+            }
+            descriptor.element_counts.push_back((family.length - candidate_header) / 16);
+        }
+        if (descriptor.element_counts.empty()) {
+            continue;
+        }
+        std::sort(descriptor.element_counts.begin(), descriptor.element_counts.end());
+        descriptor.element_counts.erase(std::unique(descriptor.element_counts.begin(), descriptor.element_counts.end()), descriptor.element_counts.end());
+        families.push_back(std::move(descriptor));
+        if (families.size() >= top_families) {
+            break;
+        }
+    }
+
+    output << "\"families\":[";
+    for (std::size_t family_index = 0; family_index < families.size(); ++family_index) {
+        const auto& family = families[family_index];
+        if (family_index > 0) {
+            output << ',';
+        }
+        output << '{';
+        output << "\"length\":" << family.length << ',';
+        output << "\"firstByte\":" << static_cast<int>(family.first_byte) << ',';
+        output << "\"label\":\"" << json_escape(family.label) << "\",";
+        output << "\"elementCounts\":[";
+        for (std::size_t count_index = 0; count_index < family.element_counts.size(); ++count_index) {
+            if (count_index > 0) {
+                output << ',';
+            }
+            output << family.element_counts[count_index];
+        }
+        output << "]}";
+    }
+    output << "],";
+
+    std::vector<std::size_t> bit_widths;
+    for (std::size_t width = 6; width <= 24; ++width) {
+        bit_widths.push_back(width);
+    }
+    if (top_slices == 0) {
+        top_slices = 24;
+    }
+
+    auto extract_bits = [](std::uint32_t raw_value, std::size_t bit_start, std::size_t bit_width) -> std::uint32_t {
+        const std::uint64_t mask = ((std::uint64_t{1} << bit_width) - 1ULL) << bit_start;
+        return static_cast<std::uint32_t>((static_cast<std::uint64_t>(raw_value) & mask) >> bit_start);
+    };
+    auto residual_bits = [](std::uint32_t raw_value, std::size_t bit_start, std::size_t bit_width) -> std::uint32_t {
+        const std::uint64_t mask = ((std::uint64_t{1} << bit_width) - 1ULL) << bit_start;
+        return static_cast<std::uint32_t>(static_cast<std::uint64_t>(raw_value) & ~mask);
+    };
+
+    std::vector<SliceCandidate> global_ranked;
+    output << "\"slots\":[";
+    bool first_slot_output = true;
+    for (const std::size_t slot_index : slot_indices) {
+        if (!first_slot_output) {
+            output << ',';
+        }
+        first_slot_output = false;
+
+        output << '{';
+        output << "\"slotIndex\":" << slot_index;
+        if (slot_index >= element_count) {
+            output << ",\"error\":\"Slot index exceeds element count.\",\"topSlices\":[]}";
+            continue;
+        }
+
+        std::vector<SliceCandidate> candidates;
+        for (std::size_t offset = 0; offset + 4 <= stride; ++offset) {
+            for (const std::size_t bit_width : bit_widths) {
+                const std::size_t max_bit_start = 32 - bit_width;
+                for (std::size_t bit_start = 0; bit_start <= max_bit_start; ++bit_start) {
+                    for (std::size_t family_index = 0; family_index < families.size(); ++family_index) {
+                        candidates.push_back({slot_index, offset, bit_start, bit_width, family_index});
+                    }
+                }
+            }
+        }
+
+        for (const auto& rec : records) {
+            const std::size_t start = header_size + (slot_index * stride);
+            if (start + stride > rec.payload.size()) {
+                continue;
+            }
+            for (auto& candidate : candidates) {
+                std::uint32_t raw_value = 0;
+                if (!read_u32_le(rec.payload, start + candidate.offset, raw_value)) {
+                    continue;
+                }
+                candidate.active_samples++;
+                const std::uint32_t index_value = extract_bits(raw_value, candidate.bit_start, candidate.bit_width);
+                const std::uint32_t residual_value = residual_bits(raw_value, candidate.bit_start, candidate.bit_width);
+                candidate.residual_freq[residual_value]++;
+
+                std::size_t matched_element_count = 0;
+                for (const std::size_t element_count_candidate : families[candidate.family_index].element_counts) {
+                    if (index_value < element_count_candidate) {
+                        matched_element_count = element_count_candidate;
+                        break;
+                    }
+                }
+                if (matched_element_count == 0) {
+                    continue;
+                }
+
+                if (candidate.best_element_count == 0 || matched_element_count < candidate.best_element_count) {
+                    candidate.best_element_count = matched_element_count;
+                }
+                candidate.in_range_count++;
+                candidate.index_freq[index_value]++;
+                candidate.min_index = std::min(candidate.min_index, index_value);
+                candidate.max_index = std::max(candidate.max_index, index_value);
+                if (candidate.previous_valid) {
+                    candidate.transitions++;
+                    if (candidate.previous_index != index_value) {
+                        candidate.changed_transitions++;
+                    }
+                }
+                candidate.previous_valid = true;
+                candidate.previous_index = index_value;
+            }
+        }
+
+        for (auto& candidate : candidates) {
+            if (candidate.active_samples < 4 || candidate.in_range_count < 4 || candidate.best_element_count == 0) {
+                candidate.score = 0.0;
+                continue;
+            }
+            const double in_range_ratio = static_cast<double>(candidate.in_range_count) / static_cast<double>(candidate.active_samples);
+            const double unique_ratio = static_cast<double>(candidate.index_freq.size()) / static_cast<double>(candidate.in_range_count);
+            const double changed_ratio = candidate.transitions > 0
+                ? static_cast<double>(candidate.changed_transitions) / static_cast<double>(candidate.transitions)
+                : 0.0;
+            const double span_ratio = candidate.best_element_count > 0
+                ? static_cast<double>(candidate.max_index) / static_cast<double>(candidate.best_element_count)
+                : 0.0;
+            std::size_t top_residual_count = 0;
+            if (!candidate.residual_freq.empty()) {
+                top_residual_count = std::max_element(candidate.residual_freq.begin(), candidate.residual_freq.end(), [](const auto& left, const auto& right) {
+                    if (left.second != right.second) {
+                        return left.second < right.second;
+                    }
+                    return left.first > right.first;
+                })->second;
+            }
+            const double residual_repeat_ratio = candidate.active_samples > 0
+                ? static_cast<double>(top_residual_count) / static_cast<double>(candidate.active_samples)
+                : 0.0;
+            const double span_score = std::min(1.0, span_ratio * 4.0);
+            candidate.score = static_cast<double>(candidate.in_range_count) *
+                              (0.30 + in_range_ratio) *
+                              (0.25 + unique_ratio) *
+                              (0.25 + changed_ratio) *
+                              (0.20 + residual_repeat_ratio) *
+                              (0.15 + span_score);
+        }
+
+        std::sort(candidates.begin(), candidates.end(), [](const SliceCandidate& left, const SliceCandidate& right) {
+            if (left.score != right.score) {
+                return left.score > right.score;
+            }
+            if (left.in_range_count != right.in_range_count) {
+                return left.in_range_count > right.in_range_count;
+            }
+            if (left.bit_width != right.bit_width) {
+                return left.bit_width > right.bit_width;
+            }
+            if (left.offset != right.offset) {
+                return left.offset < right.offset;
+            }
+            return left.bit_start < right.bit_start;
+        });
+
+        output << ",\"topSlices\":[";
+        std::size_t emitted = 0;
+        for (const auto& candidate : candidates) {
+            if (emitted >= top_slices) {
+                break;
+            }
+            if (candidate.score <= 0.0) {
+                continue;
+            }
+            if (emitted++ > 0) {
+                output << ',';
+            }
+            global_ranked.push_back(candidate);
+            const auto& family = families[candidate.family_index];
+            const double in_range_ratio = static_cast<double>(candidate.in_range_count) / static_cast<double>(candidate.active_samples);
+            const double unique_ratio = static_cast<double>(candidate.index_freq.size()) / static_cast<double>(candidate.in_range_count);
+            const double changed_ratio = candidate.transitions > 0
+                ? static_cast<double>(candidate.changed_transitions) / static_cast<double>(candidate.transitions)
+                : 0.0;
+            const double span_ratio = candidate.best_element_count > 0
+                ? static_cast<double>(candidate.max_index) / static_cast<double>(candidate.best_element_count)
+                : 0.0;
+
+            std::vector<std::pair<std::uint32_t, std::size_t>> top_indices(candidate.index_freq.begin(), candidate.index_freq.end());
+            std::sort(top_indices.begin(), top_indices.end(), [](const auto& left, const auto& right) {
+                if (left.second != right.second) {
+                    return left.second > right.second;
+                }
+                return left.first < right.first;
+            });
+            std::vector<std::pair<std::uint32_t, std::size_t>> top_residuals(candidate.residual_freq.begin(), candidate.residual_freq.end());
+            std::sort(top_residuals.begin(), top_residuals.end(), [](const auto& left, const auto& right) {
+                if (left.second != right.second) {
+                    return left.second > right.second;
+                }
+                return left.first < right.first;
+            });
+
+            output << '{';
+            output << "\"offset\":" << candidate.offset << ',';
+            output << "\"bitStart\":" << candidate.bit_start << ',';
+            output << "\"bitWidth\":" << candidate.bit_width << ',';
+            output << "\"familyLabel\":\"" << json_escape(family.label) << "\",";
+            output << "\"bestElementCount\":" << candidate.best_element_count << ',';
+            output << "\"score\":" << std::fixed << std::setprecision(4) << candidate.score << ',';
+            output << "\"activeSamples\":" << candidate.active_samples << ',';
+            output << "\"inRangeCount\":" << candidate.in_range_count << ',';
+            output << "\"inRangeRatio\":" << in_range_ratio << ',';
+            output << "\"uniqueIndices\":" << candidate.index_freq.size() << ',';
+            output << "\"uniqueRatio\":" << unique_ratio << ',';
+            output << "\"transitions\":" << candidate.transitions << ',';
+            output << "\"changedTransitions\":" << candidate.changed_transitions << ',';
+            output << "\"changedRatio\":" << changed_ratio << ',';
+            output << "\"minIndex\":" << (candidate.min_index == std::numeric_limits<std::uint32_t>::max() ? 0 : candidate.min_index) << ',';
+            output << "\"maxIndex\":" << candidate.max_index << ',';
+            output << "\"spanRatio\":" << span_ratio << ',';
+            output << "\"topIndices\":[";
+            const std::size_t top_index_limit = std::min<std::size_t>(3, top_indices.size());
+            for (std::size_t index = 0; index < top_index_limit; ++index) {
+                const auto& [value, count] = top_indices[index];
+                if (index > 0) {
+                    output << ',';
+                }
+                output << '{';
+                output << "\"value\":" << value << ',';
+                output << "\"count\":" << count;
+                output << '}';
+            }
+            output << "],\"topResiduals\":[";
+            const std::size_t top_residual_limit = std::min<std::size_t>(3, top_residuals.size());
+            for (std::size_t index = 0; index < top_residual_limit; ++index) {
+                const auto& [value, count] = top_residuals[index];
+                if (index > 0) {
+                    output << ',';
+                }
+                output << '{';
+                output << "\"rawU32\":" << value << ',';
+                output << "\"hex\":\"" << u32_hex(value) << "\",";
+                output << "\"count\":" << count;
+                output << '}';
+            }
+            output << "]}";
+        }
+        output << "]}";
+    }
+    output << "],";
+
+    std::sort(global_ranked.begin(), global_ranked.end(), [](const SliceCandidate& left, const SliceCandidate& right) {
+        if (left.score != right.score) {
+            return left.score > right.score;
+        }
+        if (left.in_range_count != right.in_range_count) {
+            return left.in_range_count > right.in_range_count;
+        }
+        return left.slot_index < right.slot_index;
+    });
+
+    output << "\"topSlices\":[";
+    std::size_t emitted = 0;
+    for (const auto& candidate : global_ranked) {
+        if (emitted >= top_slices) {
+            break;
+        }
+        if (candidate.score <= 0.0) {
+            continue;
+        }
+        if (emitted++ > 0) {
+            output << ',';
+        }
+        const auto& family = families[candidate.family_index];
+        const double in_range_ratio = static_cast<double>(candidate.in_range_count) / static_cast<double>(candidate.active_samples);
+        output << '{';
+        output << "\"slotIndex\":" << candidate.slot_index << ',';
+        output << "\"offset\":" << candidate.offset << ',';
+        output << "\"bitStart\":" << candidate.bit_start << ',';
+        output << "\"bitWidth\":" << candidate.bit_width << ',';
+        output << "\"familyLabel\":\"" << json_escape(family.label) << "\",";
+        output << "\"bestElementCount\":" << candidate.best_element_count << ',';
+        output << "\"score\":" << std::fixed << std::setprecision(4) << candidate.score << ',';
+        output << "\"activeSamples\":" << candidate.active_samples << ',';
+        output << "\"inRangeCount\":" << candidate.in_range_count << ',';
+        output << "\"inRangeRatio\":" << in_range_ratio;
+        output << '}';
+    }
+    output << "]}";
+    return output.str();
+}
+
+std::string analyze_token_bitfields_file_json(
+    const std::string& path,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    const std::vector<std::size_t>& slot_indices,
+    std::size_t top_slices,
+    std::size_t top_families
+) {
+    const auto bytes = read_file_bytes(path);
+    return analyze_token_bitfields_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_slices, top_families);
+}
+
+std::string analyze_table_descriptors_json(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    const std::vector<std::size_t>& slot_indices,
+    std::size_t top_matches
+) {
+    struct DescriptorTarget {
+        std::string family_label;
+        std::size_t element_count = 0;
+    };
+    struct DescriptorMatch {
+        std::size_t slot_index = 0;
+        std::size_t offset = 0;
+        std::size_t bit_start = 0;
+        std::string family_label;
+        std::size_t element_count = 0;
+        std::size_t exact_match_count = 0;
+        std::map<std::uint32_t, std::size_t> residual_freq;
+        std::map<std::uint32_t, std::size_t> token_freq;
+    };
+
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    std::ostringstream output;
+
+    output << '{';
+    output << "\"length\":" << target_length << ',';
+    output << "\"firstByte\":" << static_cast<int>(target_first_byte) << ',';
+    output << "\"recordCount\":" << records.size() << ',';
+    output << "\"headerSize\":" << header_size << ',';
+    output << "\"stride\":" << stride << ',';
+    output << "\"selectedSlots\":[";
+    for (std::size_t index = 0; index < slot_indices.size(); ++index) {
+        if (index > 0) {
+            output << ',';
+        }
+        output << slot_indices[index];
+    }
+    output << "],";
+
+    if (records.empty()) {
+        output << "\"targets\":[],\"matches\":[],\"slots\":[]}";
+        return output.str();
+    }
+    if (slot_indices.empty()) {
+        output << "\"error\":\"At least one slot must be provided.\",\"targets\":[],\"matches\":[],\"slots\":[]}";
+        return output.str();
+    }
+    if (header_size >= target_length) {
+        output << "\"error\":\"Header size must be smaller than the target record length.\",\"targets\":[],\"matches\":[],\"slots\":[]}";
+        return output.str();
+    }
+
+    const std::size_t usable_bytes = target_length - header_size;
+    const std::size_t element_count = usable_bytes / stride;
+    output << "\"elementCount\":" << element_count << ',';
+
+    const auto family_scan = collect_ranked_chunk_families(bytes, 256, 2);
+    std::vector<DescriptorTarget> targets;
+    for (const auto& family : family_scan.ranked_families) {
+        for (std::size_t candidate_header = 0; candidate_header <= 16; ++candidate_header) {
+            if (family.length <= candidate_header || ((family.length - candidate_header) % 16) != 0) {
+                continue;
+            }
+            std::ostringstream label;
+            label << family.length << " / 0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << static_cast<int>(family.first_byte);
+            targets.push_back({label.str(), (family.length - candidate_header) / 16});
+        }
+    }
+    std::sort(targets.begin(), targets.end(), [](const DescriptorTarget& left, const DescriptorTarget& right) {
+        if (left.element_count != right.element_count) {
+            return left.element_count < right.element_count;
+        }
+        return left.family_label < right.family_label;
+    });
+
+    output << "\"targets\":[";
+    for (std::size_t index = 0; index < targets.size(); ++index) {
+        if (index > 0) {
+            output << ',';
+        }
+        output << '{';
+        output << "\"familyLabel\":\"" << json_escape(targets[index].family_label) << "\",";
+        output << "\"elementCount\":" << targets[index].element_count;
+        output << '}';
+    }
+    output << "],";
+
+    auto extract_12 = [](std::uint32_t raw_value, std::size_t bit_start) -> std::uint32_t {
+        return (raw_value >> bit_start) & 0xFFFu;
+    };
+    auto residual_12 = [](std::uint32_t raw_value, std::size_t bit_start) -> std::uint32_t {
+        const std::uint32_t mask = 0xFFFu << bit_start;
+        return raw_value & ~mask;
+    };
+    if (top_matches == 0) {
+        top_matches = 32;
+    }
+
+    std::vector<DescriptorMatch> global_matches;
+    output << "\"slots\":[";
+    bool first_slot_output = true;
+    for (const std::size_t slot_index : slot_indices) {
+        if (!first_slot_output) {
+            output << ',';
+        }
+        first_slot_output = false;
+        output << '{';
+        output << "\"slotIndex\":" << slot_index;
+        if (slot_index >= element_count) {
+            output << ",\"matches\":[]}";
+            continue;
+        }
+
+        std::vector<DescriptorMatch> matches;
+        for (std::size_t offset = 0; offset + 4 <= stride; ++offset) {
+            for (std::size_t bit_start = 0; bit_start <= 20; ++bit_start) {
+                for (const auto& target : targets) {
+                    matches.push_back({slot_index, offset, bit_start, target.family_label, target.element_count});
+                }
+            }
+        }
+
+        for (const auto& rec : records) {
+            const std::size_t start = header_size + (slot_index * stride);
+            if (start + stride > rec.payload.size()) {
+                continue;
+            }
+            for (auto& match : matches) {
+                std::uint32_t raw_value = 0;
+                if (!read_u32_le(rec.payload, start + match.offset, raw_value)) {
+                    continue;
+                }
+                const std::uint32_t extracted = extract_12(raw_value, match.bit_start);
+                if (extracted != match.element_count) {
+                    continue;
+                }
+                match.exact_match_count++;
+                match.residual_freq[residual_12(raw_value, match.bit_start)]++;
+                match.token_freq[raw_value]++;
+            }
+        }
+
+        matches.erase(std::remove_if(matches.begin(), matches.end(), [](const DescriptorMatch& match) {
+            return match.exact_match_count == 0;
+        }), matches.end());
+        std::sort(matches.begin(), matches.end(), [](const DescriptorMatch& left, const DescriptorMatch& right) {
+            if (left.exact_match_count != right.exact_match_count) {
+                return left.exact_match_count > right.exact_match_count;
+            }
+            if (left.offset != right.offset) {
+                return left.offset < right.offset;
+            }
+            if (left.bit_start != right.bit_start) {
+                return left.bit_start < right.bit_start;
+            }
+            return left.family_label < right.family_label;
+        });
+
+        output << ",\"matches\":[";
+        std::size_t emitted = 0;
+        for (const auto& match : matches) {
+            if (emitted >= top_matches) {
+                break;
+            }
+            if (emitted++ > 0) {
+                output << ',';
+            }
+            global_matches.push_back(match);
+            std::vector<std::pair<std::uint32_t, std::size_t>> residuals(match.residual_freq.begin(), match.residual_freq.end());
+            std::sort(residuals.begin(), residuals.end(), [](const auto& left, const auto& right) {
+                if (left.second != right.second) {
+                    return left.second > right.second;
+                }
+                return left.first < right.first;
+            });
+            std::vector<std::pair<std::uint32_t, std::size_t>> tokens(match.token_freq.begin(), match.token_freq.end());
+            std::sort(tokens.begin(), tokens.end(), [](const auto& left, const auto& right) {
+                if (left.second != right.second) {
+                    return left.second > right.second;
+                }
+                return left.first < right.first;
+            });
+
+            output << '{';
+            output << "\"offset\":" << match.offset << ',';
+            output << "\"bitStart\":" << match.bit_start << ',';
+            output << "\"familyLabel\":\"" << json_escape(match.family_label) << "\",";
+            output << "\"elementCount\":" << match.element_count << ',';
+            output << "\"exactMatchCount\":" << match.exact_match_count << ',';
+            output << "\"topResiduals\":[";
+            for (std::size_t index = 0; index < std::min<std::size_t>(3, residuals.size()); ++index) {
+                if (index > 0) {
+                    output << ',';
+                }
+                output << '{';
+                output << "\"rawU32\":" << residuals[index].first << ',';
+                output << "\"hex\":\"" << u32_hex(residuals[index].first) << "\",";
+                output << "\"count\":" << residuals[index].second;
+                output << '}';
+            }
+            output << "],\"topTokens\":[";
+            for (std::size_t index = 0; index < std::min<std::size_t>(3, tokens.size()); ++index) {
+                if (index > 0) {
+                    output << ',';
+                }
+                output << '{';
+                output << "\"rawU32\":" << tokens[index].first << ',';
+                output << "\"hex\":\"" << u32_hex(tokens[index].first) << "\",";
+                output << "\"count\":" << tokens[index].second;
+                output << '}';
+            }
+            output << "]}";
+        }
+        output << "]}";
+    }
+    output << "],";
+
+    std::sort(global_matches.begin(), global_matches.end(), [](const DescriptorMatch& left, const DescriptorMatch& right) {
+        if (left.exact_match_count != right.exact_match_count) {
+            return left.exact_match_count > right.exact_match_count;
+        }
+        if (left.slot_index != right.slot_index) {
+            return left.slot_index < right.slot_index;
+        }
+        if (left.offset != right.offset) {
+            return left.offset < right.offset;
+        }
+        return left.bit_start < right.bit_start;
+    });
+
+    output << "\"matches\":[";
+    std::size_t emitted = 0;
+    for (const auto& match : global_matches) {
+        if (emitted >= top_matches) {
+            break;
+        }
+        if (emitted++ > 0) {
+            output << ',';
+        }
+        output << '{';
+        output << "\"slotIndex\":" << match.slot_index << ',';
+        output << "\"offset\":" << match.offset << ',';
+        output << "\"bitStart\":" << match.bit_start << ',';
+        output << "\"familyLabel\":\"" << json_escape(match.family_label) << "\",";
+        output << "\"elementCount\":" << match.element_count << ',';
+        output << "\"exactMatchCount\":" << match.exact_match_count;
+        output << '}';
+    }
+    output << "]}";
+    return output.str();
+}
+
+std::string analyze_table_descriptors_file_json(
+    const std::string& path,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    const std::vector<std::size_t>& slot_indices,
+    std::size_t top_matches
+) {
+    const auto bytes = read_file_bytes(path);
+    return analyze_table_descriptors_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_matches);
+}
+
+
+std::string analyze_bitfield_schema_json(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    const std::vector<std::size_t>& slot_indices,
+    std::size_t top_windows
+) {
+    struct TargetCount {
+        std::size_t element_count = 0;
+        std::vector<std::string> family_labels;
+    };
+    struct WindowClassification {
+        std::size_t slot_index = 0;
+        std::size_t offset = 0;
+        std::size_t active_samples = 0;
+        std::size_t non_zero_samples = 0;
+        std::size_t descriptor_sample_hits = 0;
+        std::size_t multi_match_samples = 0;
+        std::size_t total_exact_hits = 0;
+        std::size_t transitions = 0;
+        std::size_t changed_transitions = 0;
+        bool previous_valid = false;
+        std::uint32_t previous_value = 0;
+        std::map<std::size_t, std::size_t> bit_start_freq;
+        std::map<std::size_t, std::size_t> target_count_freq;
+        std::map<std::uint32_t, std::size_t> token_freq;
+        double score = 0.0;
+        bool descriptor_like = false;
+    };
+
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    std::ostringstream output;
+
+    output << '{';
+    output << "\"length\":" << target_length << ',';
+    output << "\"firstByte\":" << static_cast<int>(target_first_byte) << ',';
+    output << "\"recordCount\":" << records.size() << ',';
+    output << "\"headerSize\":" << header_size << ',';
+    output << "\"stride\":" << stride << ',';
+    output << "\"selectedSlots\":[";
+    for (std::size_t index = 0; index < slot_indices.size(); ++index) {
+        if (index > 0) {
+            output << ',';
+        }
+        output << slot_indices[index];
+    }
+    output << "],";
+
+    if (records.empty()) {
+        output << "\"targets\":[],\"descriptorRows\":[],\"topWindows\":[],\"rows\":[]}";
+        return output.str();
+    }
+    if (slot_indices.empty()) {
+        output << "\"error\":\"At least one slot must be provided.\",\"targets\":[],\"descriptorRows\":[],\"topWindows\":[],\"rows\":[]}";
+        return output.str();
+    }
+    if (header_size >= target_length) {
+        output << "\"error\":\"Header size must be smaller than the target record length.\",\"targets\":[],\"descriptorRows\":[],\"topWindows\":[],\"rows\":[]}";
+        return output.str();
+    }
+    if (stride < 4) {
+        output << "\"error\":\"Stride must be at least 4 bytes.\",\"targets\":[],\"descriptorRows\":[],\"topWindows\":[],\"rows\":[]}";
+        return output.str();
+    }
+
+    const std::size_t usable_bytes = target_length - header_size;
+    const std::size_t element_count = usable_bytes / stride;
+    output << "\"elementCount\":" << element_count << ',';
+
+    const auto family_scan = collect_ranked_chunk_families(bytes, 256, 2);
+    std::map<std::size_t, std::vector<std::string>> target_map;
+    for (const auto& family : family_scan.ranked_families) {
+        if (family.record_count < 4 || family.chunk_ids.size() < 4 || family.length < 16000) {
+            continue;
+        }
+        for (std::size_t candidate_header = 0; candidate_header <= 16; ++candidate_header) {
+            if (family.length <= candidate_header || ((family.length - candidate_header) % 16) != 0) {
+                continue;
+            }
+            const std::size_t count = (family.length - candidate_header) / 16;
+            if (count < 512 || count > 0xFFFu) {
+                continue;
+            }
+            std::ostringstream label;
+            label << family.length << " / 0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << static_cast<int>(family.first_byte);
+            target_map[count].push_back(label.str());
+        }
+    }
+
+    std::vector<TargetCount> targets;
+    targets.reserve(target_map.size());
+    for (auto& [count, labels] : target_map) {
+        std::sort(labels.begin(), labels.end());
+        labels.erase(std::unique(labels.begin(), labels.end()), labels.end());
+        targets.push_back({count, labels});
+    }
+
+    output << "\"targets\":[";
+    for (std::size_t index = 0; index < targets.size(); ++index) {
+        if (index > 0) {
+            output << ',';
+        }
+        output << '{';
+        output << "\"elementCount\":" << targets[index].element_count << ',';
+        output << "\"familyLabels\":[";
+        for (std::size_t label_index = 0; label_index < targets[index].family_labels.size(); ++label_index) {
+            if (label_index > 0) {
+                output << ',';
+            }
+            output << '"' << json_escape(targets[index].family_labels[label_index]) << '"';
+        }
+        output << "]}";
+    }
+    output << "],";
+
+    auto extract_12 = [](std::uint32_t raw_value, std::size_t bit_start) -> std::uint32_t {
+        return (raw_value >> bit_start) & 0xFFFu;
+    };
+    if (top_windows == 0) {
+        top_windows = 32;
+    }
+
+    std::vector<WindowClassification> global_windows;
+    struct RowSummary {
+        std::size_t slot_index = 0;
+        std::size_t row_active_records = 0;
+        std::size_t descriptor_window_count = 0;
+        std::size_t best_offset = 0;
+        std::size_t best_descriptor_sample_hits = 0;
+        std::size_t best_multi_match_samples = 0;
+        std::size_t best_total_exact_hits = 0;
+        double best_window_score = 0.0;
+        bool descriptor_like = false;
+    };
+    std::vector<RowSummary> row_summaries;
+
+    output << "\"rows\":[";
+    bool first_row_output = true;
+    for (const std::size_t slot_index : slot_indices) {
+        if (!first_row_output) {
+            output << ',';
+        }
+        first_row_output = false;
+
+        output << '{';
+        output << "\"slotIndex\":" << slot_index;
+        if (slot_index >= element_count) {
+            output << ",\"error\":\"Slot index exceeds element count.\",\"topWindows\":[]}";
+            continue;
+        }
+
+        std::vector<WindowClassification> windows;
+        windows.reserve(stride >= 4 ? (stride - 3) : 0);
+        for (std::size_t offset = 0; offset + 4 <= stride; ++offset) {
+            windows.push_back({slot_index, offset});
+        }
+
+        std::size_t row_active_records = 0;
+        for (const auto& rec : records) {
+            const std::size_t start = header_size + (slot_index * stride);
+            if (start + stride > rec.payload.size()) {
+                continue;
+            }
+
+            bool row_active = false;
+            for (std::size_t lane_offset = 0; lane_offset + 4 <= stride; lane_offset += 4) {
+                std::uint32_t lane_value = 0;
+                if (read_u32_le(rec.payload, start + lane_offset, lane_value) && lane_value != 0) {
+                    row_active = true;
+                    break;
+                }
+            }
+            if (row_active) {
+                row_active_records++;
+            }
+
+            for (auto& window : windows) {
+                std::uint32_t raw_value = 0;
+                if (!read_u32_le(rec.payload, start + window.offset, raw_value)) {
+                    continue;
+                }
+                window.active_samples++;
+                if (raw_value != 0) {
+                    window.non_zero_samples++;
+                }
+                if (window.previous_valid) {
+                    window.transitions++;
+                    if (window.previous_value != raw_value) {
+                        window.changed_transitions++;
+                    }
+                }
+                window.previous_valid = true;
+                window.previous_value = raw_value;
+
+                std::size_t sample_hit_count = 0;
+                for (std::size_t bit_start = 0; bit_start <= 20; ++bit_start) {
+                    const std::uint32_t extracted = extract_12(raw_value, bit_start);
+                    const auto target_it = target_map.find(extracted);
+                    if (target_it == target_map.end()) {
+                        continue;
+                    }
+                    sample_hit_count++;
+                    window.bit_start_freq[bit_start]++;
+                    window.target_count_freq[extracted]++;
+                }
+                if (sample_hit_count > 0) {
+                    window.descriptor_sample_hits++;
+                    window.total_exact_hits += sample_hit_count;
+                    window.token_freq[raw_value]++;
+                }
+                if (sample_hit_count > 1) {
+                    window.multi_match_samples++;
+                }
+            }
+        }
+
+        RowSummary row_summary{};
+        row_summary.slot_index = slot_index;
+        row_summary.row_active_records = row_active_records;
+
+        for (auto& window : windows) {
+            if (window.active_samples == 0) {
+                continue;
+            }
+            const double sample_hit_ratio = static_cast<double>(window.descriptor_sample_hits) / static_cast<double>(window.active_samples);
+            const double multi_match_ratio = static_cast<double>(window.multi_match_samples) / static_cast<double>(window.active_samples);
+            const double changed_ratio = window.transitions > 0
+                ? static_cast<double>(window.changed_transitions) / static_cast<double>(window.transitions)
+                : 0.0;
+            const double distinct_bit_ratio = std::min<std::size_t>(4, window.bit_start_freq.size()) / 4.0;
+            const double distinct_target_ratio = std::min<std::size_t>(4, window.target_count_freq.size()) / 4.0;
+            const double non_zero_ratio = static_cast<double>(window.non_zero_samples) / static_cast<double>(window.active_samples);
+            window.score = static_cast<double>(window.total_exact_hits) *
+                           (0.50 + sample_hit_ratio) *
+                           (0.50 + multi_match_ratio) *
+                           (0.25 + distinct_bit_ratio) *
+                           (0.25 + distinct_target_ratio) *
+                           (0.25 + non_zero_ratio) *
+                           (0.25 + changed_ratio);
+            window.descriptor_like = window.descriptor_sample_hits >= 6 &&
+                                     window.multi_match_samples >= 4 &&
+                                     window.total_exact_hits >= 18 &&
+                                     window.bit_start_freq.size() >= 4 &&
+                                     window.target_count_freq.size() >= 3 &&
+                                     sample_hit_ratio >= 0.45;
+            if (window.descriptor_like) {
+                row_summary.descriptor_window_count++;
+            }
+            if (window.score > row_summary.best_window_score) {
+                row_summary.best_window_score = window.score;
+                row_summary.best_offset = window.offset;
+                row_summary.best_descriptor_sample_hits = window.descriptor_sample_hits;
+                row_summary.best_multi_match_samples = window.multi_match_samples;
+                row_summary.best_total_exact_hits = window.total_exact_hits;
+                row_summary.descriptor_like = window.descriptor_like;
+            }
+        }
+
+        std::sort(windows.begin(), windows.end(), [](const WindowClassification& left, const WindowClassification& right) {
+            if (left.score != right.score) {
+                return left.score > right.score;
+            }
+            if (left.total_exact_hits != right.total_exact_hits) {
+                return left.total_exact_hits > right.total_exact_hits;
+            }
+            return left.offset < right.offset;
+        });
+
+        row_summaries.push_back(row_summary);
+        output << ",\"rowActiveRecords\":" << row_active_records << ',';
+        output << "\"descriptorWindowCount\":" << row_summary.descriptor_window_count << ',';
+        output << "\"bestOffset\":" << row_summary.best_offset << ',';
+        output << "\"bestWindowScore\":" << std::fixed << std::setprecision(4) << row_summary.best_window_score << ',';
+        output << "\"descriptorLike\":" << (row_summary.descriptor_like ? "true" : "false") << ',';
+        output << "\"topWindows\":[";
+        std::size_t emitted = 0;
+        for (const auto& window : windows) {
+            if (emitted >= top_windows) {
+                break;
+            }
+            if (window.score <= 0.0) {
+                continue;
+            }
+            if (emitted++ > 0) {
+                output << ',';
+            }
+            global_windows.push_back(window);
+
+            std::vector<std::pair<std::size_t, std::size_t>> bit_starts(window.bit_start_freq.begin(), window.bit_start_freq.end());
+            std::sort(bit_starts.begin(), bit_starts.end(), [](const auto& left, const auto& right) {
+                if (left.second != right.second) {
+                    return left.second > right.second;
+                }
+                return left.first < right.first;
+            });
+            std::vector<std::pair<std::size_t, std::size_t>> target_counts(window.target_count_freq.begin(), window.target_count_freq.end());
+            std::sort(target_counts.begin(), target_counts.end(), [](const auto& left, const auto& right) {
+                if (left.second != right.second) {
+                    return left.second > right.second;
+                }
+                return left.first < right.first;
+            });
+            std::vector<std::pair<std::uint32_t, std::size_t>> top_tokens(window.token_freq.begin(), window.token_freq.end());
+            std::sort(top_tokens.begin(), top_tokens.end(), [](const auto& left, const auto& right) {
+                if (left.second != right.second) {
+                    return left.second > right.second;
+                }
+                return left.first < right.first;
+            });
+
+            output << '{';
+            output << "\"offset\":" << window.offset << ',';
+            output << "\"activeSamples\":" << window.active_samples << ',';
+            output << "\"nonZeroSamples\":" << window.non_zero_samples << ',';
+            output << "\"descriptorSampleHits\":" << window.descriptor_sample_hits << ',';
+            output << "\"multiMatchSamples\":" << window.multi_match_samples << ',';
+            output << "\"totalExactHits\":" << window.total_exact_hits << ',';
+            output << "\"distinctBitStarts\":" << window.bit_start_freq.size() << ',';
+            output << "\"distinctTargets\":" << window.target_count_freq.size() << ',';
+            output << "\"score\":" << std::fixed << std::setprecision(4) << window.score << ',';
+            output << "\"descriptorLike\":" << (window.descriptor_like ? "true" : "false") << ',';
+            output << "\"topBitStarts\":[";
+            for (std::size_t index = 0; index < std::min<std::size_t>(4, bit_starts.size()); ++index) {
+                if (index > 0) {
+                    output << ',';
+                }
+                output << '{';
+                output << "\"bitStart\":" << bit_starts[index].first << ',';
+                output << "\"count\":" << bit_starts[index].second;
+                output << '}';
+            }
+            output << "],\"topTargets\":[";
+            for (std::size_t index = 0; index < std::min<std::size_t>(4, target_counts.size()); ++index) {
+                if (index > 0) {
+                    output << ',';
+                }
+                const auto labels_it = target_map.find(target_counts[index].first);
+                output << '{';
+                output << "\"elementCount\":" << target_counts[index].first << ',';
+                output << "\"count\":" << target_counts[index].second << ',';
+                output << "\"familyLabels\":[";
+                if (labels_it != target_map.end()) {
+                    for (std::size_t label_index = 0; label_index < labels_it->second.size(); ++label_index) {
+                        if (label_index > 0) {
+                            output << ',';
+                        }
+                        output << '"' << json_escape(labels_it->second[label_index]) << '"';
+                    }
+                }
+                output << "]}";
+            }
+            output << "],\"topTokens\":[";
+            for (std::size_t index = 0; index < std::min<std::size_t>(4, top_tokens.size()); ++index) {
+                if (index > 0) {
+                    output << ',';
+                }
+                output << '{';
+                output << "\"rawU32\":" << top_tokens[index].first << ',';
+                output << "\"hex\":\"" << u32_hex(top_tokens[index].first) << "\",";
+                output << "\"count\":" << top_tokens[index].second;
+                output << '}';
+            }
+            output << "]}";
+        }
+        output << "]}";
+    }
+    output << "],";
+
+    std::sort(row_summaries.begin(), row_summaries.end(), [](const RowSummary& left, const RowSummary& right) {
+        if (left.descriptor_window_count != right.descriptor_window_count) {
+            return left.descriptor_window_count > right.descriptor_window_count;
+        }
+        if (left.best_window_score != right.best_window_score) {
+            return left.best_window_score > right.best_window_score;
+        }
+        return left.slot_index < right.slot_index;
+    });
+
+    output << "\"descriptorRows\":[";
+    std::size_t descriptor_rows_emitted = 0;
+    for (const auto& row : row_summaries) {
+        if (descriptor_rows_emitted >= top_windows) {
+            break;
+        }
+        if (row.best_window_score <= 0.0) {
+            continue;
+        }
+        if (descriptor_rows_emitted++ > 0) {
+            output << ',';
+        }
+        output << '{';
+        output << "\"slotIndex\":" << row.slot_index << ',';
+        output << "\"rowActiveRecords\":" << row.row_active_records << ',';
+        output << "\"descriptorWindowCount\":" << row.descriptor_window_count << ',';
+        output << "\"bestOffset\":" << row.best_offset << ',';
+        output << "\"bestWindowScore\":" << std::fixed << std::setprecision(4) << row.best_window_score << ',';
+        output << "\"bestDescriptorSampleHits\":" << row.best_descriptor_sample_hits << ',';
+        output << "\"bestMultiMatchSamples\":" << row.best_multi_match_samples << ',';
+        output << "\"bestTotalExactHits\":" << row.best_total_exact_hits << ',';
+        output << "\"descriptorLike\":" << (row.descriptor_like ? "true" : "false");
+        output << '}';
+    }
+    output << "],";
+
+    std::sort(global_windows.begin(), global_windows.end(), [](const WindowClassification& left, const WindowClassification& right) {
+        if (left.score != right.score) {
+            return left.score > right.score;
+        }
+        if (left.total_exact_hits != right.total_exact_hits) {
+            return left.total_exact_hits > right.total_exact_hits;
+        }
+        if (left.slot_index != right.slot_index) {
+            return left.slot_index < right.slot_index;
+        }
+        return left.offset < right.offset;
+    });
+
+    output << "\"topWindows\":[";
+    std::size_t emitted = 0;
+    for (const auto& window : global_windows) {
+        if (emitted >= top_windows) {
+            break;
+        }
+        if (window.score <= 0.0) {
+            continue;
+        }
+        if (emitted++ > 0) {
+            output << ',';
+        }
+        output << '{';
+        output << "\"slotIndex\":" << window.slot_index << ',';
+        output << "\"offset\":" << window.offset << ',';
+        output << "\"descriptorSampleHits\":" << window.descriptor_sample_hits << ',';
+        output << "\"multiMatchSamples\":" << window.multi_match_samples << ',';
+        output << "\"totalExactHits\":" << window.total_exact_hits << ',';
+        output << "\"distinctBitStarts\":" << window.bit_start_freq.size() << ',';
+        output << "\"distinctTargets\":" << window.target_count_freq.size() << ',';
+        output << "\"score\":" << std::fixed << std::setprecision(4) << window.score << ',';
+        output << "\"descriptorLike\":" << (window.descriptor_like ? "true" : "false");
+        output << '}';
+    }
+    output << "]}";
+    return output.str();
+}
+
+std::string analyze_bitfield_schema_file_json(
+    const std::string& path,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    const std::vector<std::size_t>& slot_indices,
+    std::size_t top_windows
+) {
+    const auto bytes = read_file_bytes(path);
+    return analyze_bitfield_schema_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_windows);
+}
+
 std::string match_event_window(
     const std::string& replay_path,
     std::size_t target_length,

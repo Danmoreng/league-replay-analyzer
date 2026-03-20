@@ -18,6 +18,8 @@ import { analyzeEntitySlabWithWasm, analyzeScalarFamilyWithWasm, analyzeSparseFa
 import type { PlayerMovementData } from "../composables/usePlayback";
 import Minimap from "./Minimap.vue";
 import Timeline from "./Timeline.vue";
+import SchemaJsonLoader from "./SchemaJsonLoader.vue";
+import type { RawToken } from "../tokenBitfields";
 
 const props = defineProps<{
   replayBuffer: ArrayBuffer | null;
@@ -39,6 +41,13 @@ const scanError = ref("");
 const isScanning = ref(false);
 const isAnalyzing = ref(false);
 const isCorrelating = ref(false);
+const mockTokens = ref<RawToken[]>([
+  { tokenHex: "0x4B710002", tokenU32: 0x4B710002, sourceFamilyLength: 61917, sourceFirstByte: 0x00, slot: 0, offset: 0 },
+  { tokenHex: "0x00F1DD71", tokenU32: 0x00F1DD71, sourceFamilyLength: 61917, sourceFirstByte: 0x00, slot: 0, offset: 2 },
+  { tokenHex: "0x000200F1", tokenU32: 0x000200F1, sourceFamilyLength: 61917, sourceFirstByte: 0x00, slot: 0, offset: 1 },
+  { tokenHex: "0x0200F14B", tokenU32: 0x0200F14B, sourceFamilyLength: 61917, sourceFirstByte: 0x00, slot: 11, offset: 0 },
+]);
+
 const analysisCache = ref(new Map<string, ReplayFamilyAnalysisResult>());
 const scalarAnalysisCache = ref(new Map<string, ReplayScalarFamilyAnalysisResult>());
 const entitySlabCache = ref(new Map<string, ReplayEntitySlabAnalysisResult>());
@@ -755,11 +764,11 @@ function selectRanking(familyKeyValue: string, candidateKeyValue: string): void 
 
           <div class="island p-3">
             <h2 class="fs-5 mb-3">Top Classes</h2>
-            <div v-if="topClasses.length" class="d-flex flex-column gap-2">
+            <div v-if="topClasses.length" class="d-flex flex-column gap-2">    
               <div v-for="classItem in topClasses" :key="classItem.key" class="border rounded-2 p-2 small">
-                <div class="fw-bold text-break">{{ classItem.key }}</div>
+                <div class="fw-bold text-break">{{ classItem.key }}</div>      
                 <div class="text-muted x-small">
-                  {{ classItem.members }} slots | best {{ classItem.bestScore.toFixed(1) }} | moving {{ formatNumber(classItem.totalMovingTransitions) }}
+                  {{ classItem.members }} slots | best {{ classItem.bestScore.toFixed(1) }} | moving {{ formatNumber(classItem.totalMovingTransitions) }}     
                 </div>
               </div>
             </div>
@@ -768,10 +777,12 @@ function selectRanking(familyKeyValue: string, candidateKeyValue: string): void 
         </div>
       </div>
     </template>
-  </div>
-</template>
 
-<style scoped>
+    <div class="mt-4">
+      <SchemaJsonLoader :mockTokens="mockTokens" />
+    </div>
+  </div>
+</template><style scoped>
 .x-small {
   font-size: 0.7rem;
   letter-spacing: 0.05rem;

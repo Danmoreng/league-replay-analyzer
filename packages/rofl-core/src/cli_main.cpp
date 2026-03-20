@@ -3,6 +3,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "rofl/core/replay_analyzer.hpp"
 
@@ -190,6 +191,207 @@ int main(int argc, char** argv) {
                 }
             }
             std::cout << rofl::core::analyze_scalar_family_file_json(path, length, first_byte, header_size, stride, top_slots);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
+    if (first_arg == "--analyze-row-offsets-json" && argc > 2) {
+        try {
+            std::string path = argv[2];
+            std::size_t length = 0;
+            std::uint8_t first_byte = 0;
+            std::size_t header_size = 0;
+            std::size_t stride = 16;
+            std::size_t top_fields = 24;
+            std::vector<std::size_t> slot_indices;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view arg = argv[i];
+                if (arg == "--length" && i + 1 < argc) {
+                    length = std::stoull(argv[++i]);
+                } else if (arg == "--first-byte" && i + 1 < argc) {
+                    first_byte = static_cast<std::uint8_t>(std::stoul(argv[++i], nullptr, 0));
+                } else if (arg == "--header-size" && i + 1 < argc) {
+                    header_size = std::stoull(argv[++i]);
+                } else if (arg == "--stride" && i + 1 < argc) {
+                    stride = std::stoull(argv[++i]);
+                } else if (arg == "--top-fields" && i + 1 < argc) {
+                    top_fields = std::stoull(argv[++i]);
+                } else if (arg == "--slots" && i + 1 < argc) {
+                    std::stringstream slot_stream(argv[++i]);
+                    std::string token;
+                    while (std::getline(slot_stream, token, ',')) {
+                        if (!token.empty()) {
+                            slot_indices.push_back(std::stoull(token));
+                        }
+                    }
+                }
+            }
+            std::cout << rofl::core::analyze_row_offsets_file_json(path, length, first_byte, header_size, stride, slot_indices, top_fields);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
+    if (first_arg == "--analyze-handle-links-json" && argc > 2) {
+        try {
+            std::string path = argv[2];
+            std::size_t length = 0;
+            std::uint8_t first_byte = 0;
+            std::size_t header_size = 0;
+            std::size_t stride = 16;
+            std::size_t top_links = 24;
+            std::size_t top_families = 16;
+            std::vector<std::size_t> slot_indices;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view arg = argv[i];
+                if (arg == "--length" && i + 1 < argc) {
+                    length = std::stoull(argv[++i]);
+                } else if (arg == "--first-byte" && i + 1 < argc) {
+                    first_byte = static_cast<std::uint8_t>(std::stoul(argv[++i], nullptr, 0));
+                } else if (arg == "--header-size" && i + 1 < argc) {
+                    header_size = std::stoull(argv[++i]);
+                } else if (arg == "--stride" && i + 1 < argc) {
+                    stride = std::stoull(argv[++i]);
+                } else if (arg == "--top-links" && i + 1 < argc) {
+                    top_links = std::stoull(argv[++i]);
+                } else if (arg == "--top-families" && i + 1 < argc) {
+                    top_families = std::stoull(argv[++i]);
+                } else if (arg == "--slots" && i + 1 < argc) {
+                    std::stringstream slot_stream(argv[++i]);
+                    std::string token;
+                    while (std::getline(slot_stream, token, ',')) {
+                        if (!token.empty()) {
+                            slot_indices.push_back(std::stoull(token));
+                        }
+                    }
+                }
+            }
+            std::cout << rofl::core::analyze_handle_links_file_json(path, length, first_byte, header_size, stride, slot_indices, top_links, top_families);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
+    if (first_arg == "--analyze-token-bitfields-json" && argc > 2) {
+        try {
+            std::string path = argv[2];
+            std::size_t length = 0;
+            std::uint8_t first_byte = 0;
+            std::size_t header_size = 0;
+            std::size_t stride = 16;
+            std::size_t top_slices = 24;
+            std::size_t top_families = 16;
+            std::vector<std::size_t> slot_indices;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view arg = argv[i];
+                if (arg == "--length" && i + 1 < argc) {
+                    length = std::stoull(argv[++i]);
+                } else if (arg == "--first-byte" && i + 1 < argc) {
+                    first_byte = static_cast<std::uint8_t>(std::stoul(argv[++i], nullptr, 0));
+                } else if (arg == "--header-size" && i + 1 < argc) {
+                    header_size = std::stoull(argv[++i]);
+                } else if (arg == "--stride" && i + 1 < argc) {
+                    stride = std::stoull(argv[++i]);
+                } else if (arg == "--top-slices" && i + 1 < argc) {
+                    top_slices = std::stoull(argv[++i]);
+                } else if (arg == "--top-families" && i + 1 < argc) {
+                    top_families = std::stoull(argv[++i]);
+                } else if (arg == "--slots" && i + 1 < argc) {
+                    std::stringstream slot_stream(argv[++i]);
+                    std::string token;
+                    while (std::getline(slot_stream, token, ',')) {
+                        if (!token.empty()) {
+                            slot_indices.push_back(std::stoull(token));
+                        }
+                    }
+                }
+            }
+            std::cout << rofl::core::analyze_token_bitfields_file_json(path, length, first_byte, header_size, stride, slot_indices, top_slices, top_families);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
+    if (first_arg == "--analyze-table-descriptors-json" && argc > 2) {
+        try {
+            std::string path = argv[2];
+            std::size_t length = 0;
+            std::uint8_t first_byte = 0;
+            std::size_t header_size = 0;
+            std::size_t stride = 16;
+            std::size_t top_matches = 32;
+            std::vector<std::size_t> slot_indices;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view arg = argv[i];
+                if (arg == "--length" && i + 1 < argc) {
+                    length = std::stoull(argv[++i]);
+                } else if (arg == "--first-byte" && i + 1 < argc) {
+                    first_byte = static_cast<std::uint8_t>(std::stoul(argv[++i], nullptr, 0));
+                } else if (arg == "--header-size" && i + 1 < argc) {
+                    header_size = std::stoull(argv[++i]);
+                } else if (arg == "--stride" && i + 1 < argc) {
+                    stride = std::stoull(argv[++i]);
+                } else if (arg == "--top-matches" && i + 1 < argc) {
+                    top_matches = std::stoull(argv[++i]);
+                } else if (arg == "--slots" && i + 1 < argc) {
+                    std::stringstream slot_stream(argv[++i]);
+                    std::string token;
+                    while (std::getline(slot_stream, token, ',')) {
+                        if (!token.empty()) {
+                            slot_indices.push_back(std::stoull(token));
+                        }
+                    }
+                }
+            }
+            std::cout << rofl::core::analyze_table_descriptors_file_json(path, length, first_byte, header_size, stride, slot_indices, top_matches);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
+    if (first_arg == "--analyze-bitfield-schema-json" && argc > 2) {
+        try {
+            std::string path = argv[2];
+            std::size_t length = 0;
+            std::uint8_t first_byte = 0;
+            std::size_t header_size = 0;
+            std::size_t stride = 16;
+            std::size_t top_windows = 32;
+            std::vector<std::size_t> slot_indices;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view arg = argv[i];
+                if (arg == "--length" && i + 1 < argc) {
+                    length = std::stoull(argv[++i]);
+                } else if (arg == "--first-byte" && i + 1 < argc) {
+                    first_byte = static_cast<std::uint8_t>(std::stoul(argv[++i], nullptr, 0));
+                } else if (arg == "--header-size" && i + 1 < argc) {
+                    header_size = std::stoull(argv[++i]);
+                } else if (arg == "--stride" && i + 1 < argc) {
+                    stride = std::stoull(argv[++i]);
+                } else if (arg == "--top-windows" && i + 1 < argc) {
+                    top_windows = std::stoull(argv[++i]);
+                } else if (arg == "--slots" && i + 1 < argc) {
+                    std::stringstream slot_stream(argv[++i]);
+                    std::string token;
+                    while (std::getline(slot_stream, token, ',')) {
+                        if (!token.empty()) {
+                            slot_indices.push_back(std::stoull(token));
+                        }
+                    }
+                }
+            }
+            std::cout << rofl::core::analyze_bitfield_schema_file_json(path, length, first_byte, header_size, stride, slot_indices, top_windows);
             return 0;
         } catch (const std::exception& exception) {
             std::cerr << exception.what() << '\n';
@@ -612,6 +814,11 @@ int main(int argc, char** argv) {
     std::cout << "Use --scan-families-json <path-to-rofl> [--min-length <n>] [--min-records <n>] [--top-families <n>] to emit recurring family scan results as JSON.\n";
     std::cout << "Use --analyze-scalar-family-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] to emit scalar lane candidates as JSON.\n";
     std::cout << "Use --analyze-entity-slab-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] to classify a sparse family into handle-like vs dynamic-state-like rows.\n";
+    std::cout << "Use --analyze-row-offsets-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-fields <n>] to rank raw byte-offset fields inside selected sparse rows.\n";
+    std::cout << "Use --analyze-handle-links-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-links <n>] [--top-families <n>] to test whether packed row tokens point into other recurring families.\n";
+    std::cout << "Use --analyze-token-bitfields-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-slices <n>] [--top-families <n>] to search packed token bit slices for family-sized index fields.\n";
+    std::cout << "Use --analyze-table-descriptors-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-matches <n>] to find exact 12-bit matches against known family element counts.\n";
+    std::cout << "Use --analyze-bitfield-schema-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-windows <n>] to classify 32-bit token windows as descriptor-like via overlapping 12-bit family-count hits.\n";
     std::cout << "Use --trace-sparse-slot <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slot-index <n> [--stride <len>] [--max-records <n>] to trace one sparse slot over time.\n";
     std::cout << "Use --profile-position-slots <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--move-epsilon <f>] [--smooth-threshold <f>] to rank position-like sparse slots.\n";
     std::cout << "Use --compare-position-classes <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--top-classes <n>] [--move-epsilon <f>] [--smooth-threshold <f>] to compare discovered slot classes against entity archetypes.\n";
