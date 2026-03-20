@@ -717,7 +717,7 @@ function selectRanking(familyKeyValue: string, candidateKeyValue: string): void 
         <p class="text-muted small mt-2 mb-3">
           Use this when you want the Wasm backend to run schema and cleaned-field analysis for the currently selected family.
         </p>
-        <SchemaJsonLoader :replayBuffer="replayBuffer" :selectedFamily="selectedFamily" :candidateRows="suggestedAnalysisRows" :riotBundle="riotBundle" />
+        <SchemaJsonLoader :replayBuffer="replayBuffer" :selectedFamily="selectedFamily" :candidateRows="suggestedAnalysisRows" :families="families" :riotBundle="riotBundle" />
       </details>
     </template>
   </div>

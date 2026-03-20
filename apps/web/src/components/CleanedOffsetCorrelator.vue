@@ -54,15 +54,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from "vue";
-import { correlateReplayScalars, type ReplayScalarCorrelationReport } from "../replayScalarCorrelation";
+import { computed, ref, watch } from "vue";
+import type { ReplayScalarCorrelationReport } from "../replayScalarCorrelation";
 import type { RiotFixtureBundle } from "../riotApiFixtures";
-import type { ReplayFamilyScanItem, ReplayScalarFamilyAnalysisResult } from "../replayInvestigation";
+import type { ReplayFamilyScanItem } from "../replayInvestigation";
+import { correlateCleanedFields } from "../replayDeepAnalysis";
 
 const props = defineProps<{
   riotBundle: RiotFixtureBundle | null;
   familyContext: ReplayFamilyScanItem;
   cleanedFieldsData: any; // The raw JSON output containing slots -> fields -> samples
+  autorun?: boolean;
 }>();
 
 const isCorrelating = ref(false);
@@ -73,79 +75,31 @@ const hasCandidates = computed(() => {
 });
 
 function correlate() {
-  if (!props.riotBundle || !hasCandidates.value) return;
-  
+  if (!props.riotBundle || !hasCandidates.value) {
+    return;
+  }
+
   isCorrelating.value = true;
-  
+
   try {
-    // We need to map the new CLI output (slots -> fields -> samples) 
-    // into the ReplayScalarFamilyAnalysisResult shape (slots -> lanes -> samples) 
-    // expected by correlateReplayScalars.
-    
-    const mappedSlots = props.cleanedFieldsData.slots.map((s: any) => {
-       const mappedLanes = (s.fields || []).map((f: any) => {
-           return {
-               laneIndex: f.offset, // Map offset to laneIndex so the correlator knows what it is
-               activeSamples: f.activeSamples ?? 0,
-               nonZeroSamples: f.nonZeroSamples ?? 0,
-               uniqueValues: f.uniqueValues ?? 0,
-               transitions: f.transitions ?? 0,
-               changedTransitions: f.changedTransitions ?? 0,
-               minU32: f.minValue ?? 0, // Approx
-               maxU32: f.maxValue ?? 0,
-               minFiniteF32: 0,
-               maxFiniteF32: 0,
-               samples: (f.samples || []).map((sample: any) => ({
-                   chunkId: sample.chunkId ?? 0,
-                   recordIndex: sample.recordIndex ?? 0,
-                   timestamp: sample.timestamp ?? 0,
-                   rawU32: sample.raw !== undefined ? sample.raw : (sample.u32 ?? 0),
-                   firstByte: 0,
-                   mask: 0,
-                   maskBits: ""
-               }))
-           };
-       });
-       
-       return {
-           rank: 0,
-           slotIndex: s.slotIndex,
-           score: 0,
-           activeRecords: s.activeRecords ?? 0,
-           totalLaneSamples: 0,
-           maxActiveLanes: 0,
-           topFirstByte: 0,
-           topFirstByteCount: 0,
-           topMask: 0,
-           topMaskBits: "",
-           topMaskCount: 0,
-           chunkSpanStart: s.chunkSpanStart ?? 0,
-           chunkSpanEnd: s.chunkSpanEnd ?? 0,
-           lanes: mappedLanes
-       };
-    });
-    
-    const analysisStub: ReplayScalarFamilyAnalysisResult = {
-        length: props.familyContext.length,
-        firstByte: props.familyContext.firstByte,
-        recordCount: props.cleanedFieldsData.recordCount ?? 0,
-        headerSize: props.familyContext.recommendedHeaderSize,
-        stride: props.familyContext.recommendedStride,
-        gameLengthMillis: 0,
-        chunkBaseId: 0,
-        elementCount: 0,
-        laneCount: 0,
-        slots: mappedSlots
-    };
-    
-    const result = correlateReplayScalars([{ family: props.familyContext, analysis: analysisStub }], props.riotBundle);
-    report.value = result;
-    
-  } catch (e) {
-    console.error("Cleaned correlation failed", e);
+    report.value = correlateCleanedFields(props.familyContext, props.cleanedFieldsData, props.riotBundle);
+  } catch (error) {
+    console.error("Cleaned correlation failed", error);
+    report.value = null;
   } finally {
     isCorrelating.value = false;
   }
 }
+
+watch(
+  () => [props.cleanedFieldsData, props.riotBundle, props.autorun],
+  () => {
+    report.value = null;
+    if (props.autorun !== false && props.riotBundle && hasCandidates.value) {
+      correlate();
+    }
+  },
+  { immediate: true },
+);
 </script>
 

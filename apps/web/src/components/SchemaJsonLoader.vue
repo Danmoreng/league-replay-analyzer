@@ -50,6 +50,105 @@
       <div class="d-flex flex-column gap-1 mt-3 small">
         <div :class="schemaError ? 'text-danger' : 'text-muted'">{{ schemaError || schemaStatus }}</div>
         <div :class="cleanError ? 'text-danger' : 'text-muted'">{{ cleanError || cleanStatus }}</div>
+        <div :class="deepError ? 'text-danger' : 'text-muted'">{{ deepError || deepStatus }}</div>
+      </div>
+    </div>
+
+    <div class="island p-3">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+        <div>
+          <h3 class="fs-6 mb-1">Automatic Deep Analysis</h3>
+          <p class="text-muted small mb-0">
+            Run schema scan plus cleaned-field correlation across the top recurring families and rank the most likely decoded fields automatically.
+          </p>
+        </div>
+        <button class="btn btn-primary btn-sm" :disabled="!replayBuffer || !riotBundle || !families.length || isDeepRunning" @click="void runAutoDeepAnalysis()">
+          <span v-if="isDeepRunning" class="spinner-border spinner-border-sm me-2"></span>
+          Run Auto Deep Analysis
+        </button>
+      </div>
+
+      <div v-if="deepReport" class="row g-3">
+        <div class="col-xl-5">
+          <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0 small">
+              <thead class="text-muted x-small text-uppercase bg-body">
+                <tr>
+                  <th>Family</th>
+                  <th>Rows</th>
+                  <th>Fields</th>
+                  <th>Best Lead</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="family in deepReport.families.slice(0, 6)" :key="family.familyKey">
+                  <td><code>{{ family.familyLabel }}</code></td>
+                  <td>{{ family.cleanedRowCount }}</td>
+                  <td>{{ family.cleanedFieldCount }}</td>
+                  <td>
+                    <span v-if="family.topMatch">{{ family.topMatch.champion }} {{ family.topMatch.metricLabel }}</span>
+                    <span v-else class="text-muted">n/a</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="col-xl-7">
+          <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0 small">
+              <thead class="text-muted x-small text-uppercase bg-body">
+                <tr>
+                  <th>Family</th>
+                  <th>Row/Offset</th>
+                  <th>Decode</th>
+                  <th>Metric</th>
+                  <th>Corr</th>
+                  <th>nRMSE</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="match in deepReport.topMatches.slice(0, 10)" :key="`${match.familyKey}:${match.candidateKey}:${match.metricKey}:${match.participantId}`">
+                  <td><code>{{ match.familyLength }} / {{ formatByte(match.familyFirstByte) }}</code></td>
+                  <td>{{ match.slotIndex }} / {{ match.laneIndex }}</td>
+                  <td><code>{{ match.decodeLabel }}</code></td>
+                  <td>{{ match.champion }} {{ match.metricLabel }}</td>
+                  <td>{{ match.correlation.toFixed(2) }}</td>
+                  <td>{{ match.normalizedRmse.toFixed(2) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="col-12" v-if="deepReport.participantAssignments.topCandidates.length">
+          <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0 small">
+              <thead class="text-muted x-small text-uppercase bg-body">
+                <tr>
+                  <th>Family</th>
+                  <th>Row</th>
+                  <th>Champion</th>
+                  <th>Metrics</th>
+                  <th>Archetype</th>
+                  <th>Score</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="candidate in deepReport.participantAssignments.topCandidates.slice(0, 10)" :key="`${candidate.familyKey}:${candidate.slotIndex}:${candidate.participantId}`">
+                  <td><code>{{ candidate.familyLabel }}</code></td>
+                  <td>{{ candidate.slotIndex }}</td>
+                  <td>{{ candidate.champion }}</td>
+                  <td>{{ candidate.distinctMetrics }}</td>
+                  <td><code>{{ candidate.archetype }}</code></td>
+                  <td>{{ candidate.score.toFixed(2) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div v-else class="small text-muted">
+        No automatic deep-analysis report yet. Run it after scanning families.
       </div>
     </div>
 
@@ -94,6 +193,7 @@
       :riotBundle="riotBundle"
       :familyContext="familyContext"
       :cleanedFieldsData="cleanedData"
+      :autorun="true"
     />
 
     <div v-if="activeTokens.length > 0" class="row g-2 mt-2">
@@ -115,12 +215,14 @@ import CleanedOffsetCorrelator from "./CleanedOffsetCorrelator.vue";
 import type { RiotFixtureBundle } from "../riotApiFixtures";
 import type { ReplayFamilyScanItem } from "../replayInvestigation";
 import type { RawToken } from "../tokenBitfields";
-import { analyzeBitfieldSchemaWithWasm, analyzeCleanRowOffsetsWithWasm } from "../wasmReplayParser";
+import { analyzeBitfieldSchemaWithWasm, analyzeCleanRowOffsetsWithWasm, analyzeEntitySlabWithWasm } from "../wasmReplayParser";
+import { buildReplayDeepAnalysisReport, deriveDeepCleanedRows, estimateElementCount, type ReplayDeepAnalysisReport } from "../replayDeepAnalysis";
 
 const props = defineProps<{
   replayBuffer: ArrayBuffer | null;
   selectedFamily: ReplayFamilyScanItem | null;
   candidateRows: number[];
+  families: ReplayFamilyScanItem[];
   riotBundle: RiotFixtureBundle | null;
 }>();
 
@@ -133,21 +235,15 @@ const cleanError = ref("");
 const schemaData = ref<any>(null);
 const cleanedData = ref<any>(null);
 const activeTokens = ref<RawToken[]>([]);
+const deepReport = ref<ReplayDeepAnalysisReport | null>(null);
+const isDeepRunning = ref(false);
+const deepStatus = ref("Automatic deep analysis can scan the top families and rank likely decoded fields without manual family-by-family work.");
+const deepError = ref("");
 
 const selectedFamily = computed(() => props.selectedFamily);
 const canRun = computed(() => Boolean(props.replayBuffer && props.selectedFamily));
 
-const estimatedElementCount = computed(() => {
-  const family = props.selectedFamily;
-  if (!family) {
-    return 0;
-  }
-  const usable = family.length - Math.max(family.recommendedHeaderSize, 0);
-  if (usable <= 0 || family.recommendedStride <= 0) {
-    return 0;
-  }
-  return Math.floor(usable / family.recommendedStride);
-});
+const estimatedElementCount = computed(() => props.selectedFamily ? estimateElementCount(props.selectedFamily) : 0);
 
 const schemaRows = computed(() => {
   const max = Math.min(12, estimatedElementCount.value);
@@ -198,8 +294,96 @@ watch(() => props.selectedFamily && `${props.selectedFamily.length}:${props.sele
   cleanStatus.value = "Cleaned field scan uses suggested non-schema rows and feeds the scalar correlator automatically.";
 });
 
+watch(() => props.families, () => {
+  deepReport.value = null;
+  deepError.value = "";
+  deepStatus.value = "Automatic deep analysis can scan the top families and rank likely decoded fields without manual family-by-family work.";
+});
+
 function formatByte(value: number): string {
   return `0x${value.toString(16).toUpperCase().padStart(2, "0")}`;
+}
+
+function resolveHeaderSize(family: ReplayFamilyScanItem): number {
+  return family.recommendedHeaderSize >= 0 ? family.recommendedHeaderSize : (family.headerSizeCandidates[0]?.headerSize ?? 0);
+}
+
+async function runAutoDeepAnalysis(): Promise<void> {
+  if (!props.replayBuffer) {
+    deepError.value = "Load a replay before running automatic deep analysis.";
+    return;
+  }
+  if (!props.riotBundle) {
+    deepError.value = "Load a Riot timeline bundle before running automatic deep analysis.";
+    return;
+  }
+  if (!props.families.length) {
+    deepError.value = "Run a family scan first.";
+    return;
+  }
+
+  isDeepRunning.value = true;
+  deepError.value = "";
+  deepStatus.value = "Running schema and cleaned-field analysis across the top families...";
+
+  try {
+    const targets = props.families.slice(0, 6);
+    const inputs = [] as any[];
+
+    for (let index = 0; index < targets.length; index += 1) {
+      const family = targets[index];
+      const headerSize = resolveHeaderSize(family);
+      deepStatus.value = `Analyzing family ${index + 1}/${targets.length}: ${family.length} / ${formatByte(family.firstByte)}...`;
+      const entityAnalysis = await analyzeEntitySlabWithWasm(props.replayBuffer, {
+        length: family.length,
+        firstByte: family.firstByte,
+        headerSize,
+        stride: family.recommendedStride,
+        topSlots: 24,
+      });
+      const schemaRowCount = Math.min(12, estimateElementCount(family));
+      const schemaRowsForFamily = Array.from({ length: schemaRowCount }, (_, rowIndex) => rowIndex);
+      const schemaResult = await analyzeBitfieldSchemaWithWasm(props.replayBuffer, {
+        length: family.length,
+        firstByte: family.firstByte,
+        headerSize,
+        stride: family.recommendedStride,
+        slotIndices: schemaRowsForFamily,
+        topWindows: 12,
+      });
+      const cleanedRowsForFamily = deriveDeepCleanedRows(family, entityAnalysis, familyKeyMatchesSelected(family) ? props.candidateRows : []);
+      const cleanedResult = await analyzeCleanRowOffsetsWithWasm(props.replayBuffer, {
+        length: family.length,
+        firstByte: family.firstByte,
+        headerSize,
+        stride: family.recommendedStride,
+        slotIndices: cleanedRowsForFamily,
+        topFields: 10,
+      });
+      inputs.push({
+        family,
+        entityAnalysis,
+        schemaData: schemaResult,
+        cleanedData: cleanedResult,
+      });
+    }
+
+    deepReport.value = buildReplayDeepAnalysisReport(inputs, props.riotBundle);
+    deepStatus.value = deepReport.value.summary;
+  } catch (error) {
+    deepReport.value = null;
+    deepError.value = error instanceof Error ? error.message : String(error);
+    deepStatus.value = "Automatic deep analysis failed.";
+  } finally {
+    isDeepRunning.value = false;
+  }
+}
+
+function familyKeyMatchesSelected(family: ReplayFamilyScanItem): boolean {
+  if (!props.selectedFamily) {
+    return false;
+  }
+  return family.length === props.selectedFamily.length && family.firstByte === props.selectedFamily.firstByte;
 }
 
 function extractTokensFromSchema(data: any): RawToken[] {
