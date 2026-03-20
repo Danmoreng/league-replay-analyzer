@@ -80,6 +80,7 @@ export interface ReplayScalarMetricMatch {
 
 export interface ReplayScalarCorrelationReport {
   topScalarMatches: ReplayScalarMetricMatch[];
+  allMatches: ReplayScalarMetricMatch[];
   summary: string;
 }
 
@@ -465,7 +466,8 @@ export function correlateReplayScalars(
   }
 
   return {
-    topScalarMatches: matches.slice(0, 36),
+    topScalarMatches: matches.slice(0, 64),
+    allMatches: matches,
     summary,
   };
 }

@@ -141,3 +141,71 @@ export interface ReplayScalarFamilyAnalysisResult {
   error?: string;
   slots: ReplayScalarSlot[];
 }
+
+
+export interface ReplayEntitySlabValueCount {
+  rawU32: number;
+  hex: string;
+  count: number;
+}
+
+export interface ReplayEntitySlabLane {
+  laneIndex: number;
+  archetype: string;
+  activeSamples: number;
+  uniqueValues: number;
+  transitions: number;
+  changedTransitions: number;
+  repeatedRatio: number;
+  changeRatio: number;
+  familyByteHitRatio: number;
+  familyByteHitsByOffset: number[];
+  topValues: ReplayEntitySlabValueCount[];
+}
+
+export interface ReplayEntitySlabSlot {
+  rank: number;
+  slotIndex: number;
+  archetype: string;
+  activeRecords: number;
+  totalLaneSamples: number;
+  maxActiveLanes: number;
+  chunkSpanStart: number;
+  chunkSpanEnd: number;
+  handleScore: number;
+  dynamicScore: number;
+  handleLikeLanes: number;
+  dynamicLikeLanes: number;
+  mixedLanes: number;
+  opaqueLanes: number;
+  lanes: ReplayEntitySlabLane[];
+}
+
+export interface ReplayEntitySlabAnalysisResult {
+  length: number;
+  firstByte: number;
+  recordCount: number;
+  headerSize: number;
+  stride: number;
+  gameLengthMillis: number;
+  chunkBaseId: number;
+  elementCount: number;
+  laneCount: number;
+  knownFirstBytes: number[];
+  recurringFamilies: Array<{
+    length: number;
+    firstByte: number;
+    recordCount: number;
+    chunkCount: number;
+  }>;
+  archetypeCounts: {
+    staticHandleLike: number;
+    dynamicStateLike: number;
+    mixed: number;
+    opaque: number;
+  };
+  topHandleSlots: ReplayEntitySlabSlot[];
+  topDynamicSlots: ReplayEntitySlabSlot[];
+  topMixedSlots: ReplayEntitySlabSlot[];
+  error?: string;
+}

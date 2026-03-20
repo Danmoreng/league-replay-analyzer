@@ -133,6 +133,44 @@ EMSCRIPTEN_KEEPALIVE const char* lra_scan_replay_families_buffer(
     }
 }
 
+EMSCRIPTEN_KEEPALIVE const char* lra_analyze_entity_slab_buffer(
+    const std::uint8_t* data,
+    int size,
+    int target_length,
+    int target_first_byte,
+    int header_size,
+    int stride,
+    int top_slots
+) {
+    try {
+        if (data == nullptr || size <= 0) {
+            const std::string empty = "{\"error\":\"Replay buffer was empty.\"}";
+            char* output = new char[empty.size() + 1];
+            std::memcpy(output, empty.c_str(), empty.size() + 1);
+            return output;
+        }
+
+        const std::vector<std::uint8_t> bytes(data, data + size);
+        const std::string json = rofl::core::analyze_entity_slab_json(
+            bytes,
+            static_cast<std::size_t>(std::max(target_length, 0)),
+            static_cast<std::uint8_t>(std::clamp(target_first_byte, 0, 255)),
+            static_cast<std::size_t>(std::max(header_size, 0)),
+            static_cast<std::size_t>(std::max(stride, 0)),
+            static_cast<std::size_t>(std::max(top_slots, 0))
+        );
+        char* output = new char[json.size() + 1];
+        std::memcpy(output, json.c_str(), json.size() + 1);
+        return output;
+    } catch (const std::exception& exception) {
+        log_error(std::string{"[lra/wasm] Entity-slab analysis failed: "} + exception.what());
+        const std::string error_json = std::string{"{\"error\":\""} + exception.what() + "\"}";
+        char* output = new char[error_json.size() + 1];
+        std::memcpy(output, error_json.c_str(), error_json.size() + 1);
+        return output;
+    }
+}
+
 EMSCRIPTEN_KEEPALIVE const char* lra_analyze_scalar_family_buffer(
     const std::uint8_t* data,
     int size,

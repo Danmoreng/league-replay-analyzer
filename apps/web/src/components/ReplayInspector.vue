@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 
 import type {
   ReplayAnalysisCandidate,
+  ReplayEntitySlabAnalysisResult,
   ReplayFamilyAnalysisResult,
   ReplayFamilyScanItem,
   ReplayFamilyScanResult,
@@ -12,7 +13,8 @@ import type { ReplaySummary } from "../replayParser";
 import type { RiotFixtureBundle } from "../riotApiFixtures";
 import { correlateReplayAnalyses, type ReplayCorrelationReport } from "../replayCorrelation";
 import { correlateReplayScalars, type ReplayScalarCorrelationReport } from "../replayScalarCorrelation";
-import { analyzeScalarFamilyWithWasm, analyzeSparseFamilyWithWasm, scanReplayFamiliesWithWasm } from "../wasmReplayParser";
+import { assignReplayParticipants, type ReplayParticipantSlotAssignmentReport } from "../replayParticipantAssignment";
+import { analyzeEntitySlabWithWasm, analyzeScalarFamilyWithWasm, analyzeSparseFamilyWithWasm, scanReplayFamiliesWithWasm } from "../wasmReplayParser";
 import type { PlayerMovementData } from "../composables/usePlayback";
 import Minimap from "./Minimap.vue";
 import Timeline from "./Timeline.vue";
@@ -29,6 +31,7 @@ const familyAnalysis = ref<ReplayFamilyAnalysisResult | null>(null);
 const selectedCandidateKey = ref("");
 const correlationReport = ref<ReplayCorrelationReport | null>(null);
 const scalarCorrelationReport = ref<ReplayScalarCorrelationReport | null>(null);
+const participantAssignmentReport = ref<ReplayParticipantSlotAssignmentReport | null>(null);
 const scanStatus = ref("Run the decoder scan to rank recurring chunk families before drilling into candidate tracks.");
 const analysisStatus = ref("Select a family to inspect its top slot/pair candidates.");
 const correlationStatus = ref("Automatic correlation compares replay candidates against Riot timeline positions, event anchors, and participant-frame scalar stats.");
@@ -38,6 +41,7 @@ const isAnalyzing = ref(false);
 const isCorrelating = ref(false);
 const analysisCache = ref(new Map<string, ReplayFamilyAnalysisResult>());
 const scalarAnalysisCache = ref(new Map<string, ReplayScalarFamilyAnalysisResult>());
+const entitySlabCache = ref(new Map<string, ReplayEntitySlabAnalysisResult>());
 
 function familyKey(family: ReplayFamilyScanItem): string {
   return `${family.length}:${family.firstByte}`;
@@ -62,6 +66,8 @@ const selectedCandidate = computed(() => {
 const topClasses = computed(() => familyAnalysis.value?.classes.slice(0, 8) ?? []);
 const topMatches = computed(() => correlationReport.value?.topPositionMatches ?? []);
 const topScalarMatches = computed(() => scalarCorrelationReport.value?.topScalarMatches ?? []);
+const participantAssignments = computed(() => participantAssignmentReport.value?.assignments ?? []);
+const topParticipantCandidates = computed(() => participantAssignmentReport.value?.topCandidates ?? []);
 const familyRankings = computed(() => correlationReport.value?.familyRankings ?? []);
 
 const selectedCandidateMovement = computed<PlayerMovementData[]>(() => {
@@ -151,16 +157,19 @@ async function runFamilyScan(): Promise<void> {
     familyScan.value = await scanReplayFamiliesWithWasm(props.replayBuffer, 4096, 4, 18);
     analysisCache.value.clear();
     scalarAnalysisCache.value.clear();
+    entitySlabCache.value.clear();
     familyAnalysis.value = null;
     selectedCandidateKey.value = "";
     correlationReport.value = null;
     scalarCorrelationReport.value = null;
+    participantAssignmentReport.value = null;
     scanStatus.value = `Scanned ${familyScan.value.scannedChunkCount} chunks and ranked ${familyScan.value.families.length} recurring families.`;
   } catch (error) {
     familyScan.value = null;
     familyAnalysis.value = null;
     correlationReport.value = null;
     scalarCorrelationReport.value = null;
+    participantAssignmentReport.value = null;
     scanError.value = error instanceof Error ? error.message : String(error);
     scanStatus.value = "Family scan failed.";
   } finally {
@@ -193,6 +202,32 @@ async function analyzeFamily(family: ReplayFamilyScanItem): Promise<ReplayFamily
     smoothThreshold: 800,
   });
   analysisCache.value.set(cacheKey, result);
+  return result;
+}
+
+async function analyzeEntitySlabFamily(family: ReplayFamilyScanItem): Promise<ReplayEntitySlabAnalysisResult> {
+  if (!props.replayBuffer) {
+    throw new Error("Replay buffer unavailable.");
+  }
+
+  const cacheKey = familyKey(family);
+  const cached = entitySlabCache.value.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const headerSize = family.recommendedHeaderSize >= 0
+    ? family.recommendedHeaderSize
+    : family.headerSizeCandidates[0]?.headerSize ?? 0;
+
+  const result = await analyzeEntitySlabWithWasm(props.replayBuffer, {
+    length: family.length,
+    firstByte: family.firstByte,
+    headerSize,
+    stride: family.recommendedStride,
+    topSlots: 24,
+  });
+  entitySlabCache.value.set(cacheKey, result);
   return result;
 }
 
@@ -268,16 +303,20 @@ async function runAutomaticCorrelation(): Promise<void> {
     const familiesToAnalyze = familyScan.value.families.slice(0, 8);
     const analyses: Array<{ family: ReplayFamilyScanItem; analysis: ReplayFamilyAnalysisResult }> = [];
     const scalarAnalyses: Array<{ family: ReplayFamilyScanItem; analysis: ReplayScalarFamilyAnalysisResult }> = [];
+    const entityAnalyses: Array<{ family: ReplayFamilyScanItem; analysis: ReplayEntitySlabAnalysisResult }> = [];
     for (const family of familiesToAnalyze) {
       const analysis = await analyzeFamily(family);
       const scalarAnalysis = await analyzeScalarFamily(family);
+      const entityAnalysis = await analyzeEntitySlabFamily(family);
       analyses.push({ family, analysis });
       scalarAnalyses.push({ family, analysis: scalarAnalysis });
+      entityAnalyses.push({ family, analysis: entityAnalysis });
     }
 
     correlationReport.value = correlateReplayAnalyses(analyses, props.riotBundle);
     scalarCorrelationReport.value = correlateReplayScalars(scalarAnalyses, props.riotBundle);
-    correlationStatus.value = `${correlationReport.value.summary} ${scalarCorrelationReport.value.summary}`;
+    participantAssignmentReport.value = assignReplayParticipants(scalarCorrelationReport.value, entityAnalyses, props.riotBundle);
+    correlationStatus.value = `${correlationReport.value.summary} ${scalarCorrelationReport.value.summary} ${participantAssignmentReport.value.summary}`;
 
     const bestFamily = correlationReport.value.familyRankings[0];
     if (bestFamily) {
@@ -285,15 +324,22 @@ async function runAutomaticCorrelation(): Promise<void> {
       familyAnalysis.value = analysisCache.value.get(bestFamily.familyKey) ?? null;
       selectedCandidateKey.value = bestFamily.bestCandidateKey;
     } else {
-      const bestScalarMatch = scalarCorrelationReport.value.topScalarMatches[0];
-      if (bestScalarMatch) {
-        selectedFamilyKey.value = bestScalarMatch.familyKey;
-        familyAnalysis.value = analysisCache.value.get(bestScalarMatch.familyKey) ?? null;
+      const bestAssignment = participantAssignmentReport.value.assignments[0];
+      if (bestAssignment) {
+        selectedFamilyKey.value = bestAssignment.familyKey;
+        familyAnalysis.value = analysisCache.value.get(bestAssignment.familyKey) ?? null;
+      } else {
+        const bestScalarMatch = scalarCorrelationReport.value.topScalarMatches[0];
+        if (bestScalarMatch) {
+          selectedFamilyKey.value = bestScalarMatch.familyKey;
+          familyAnalysis.value = analysisCache.value.get(bestScalarMatch.familyKey) ?? null;
+        }
       }
     }
   } catch (error) {
     correlationReport.value = null;
     scalarCorrelationReport.value = null;
+    participantAssignmentReport.value = null;
     correlationStatus.value = error instanceof Error ? error.message : String(error);
   } finally {
     isCorrelating.value = false;
@@ -451,6 +497,85 @@ function selectRanking(familyKeyValue: string, candidateKeyValue: string): void 
                   <td>{{ match.metricLabel }}</td>
                   <td>{{ match.correlation.toFixed(2) }}</td>
                   <td>{{ match.normalizedRmse.toFixed(2) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <div v-if="participantAssignments.length || topParticipantCandidates.length" class="row g-2">
+      <div class="col-lg-6 d-flex flex-column gap-2">
+        <div class="island p-3">
+          <h2 class="fs-5 mb-2">Automatic Participant Assignment</h2>
+          <p class="text-muted small mb-3">
+            These rows are the best current slot-to-player assignments after filtering families down to dynamic and mixed archetypes from the entity-slab pass.
+          </p>
+          <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0 small">
+              <thead class="text-muted x-small text-uppercase sticky-top bg-body">
+                <tr>
+                  <th>Family</th>
+                  <th>Slot</th>
+                  <th>Champion</th>
+                  <th>Archetype</th>
+                  <th>Metrics</th>
+                  <th>Score</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="assignment in participantAssignments"
+                  :key="`${assignment.familyKey}:${assignment.slotIndex}:${assignment.participantId}`"
+                  style="cursor: pointer"
+                  @click="selectedFamilyKey = assignment.familyKey"
+                >
+                  <td><code>{{ assignment.familyLabel }}</code></td>
+                  <td>{{ assignment.slotIndex }}</td>
+                  <td>{{ assignment.champion }}</td>
+                  <td><code>{{ assignment.archetype }}</code></td>
+                  <td>{{ assignment.distinctMetrics }}</td>
+                  <td>{{ assignment.score.toFixed(2) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-6 d-flex flex-column gap-2">
+        <div class="island p-3">
+          <h2 class="fs-5 mb-2">Top Row Candidates</h2>
+          <p class="text-muted small mb-3">
+            Candidate rows are aggregated across multiple scalar metrics. Higher metric diversity is stronger evidence than a single good gold or xp lane.
+          </p>
+          <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0 small">
+              <thead class="text-muted x-small text-uppercase sticky-top bg-body">
+                <tr>
+                  <th>Family</th>
+                  <th>Slot</th>
+                  <th>Champion</th>
+                  <th>Metrics</th>
+                  <th>Corr</th>
+                  <th>nRMSE</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="candidate in topParticipantCandidates.slice(0, 16)"
+                  :key="`${candidate.familyKey}:${candidate.slotIndex}:${candidate.participantId}:candidate`"
+                  style="cursor: pointer"
+                  @click="selectedFamilyKey = candidate.familyKey"
+                >
+                  <td><code>{{ candidate.familyLabel }}</code></td>
+                  <td>{{ candidate.slotIndex }}</td>
+                  <td>{{ candidate.champion }}</td>
+                  <td>{{ candidate.distinctMetrics }}</td>
+                  <td>{{ candidate.averageCorrelation.toFixed(2) }}</td>
+                  <td>{{ candidate.averageNormalizedRmse.toFixed(2) }}</td>
                 </tr>
               </tbody>
             </table>

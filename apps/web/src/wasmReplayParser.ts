@@ -1,4 +1,4 @@
-import type { ReplayFamilyAnalysisResult, ReplayFamilyScanResult, ReplayScalarFamilyAnalysisResult } from "./replayInvestigation";
+import type { ReplayEntitySlabAnalysisResult, ReplayFamilyAnalysisResult, ReplayFamilyScanResult, ReplayScalarFamilyAnalysisResult } from "./replayInvestigation";
 import type { ReplaySummary } from "./replayParser";
 import createReplayModule from "./generated/wasm/rofl_wasm.js";
 
@@ -100,6 +100,60 @@ export async function scanReplayFamiliesWithWasm(
     return parseJsonResult<ReplayFamilyScanResult>(
       module,
       scanFamilies(replayPointer, size, minimumLength, minimumRecords, topFamilies),
+    );
+  });
+}
+
+export async function analyzeEntitySlabWithWasm(
+  buffer: ArrayBuffer,
+  options: {
+    length: number;
+    firstByte: number;
+    headerSize: number;
+    stride?: number;
+    topSlots?: number;
+  },
+): Promise<ReplayEntitySlabAnalysisResult> {
+  const {
+    length,
+    firstByte,
+    headerSize,
+    stride = 16,
+    topSlots = 24,
+  } = options;
+
+  return withReplayBuffer(buffer, (module, replayPointer, size) => {
+    const analyzeFamily = module.cwrap<
+      (
+        input: number,
+        size: number,
+        length: number,
+        firstByte: number,
+        headerSize: number,
+        stride: number,
+        topSlots: number,
+      ) => number
+    >("lra_analyze_entity_slab_buffer", "number", [
+      "number",
+      "number",
+      "number",
+      "number",
+      "number",
+      "number",
+      "number",
+    ]);
+
+    return parseJsonResult<ReplayEntitySlabAnalysisResult>(
+      module,
+      analyzeFamily(
+        replayPointer,
+        size,
+        length,
+        firstByte,
+        headerSize,
+        stride,
+        topSlots,
+      ),
     );
   });
 }
