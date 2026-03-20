@@ -1,3 +1,5 @@
+> Note: this is a historical investigation document. For the current decoder state, start with `docs/decoder-status.md` and `docs/reverse-engineering-index.md`.
+
 # ROFL Movement Investigation Handoff - March 16, 2026
 
 ## Session Goal

@@ -1,3 +1,5 @@
+> Note: this is a historical investigation document. For the current decoder state, start with `docs/decoder-status.md` and `docs/reverse-engineering-index.md`.
+
 # Recurring Signature Window Clusters
 
 As a sidecar task, we clustered the recurring signature windows in the non-schema rows (Rows 11+) of `61917 / 0x00`. 

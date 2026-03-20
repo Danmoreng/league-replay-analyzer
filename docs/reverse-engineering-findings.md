@@ -1,3 +1,5 @@
+> Note: this is a historical investigation document. For the current decoder state, start with `docs/decoder-status.md` and `docs/reverse-engineering-index.md`.
+
 # ROFL2 Reverse Engineering Findings
 
 This document summarizes the technical findings regarding the League of Legends ROFL2 replay format, specifically focusing on the "Sparse Record" families found in footer-style chunk payloads.

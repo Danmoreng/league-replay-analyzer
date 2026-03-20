@@ -1,3 +1,5 @@
+> Note: use `docs/decoder-status.md` for the latest decoder state. This file is for more stable format and container notes.
+
 # Replay Format Notes
 
 ## Verified So Far
