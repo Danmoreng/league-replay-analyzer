@@ -18,7 +18,6 @@ import { analyzeEntitySlabWithWasm, analyzeScalarFamilyWithWasm, analyzeSparseFa
 import type { PlayerMovementData } from "../composables/usePlayback";
 import Minimap from "./Minimap.vue";
 import SchemaJsonLoader from "./SchemaJsonLoader.vue";
-import type { RawToken } from "../tokenBitfields";
 
 const props = defineProps<{
   replayBuffer: ArrayBuffer | null;
@@ -40,12 +39,6 @@ const scanError = ref("");
 const isScanning = ref(false);
 const isAnalyzing = ref(false);
 const isCorrelating = ref(false);
-const mockTokens = ref<RawToken[]>([
-  { tokenHex: "0x4B710002", tokenU32: 0x4B710002, sourceFamilyLength: 61917, sourceFirstByte: 0x00, slot: 0, offset: 0 },
-  { tokenHex: "0x00F1DD71", tokenU32: 0x00F1DD71, sourceFamilyLength: 61917, sourceFirstByte: 0x00, slot: 0, offset: 2 },
-  { tokenHex: "0x000200F1", tokenU32: 0x000200F1, sourceFamilyLength: 61917, sourceFirstByte: 0x00, slot: 0, offset: 1 },
-  { tokenHex: "0x0200F14B", tokenU32: 0x0200F14B, sourceFamilyLength: 61917, sourceFirstByte: 0x00, slot: 11, offset: 0 },
-]);
 
 const analysisCache = ref(new Map<string, ReplayFamilyAnalysisResult>());
 const scalarAnalysisCache = ref(new Map<string, ReplayScalarFamilyAnalysisResult>());
@@ -69,6 +62,21 @@ const topScalarMatches = computed(() => scalarCorrelationReport.value?.topScalar
 const participantAssignments = computed(() => participantAssignmentReport.value?.assignments ?? []);
 const topParticipantCandidates = computed(() => participantAssignmentReport.value?.topCandidates ?? []);
 const familyRankings = computed(() => correlationReport.value?.familyRankings ?? []);
+
+const suggestedAnalysisRows = computed(() => {
+  const rows = new Set<number>();
+  for (const candidate of candidates.value.slice(0, 8)) {
+    rows.add(candidate.slotIndex);
+  }
+  if (selectedFamily.value) {
+    for (const assignment of participantAssignments.value) {
+      if (`${assignment.familyLength}:${assignment.familyFirstByte}` === familyKey(selectedFamily.value)) {
+        rows.add(assignment.slotIndex);
+      }
+    }
+  }
+  return Array.from(rows);
+});
 
 const bestFamilyRanking = computed(() => familyRankings.value[0] ?? null);
 const bestScalarMatch = computed(() => topScalarMatches.value[0] ?? null);
@@ -112,7 +120,7 @@ const nextStep = computed(() => {
   if (!props.riotBundle) {
     return "Load a Riot timeline bundle if you want automatic matching.";
   }
-  return "Use Auto Correlate for a ranked guess, or open the manual JSON tools for cleaned-field analysis.";
+  return "Use Auto Correlate for a ranked guess, or open the backend deep-analysis tools for cleaned-field analysis.";
 });
 
 watch(
@@ -430,7 +438,7 @@ function selectRanking(familyKeyValue: string, candidateKeyValue: string): void 
       <ol class="small mb-3 ps-3">
         <li>Scan families to find the large recurring data slabs.</li>
         <li>Pick one family and analyze it to preview candidate movement tracks.</li>
-        <li>Use Auto Correlate for quick guesses, or open the manual JSON tools for cleaned-field investigation.</li>
+        <li>Use Auto Correlate for quick guesses, or open the backend deep-analysis tools for cleaned-field investigation.</li>
       </ol>
       <div class="small text-muted mb-0">Nothing is missing here yet. The UI will expand once scan results exist.</div>
     </div>
@@ -705,11 +713,11 @@ function selectRanking(familyKeyValue: string, candidateKeyValue: string): void 
       </div>
 
       <details class="island p-3">
-        <summary class="fs-5 mb-2">Step 3: Manual JSON Tools</summary>
+        <summary class="fs-5 mb-2">Step 3: Backend Deep Analysis</summary>
         <p class="text-muted small mt-2 mb-3">
-          Use this when you want to paste native CLI JSON, inspect signature windows, or correlate cleaned fields manually.
+          Use this when you want the Wasm backend to run schema and cleaned-field analysis for the currently selected family.
         </p>
-        <SchemaJsonLoader :mockTokens="mockTokens" :riotBundle="riotBundle" />
+        <SchemaJsonLoader :replayBuffer="replayBuffer" :selectedFamily="selectedFamily" :candidateRows="suggestedAnalysisRows" :riotBundle="riotBundle" />
       </details>
     </template>
   </div>

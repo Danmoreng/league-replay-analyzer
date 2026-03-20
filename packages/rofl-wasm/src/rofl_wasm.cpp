@@ -5,6 +5,7 @@
 #include <cstring>
 #include <exception>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -18,6 +19,27 @@
 #endif
 
 namespace {
+
+std::vector<std::size_t> parse_slot_indices_csv(const char* csv) {
+    std::vector<std::size_t> slot_indices;
+    if (csv == nullptr || csv[0] == '\0') {
+        return slot_indices;
+    }
+
+    std::stringstream stream(csv);
+    std::string token;
+    while (std::getline(stream, token, ',')) {
+        if (token.empty()) {
+            continue;
+        }
+        try {
+            slot_indices.push_back(static_cast<std::size_t>(std::stoull(token)));
+        } catch (const std::exception&) {
+        }
+    }
+
+    return slot_indices;
+}
 
 void log_info(const std::string& message) {
 #ifdef __EMSCRIPTEN__
@@ -202,6 +224,88 @@ EMSCRIPTEN_KEEPALIVE const char* lra_analyze_scalar_family_buffer(
         return output;
     } catch (const std::exception& exception) {
         log_error(std::string{"[lra/wasm] Scalar-family analysis failed: "} + exception.what());
+        const std::string error_json = std::string{"{\"error\":\""} + exception.what() + "\"}";
+        char* output = new char[error_json.size() + 1];
+        std::memcpy(output, error_json.c_str(), error_json.size() + 1);
+        return output;
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE const char* lra_analyze_clean_row_offsets_buffer(
+    const std::uint8_t* data,
+    int size,
+    int target_length,
+    int target_first_byte,
+    int header_size,
+    int stride,
+    const char* slot_indices_csv,
+    int top_fields
+) {
+    try {
+        if (data == nullptr || size <= 0) {
+            const std::string empty = "{\"error\":\"Replay buffer was empty.\"}";
+            char* output = new char[empty.size() + 1];
+            std::memcpy(output, empty.c_str(), empty.size() + 1);
+            return output;
+        }
+
+        const std::vector<std::uint8_t> bytes(data, data + size);
+        const auto slot_indices = parse_slot_indices_csv(slot_indices_csv);
+        const std::string json = rofl::core::analyze_clean_row_offsets_json(
+            bytes,
+            static_cast<std::size_t>(std::max(target_length, 0)),
+            static_cast<std::uint8_t>(std::clamp(target_first_byte, 0, 255)),
+            static_cast<std::size_t>(std::max(header_size, 0)),
+            static_cast<std::size_t>(std::max(stride, 0)),
+            slot_indices,
+            static_cast<std::size_t>(std::max(top_fields, 0))
+        );
+        char* output = new char[json.size() + 1];
+        std::memcpy(output, json.c_str(), json.size() + 1);
+        return output;
+    } catch (const std::exception& exception) {
+        log_error(std::string{"[lra/wasm] Clean-row analysis failed: "} + exception.what());
+        const std::string error_json = std::string{"{\"error\":\""} + exception.what() + "\"}";
+        char* output = new char[error_json.size() + 1];
+        std::memcpy(output, error_json.c_str(), error_json.size() + 1);
+        return output;
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE const char* lra_analyze_bitfield_schema_buffer(
+    const std::uint8_t* data,
+    int size,
+    int target_length,
+    int target_first_byte,
+    int header_size,
+    int stride,
+    const char* slot_indices_csv,
+    int top_windows
+) {
+    try {
+        if (data == nullptr || size <= 0) {
+            const std::string empty = "{\"error\":\"Replay buffer was empty.\"}";
+            char* output = new char[empty.size() + 1];
+            std::memcpy(output, empty.c_str(), empty.size() + 1);
+            return output;
+        }
+
+        const std::vector<std::uint8_t> bytes(data, data + size);
+        const auto slot_indices = parse_slot_indices_csv(slot_indices_csv);
+        const std::string json = rofl::core::analyze_bitfield_schema_json(
+            bytes,
+            static_cast<std::size_t>(std::max(target_length, 0)),
+            static_cast<std::uint8_t>(std::clamp(target_first_byte, 0, 255)),
+            static_cast<std::size_t>(std::max(header_size, 0)),
+            static_cast<std::size_t>(std::max(stride, 0)),
+            slot_indices,
+            static_cast<std::size_t>(std::max(top_windows, 0))
+        );
+        char* output = new char[json.size() + 1];
+        std::memcpy(output, json.c_str(), json.size() + 1);
+        return output;
+    } catch (const std::exception& exception) {
+        log_error(std::string{"[lra/wasm] Bitfield-schema analysis failed: "} + exception.what());
         const std::string error_json = std::string{"{\"error\":\""} + exception.what() + "\"}";
         char* output = new char[error_json.size() + 1];
         std::memcpy(output, error_json.c_str(), error_json.size() + 1);

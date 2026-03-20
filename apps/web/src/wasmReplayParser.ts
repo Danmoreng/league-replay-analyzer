@@ -277,3 +277,122 @@ export async function analyzeScalarFamilyWithWasm(
     );
   });
 }
+
+
+export async function analyzeCleanRowOffsetsWithWasm(
+  buffer: ArrayBuffer,
+  options: {
+    length: number;
+    firstByte: number;
+    headerSize: number;
+    stride?: number;
+    slotIndices: number[];
+    topFields?: number;
+  },
+): Promise<any> {
+  const {
+    length,
+    firstByte,
+    headerSize,
+    stride = 16,
+    slotIndices,
+    topFields = 8,
+  } = options;
+
+  return withReplayBuffer(buffer, (module, replayPointer, size) => {
+    const analyzeFamily = module.cwrap<
+      (
+        input: number,
+        size: number,
+        length: number,
+        firstByte: number,
+        headerSize: number,
+        stride: number,
+        slotIndicesCsv: string,
+        topFields: number,
+      ) => number
+    >("lra_analyze_clean_row_offsets_buffer", "number", [
+      "number",
+      "number",
+      "number",
+      "number",
+      "number",
+      "number",
+      "string",
+      "number",
+    ]);
+
+    return parseJsonResult<any>(
+      module,
+      analyzeFamily(
+        replayPointer,
+        size,
+        length,
+        firstByte,
+        headerSize,
+        stride,
+        slotIndices.join(","),
+        topFields,
+      ),
+    );
+  });
+}
+
+export async function analyzeBitfieldSchemaWithWasm(
+  buffer: ArrayBuffer,
+  options: {
+    length: number;
+    firstByte: number;
+    headerSize: number;
+    stride?: number;
+    slotIndices: number[];
+    topWindows?: number;
+  },
+): Promise<any> {
+  const {
+    length,
+    firstByte,
+    headerSize,
+    stride = 16,
+    slotIndices,
+    topWindows = 12,
+  } = options;
+
+  return withReplayBuffer(buffer, (module, replayPointer, size) => {
+    const analyzeFamily = module.cwrap<
+      (
+        input: number,
+        size: number,
+        length: number,
+        firstByte: number,
+        headerSize: number,
+        stride: number,
+        slotIndicesCsv: string,
+        topWindows: number,
+      ) => number
+    >("lra_analyze_bitfield_schema_buffer", "number", [
+      "number",
+      "number",
+      "number",
+      "number",
+      "number",
+      "number",
+      "string",
+      "number",
+    ]);
+
+    return parseJsonResult<any>(
+      module,
+      analyzeFamily(
+        replayPointer,
+        size,
+        length,
+        firstByte,
+        headerSize,
+        stride,
+        slotIndices.join(","),
+        topWindows,
+      ),
+    );
+  });
+}
