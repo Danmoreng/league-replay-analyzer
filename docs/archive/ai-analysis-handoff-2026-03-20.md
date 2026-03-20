@@ -70,7 +70,7 @@ Important current files:
 - `apps/web/src/wasmReplayParser.ts`
 - `apps/web/src/App.vue`
 - `docs/replay-format-notes.md`
-- `docs/session-rofl-movement-investigation-handoff.md`
+- `docs/archive/session-rofl-movement-investigation-handoff.md`
 
 ## Replay Container Findings
 
@@ -509,7 +509,7 @@ Current code:
 
 Current notes:
 - `docs/replay-format-notes.md`
-- `docs/session-rofl-movement-investigation-handoff.md`
+- `docs/archive/session-rofl-movement-investigation-handoff.md`
 - this file
 
 Optional scratch artifacts that may still help a deeper model inspect chunk structure:
@@ -557,7 +557,7 @@ Use something like this:
 You are continuing reverse-engineering work on a local-first League of Legends replay analyzer.
 
 Read these files first:
-- docs/ai-analysis-handoff-2026-03-20.md
+- docs/archive/ai-analysis-handoff-2026-03-20.md
 - docs/replay-format-notes.md
 - packages/rofl-core/src/replay_analyzer.cpp
 - apps/web/src/replayScalarCorrelation.ts

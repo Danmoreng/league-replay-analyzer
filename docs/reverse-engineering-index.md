@@ -25,16 +25,16 @@ This file consolidates the replay reverse-engineering documentation into a small
 
 ## Historical / Session Docs
 
-These are still useful for provenance, but they should not be treated as the latest status on their own:
+These are still useful for provenance, but they should not be treated as the latest status on their own. Archived session and handoff notes now live under `docs/archive/`.
 
-- `docs/ai-analysis-handoff-2026-03-20.md`
+- `docs/archive/ai-analysis-handoff-2026-03-20.md`
 - `docs/bitfield-packing-hypothesis.md`
 - `docs/signature-clustering-findings.md`
-- `docs/session-rofl-movement-handoff.md`
-- `docs/session-rofl-movement-investigation-handoff.md`
-- `docs/reverse-engineering-findings.md`
-- `docs/decoding-plan-final.md`
-- `docs/layout-hypothesis.md`
+- `docs/archive/session-rofl-movement-handoff.md`
+- `docs/archive/session-rofl-movement-investigation-handoff.md`
+- `docs/archive/reverse-engineering-findings.md`
+- `docs/archive/decoding-plan-final.md`
+- `docs/archive/layout-hypothesis.md`
 
 ## Consolidation Policy
 
