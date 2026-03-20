@@ -17,7 +17,6 @@ import { assignReplayParticipants, type ReplayParticipantSlotAssignmentReport } 
 import { analyzeEntitySlabWithWasm, analyzeScalarFamilyWithWasm, analyzeSparseFamilyWithWasm, scanReplayFamiliesWithWasm } from "../wasmReplayParser";
 import type { PlayerMovementData } from "../composables/usePlayback";
 import Minimap from "./Minimap.vue";
-import Timeline from "./Timeline.vue";
 import SchemaJsonLoader from "./SchemaJsonLoader.vue";
 import type { RawToken } from "../tokenBitfields";
 
@@ -34,9 +33,9 @@ const selectedCandidateKey = ref("");
 const correlationReport = ref<ReplayCorrelationReport | null>(null);
 const scalarCorrelationReport = ref<ReplayScalarCorrelationReport | null>(null);
 const participantAssignmentReport = ref<ReplayParticipantSlotAssignmentReport | null>(null);
-const scanStatus = ref("Run the decoder scan to rank recurring chunk families before drilling into candidate tracks.");
-const analysisStatus = ref("Select a family to inspect its top slot/pair candidates.");
-const correlationStatus = ref("Automatic correlation compares replay candidates against Riot timeline positions, event anchors, and participant-frame scalar stats.");
+const scanStatus = ref("Scan families to see which recurring replay slabs are worth investigating.");
+const analysisStatus = ref("Pick a family and analyze it to inspect candidate tracks.");
+const correlationStatus = ref("Automatic correlation compares replay candidates against Riot timeline movement and scalar stats.");
 const scanError = ref("");
 const isScanning = ref(false);
 const isAnalyzing = ref(false);
@@ -61,23 +60,20 @@ function candidateKey(candidate: ReplayAnalysisCandidate): string {
 }
 
 const families = computed(() => familyScan.value?.families ?? []);
-
-const selectedFamily = computed(() => {
-  return families.value.find((family) => familyKey(family) === selectedFamilyKey.value) ?? null;
-});
-
+const selectedFamily = computed(() => families.value.find((family) => familyKey(family) === selectedFamilyKey.value) ?? null);
 const candidates = computed(() => familyAnalysis.value?.candidates ?? []);
-
-const selectedCandidate = computed(() => {
-  return candidates.value.find((candidate) => candidateKey(candidate) === selectedCandidateKey.value) ?? null;
-});
-
-const topClasses = computed(() => familyAnalysis.value?.classes.slice(0, 8) ?? []);
+const selectedCandidate = computed(() => candidates.value.find((candidate) => candidateKey(candidate) === selectedCandidateKey.value) ?? null);
+const topClasses = computed(() => familyAnalysis.value?.classes.slice(0, 6) ?? []);
 const topMatches = computed(() => correlationReport.value?.topPositionMatches ?? []);
 const topScalarMatches = computed(() => scalarCorrelationReport.value?.topScalarMatches ?? []);
 const participantAssignments = computed(() => participantAssignmentReport.value?.assignments ?? []);
 const topParticipantCandidates = computed(() => participantAssignmentReport.value?.topCandidates ?? []);
 const familyRankings = computed(() => correlationReport.value?.familyRankings ?? []);
+
+const bestFamilyRanking = computed(() => familyRankings.value[0] ?? null);
+const bestScalarMatch = computed(() => topScalarMatches.value[0] ?? null);
+const bestAssignment = computed(() => participantAssignments.value[0] ?? null);
+const hasAutoResults = computed(() => Boolean(bestFamilyRanking.value || bestScalarMatch.value || bestAssignment.value));
 
 const selectedCandidateMovement = computed<PlayerMovementData[]>(() => {
   const candidate = selectedCandidate.value;
@@ -98,6 +94,25 @@ const selectedCandidateMovement = computed<PlayerMovementData[]>(() => {
       })),
     },
   ];
+});
+
+const nextStep = computed(() => {
+  if (!props.replayBuffer) {
+    return "Load a replay file first.";
+  }
+  if (!familyScan.value) {
+    return "Run Scan Families to build the candidate list.";
+  }
+  if (!selectedFamily.value) {
+    return "Pick one recurring family from the list.";
+  }
+  if (!familyAnalysis.value) {
+    return "Analyze the selected family to inspect candidate tracks.";
+  }
+  if (!props.riotBundle) {
+    return "Load a Riot timeline bundle if you want automatic matching.";
+  }
+  return "Use Auto Correlate for a ranked guess, or open the manual JSON tools for cleaned-field analysis.";
 });
 
 watch(
@@ -363,13 +378,13 @@ function selectRanking(familyKeyValue: string, candidateKeyValue: string): void 
 </script>
 
 <template>
-  <div class="d-flex flex-column gap-2">
-    <div class="island p-3 d-flex flex-column gap-3">
+  <div class="d-flex flex-column gap-3">
+    <div class="island p-3 p-lg-4 d-flex flex-column gap-3">
       <div class="d-flex flex-wrap justify-content-between gap-3 align-items-start">
         <div>
-          <h2 class="fs-5 mb-1">Decoder Inspector</h2>
-          <p class="text-muted small mb-0">
-            This page is now data-driven first: it scans recurring replay families, analyzes movement candidates, and scores both movement and scalar replay lanes automatically against Riot timeline fixtures.
+          <h2 class="fs-4 mb-1">Replay Analysis</h2>
+          <p class="text-muted mb-0 small">
+            Use this screen in three steps: scan recurring families, inspect one family, then use automatic or manual correlation to see what the data might mean.
           </p>
         </div>
         <div class="d-flex gap-2 flex-wrap">
@@ -377,243 +392,64 @@ function selectRanking(familyKeyValue: string, candidateKeyValue: string): void 
             <span v-if="isScanning" class="spinner-border spinner-border-sm me-2"></span>
             Scan Families
           </button>
-          <button
-            class="btn btn-outline-light btn-sm"
-            :disabled="!selectedFamily || isAnalyzing"
-            @click="void analyzeSelectedFamily()"
-          >
+          <button class="btn btn-outline-light btn-sm" :disabled="!selectedFamily || isAnalyzing" @click="void analyzeSelectedFamily()">
             <span v-if="isAnalyzing" class="spinner-border spinner-border-sm me-2"></span>
-            Analyze Selected Family
+            Analyze Family
           </button>
-          <button
-            class="btn btn-success btn-sm"
-            :disabled="!replayBuffer || !riotBundle || isCorrelating"
-            @click="void runAutomaticCorrelation()"
-          >
+          <button class="btn btn-success btn-sm" :disabled="!replayBuffer || !riotBundle || isCorrelating" @click="void runAutomaticCorrelation()">
             <span v-if="isCorrelating" class="spinner-border spinner-border-sm me-2"></span>
             Auto Correlate
           </button>
         </div>
       </div>
 
-      <div class="small" :class="scanError ? 'text-danger' : 'text-muted'">
-        {{ scanError || scanStatus }}
-      </div>
-      <div class="small text-muted">{{ analysisStatus }}</div>
-      <div class="small" :class="riotBundle ? 'text-info' : 'text-warning'">{{ correlationStatus }}</div>
-    </div>
-
-    <div v-if="familyRankings.length" class="row g-2">
-      <div class="col-lg-6 d-flex flex-column gap-2">
-        <div class="island p-3">
-          <h2 class="fs-5 mb-3">Automatic Family Ranking</h2>
-          <div class="table-responsive">
-            <table class="table table-sm table-hover align-middle mb-0 small">
-              <thead class="text-muted x-small text-uppercase sticky-top bg-body">
-                <tr>
-                  <th>Family</th>
-                  <th>Champion</th>
-                  <th>Affine RMSE</th>
-                  <th>Near-10 Classes</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="ranking in familyRankings"
-                  :key="ranking.familyKey"
-                  style="cursor: pointer"
-                  @click="selectRanking(ranking.familyKey, ranking.bestCandidateKey)"
-                >
-                  <td><code>{{ ranking.familyLabel }}</code></td>
-                  <td>{{ ranking.bestChampion }}</td>
-                  <td>{{ ranking.bestAffineRmse.toFixed(0) }}</td>
-                  <td>{{ ranking.classNearTenCount }}</td>
-                </tr>
-              </tbody>
-            </table>
+      <div class="row g-2">
+        <div class="col-lg-4">
+          <div class="rounded-3 border border-secondary border-opacity-10 p-3 h-100 bg-body-tertiary bg-opacity-25">
+            <div class="text-uppercase x-small text-muted mb-1">Next Step</div>
+            <div class="small">{{ nextStep }}</div>
           </div>
         </div>
-      </div>
-
-      <div class="col-lg-6 d-flex flex-column gap-2">
-        <div class="island p-3">
-          <h2 class="fs-5 mb-3">Top Automatic Matches</h2>
-          <div class="table-responsive">
-            <table class="table table-sm table-hover align-middle mb-0 small">
-              <thead class="text-muted x-small text-uppercase sticky-top bg-body">
-                <tr>
-                  <th>Slot</th>
-                  <th>Pair</th>
-                  <th>Champion</th>
-                  <th>Affine</th>
-                  <th>Events</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="match in topMatches.slice(0, 12)"
-                  :key="`${match.familyKey}:${match.candidateKey}:${match.participantId}`"
-                  style="cursor: pointer"
-                  @click="selectRanking(match.familyKey, match.candidateKey)"
-                >
-                  <td>{{ match.slotIndex }}</td>
-                  <td><code>{{ match.pairLabel }}</code></td>
-                  <td>{{ match.champion }}</td>
-                  <td>{{ match.affineRmse.toFixed(0) }}</td>
-                  <td>{{ match.eventMatches > 0 ? match.eventRmse.toFixed(0) : 'n/a' }}</td>
-                </tr>
-              </tbody>
-            </table>
+        <div class="col-lg-4">
+          <div class="rounded-3 border border-secondary border-opacity-10 p-3 h-100 bg-body-tertiary bg-opacity-25">
+            <div class="text-uppercase x-small text-muted mb-1">Scan Status</div>
+            <div class="small" :class="scanError ? 'text-danger' : 'text-muted'">{{ scanError || scanStatus }}</div>
+          </div>
+        </div>
+        <div class="col-lg-4">
+          <div class="rounded-3 border border-secondary border-opacity-10 p-3 h-100 bg-body-tertiary bg-opacity-25">
+            <div class="text-uppercase x-small text-muted mb-1">Correlation Status</div>
+            <div class="small" :class="riotBundle ? 'text-muted' : 'text-warning'">{{ correlationStatus }}</div>
           </div>
         </div>
       </div>
     </div>
 
-
-    <div v-if="topScalarMatches.length" class="row g-2">
-      <div class="col-12 d-flex flex-column gap-2">
-        <div class="island p-3">
-          <h2 class="fs-5 mb-2">Top Automatic Scalar Matches</h2>
-          <p class="text-muted small mb-3">
-            These are raw replay lanes ranked against Riot participant-frame stats like gold, xp, cs, level, health, and resource values. This is the main path for identifying semantics when movement stays ambiguous.
-          </p>
-          <div class="table-responsive">
-            <table class="table table-sm table-hover align-middle mb-0 small">
-              <thead class="text-muted x-small text-uppercase sticky-top bg-body">
-                <tr>
-                  <th>Family</th>
-                  <th>Slot</th>
-                  <th>Lane</th>
-                  <th>Decode</th>
-                  <th>Champion</th>
-                  <th>Metric</th>
-                  <th>Corr</th>
-                  <th>nRMSE</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="match in topScalarMatches.slice(0, 16)"
-                  :key="`${match.familyKey}:${match.candidateKey}:${match.participantId}:${match.metricKey}`"
-                  style="cursor: pointer"
-                  @click="selectedFamilyKey = match.familyKey"
-                >
-                  <td><code>{{ formatNumber(match.familyLength) }} / {{ formatByte(match.familyFirstByte) }}</code></td>
-                  <td>{{ match.slotIndex }}</td>
-                  <td>{{ match.laneIndex }}</td>
-                  <td><code>{{ match.decodeLabel }}</code></td>
-                  <td>{{ match.champion }}</td>
-                  <td>{{ match.metricLabel }}</td>
-                  <td>{{ match.correlation.toFixed(2) }}</td>
-                  <td>{{ match.normalizedRmse.toFixed(2) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-
-
-    <div v-if="participantAssignments.length || topParticipantCandidates.length" class="row g-2">
-      <div class="col-lg-6 d-flex flex-column gap-2">
-        <div class="island p-3">
-          <h2 class="fs-5 mb-2">Automatic Participant Assignment</h2>
-          <p class="text-muted small mb-3">
-            These rows are the best current slot-to-player assignments after filtering families down to dynamic and mixed archetypes from the entity-slab pass.
-          </p>
-          <div class="table-responsive">
-            <table class="table table-sm table-hover align-middle mb-0 small">
-              <thead class="text-muted x-small text-uppercase sticky-top bg-body">
-                <tr>
-                  <th>Family</th>
-                  <th>Slot</th>
-                  <th>Champion</th>
-                  <th>Archetype</th>
-                  <th>Metrics</th>
-                  <th>Score</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="assignment in participantAssignments"
-                  :key="`${assignment.familyKey}:${assignment.slotIndex}:${assignment.participantId}`"
-                  style="cursor: pointer"
-                  @click="selectedFamilyKey = assignment.familyKey"
-                >
-                  <td><code>{{ assignment.familyLabel }}</code></td>
-                  <td>{{ assignment.slotIndex }}</td>
-                  <td>{{ assignment.champion }}</td>
-                  <td><code>{{ assignment.archetype }}</code></td>
-                  <td>{{ assignment.distinctMetrics }}</td>
-                  <td>{{ assignment.score.toFixed(2) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-lg-6 d-flex flex-column gap-2">
-        <div class="island p-3">
-          <h2 class="fs-5 mb-2">Top Row Candidates</h2>
-          <p class="text-muted small mb-3">
-            Candidate rows are aggregated across multiple scalar metrics. Higher metric diversity is stronger evidence than a single good gold or xp lane.
-          </p>
-          <div class="table-responsive">
-            <table class="table table-sm table-hover align-middle mb-0 small">
-              <thead class="text-muted x-small text-uppercase sticky-top bg-body">
-                <tr>
-                  <th>Family</th>
-                  <th>Slot</th>
-                  <th>Champion</th>
-                  <th>Metrics</th>
-                  <th>Corr</th>
-                  <th>nRMSE</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="candidate in topParticipantCandidates.slice(0, 16)"
-                  :key="`${candidate.familyKey}:${candidate.slotIndex}:${candidate.participantId}:candidate`"
-                  style="cursor: pointer"
-                  @click="selectedFamilyKey = candidate.familyKey"
-                >
-                  <td><code>{{ candidate.familyLabel }}</code></td>
-                  <td>{{ candidate.slotIndex }}</td>
-                  <td>{{ candidate.champion }}</td>
-                  <td>{{ candidate.distinctMetrics }}</td>
-                  <td>{{ candidate.averageCorrelation.toFixed(2) }}</td>
-                  <td>{{ candidate.averageNormalizedRmse.toFixed(2) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="families.length === 0" class="island p-4 text-center text-muted">
-      <div class="fs-5 mb-2">No family scan results yet</div>
-      <p class="mb-0">
-        The scan ranks recurring framed subrecord families that are likely to contain world or entity state.
-        Automatic correlation then checks those candidates against Riot timeline positions, event windows, and scalar participant-frame stats.
-      </p>
+    <div v-if="!families.length" class="island p-4">
+      <h3 class="fs-5 mb-3">Recommended Flow</h3>
+      <ol class="small mb-3 ps-3">
+        <li>Scan families to find the large recurring data slabs.</li>
+        <li>Pick one family and analyze it to preview candidate movement tracks.</li>
+        <li>Use Auto Correlate for quick guesses, or open the manual JSON tools for cleaned-field investigation.</li>
+      </ol>
+      <div class="small text-muted mb-0">Nothing is missing here yet. The UI will expand once scan results exist.</div>
     </div>
 
     <template v-else>
-      <div class="row g-2">
-        <div class="col-lg-7 d-flex flex-column gap-2">
+      <div class="row g-3">
+        <div class="col-xl-5 d-flex flex-column gap-3">
           <div class="island p-3">
-            <h2 class="fs-5 mb-3">Recurring Families</h2>
-            <div class="table-responsive">
+            <h3 class="fs-5 mb-2">Step 1: Choose A Family</h3>
+            <p class="text-muted small mb-3">
+              Focus on one recurring slab at a time. The selected family drives everything below.
+            </p>
+            <div class="table-responsive analysis-table">
               <table class="table table-sm table-hover align-middle mb-0 small">
                 <thead class="text-muted x-small text-uppercase sticky-top bg-body">
                   <tr>
                     <th>Length</th>
                     <th>First</th>
                     <th>Records</th>
-                    <th>Chunks</th>
                     <th>Header</th>
                   </tr>
                 </thead>
@@ -628,7 +464,6 @@ function selectRanking(familyKeyValue: string, candidateKeyValue: string): void 
                     <td>{{ formatNumber(family.length) }}</td>
                     <td><code>{{ formatByte(family.firstByte) }}</code></td>
                     <td>{{ formatNumber(family.recordCount) }}</td>
-                    <td>{{ formatNumber(family.chunkCount) }}</td>
                     <td>
                       <span v-if="family.recommendedHeaderSize >= 0">h{{ family.recommendedHeaderSize }}</span>
                       <span v-else class="text-muted">n/a</span>
@@ -638,12 +473,10 @@ function selectRanking(familyKeyValue: string, candidateKeyValue: string): void 
               </table>
             </div>
           </div>
-        </div>
 
-        <div class="col-lg-5 d-flex flex-column gap-2">
           <div v-if="selectedFamily" class="island p-3">
-            <h2 class="fs-5 mb-3">Selected Family</h2>
-            <dl class="row g-2 mb-0 small">
+            <h3 class="fs-5 mb-2">Selected Family</h3>
+            <dl class="row g-2 mb-3 small">
               <dt class="col-6 text-muted fw-normal">Length</dt>
               <dd class="col-6 text-end fw-bold mb-0">{{ formatNumber(selectedFamily.length) }}</dd>
 
@@ -661,32 +494,139 @@ function selectRanking(familyKeyValue: string, candidateKeyValue: string): void 
                 <span v-else class="text-muted">none</span>
               </dd>
             </dl>
+            <div class="small" :class="familyAnalysis ? 'text-muted' : 'text-warning'">
+              {{ analysisStatus }}
+            </div>
+          </div>
+        </div>
+
+        <div class="col-xl-7 d-flex flex-column gap-3">
+          <div class="island p-3">
+            <h3 class="fs-5 mb-2">Current Read</h3>
+            <div v-if="hasAutoResults" class="d-flex flex-column gap-2 small">
+              <div v-if="bestFamilyRanking" class="rounded-3 border border-secondary border-opacity-10 p-3">
+                <div class="text-uppercase x-small text-muted mb-1">Best Movement Lead</div>
+                <div>
+                  <code>{{ bestFamilyRanking.familyLabel }}</code>
+                  vs {{ bestFamilyRanking.bestChampion }}
+                  with affine RMSE {{ bestFamilyRanking.bestAffineRmse.toFixed(0) }}
+                </div>
+              </div>
+              <div v-if="bestScalarMatch" class="rounded-3 border border-secondary border-opacity-10 p-3">
+                <div class="text-uppercase x-small text-muted mb-1">Best Scalar Lead</div>
+                <div>
+                  Row {{ bestScalarMatch.slotIndex }}, lane {{ bestScalarMatch.laneIndex }},
+                  <code>{{ bestScalarMatch.decodeLabel }}</code>
+                  looks most like {{ bestScalarMatch.champion }} {{ bestScalarMatch.metricLabel }}
+                  (corr {{ bestScalarMatch.correlation.toFixed(2) }}, nRMSE {{ bestScalarMatch.normalizedRmse.toFixed(2) }})
+                </div>
+              </div>
+              <div v-if="bestAssignment" class="rounded-3 border border-secondary border-opacity-10 p-3">
+                <div class="text-uppercase x-small text-muted mb-1">Best Participant Row</div>
+                <div>
+                  <code>{{ bestAssignment.familyLabel }}</code>
+                  row {{ bestAssignment.slotIndex }} currently looks most like {{ bestAssignment.champion }}
+                  with archetype <code>{{ bestAssignment.archetype }}</code>
+                </div>
+              </div>
+            </div>
+            <div v-else class="small text-muted">
+              No automatic matches yet. That is normal until you run Auto Correlate.
+            </div>
           </div>
 
-          <div class="island p-3">
-            <h2 class="fs-5 mb-2">Interpretation</h2>
-            <p class="small text-muted mb-2">
-              The tables below are now ranked automatically. Lower affine RMSE helps for movement, while higher scalar correlation and lower normalized RMSE help identify stat-like lanes.
-            </p>
-            <p class="small text-muted mb-0">
-              If movement stays weak but scalar matches start to look strong, that is still progress: we can lock identity and timing through gold/xp/cs/health style lanes first and come back to positions later.
-            </p>
-          </div>
+          <details v-if="hasAutoResults" class="island p-3" open>
+            <summary class="fs-5 mb-2">Automatic Results</summary>
+            <div class="row g-3 mt-1">
+              <div class="col-lg-6" v-if="familyRankings.length">
+                <h4 class="fs-6 mb-2">Family Ranking</h4>
+                <div class="table-responsive analysis-table">
+                  <table class="table table-sm table-hover align-middle mb-0 small">
+                    <thead class="text-muted x-small text-uppercase sticky-top bg-body">
+                      <tr>
+                        <th>Family</th>
+                        <th>Champion</th>
+                        <th>RMSE</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        v-for="ranking in familyRankings.slice(0, 6)"
+                        :key="ranking.familyKey"
+                        style="cursor: pointer"
+                        @click="selectRanking(ranking.familyKey, ranking.bestCandidateKey)"
+                      >
+                        <td><code>{{ ranking.familyLabel }}</code></td>
+                        <td>{{ ranking.bestChampion }}</td>
+                        <td>{{ ranking.bestAffineRmse.toFixed(0) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="col-lg-6" v-if="topScalarMatches.length">
+                <h4 class="fs-6 mb-2">Top Scalar Matches</h4>
+                <div class="table-responsive analysis-table">
+                  <table class="table table-sm table-hover align-middle mb-0 small">
+                    <thead class="text-muted x-small text-uppercase sticky-top bg-body">
+                      <tr>
+                        <th>Row</th>
+                        <th>Metric</th>
+                        <th>Corr</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="match in topScalarMatches.slice(0, 6)" :key="`${match.familyKey}:${match.candidateKey}:${match.metricKey}`">
+                        <td>{{ match.slotIndex }} / {{ match.laneIndex }}</td>
+                        <td>{{ match.champion }} {{ match.metricLabel }}</td>
+                        <td>{{ match.correlation.toFixed(2) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="col-12" v-if="participantAssignments.length">
+                <h4 class="fs-6 mb-2">Participant Guesses</h4>
+                <div class="table-responsive analysis-table">
+                  <table class="table table-sm table-hover align-middle mb-0 small">
+                    <thead class="text-muted x-small text-uppercase sticky-top bg-body">
+                      <tr>
+                        <th>Family</th>
+                        <th>Row</th>
+                        <th>Champion</th>
+                        <th>Score</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="assignment in participantAssignments.slice(0, 8)" :key="`${assignment.familyKey}:${assignment.slotIndex}:${assignment.participantId}`">
+                        <td><code>{{ assignment.familyLabel }}</code></td>
+                        <td>{{ assignment.slotIndex }}</td>
+                        <td>{{ assignment.champion }}</td>
+                        <td>{{ assignment.score.toFixed(2) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </details>
         </div>
       </div>
 
-      <div v-if="familyAnalysis" class="row g-2">
-        <div class="col-xl-8 d-flex flex-column gap-2">
-          <div class="island p-3 d-flex flex-column gap-3">
-            <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+      <div v-if="familyAnalysis" class="row g-3">
+        <div class="col-xl-7 d-flex flex-column gap-3">
+          <div class="island p-3">
+            <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
               <div>
-                <h2 class="fs-5 mb-1">Candidate Track Preview</h2>
+                <h3 class="fs-5 mb-1">Step 2: Inspect Candidate Track</h3>
                 <p class="text-muted small mb-0">
-                  This preview is still useful for inspection, but the main ranking now comes from automatic Riot correlation rather than visual guesswork.
+                  This is a rough preview of the selected candidate, useful for spotting obvious movement-like behavior.
                 </p>
               </div>
               <span v-if="selectedCandidate" class="badge bg-info-subtle text-info-emphasis">
-                Slot {{ selectedCandidate.slotIndex }} {{ selectedCandidate.pairLabel }}
+                Row {{ selectedCandidate.slotIndex }} {{ selectedCandidate.pairLabel }}
               </span>
             </div>
             <div class="movement-map-frame d-flex justify-content-center bg-black bg-opacity-25 rounded-3 p-2 p-xl-3 border border-secondary border-opacity-10">
@@ -696,51 +636,42 @@ function selectRanking(familyKeyValue: string, candidateKeyValue: string): void 
                 empty-message="Analyze a family and select a candidate track to render it here."
               />
             </div>
-            <Timeline />
           </div>
+        </div>
 
+        <div class="col-xl-5 d-flex flex-column gap-3">
           <div class="island p-3">
-            <h2 class="fs-5 mb-3">Top Slot/Pair Candidates</h2>
-            <div class="table-responsive">
+            <h3 class="fs-5 mb-2">Candidate List</h3>
+            <div class="table-responsive analysis-table">
               <table class="table table-sm table-hover align-middle mb-0 small">
                 <thead class="text-muted x-small text-uppercase sticky-top bg-body">
                   <tr>
-                    <th>#</th>
-                    <th>Slot</th>
+                    <th>Row</th>
                     <th>Pair</th>
                     <th>Score</th>
-                    <th>Smooth</th>
                     <th>Moving</th>
-                    <th>Coverage</th>
-                    <th>Range</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr
-                    v-for="candidate in candidates"
+                    v-for="candidate in candidates.slice(0, 12)"
                     :key="candidateKey(candidate)"
                     :class="{ 'table-primary': candidateKey(candidate) === selectedCandidateKey }"
                     style="cursor: pointer"
                     @click="selectedCandidateKey = candidateKey(candidate)"
                   >
-                    <td>{{ candidate.rank }}</td>
                     <td>{{ candidate.slotIndex }}</td>
                     <td><code>{{ candidate.pairLabel }}</code></td>
                     <td>{{ candidate.score.toFixed(1) }}</td>
-                    <td>{{ formatPercent(candidate.smoothRatio) }}</td>
                     <td>{{ formatPercent(candidate.movingRatio) }}</td>
-                    <td>{{ formatPercent(candidate.coverage) }}</td>
-                    <td>{{ Math.round(candidate.xRange) }}/{{ Math.round(candidate.yRange) }}</td>
                   </tr>
                 </tbody>
               </table>
             </div>
           </div>
-        </div>
 
-        <div class="col-xl-4 d-flex flex-column gap-2">
           <div v-if="selectedCandidate" class="island p-3">
-            <h2 class="fs-5 mb-3">Candidate Details</h2>
+            <h3 class="fs-5 mb-2">Selected Candidate</h3>
             <dl class="row g-2 mb-0 small">
               <dt class="col-6 text-muted fw-normal">Class</dt>
               <dd class="col-6 text-end fw-bold mb-0">{{ selectedCandidate.classKey }}</dd>
@@ -751,41 +682,47 @@ function selectRanking(familyKeyValue: string, candidateKeyValue: string): void 
               <dt class="col-6 text-muted fw-normal">Transitions</dt>
               <dd class="col-6 text-end fw-bold mb-0">{{ formatNumber(selectedCandidate.transitions) }}</dd>
 
-              <dt class="col-6 text-muted fw-normal">Top Mask</dt>
-              <dd class="col-6 text-end fw-bold mb-0"><code>{{ selectedCandidate.topMaskBits }}</code></dd>
+              <dt class="col-6 text-muted fw-normal">Coverage</dt>
+              <dd class="col-6 text-end fw-bold mb-0">{{ formatPercent(selectedCandidate.coverage) }}</dd>
 
               <dt class="col-6 text-muted fw-normal">Top First Byte</dt>
               <dd class="col-6 text-end fw-bold mb-0"><code>{{ formatByte(selectedCandidate.topFirstByte) }}</code></dd>
-
-              <dt class="col-6 text-muted fw-normal">Chunk Span</dt>
-              <dd class="col-6 text-end fw-bold mb-0">{{ selectedCandidate.chunkSpanStart }}-{{ selectedCandidate.chunkSpanEnd }}</dd>
             </dl>
           </div>
 
-          <div class="island p-3">
-            <h2 class="fs-5 mb-3">Top Classes</h2>
-            <div v-if="topClasses.length" class="d-flex flex-column gap-2">    
+          <details v-if="topClasses.length" class="island p-3">
+            <summary class="fs-5 mb-2">Class Breakdown</summary>
+            <div class="d-flex flex-column gap-2 mt-2">
               <div v-for="classItem in topClasses" :key="classItem.key" class="border rounded-2 p-2 small">
-                <div class="fw-bold text-break">{{ classItem.key }}</div>      
+                <div class="fw-bold text-break">{{ classItem.key }}</div>
                 <div class="text-muted x-small">
-                  {{ classItem.members }} slots | best {{ classItem.bestScore.toFixed(1) }} | moving {{ formatNumber(classItem.totalMovingTransitions) }}     
+                  {{ classItem.members }} rows | best {{ classItem.bestScore.toFixed(1) }} | moving {{ formatNumber(classItem.totalMovingTransitions) }}
                 </div>
               </div>
             </div>
-            <div v-else class="small text-muted">No class aggregation available yet.</div>
-          </div>
+          </details>
         </div>
       </div>
-    </template>
 
-    <div class="mt-4">
-      <SchemaJsonLoader :mockTokens="mockTokens" :riotBundle="riotBundle" />
-    </div>
+      <details class="island p-3">
+        <summary class="fs-5 mb-2">Step 3: Manual JSON Tools</summary>
+        <p class="text-muted small mt-2 mb-3">
+          Use this when you want to paste native CLI JSON, inspect signature windows, or correlate cleaned fields manually.
+        </p>
+        <SchemaJsonLoader :mockTokens="mockTokens" :riotBundle="riotBundle" />
+      </details>
+    </template>
   </div>
-</template><style scoped>
+</template>
+
+<style scoped>
 .x-small {
   font-size: 0.7rem;
   letter-spacing: 0.05rem;
+}
+
+.analysis-table {
+  max-height: 22rem;
 }
 
 .movement-map-frame {
@@ -794,5 +731,14 @@ function selectRanking(familyKeyValue: string, candidateKeyValue: string): void 
 
 .movement-map {
   width: 100%;
+}
+
+summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+summary::-webkit-details-marker {
+  display: none;
 }
 </style>
