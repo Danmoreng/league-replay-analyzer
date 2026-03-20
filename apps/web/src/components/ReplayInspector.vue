@@ -779,7 +779,7 @@ function selectRanking(familyKeyValue: string, candidateKeyValue: string): void 
     </template>
 
     <div class="mt-4">
-      <SchemaJsonLoader :mockTokens="mockTokens" />
+      <SchemaJsonLoader :mockTokens="mockTokens" :riotBundle="riotBundle" />
     </div>
   </div>
 </template><style scoped>

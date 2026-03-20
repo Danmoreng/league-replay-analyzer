@@ -322,6 +322,10 @@ function buildDecodedSeries(slot: ReplayScalarSlot, lane: ReplayScalarLane, fami
     build("u16hi", (sample) => sample.rawU32 >>> 16),
     build("i16lo", (sample) => signExtend16(sample.rawU32)),
     build("i16hi", (sample) => signExtend16(sample.rawU32 >>> 16)),
+    build("u8_0", (sample) => sample.rawU32 & 0xff),
+    build("u8_1", (sample) => (sample.rawU32 >>> 8) & 0xff),
+    build("u8_2", (sample) => (sample.rawU32 >>> 16) & 0xff),
+    build("u8_3", (sample) => (sample.rawU32 >>> 24) & 0xff),
   ].filter((candidate): candidate is ScalarCandidateSeries => candidate !== null);
 }
 

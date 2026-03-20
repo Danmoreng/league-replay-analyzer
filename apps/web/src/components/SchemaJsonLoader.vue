@@ -55,18 +55,37 @@
         </div>
       </div>
     </div>
+    
+    <CleanedOffsetCorrelator 
+      v-if="rawJsonData" 
+      :riotBundle="riotBundle"
+      :familyContext="familyContext"
+      :cleanedFieldsData="rawJsonData"
+    />
 
-    <TokenBitfieldInspector v-if="activeTokens.length > 0" :tokens="activeTokens" />
+    <div v-if="activeTokens.length > 0" class="row g-2 mt-2">
+      <div class="col-lg-6">
+        <EcsMemoryMap :tokens="activeTokens" />
+      </div>
+      <div class="col-lg-6">
+        <TokenBitfieldInspector :tokens="activeTokens" />
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue';
 import TokenBitfieldInspector from './TokenBitfieldInspector.vue';
+import EcsMemoryMap from './EcsMemoryMap.vue';
+import CleanedOffsetCorrelator from './CleanedOffsetCorrelator.vue';
 import type { RawToken } from '../tokenBitfields';
+import type { RiotFixtureBundle } from '../riotApiFixtures';
+import type { ReplayFamilyScanItem } from '../replayInvestigation';
 
 const props = defineProps<{
   mockTokens: RawToken[];
+  riotBundle: RiotFixtureBundle | null;
 }>();
 
 const jsonText = ref('');
@@ -74,6 +93,21 @@ const error = ref('');
 const successMsg = ref('');
 const activeTokens = ref<RawToken[]>(props.mockTokens);
 const summary = ref<any>(null);
+const rawJsonData = ref<any>(null);
+
+// Best-effort dummy context if the user hasn't selected a family via the UI yet
+const familyContext = ref<ReplayFamilyScanItem>({
+  length: 61917,
+  firstByte: 0x00,
+  paddingByte: 0,
+  recordCount: 0,
+  chunkCount: 0,
+  chunkSpanStart: 0,
+  chunkSpanEnd: 0,
+  recommendedStride: 16,
+  recommendedHeaderSize: 13,
+  headerSizeCandidates: []
+});
 
 function handleFileUpload(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0];
@@ -89,6 +123,7 @@ function handleFileUpload(event: Event) {
 function loadMock() {
   activeTokens.value = props.mockTokens;
   summary.value = null;
+  rawJsonData.value = null;
   error.value = '';
   successMsg.value = 'Mock tokens loaded.';
 }
@@ -108,6 +143,16 @@ function parseJson() {
     // Typed adapter logic
     const familyLength = data.length ?? data.familyLength;
     const firstByte = data.firstByte ?? data.familyFirstByte;
+    familyContext.value = {
+      ...familyContext.value,
+      length: familyLength ?? familyContext.value.length,
+      firstByte: firstByte ?? familyContext.value.firstByte,
+      recordCount: data.recordCount ?? familyContext.value.recordCount,
+      chunkSpanStart: data.chunkSpanStart ?? familyContext.value.chunkSpanStart,
+      chunkSpanEnd: data.chunkSpanEnd ?? familyContext.value.chunkSpanEnd,
+      recommendedStride: data.stride ?? familyContext.value.recommendedStride,
+      recommendedHeaderSize: data.headerSize ?? familyContext.value.recommendedHeaderSize,
+    };
     
     const descriptorRows: any[] = [];
     
@@ -209,6 +254,7 @@ function parseJson() {
     }
     
     activeTokens.value = parsedTokens;
+    rawJsonData.value = data;
     summary.value = {
       descriptorRows: (Array.isArray(data.descriptorRows) ? data.descriptorRows.map((row: any) => ({
         slotIndex: row.slotIndex ?? row.row ?? row.index ?? 0,

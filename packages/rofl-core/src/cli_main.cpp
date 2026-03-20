@@ -237,6 +237,45 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (first_arg == "--analyze-clean-row-offsets-json" && argc > 2) {
+        try {
+            std::string path = argv[2];
+            std::size_t length = 0;
+            std::uint8_t first_byte = 0;
+            std::size_t header_size = 0;
+            std::size_t stride = 16;
+            std::size_t top_fields = 24;
+            std::vector<std::size_t> slot_indices;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view arg = argv[i];
+                if (arg == "--length" && i + 1 < argc) {
+                    length = std::stoull(argv[++i]);
+                } else if (arg == "--first-byte" && i + 1 < argc) {
+                    first_byte = static_cast<std::uint8_t>(std::stoul(argv[++i], nullptr, 0));
+                } else if (arg == "--header-size" && i + 1 < argc) {
+                    header_size = std::stoull(argv[++i]);
+                } else if (arg == "--stride" && i + 1 < argc) {
+                    stride = std::stoull(argv[++i]);
+                } else if (arg == "--top-fields" && i + 1 < argc) {
+                    top_fields = std::stoull(argv[++i]);
+                } else if (arg == "--slots" && i + 1 < argc) {
+                    std::stringstream slot_stream(argv[++i]);
+                    std::string token;
+                    while (std::getline(slot_stream, token, ',')) {
+                        if (!token.empty()) {
+                            slot_indices.push_back(std::stoull(token));
+                        }
+                    }
+                }
+            }
+            std::cout << rofl::core::analyze_clean_row_offsets_file_json(path, length, first_byte, header_size, stride, slot_indices, top_fields);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
     if (first_arg == "--analyze-handle-links-json" && argc > 2) {
         try {
             std::string path = argv[2];
@@ -815,6 +854,7 @@ int main(int argc, char** argv) {
     std::cout << "Use --analyze-scalar-family-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] to emit scalar lane candidates as JSON.\n";
     std::cout << "Use --analyze-entity-slab-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] to classify a sparse family into handle-like vs dynamic-state-like rows.\n";
     std::cout << "Use --analyze-row-offsets-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-fields <n>] to rank raw byte-offset fields inside selected sparse rows.\n";
+    std::cout << "Use --analyze-clean-row-offsets-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-fields <n>] to mask descriptor/signature windows and rank cleaner offset candidates inside selected rows.\n";
     std::cout << "Use --analyze-handle-links-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-links <n>] [--top-families <n>] to test whether packed row tokens point into other recurring families.\n";
     std::cout << "Use --analyze-token-bitfields-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-slices <n>] [--top-families <n>] to search packed token bit slices for family-sized index fields.\n";
     std::cout << "Use --analyze-table-descriptors-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-matches <n>] to find exact 12-bit matches against known family element counts.\n";

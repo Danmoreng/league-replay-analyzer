@@ -6678,6 +6678,759 @@ std::string analyze_row_offsets_file_json(
     return analyze_row_offsets_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_fields);
 }
 
+
+std::string analyze_clean_row_offsets_json(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    const std::vector<std::size_t>& slot_indices,
+    std::size_t top_fields
+) {
+    struct FieldSample {
+        int chunk_id = 0;
+        std::size_t record_index = 0;
+        int timestamp = 0;
+        std::uint64_t raw_value = 0;
+        double decoded_value = 0.0;
+    };
+    struct FieldProfile {
+        std::size_t offset = 0;
+        std::size_t width = 0;
+        std::string decode_label;
+        std::size_t active_samples = 0;
+        std::size_t non_zero_samples = 0;
+        std::size_t transitions = 0;
+        std::size_t changed_transitions = 0;
+        std::size_t increasing_transitions = 0;
+        std::size_t decreasing_transitions = 0;
+        std::size_t stable_transitions = 0;
+        double min_value = std::numeric_limits<double>::infinity();
+        double max_value = -std::numeric_limits<double>::infinity();
+        bool previous_valid = false;
+        std::uint64_t previous_raw = 0;
+        double previous_value = 0.0;
+        std::map<std::uint64_t, std::size_t> value_freq;
+        std::vector<FieldSample> samples;
+        double score = 0.0;
+    };
+    struct WindowStats {
+        std::size_t offset = 0;
+        std::size_t active_samples = 0;
+        std::size_t descriptor_sample_hits = 0;
+        std::size_t multi_match_samples = 0;
+        std::size_t total_exact_hits = 0;
+        std::map<std::size_t, std::size_t> bit_start_freq;
+        std::map<std::size_t, std::size_t> target_count_freq;
+        std::map<std::uint32_t, std::size_t> token_freq;
+        std::map<std::uint32_t, std::size_t> signature_token_freq;
+        std::size_t signature_samples = 0;
+        std::size_t top_signature_token_count = 0;
+        bool descriptor_like = false;
+        bool signature_dominated = false;
+        double signature_ratio = 0.0;
+    };
+    struct GlobalSignatureToken {
+        std::uint32_t raw_value = 0;
+        std::size_t count = 0;
+    };
+
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    std::ostringstream output;
+
+    output << '{';
+    output << "\"length\":" << target_length << ',';
+    output << "\"firstByte\":" << static_cast<int>(target_first_byte) << ',';
+    output << "\"recordCount\":" << records.size() << ',';
+    output << "\"headerSize\":" << header_size << ',';
+    output << "\"stride\":" << stride << ',';
+    output << "\"gameLengthMillis\":" << summary.game_length_millis << ',';
+    output << "\"chunkBaseId\":" << (summary.container.game_start_chunk_id > 0 ? summary.container.game_start_chunk_id : 0) << ',';
+    output << "\"selectedSlots\":[";
+    for (std::size_t index = 0; index < slot_indices.size(); ++index) {
+        if (index > 0) {
+            output << ',';
+        }
+        output << slot_indices[index];
+    }
+    output << "],";
+
+    if (records.empty()) {
+        output << "\"elementCount\":0,\"signatureBytes\":[],\"targetCounts\":[],\"signatureCatalog\":[],\"slots\":[]}";
+        return output.str();
+    }
+    if (slot_indices.empty()) {
+        output << "\"error\":\"At least one slot must be provided.\",\"slots\":[]}";
+        return output.str();
+    }
+    if (header_size >= target_length) {
+        output << "\"error\":\"Header size must be smaller than the target record length.\",\"slots\":[]}";
+        return output.str();
+    }
+    if (stride == 0) {
+        output << "\"error\":\"Stride must be positive.\",\"slots\":[]}";
+        return output.str();
+    }
+
+    const std::uint8_t padding_byte = static_cast<std::uint8_t>(target_length & 0xFFu);
+    const std::uint32_t padding_u32 = static_cast<std::uint32_t>(padding_byte) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 8U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 16U) |
+                                      (static_cast<std::uint32_t>(padding_byte) << 24U);
+    const std::size_t usable_bytes = target_length - header_size;
+    const std::size_t element_count = usable_bytes / stride;
+    output << "\"elementCount\":" << element_count << ',';
+
+    const auto family_scan = collect_ranked_chunk_families(bytes, 256, 2);
+    std::map<std::size_t, std::vector<std::string>> target_map;
+    std::set<std::uint8_t> signature_bytes;
+    for (const auto& family : family_scan.ranked_families) {
+        if (family.record_count < 4 || family.chunk_ids.size() < 4 || family.length < 16000) {
+            continue;
+        }
+        if (family.first_byte != 0) {
+            signature_bytes.insert(family.first_byte);
+        }
+        for (std::size_t candidate_header = 0; candidate_header <= 16; ++candidate_header) {
+            if (family.length <= candidate_header || ((family.length - candidate_header) % 16) != 0) {
+                continue;
+            }
+            const std::size_t count = (family.length - candidate_header) / 16;
+            if (count < 512 || count > 0xFFFu) {
+                continue;
+            }
+            std::ostringstream label;
+            label << family.length << " / 0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << static_cast<int>(family.first_byte);
+            target_map[count].push_back(label.str());
+            const std::uint8_t count_byte = static_cast<std::uint8_t>((count >> 4U) & 0xFFu);
+            if (count_byte != 0) {
+                signature_bytes.insert(count_byte);
+            }
+        }
+    }
+
+    for (auto& [count, labels] : target_map) {
+        std::sort(labels.begin(), labels.end());
+        labels.erase(std::unique(labels.begin(), labels.end()), labels.end());
+    }
+
+    output << "\"signatureBytes\":[";
+    bool first_signature_byte = true;
+    for (const std::uint8_t byte_value : signature_bytes) {
+        if (!first_signature_byte) {
+            output << ',';
+        }
+        first_signature_byte = false;
+        output << static_cast<int>(byte_value);
+    }
+    output << "],";
+
+    output << "\"targetCounts\":[";
+    bool first_target_count = true;
+    for (const auto& [count, labels] : target_map) {
+        if (!first_target_count) {
+            output << ',';
+        }
+        first_target_count = false;
+        output << '{';
+        output << "\"elementCount\":" << count << ',';
+        output << "\"familyLabels\":[";
+        for (std::size_t index = 0; index < labels.size(); ++index) {
+            if (index > 0) {
+                output << ',';
+            }
+            output << '"' << json_escape(labels[index]) << '"';
+        }
+        output << "]}";
+    }
+    output << "],";
+
+    const auto value_hex = [](std::uint64_t value, std::size_t width) {
+        std::ostringstream stream;
+        stream << "0x" << std::hex << std::uppercase << std::setw(static_cast<int>(width * 2)) << std::setfill('0') << value;
+        return stream.str();
+    };
+    const auto extract_12 = [](std::uint32_t raw_value, std::size_t bit_start) -> std::uint32_t {
+        return (raw_value >> bit_start) & 0xFFFu;
+    };
+    const auto count_zero_bytes = [](std::uint32_t raw_value) -> std::size_t {
+        std::size_t zeros = 0;
+        for (std::size_t index = 0; index < 4; ++index) {
+            if (((raw_value >> (index * 8U)) & 0xFFu) == 0) {
+                zeros++;
+            }
+        }
+        return zeros;
+    };
+    const auto count_unique_bytes = [](std::uint32_t raw_value) -> std::size_t {
+        std::set<std::uint8_t> unique_bytes;
+        for (std::size_t index = 0; index < 4; ++index) {
+            unique_bytes.insert(static_cast<std::uint8_t>((raw_value >> (index * 8U)) & 0xFFu));
+        }
+        return unique_bytes.size();
+    };
+    const auto count_signature_bytes_for_token = [&](std::uint32_t raw_value) -> std::size_t {
+        std::size_t count = 0;
+        for (std::size_t index = 0; index < 4; ++index) {
+            const auto byte_value = static_cast<std::uint8_t>((raw_value >> (index * 8U)) & 0xFFu);
+            if (signature_bytes.find(byte_value) != signature_bytes.end()) {
+                count++;
+            }
+        }
+        return count;
+    };
+    const auto exact_hit_count_for_token = [&](std::uint32_t raw_value) -> std::size_t {
+        std::size_t exact_hits = 0;
+        for (std::size_t bit_start = 0; bit_start <= 20; ++bit_start) {
+            if (target_map.find(extract_12(raw_value, bit_start)) != target_map.end()) {
+                exact_hits++;
+            }
+        }
+        return exact_hits;
+    };
+    const auto token_matches_signature_shape = [&](std::uint32_t raw_value) -> bool {
+        const std::size_t exact_hits = exact_hit_count_for_token(raw_value);
+        const std::size_t signature_byte_count = count_signature_bytes_for_token(raw_value);
+        const std::size_t zero_byte_count = count_zero_bytes(raw_value);
+        const std::size_t unique_byte_count = count_unique_bytes(raw_value);
+        return exact_hits >= 1 ||
+               signature_byte_count >= 2 ||
+               (signature_byte_count >= 1 && zero_byte_count >= 1 && unique_byte_count <= 3);
+    };
+    auto update_profile = [](FieldProfile& profile, int chunk_id, std::size_t record_index, int timestamp, std::uint64_t raw_value, double decoded_value) {
+        profile.active_samples++;
+        profile.value_freq[raw_value]++;
+        profile.samples.push_back({chunk_id, record_index, timestamp, raw_value, decoded_value});
+        if (raw_value != 0) {
+            profile.non_zero_samples++;
+        }
+        profile.min_value = std::min(profile.min_value, decoded_value);
+        profile.max_value = std::max(profile.max_value, decoded_value);
+        if (profile.previous_valid) {
+            profile.transitions++;
+            if (profile.previous_raw != raw_value) {
+                profile.changed_transitions++;
+            }
+            if (decoded_value > profile.previous_value) {
+                profile.increasing_transitions++;
+            } else if (decoded_value < profile.previous_value) {
+                profile.decreasing_transitions++;
+            } else {
+                profile.stable_transitions++;
+            }
+        }
+        profile.previous_valid = true;
+        profile.previous_raw = raw_value;
+        profile.previous_value = decoded_value;
+    };
+
+    if (top_fields == 0) {
+        top_fields = 24;
+    }
+
+    std::map<std::uint32_t, std::size_t> global_signature_shapes;
+    for (const std::size_t slot_index : slot_indices) {
+        if (slot_index >= element_count) {
+            continue;
+        }
+        for (const auto& rec : records) {
+            const std::size_t start = header_size + (slot_index * stride);
+            if (start + stride > rec.payload.size()) {
+                continue;
+            }
+
+            bool row_active = false;
+            if ((stride % 4) == 0) {
+                for (std::size_t lane_offset = 0; lane_offset + 4 <= stride; lane_offset += 4) {
+                    std::uint32_t lane_value = 0;
+                    if (read_u32_le(rec.payload, start + lane_offset, lane_value) && lane_value != padding_u32) {
+                        row_active = true;
+                        break;
+                    }
+                }
+            } else {
+                for (std::size_t byte_offset = 0; byte_offset < stride; ++byte_offset) {
+                    if (rec.payload[start + byte_offset] != padding_byte) {
+                        row_active = true;
+                        break;
+                    }
+                }
+            }
+            if (!row_active) {
+                continue;
+            }
+
+            for (std::size_t offset = 0; offset + 4 <= stride; ++offset) {
+                std::uint32_t raw_value = 0;
+                if (!read_u32_le(rec.payload, start + offset, raw_value)) {
+                    continue;
+                }
+                if (!token_matches_signature_shape(raw_value)) {
+                    continue;
+                }
+                global_signature_shapes[raw_value]++;
+            }
+        }
+    }
+
+    std::set<std::uint32_t> global_signature_motifs;
+    for (const auto& [raw_value, count] : global_signature_shapes) {
+        if (count >= 2) {
+            global_signature_motifs.insert(raw_value);
+        }
+    }
+
+    std::map<std::uint32_t, std::size_t> global_signature_freq;
+    output << "\"slots\":[";
+    bool first_slot_output = true;
+    for (const std::size_t slot_index : slot_indices) {
+        if (!first_slot_output) {
+            output << ',';
+        }
+        first_slot_output = false;
+
+        output << '{';
+        output << "\"slotIndex\":" << slot_index;
+        if (slot_index >= element_count) {
+            output << ",\"error\":\"Slot index exceeds element count.\",\"excludedWindows\":[],\"fields\":[]}";
+            continue;
+        }
+
+        std::vector<WindowStats> windows;
+        for (std::size_t offset = 0; offset + 4 <= stride; ++offset) {
+            windows.push_back({offset});
+        }
+
+        std::size_t row_active_records = 0;
+        int min_chunk_id = std::numeric_limits<int>::max();
+        int max_chunk_id = std::numeric_limits<int>::min();
+        for (const auto& rec : records) {
+            const std::size_t start = header_size + (slot_index * stride);
+            if (start + stride > rec.payload.size()) {
+                continue;
+            }
+
+            bool row_active = false;
+            if ((stride % 4) == 0) {
+                for (std::size_t lane_offset = 0; lane_offset + 4 <= stride; lane_offset += 4) {
+                    std::uint32_t lane_value = 0;
+                    if (read_u32_le(rec.payload, start + lane_offset, lane_value) && lane_value != padding_u32) {
+                        row_active = true;
+                        break;
+                    }
+                }
+            } else {
+                for (std::size_t byte_offset = 0; byte_offset < stride; ++byte_offset) {
+                    if (rec.payload[start + byte_offset] != padding_byte) {
+                        row_active = true;
+                        break;
+                    }
+                }
+            }
+            if (!row_active) {
+                continue;
+            }
+
+            row_active_records++;
+            min_chunk_id = std::min(min_chunk_id, rec.chunk_id);
+            max_chunk_id = std::max(max_chunk_id, rec.chunk_id);
+
+            for (auto& window : windows) {
+                std::uint32_t raw_value = 0;
+                if (!read_u32_le(rec.payload, start + window.offset, raw_value)) {
+                    continue;
+                }
+                window.active_samples++;
+                window.token_freq[raw_value]++;
+                std::size_t sample_hit_count = 0;
+                for (std::size_t bit_start = 0; bit_start <= 20; ++bit_start) {
+                    const std::uint32_t extracted = extract_12(raw_value, bit_start);
+                    const auto target_it = target_map.find(extracted);
+                    if (target_it == target_map.end()) {
+                        continue;
+                    }
+                    sample_hit_count++;
+                    window.bit_start_freq[bit_start]++;
+                    window.target_count_freq[extracted]++;
+                }
+                if (sample_hit_count > 0) {
+                    window.descriptor_sample_hits++;
+                    window.total_exact_hits += sample_hit_count;
+                }
+                if (sample_hit_count > 1) {
+                    window.multi_match_samples++;
+                }
+            }
+        }
+
+        std::size_t descriptor_window_count = 0;
+        for (auto& window : windows) {
+            if (window.active_samples == 0) {
+                continue;
+            }
+            const double sample_hit_ratio = static_cast<double>(window.descriptor_sample_hits) / static_cast<double>(window.active_samples);
+            window.descriptor_like = window.descriptor_sample_hits >= 6 &&
+                                     window.multi_match_samples >= 4 &&
+                                     window.total_exact_hits >= 18 &&
+                                     window.bit_start_freq.size() >= 4 &&
+                                     window.target_count_freq.size() >= 3 &&
+                                     sample_hit_ratio >= 0.45;
+            if (window.descriptor_like) {
+                descriptor_window_count++;
+            }
+            for (const auto& [raw_value, count] : window.token_freq) {
+                if (global_signature_motifs.find(raw_value) == global_signature_motifs.end()) {
+                    continue;
+                }
+                window.signature_token_freq[raw_value] = count;
+                window.signature_samples += count;
+                window.top_signature_token_count = std::max(window.top_signature_token_count, count);
+            }
+            window.signature_ratio = window.active_samples > 0
+                ? static_cast<double>(window.signature_samples) / static_cast<double>(window.active_samples)
+                : 0.0;
+            window.signature_dominated = window.signature_samples >= 2 && window.signature_ratio >= 0.20 && window.top_signature_token_count >= 1;
+        }
+
+        const bool row_descriptor_like = descriptor_window_count > 0;
+        std::set<std::size_t> excluded_u32_offsets;
+        for (const auto& window : windows) {
+            if (window.signature_dominated) {
+                excluded_u32_offsets.insert(window.offset);
+                for (const auto& [raw_value, count] : window.signature_token_freq) {
+                    global_signature_freq[raw_value] += count;
+                }
+            }
+        }
+
+        std::vector<FieldProfile> profiles;
+        if (!row_descriptor_like) {
+            std::vector<std::size_t> excluded_byte_coverage(stride, 0);
+            for (const std::size_t offset : excluded_u32_offsets) {
+                for (std::size_t byte_index = offset; byte_index < std::min(stride, offset + 4); ++byte_index) {
+                    excluded_byte_coverage[byte_index] += 1;
+                }
+            }
+            auto field_is_excluded = [&](std::size_t offset, std::size_t width) -> bool {
+                if (offset + width > stride) {
+                    return true;
+                }
+                for (std::size_t byte_index = offset; byte_index < offset + width; ++byte_index) {
+                    if (excluded_byte_coverage[byte_index] == 0) {
+                        return false;
+                    }
+                }
+                return true;
+            };
+
+            profiles.reserve((stride * 1) + ((stride > 1 ? stride - 1 : 0) * 2) + ((stride > 3 ? stride - 3 : 0) * 3));
+            for (std::size_t offset = 0; offset < stride; ++offset) {
+                if (field_is_excluded(offset, 1)) {
+                    continue;
+                }
+                profiles.push_back({offset, 1, "u8"});
+            }
+            for (std::size_t offset = 0; offset + 2 <= stride; ++offset) {
+                if (field_is_excluded(offset, 2)) {
+                    continue;
+                }
+                profiles.push_back({offset, 2, "u16"});
+                profiles.push_back({offset, 2, "i16"});
+            }
+            for (std::size_t offset = 0; offset + 4 <= stride; ++offset) {
+                if (field_is_excluded(offset, 4)) {
+                    continue;
+                }
+                profiles.push_back({offset, 4, "u32"});
+                profiles.push_back({offset, 4, "i32"});
+                profiles.push_back({offset, 4, "f32"});
+            }
+
+            const std::size_t max_record_index = records.size() > 1 ? (records.size() - 1) : 1;
+            for (std::size_t record_index = 0; record_index < records.size(); ++record_index) {
+                const auto& rec = records[record_index];
+                const std::size_t start = header_size + (slot_index * stride);
+                if (start + stride > rec.payload.size()) {
+                    continue;
+                }
+
+                bool row_active = false;
+                if ((stride % 4) == 0) {
+                    for (std::size_t lane_offset = 0; lane_offset + 4 <= stride; lane_offset += 4) {
+                        std::uint32_t lane_value = 0;
+                        if (read_u32_le(rec.payload, start + lane_offset, lane_value) && lane_value != padding_u32) {
+                            row_active = true;
+                            break;
+                        }
+                    }
+                } else {
+                    for (std::size_t byte_offset = 0; byte_offset < stride; ++byte_offset) {
+                        if (rec.payload[start + byte_offset] != padding_byte) {
+                            row_active = true;
+                            break;
+                        }
+                    }
+                }
+                if (!row_active) {
+                    continue;
+                }
+
+                const int timestamp = summary.game_length_millis > 0
+                    ? static_cast<int>(std::llround((static_cast<double>(summary.game_length_millis) * static_cast<double>(record_index)) / static_cast<double>(max_record_index)))
+                    : static_cast<int>(record_index * 1000);
+
+                for (auto& profile : profiles) {
+                    const std::size_t field_offset = start + profile.offset;
+                    if (profile.width == 1) {
+                        const std::uint8_t raw = rec.payload[field_offset];
+                        update_profile(profile, rec.chunk_id, record_index, timestamp, raw, static_cast<double>(raw));
+                    } else if (profile.width == 2) {
+                        const std::uint16_t raw = static_cast<std::uint16_t>(rec.payload[field_offset]) |
+                                                  (static_cast<std::uint16_t>(rec.payload[field_offset + 1]) << 8U);
+                        if (profile.decode_label == "u16") {
+                            update_profile(profile, rec.chunk_id, record_index, timestamp, raw, static_cast<double>(raw));
+                        } else {
+                            const std::int16_t signed_value = static_cast<std::int16_t>(raw);
+                            update_profile(profile, rec.chunk_id, record_index, timestamp, raw, static_cast<double>(signed_value));
+                        }
+                    } else {
+                        std::uint32_t raw = 0;
+                        if (!read_u32_le(rec.payload, field_offset, raw)) {
+                            continue;
+                        }
+                        if (profile.decode_label == "u32") {
+                            update_profile(profile, rec.chunk_id, record_index, timestamp, raw, static_cast<double>(raw));
+                        } else if (profile.decode_label == "i32") {
+                            const std::int32_t signed_value = static_cast<std::int32_t>(raw);
+                            update_profile(profile, rec.chunk_id, record_index, timestamp, raw, static_cast<double>(signed_value));
+                        } else {
+                            const float as_float = std::bit_cast<float>(raw);
+                            if (!std::isfinite(as_float)) {
+                                continue;
+                            }
+                            update_profile(profile, rec.chunk_id, record_index, timestamp, raw, static_cast<double>(as_float));
+                        }
+                    }
+                }
+            }
+
+            for (auto& profile : profiles) {
+                if (profile.active_samples < 4) {
+                    profile.score = 0.0;
+                    continue;
+                }
+                const double unique_ratio = static_cast<double>(profile.value_freq.size()) / static_cast<double>(profile.active_samples);
+                const double change_ratio = profile.transitions > 0
+                    ? static_cast<double>(profile.changed_transitions) / static_cast<double>(profile.transitions)
+                    : 0.0;
+                const double monotonic_ratio = profile.transitions > 0
+                    ? static_cast<double>(std::max(profile.increasing_transitions, profile.decreasing_transitions)) / static_cast<double>(profile.transitions)
+                    : 0.0;
+                const double coverage = records.empty()
+                    ? 0.0
+                    : static_cast<double>(profile.active_samples) / static_cast<double>(records.size());
+                profile.score = static_cast<double>(profile.active_samples) *
+                                (0.15 + unique_ratio) *
+                                (0.20 + change_ratio) *
+                                (0.25 + coverage) *
+                                (0.25 + monotonic_ratio);
+            }
+
+            std::sort(profiles.begin(), profiles.end(), [](const FieldProfile& left, const FieldProfile& right) {
+                if (left.score != right.score) {
+                    return left.score > right.score;
+                }
+                if (left.active_samples != right.active_samples) {
+                    return left.active_samples > right.active_samples;
+                }
+                if (left.width != right.width) {
+                    return left.width > right.width;
+                }
+                if (left.offset != right.offset) {
+                    return left.offset < right.offset;
+                }
+                return left.decode_label < right.decode_label;
+            });
+        }
+
+        output << ",\"activeRecords\":" << row_active_records << ',';
+        output << "\"chunkSpanStart\":" << (min_chunk_id == std::numeric_limits<int>::max() ? 0 : min_chunk_id) << ',';
+        output << "\"chunkSpanEnd\":" << (max_chunk_id == std::numeric_limits<int>::min() ? 0 : max_chunk_id) << ',';
+        output << "\"descriptorWindowCount\":" << descriptor_window_count << ',';
+        output << "\"descriptorLike\":" << (row_descriptor_like ? "true" : "false") << ',';
+        output << "\"excludedWindows\":[";
+        bool first_window_output = true;
+        for (const auto& window : windows) {
+            if (!window.signature_dominated) {
+                continue;
+            }
+            if (!first_window_output) {
+                output << ',';
+            }
+            first_window_output = false;
+            std::vector<std::pair<std::uint32_t, std::size_t>> top_tokens(window.signature_token_freq.begin(), window.signature_token_freq.end());
+            std::sort(top_tokens.begin(), top_tokens.end(), [](const auto& left, const auto& right) {
+                if (left.second != right.second) {
+                    return left.second > right.second;
+                }
+                return left.first < right.first;
+            });
+            output << '{';
+            output << "\"offset\":" << window.offset << ',';
+            output << "\"activeSamples\":" << window.active_samples << ',';
+            output << "\"signatureSamples\":" << window.signature_samples << ',';
+            output << "\"signatureRatio\":" << std::fixed << std::setprecision(4) << window.signature_ratio << ',';
+            output << "\"descriptorLike\":" << (window.descriptor_like ? "true" : "false") << ',';
+            output << "\"topSignatureTokens\":[";
+            for (std::size_t index = 0; index < std::min<std::size_t>(4, top_tokens.size()); ++index) {
+                if (index > 0) {
+                    output << ',';
+                }
+                output << '{';
+                output << "\"rawU32\":" << top_tokens[index].first << ',';
+                output << "\"hex\":\"" << u32_hex(top_tokens[index].first) << "\",";
+                output << "\"count\":" << top_tokens[index].second;
+                output << '}';
+            }
+            output << "]}";
+        }
+        output << "],";
+        output << "\"fields\":[";
+        std::size_t emitted = 0;
+        for (const auto& profile : profiles) {
+            if (emitted >= top_fields) {
+                break;
+            }
+            if (profile.active_samples < 4 || profile.score <= 0.0) {
+                continue;
+            }
+            if (emitted++ > 0) {
+                output << ',';
+            }
+            const double unique_ratio = static_cast<double>(profile.value_freq.size()) / static_cast<double>(profile.active_samples);
+            const double change_ratio = profile.transitions > 0
+                ? static_cast<double>(profile.changed_transitions) / static_cast<double>(profile.transitions)
+                : 0.0;
+            const double monotonic_ratio = profile.transitions > 0
+                ? static_cast<double>(std::max(profile.increasing_transitions, profile.decreasing_transitions)) / static_cast<double>(profile.transitions)
+                : 0.0;
+            const char* direction = "mixed";
+            if (profile.increasing_transitions > profile.decreasing_transitions && monotonic_ratio >= 0.6) {
+                direction = "increasing";
+            } else if (profile.decreasing_transitions > profile.increasing_transitions && monotonic_ratio >= 0.6) {
+                direction = "decreasing";
+            }
+
+            std::vector<std::pair<std::uint64_t, std::size_t>> top_values(profile.value_freq.begin(), profile.value_freq.end());
+            std::sort(top_values.begin(), top_values.end(), [](const auto& left, const auto& right) {
+                if (left.second != right.second) {
+                    return left.second > right.second;
+                }
+                return left.first < right.first;
+            });
+
+            output << '{';
+            output << "\"offset\":" << profile.offset << ',';
+            output << "\"width\":" << profile.width << ',';
+            output << "\"decodeLabel\":\"" << json_escape(profile.decode_label) << "\",";
+            output << "\"score\":" << std::fixed << std::setprecision(4) << profile.score << ',';
+            output << "\"activeSamples\":" << profile.active_samples << ',';
+            output << "\"nonZeroSamples\":" << profile.non_zero_samples << ',';
+            output << "\"uniqueValues\":" << profile.value_freq.size() << ',';
+            output << "\"transitions\":" << profile.transitions << ',';
+            output << "\"changedTransitions\":" << profile.changed_transitions << ',';
+            output << "\"increasingTransitions\":" << profile.increasing_transitions << ',';
+            output << "\"decreasingTransitions\":" << profile.decreasing_transitions << ',';
+            output << "\"stableTransitions\":" << profile.stable_transitions << ',';
+            output << "\"uniqueRatio\":" << unique_ratio << ',';
+            output << "\"changeRatio\":" << change_ratio << ',';
+            output << "\"monotonicRatio\":" << monotonic_ratio << ',';
+            output << "\"directionHint\":\"" << direction << "\",";
+            output << "\"minValue\":" << (std::isfinite(profile.min_value) ? profile.min_value : 0.0) << ',';
+            output << "\"maxValue\":" << (std::isfinite(profile.max_value) ? profile.max_value : 0.0) << ',';
+            output << "\"topValues\":[";
+            for (std::size_t value_index = 0; value_index < std::min<std::size_t>(3, top_values.size()); ++value_index) {
+                const auto& [raw_value, count] = top_values[value_index];
+                if (value_index > 0) {
+                    output << ',';
+                }
+                output << '{';
+                output << "\"raw\":" << raw_value << ',';
+                output << "\"hex\":\"" << value_hex(raw_value, profile.width) << "\",";
+                output << "\"count\":" << count;
+                output << '}';
+            }
+            output << "],\"samples\":[";
+            for (std::size_t sample_index = 0; sample_index < profile.samples.size(); ++sample_index) {
+                const auto& sample = profile.samples[sample_index];
+                if (sample_index > 0) {
+                    output << ',';
+                }
+                output << '{';
+                output << "\"chunkId\":" << sample.chunk_id << ',';
+                output << "\"recordIndex\":" << sample.record_index << ',';
+                output << "\"timestamp\":" << sample.timestamp << ',';
+                output << "\"raw\":" << sample.raw_value << ',';
+                output << "\"rawHex\":\"" << value_hex(sample.raw_value, profile.width) << "\",";
+                output << "\"decoded\":" << sample.decoded_value;
+                output << '}';
+            }
+            output << "]}";
+        }
+        output << "]}";
+    }
+    output << "],";
+
+    std::vector<GlobalSignatureToken> signature_catalog;
+    signature_catalog.reserve(global_signature_shapes.size());
+    for (const auto& [raw_value, count] : global_signature_shapes) {
+        if (global_signature_motifs.find(raw_value) == global_signature_motifs.end()) {
+            continue;
+        }
+        signature_catalog.push_back({raw_value, count});
+    }
+    std::sort(signature_catalog.begin(), signature_catalog.end(), [](const GlobalSignatureToken& left, const GlobalSignatureToken& right) {
+        if (left.count != right.count) {
+            return left.count > right.count;
+        }
+        return left.raw_value < right.raw_value;
+    });
+
+    output << "\"signatureCatalog\":[";
+    for (std::size_t index = 0; index < std::min<std::size_t>(24, signature_catalog.size()); ++index) {
+        if (index > 0) {
+            output << ',';
+        }
+        const auto& token = signature_catalog[index];
+        output << '{';
+        output << "\"rawU32\":" << token.raw_value << ',';
+        output << "\"hex\":\"" << u32_hex(token.raw_value) << "\",";
+        output << "\"count\":" << token.count << ',';
+        output << "\"exactHitCount\":" << exact_hit_count_for_token(token.raw_value) << ',';
+        output << "\"signatureByteCount\":" << count_signature_bytes_for_token(token.raw_value) << ',';
+        output << "\"zeroByteCount\":" << count_zero_bytes(token.raw_value) << ',';
+        output << "\"uniqueByteCount\":" << count_unique_bytes(token.raw_value);
+        output << '}';
+    }
+    output << "]}";
+    return output.str();
+}
+
+std::string analyze_clean_row_offsets_file_json(
+    const std::string& path,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::size_t header_size,
+    std::size_t stride,
+    const std::vector<std::size_t>& slot_indices,
+    std::size_t top_fields
+) {
+    const auto bytes = read_file_bytes(path);
+    return analyze_clean_row_offsets_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_fields);
+}
+
 std::string analyze_handle_links_json(
     const std::vector<std::uint8_t>& bytes,
     std::size_t target_length,
