@@ -307,6 +307,9 @@ Use `scripts/run_decoder_corpus.ps1` for the current end-to-end corpus pass. It 
 - builds a corpus schema at `artifacts/corpus-schema.json`
 - runs replay-only extraction into `artifacts/<replay-id>/extracted-stats.json`
 - runs offline validation into `artifacts/<replay-id>/validation-report.json`
+- rebuilds the corpus schema from those refreshed stats
+- reruns replay-only extraction and validation with the refreshed schema
+- finalizes `artifacts/corpus-schema.json` from the latest validated outputs so the corpus file is not one run behind
 
 The replay-only extractor itself lives in `scripts/extract_replay_stats.mjs` and:
 
@@ -323,6 +326,7 @@ Current files:
 - `scripts/build_corpus_schema.mjs`
 - `scripts/extract_replay_stats.mjs`
 - `scripts/validate_extracted_stats.mjs`
+- `scripts/analyze_scalar_family_layout.mjs`
 
 Current outputs:
 
@@ -338,28 +342,45 @@ Current outputs:
 - `artifacts/<replay-id>/participant-movement.json`
 - `artifacts/<replay-id>/assigned-movement-validation-report.json`
 
-Current 2026-03-21 baseline from the local 7-replay corpus:
-
-- corpus builder now emits semantic alias clusters in addition to exact promoted patterns
-- latest full run promoted `133` exact corpus-backed patterns from `886` ranked exact patterns
-- validated replay-only extraction is now producing usable `level`, `xp`, `totalGold`, and `minionsKilled` timelines on multiple replays
-- the best current replay is still `EUW1-7779216102`, where replay-only extraction validates `level` for 3 participants, `totalGold` for 2, `xp` for 1, and `minionsKilled` for 1
-- movement discovery now exists as a separate pipeline and is already promoting replay-local movement patterns on `EUW1-7596620123`, `EUW1-7617298409`, and `EUW1-7678536418`
-- replay-only movement assignment now exists as a second-stage pipeline using learned priors plus replay-local heuristics
-- current best replay-only movement labelling is `EUW1-7596231295`, where `FiddleSticks` jungle and `Jinx` bottom both pass validation from replay-only extraction
-- `EUW1-7617298409` now also yields a validated replay-only `Corki` bottom path
-- newer `16.1` movement families still need stronger filtering and identity priors before they can be treated as reliable
-
 Current 2026-03-21 expanded baseline from the 13-replay corpus:
 
 - the corpus now includes a 6-replay `16.6` cohort
 - exact corpus-backed scalar patterns increased to `258`
+- replay-only scalar validation currently yields:
+  - `xp`: `10 / 12`
+  - `totalGold`: `11 / 11`
+  - `level`: `2 / 3`
+  - `power`: `2 / 4`
+  - `powerMax`: `1 / 1`
+  - `healthMax`: `1 / 2`
+  - `movementSpeed`: `1 / 4`
+  - `health`: `0 / 2`
+- the strongest latest-patch scalar slab remains `16.6 | 61894-0x00-h6`
+- `61894` now has real replay-only bundle-backed evidence for `power`, `healthMax`, and `movementSpeed`
+- `16.6 | 6912-0xC6-h0` remains the strongest replay-only `powerMax` slab
 - movement coordinate priors now include family-aware and family-band layers, not just decode signatures
-- `EUN1-3926600040` now yields `2 / 2` passing replay-only labelled movement tracks
-- `EUW1-7678536418` now yields `1 / 4` passing replay-only labelled movement tracks, with `Belveth` jungle passing from `61733 / 0x00`
-- `EUW1-7617298409` improved from `1 / 3` to `1 / 2` passing labelled movement tracks after stronger filtering
+- `EUN1-3926600040` now yields `2 / 3` passing replay-only labelled movement tracks
+- `EUN1-3927135846` now yields `1 / 1` passing replay-only labelled movement tracks
+- `EUW1-7779216102` still yields `1 / 2` passing replay-only labelled movement tracks
 
-### 4. Movement discovery runner
+### 4. Scalar family layout analysis
+
+Use `scripts/analyze_scalar_family_layout.mjs` when one family already has several replay-only hits but still drifts across row variants.
+
+Current best target:
+
+- `16.6 | 61894-0x00-h6`
+
+Current layout finding:
+
+- anchor metric: `xp`
+- late-slot cluster around `17` carrying `xp`, `healthMax`, and some `power`
+- earlier cluster around `12` carrying `totalGold` and some `power`
+- unresolved variants still around `18` and `19`
+
+That means the next scalar promotion step should be slot-cluster-aware, not just family-wide.
+
+### 5. Movement discovery runner
 
 Use the same corpus runner, `scripts/run_decoder_corpus.ps1`, for movement discovery as well. It now additionally:
 
@@ -380,7 +401,7 @@ Current movement files:
 - `scripts/assign_replay_movement.mjs`
 - `scripts/validate_assigned_movement.mjs`
 
-### 5. Only then improve the UI
+### 6. Only then improve the UI
 
 Once the CLI/script loop is producing believable schemas and extracted fields, the UI should consume those results and visualize them.
 
@@ -405,10 +426,10 @@ Do not return to movement as the main focus until:
 
 The next concrete task should be:
 
-1. tighten corpus promotion so exact promoted patterns are less noisy while still inheriting version-group alias support
-2. improve replay-only row assignment on `level`, `xp`, `totalGold`, and `cs`, especially for the weaker `15.22` and `15.23` replays
-3. improve `16.1` movement extraction and identity assignment, especially around `61733 / 0x00`, so bad tracks stay filtered instead of being weakly labelled
-4. widen replay-only participant-labelled movement coverage on `15.22` and `15.23`
+1. split `16.6 | 61894-0x00-h6` bundle-family promotion by dominant slot cluster instead of flattening all slot variants into one metric bucket
+2. let `movementSpeed` and `power` compete as cluster-specific bundle candidates so bad `18/19` variants stop dragging down good `12/13` and `16/17` variants
+3. rerun the two-pass corpus loop and check whether `movementSpeed` can graduate from ranked-only to promoted on `16.6`
+4. improve `16.1` movement extraction and identity assignment, especially around `61733 / 0x00`, so bad tracks stay filtered instead of being weakly labelled
 5. use the validated extraction output as the UI input contract
 
 That is the shortest path from investigation tooling to an actual decoder.
@@ -459,6 +480,7 @@ The main need is more examples per version group so replay-local winners can bec
 2. inspect:
    - `artifacts/corpus-schema.json`
    - `artifacts/movement-identity-priors.json`
+   - `artifacts/scalar-family-layout/16.6/61894-0x00-h6.json`
    - `artifacts/movement-coordinate-model.json`
 3. compare which new version groups produce:
    - promoted scalar patterns

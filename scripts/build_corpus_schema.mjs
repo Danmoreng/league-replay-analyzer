@@ -337,6 +337,13 @@ function loadBundleReplayEntries(artifactDir) {
     const validationMetrics = participantMetricRecords
       .map((record) => record.validationMetric)
       .filter(Boolean);
+    const participantTransforms = participantMetricRecords
+      .map((record) => record.metricRecord?.transform ?? null)
+      .filter((transform) =>
+        transform &&
+        Number.isFinite(transform.slopeMedian) &&
+        Number.isFinite(transform.interceptMedian),
+      );
     const passCount = validationMetrics.filter((metric) => metric.passes).length;
     const avgCorrelation = average(validationMetrics.map((metric) => metric.correlation).filter(Number.isFinite));
     const avgNormalizedRmse = average(validationMetrics.map((metric) => metric.normalizedRmse).filter(Number.isFinite));
@@ -356,6 +363,13 @@ function loadBundleReplayEntries(artifactDir) {
     const recommendedSlots = selectedPattern.recommendedSlots ?? [];
     const recommendedRowBand = selectedPattern.recommendedRowBand ?? [0, 0];
     const confidenceBoost = (0.82 + (0.18 * Math.min(1, bundleScore))) * (0.7 + (0.3 * Math.min(1, replayOverlap)));
+    const replayTransform = participantTransforms.length > 0
+      ? {
+        slopeMedian: median(participantTransforms.map((transform) => transform.slopeMedian)),
+        interceptMedian: median(participantTransforms.map((transform) => transform.interceptMedian)),
+        sampleCount: participantTransforms.reduce((sum, transform) => sum + (transform.sampleCount ?? 0), 0),
+      }
+      : (selectedPattern.transform ?? { slopeMedian: 1, interceptMedian: 0, sampleCount: 0 });
 
     const replayEntry = {
       replayId,
@@ -387,7 +401,7 @@ function loadBundleReplayEntries(artifactDir) {
       recommendedSlots: recommendedSlots
         .map((slot) => slot.slotIndex)
         .filter((value, index, array) => array.indexOf(value) === index),
-      transform: selectedPattern.transform ?? { slopeMedian: 1, interceptMedian: 0, sampleCount: 0 },
+      transform: replayTransform,
       bundleSupport: {
         bundleIndex: descriptor.bundleIndex,
         bundleScore,

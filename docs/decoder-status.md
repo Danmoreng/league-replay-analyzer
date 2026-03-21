@@ -31,18 +31,39 @@ The decoder now has a working offline corpus pipeline:
 - version-group alias clustering across replays
 - replay-only stat extraction
 - offline validation against Riot timeline fixtures
+- a two-pass corpus convergence loop so `corpus-schema.json` is rebuilt again after fresh extraction and validation results exist
 
 The latest full corpus run on `2026-03-21` covered 13 local replay fixtures and produced:
 
 - `258` promoted exact corpus-backed patterns from `1577` ranked exact patterns
 - `82` version-group alias clusters in `artifacts/corpus-schema.json`
-- validated replay-only `level`, `xp`, `totalGold`, and `minionsKilled` timelines across multiple replays
+- validated replay-only `xp`, `totalGold`, `level`, `power`, `powerMax`, `healthMax`, and `movementSpeed` timelines across at least some replays
 
-Current best validated replay-only result:
+Current validated replay-only scalar coverage:
 
-- `EUW1-7779216102`: `level` for 3 participants, `totalGold` for 2, `xp` for 1, `minionsKilled` for 1
+- `xp`: `10 / 12` participant passes
+- `totalGold`: `11 / 11`
+- `level`: `2 / 3`
+- `power`: `2 / 4`
+- `powerMax`: `1 / 1`
+- `healthMax`: `1 / 2`
+- `movementSpeed`: `1 / 4`
+- `health`: `0 / 2`
 
-Other replays now also yield real replay-derived stat timelines, but coverage is still uneven by patch/version group.
+Current strongest latest-patch scalar family is still `16.6 | 61894 / 0x00 / h6`, now with real bundle-backed replay-only evidence for:
+
+- `power`
+- `healthMax`
+- `movementSpeed`
+
+The strongest companion latest-patch slab remains `16.6 | 6912 / 0xC6 / h0`, which currently carries the best replay-only `powerMax` result.
+
+Important caveat:
+
+- `61894` bundle-backed metrics are not all schema-promoted yet
+- `healthMax` is promoted
+- `power` and `movementSpeed` are still ranked bundle-family candidates
+- the remaining blocker is slot-variant drift inside the slab, not complete lack of replay-only signal
 
 ## Current Movement Discovery Status
 
@@ -70,10 +91,10 @@ The current movement pipeline:
 
 Current corpus-level result from the same 13 local replays:
 
-- `EUN1-3926600040`: `0` promoted movement patterns, `5` extracted trajectories from strong ranked fallback families
-- `EUW1-7596620123`: `2` promoted movement patterns, `4` extracted trajectories
-- `EUW1-7617298409`: `2` promoted movement patterns, `4` extracted trajectories
-- `EUW1-7678536418`: `8` promoted movement patterns, `9` extracted trajectories
+- `EUN1-3926600040`: `0` promoted movement patterns, `4` extracted trajectories from strong ranked fallback families
+- `EUW1-7596620123`: `3` promoted movement patterns, `6` extracted trajectories
+- `EUW1-7617298409`: `1` promoted movement patterns, `2` extracted trajectories
+- `EUW1-7678536418`: `2` promoted movement patterns, `4` extracted trajectories
 - other replays currently show anonymous movement candidates, but many still lack repeated-row support for promotion
 
 The strongest current pattern is version-sensitive and appears to live in the main `0x00` state family for several patch groups:
@@ -84,21 +105,18 @@ The strongest current pattern is version-sensitive and appears to live in the ma
 
 Replay-only movement identity is now partially working, but still patch-fragile:
 
-- `EUN1-3926600040`: `2 / 5` participant-labelled movement assignments pass validation on `16.6`
+- `EUN1-3926600040`: `2 / 3` participant-labelled movement assignments pass validation on `16.6`
 - `EUN1-3927135846`: `1 / 1` participant-labelled movement assignment passes on `16.6`
-- `EUW1-7596231295`: `1 / 2` participant-labelled movement assignments passes on `15.22`
-- `EUW1-7617298409`: `1 / 3` participant-labelled movement assignments passes on `15.23`
-- `EUW1-7689604967`: `1 / 2` participant-labelled movement assignments passes on `16.1`
-- `EUW1-7779216102`: `1 / 2` participant-labelled movement assignments passes on `15.24`
-- `EUW1-7596620123`: one near-pass (`Khazix`, normalized RMSE about `0.205`) but no passing assignments under the current threshold
-- `EUW1-7678536418`: one near-pass on `16.1` (`Neeko`), but no passing assignment in the latest run
+- `EUW1-7596231295`: `1 / 2` participant-labelled movement assignments pass on `15.22`
+- `EUW1-7779216102`: `1 / 2` participant-labelled movement assignments pass on `15.24`
+- other replays still produce assignments, but many remain non-passing under the current threshold
 
 Current best replay-only movement examples:
 
-- `EUN1-3926600040`: `Diana` jungle from `51483 / 0xF1` and `Leona` support from `58082 / 0xE2`
-- `EUN1-3927135846`: `Malzahar` from a replay-only latest-patch track
-- `EUW1-7617298409`: `Briar` from `61737 / 0x00`
-- `EUW1-7779216102`: `Brand` from a replay-only movement family on the original target replay
+- `EUN1-3926600040`: `Diana` jungle from `61897 / 0x00` and `Swain` middle from `51483 / 0xF1`
+- `EUN1-3927135846`: `Pyke` support from a replay-only latest-patch track
+- `EUW1-7596231295`: `Malzahar` from `17068 / 0xF1`
+- `EUW1-7779216102`: `Brand` from `19313 / 0xF1`
 
 The coordinate-model audit is now materially more useful:
 
@@ -192,6 +210,18 @@ Important commands now available in `rofl_core_cli`:
 - `--analyze-bitfield-schema-json`
 - `--analyze-clean-row-offsets-json`
 
+### Offline decoder scripts
+
+Important current scripts:
+
+- `scripts/run_decoder_artifacts.ps1`
+- `scripts/build_provisional_schema.mjs`
+- `scripts/build_corpus_schema.mjs`
+- `scripts/extract_replay_stats.mjs`
+- `scripts/validate_extracted_stats.mjs`
+- `scripts/analyze_scalar_family_layout.mjs`
+- `scripts/run_decoder_corpus.ps1`
+
 ### Web / Wasm
 
 The web inspector can now run these backend paths directly through Wasm:
@@ -222,11 +252,11 @@ For a new replay or continued work on the current replay:
 
 The most useful next backend steps are:
 
-- improve cleaned-field ranking on surviving subfields, not just full aligned windows
-- stabilize participant assignment across several metrics simultaneously
-- improve movement candidate filtering on `16.1` families, especially `61733 / 0x00`
-- strengthen movement identity priors and assignment thresholds so weak families stay unmatched instead of mislabelled
+- split bundle-family scalar promotion by slot cluster inside `16.6 | 61894 / 0x00 / h6` instead of flattening all slot variants into one family-wide metric group
+- use the discovered layout artifact (`artifacts/scalar-family-layout/16.6/61894-0x00-h6.json`) as the basis for those slot-cluster priors
+- let `movementSpeed` and `power` compete as cluster-specific bundle candidates so bad `18/19` variants stop dragging down good `12/13` or `16/17` variants
 - keep using scalar/state extraction as the identity backbone for movement
+- continue improving `16.1` movement family filtering and identity assignment, especially around `61733 / 0x00`
 
 The next session should begin with more replay intake:
 
@@ -234,7 +264,7 @@ The next session should begin with more replay intake:
 - collect matching Riot `match.json` and `timeline.json` fixtures for each replay when possible
 - rerun the full corpus pipeline before changing thresholds again
 
-The highest-value next implementation after intake is to upgrade the movement coordinate model from sparse decode-signature priors to stronger family-aware priors per version group.
+The highest-value next implementation is now slot-clustered bundle promotion for `61894 / 0x00 / h6`, followed by another corpus rerun to see whether `movementSpeed` can graduate from ranked-only to promoted replay-only schema support on `16.6`.
 
 ## Related Docs
 

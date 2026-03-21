@@ -475,6 +475,96 @@ function buildBundleRecommendedPatterns(artifactDir, runManifest, summaryJson, p
   return recommendedPatterns;
 }
 
+function loadScalarFamilyLayout(artifactRoot, versionGroup, familyKey) {
+  const layoutPath = path.join(
+    artifactRoot,
+    "scalar-family-layout",
+    versionGroup,
+    `${familyKey.replace(/[^A-Za-z0-9._-]+/g, "_")}.json`,
+  );
+  if (!fs.existsSync(layoutPath)) {
+    return null;
+  }
+  return readJson(layoutPath);
+}
+
+function buildFamilyLayoutIndex(artifactRoot, versionGroup, familyKeys) {
+  const layouts = new Map();
+  for (const familyKey of familyKeys) {
+    const layout = loadScalarFamilyLayout(artifactRoot, versionGroup, familyKey);
+    if (layout) {
+      layouts.set(familyKey, layout);
+    }
+  }
+  return layouts;
+}
+
+function applyFamilyLayoutPrior(pattern, familyLayout) {
+  if (!familyLayout) {
+    return pattern;
+  }
+
+  const metricSummary = (familyLayout.metricAssignmentSummary ?? [])
+    .find((entry) => entry.metric === pattern.metric) ?? null;
+  const variantHints = (familyLayout.rowVariantSummary ?? [])
+    .filter((variant) =>
+      (variant.assignedMetrics ?? []).includes(pattern.metric) ||
+      (variant.unresolvedMetrics ?? []).includes(pattern.metric),
+    );
+
+  const layoutSlots = [
+    ...(metricSummary?.slotCounts ?? []).map((entry) => entry.value),
+    ...variantHints.flatMap((variant) => {
+      const [start, end] = variant.slotBand ?? [];
+      const slots = [];
+      if (Number.isFinite(start) && Number.isFinite(end)) {
+        for (let slotIndex = start; slotIndex <= end; slotIndex += 1) {
+          slots.push(slotIndex);
+        }
+      }
+      if (Number.isFinite(variant.dominantSlot)) {
+        slots.push(variant.dominantSlot);
+      }
+      return slots;
+    }),
+  ].filter(Number.isFinite);
+
+  if (layoutSlots.length === 0) {
+    return pattern;
+  }
+
+  const recommendedSlots = [
+    ...(pattern.recommendedSlots ?? []).map((slot) => slot.slotIndex),
+    ...layoutSlots,
+  ]
+    .filter((slotIndex, index, array) => array.indexOf(slotIndex) === index)
+    .sort((left, right) => left - right)
+    .map((slotIndex) => ({ slotIndex, replayCount: 1 }));
+
+  const rowBandValues = [
+    ...(pattern.recommendedRowBand ?? []),
+    ...layoutSlots,
+  ].filter(Number.isFinite);
+  const recommendedRowBand = rowBandValues.length > 0
+    ? [Math.min(...rowBandValues), Math.max(...rowBandValues)]
+    : pattern.recommendedRowBand;
+
+  let selectionScore = pattern.selectionScore;
+  if ((metricSummary?.assignmentCount ?? 0) > 0) {
+    selectionScore += 0.04;
+  }
+  if (variantHints.length > 0) {
+    selectionScore += Math.min(0.04, 0.01 * variantHints.length);
+  }
+
+  return {
+    ...pattern,
+    recommendedSlots,
+    recommendedRowBand,
+    selectionScore,
+  };
+}
+
 function normalizePattern(pattern, candidateMatches, source) {
   const recommendedSlots = pattern.recommendedSlots
     ? pattern.recommendedSlots
@@ -510,31 +600,37 @@ function evaluateSeriesPlausibility(metricKey, series) {
   let minExpected = -Infinity;
   let maxExpected = Infinity;
   let monotonic = false;
+  let jumpThreshold = Infinity;
   switch (metricKey) {
     case "level":
       minExpected = 1;
       maxExpected = 18;
       monotonic = true;
+      jumpThreshold = 2;
       break;
     case "totalGold":
       minExpected = 0;
       maxExpected = 30000;
       monotonic = true;
+      jumpThreshold = 4500;
       break;
     case "xp":
       minExpected = 0;
       maxExpected = 40000;
       monotonic = true;
+      jumpThreshold = 6500;
       break;
     case "minionsKilled":
       minExpected = 0;
       maxExpected = 500;
       monotonic = true;
+      jumpThreshold = 40;
       break;
     case "jungleMinionsKilled":
       minExpected = 0;
       maxExpected = 350;
       monotonic = true;
+      jumpThreshold = 35;
       break;
     case "health": {
       minExpected = 0;
@@ -614,12 +710,22 @@ function evaluateSeriesPlausibility(metricKey, series) {
   let monotonicRatio = 1;
   if (monotonic && values.length > 1) {
     let okay = 0;
+    let extremeJumps = 0;
     for (let index = 1; index < values.length; index += 1) {
-      if (values[index] >= (values[index - 1] - 1e-6)) {
+      const diff = values[index] - values[index - 1];
+      if (diff >= -1e-6) {
         okay += 1;
+      }
+      if (Math.abs(diff) > jumpThreshold) {
+        extremeJumps += 1;
       }
     }
     monotonicRatio = okay / (values.length - 1);
+    const extremeJumpRatio = extremeJumps / (values.length - 1);
+    const jumpPenalty = extremeJumpRatio > 0
+      ? Math.max(0.22, 1 - (1.35 * extremeJumpRatio))
+      : 1;
+    return ((0.7 * inRangeRatio) + (0.3 * monotonicRatio)) * jumpPenalty;
   }
 
   return (0.7 * inRangeRatio) + (0.3 * monotonicRatio);
@@ -690,7 +796,7 @@ function pickBestTransform(pattern, field, roster) {
   return best;
 }
 
-function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches, runManifest, roster, artifactDir, summaryJson) {
+function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches, runManifest, roster, artifactDir, summaryJson, familyLayouts) {
   const familyKeys = new Set((runManifest.families ?? []).map((family) => family.familyKey));
   const metricCaps = new Map([
     ["level", 3],
@@ -795,7 +901,8 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
             },
           }
           : pattern;
-      return normalizePattern(mergedPattern, candidateMatches, promoted ? "bundle-promoted" : "bundle-recommended");
+      const normalized = normalizePattern(mergedPattern, candidateMatches, promoted ? "bundle-promoted" : "bundle-recommended");
+      return applyFamilyLayoutPrior(normalized, familyLayouts.get(normalized.familyKey));
     });
   const preferredBundleFamilyKeys = new Set(bundleRecommended.map((pattern) => pattern.familyKey));
 
@@ -803,8 +910,8 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
   const selectedKeys = new Set();
   const selectedMetricCounts = new Map();
   const candidates = [...bundleRecommended, ...corpusPromoted, ...localPromoted, ...localRanked, ...rankedCorpus]
-    .map((pattern) => {
-      let bonus = 0;
+      .map((pattern) => {
+        let bonus = 0;
       if (
         pattern.source !== "bundle-recommended" &&
         preferredBundleFamilyKeys.has(pattern.familyKey) &&
@@ -815,11 +922,12 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
           bonus += 0.08;
         }
       }
-      return {
-        ...pattern,
-        selectionScore: pattern.selectionScore + bonus,
-      };
-    })
+        const layoutPattern = applyFamilyLayoutPrior(pattern, familyLayouts.get(pattern.familyKey));
+        return {
+          ...layoutPattern,
+          selectionScore: layoutPattern.selectionScore + bonus,
+        };
+      })
     .sort((left, right) =>
       right.selectionScore - left.selectionScore ||
       right.confidence - left.confidence ||
@@ -887,6 +995,12 @@ function candidateOutputScore(metric, record) {
   if (Number.isFinite(record.siblingAnchorScore)) {
     score += 0.12 * record.siblingAnchorScore;
   }
+  if (Number.isFinite(record.layoutAnchorScore)) {
+    score += 0.1 * record.layoutAnchorScore;
+  }
+  if (Number.isFinite(record.variantAnchorScore)) {
+    score += 0.11 * record.variantAnchorScore;
+  }
   if (Number.isFinite(record.familyAnchorScore)) {
     score += 0.08 * record.familyAnchorScore;
   }
@@ -941,6 +1055,12 @@ function buildCandidateRows(pattern, familyFieldIndex, roster) {
       metric: pattern.metric,
       metricLabel: pattern.metricLabel,
       patternConfidence: pattern.confidence,
+      field: fieldEntry.field,
+      transform: {
+        slopeMedian: transformed.transform.slopeMedian,
+        interceptMedian: transformed.transform.interceptMedian,
+        sampleCount: transformed.transform.sampleCount ?? 0,
+      },
       transformLabel: transformed.transform.label,
       plausibilityScore: transformed.plausibilityScore,
       series: transformed.series,
@@ -949,6 +1069,208 @@ function buildCandidateRows(pattern, familyFieldIndex, roster) {
   }
 
   return candidates;
+}
+
+function maybeRefineCandidateForParticipant(candidate, rosterEntry) {
+  if (!rosterEntry || !candidate.field) {
+    return candidate;
+  }
+
+  const expectedFinalValue = rosterEntry.finalMetrics?.[candidate.metric];
+  if (!Number.isFinite(expectedFinalValue)) {
+    return candidate;
+  }
+
+  const refined = pickBestTransform(candidate.pattern, candidate.field, [rosterEntry]);
+  if (!refined) {
+    return candidate;
+  }
+
+  const plausibilityFloor = candidate.pattern.source === "bundle-recommended" ? 0.45 : 0.55;
+  if ((refined.plausibilityScore ?? 0) < plausibilityFloor) {
+    return candidate;
+  }
+
+  const metricBounds = getMetricBounds(candidate.metric);
+  if (
+    metricBounds &&
+    (!Number.isFinite(refined.finalValue) || refined.finalValue < metricBounds.min || refined.finalValue > metricBounds.max)
+  ) {
+    return candidate;
+  }
+
+  const currentFit = (
+    scoreMetricValue(candidate.metric, expectedFinalValue, candidate.finalValue) +
+    (0.05 * Math.min(1, candidate.plausibilityScore ?? 0)) +
+    (candidate.transformLabel !== "identity" ? 0.02 : 0)
+  );
+  const refinedFit = (
+    scoreMetricValue(candidate.metric, expectedFinalValue, refined.finalValue) +
+    (0.05 * Math.min(1, refined.plausibilityScore ?? 0)) +
+    (refined.transform.label !== "identity" ? 0.02 : 0)
+  );
+  if (refinedFit <= currentFit + 0.015) {
+    return candidate;
+  }
+
+  return {
+    ...candidate,
+    transform: {
+      slopeMedian: refined.transform.slopeMedian,
+      interceptMedian: refined.transform.interceptMedian,
+      sampleCount: refined.transform.sampleCount ?? 0,
+    },
+    transformLabel: refined.transform.label,
+    plausibilityScore: refined.plausibilityScore,
+    series: refined.series,
+    finalValue: refined.finalValue,
+  };
+}
+
+function findLayoutAnchoredParticipant(candidate, participantOutputs, familyLayout) {
+  if (!familyLayout) {
+    return null;
+  }
+
+  const relative = (familyLayout.relativeSlotSummary ?? [])
+    .find((entry) => entry.metric === candidate.metric) ?? null;
+  if (!relative || !relative.anchorMetric || !Array.isArray(relative.deltaCounts) || relative.deltaCounts.length === 0) {
+    return null;
+  }
+
+  const dominantDelta = relative.deltaCounts[0]?.delta;
+  if (!Number.isFinite(dominantDelta)) {
+    return null;
+  }
+
+  const matches = participantOutputs
+    .map((participantOutput) => {
+      const anchorRecord = participantOutput.metrics?.[relative.anchorMetric] ?? null;
+      if (!anchorRecord || anchorRecord.familyKey !== candidate.familyKey) {
+        return null;
+      }
+      const expectedSlot = (anchorRecord.slotIndex ?? candidate.slotIndex) + dominantDelta;
+      const slotDistance = Math.abs(candidate.slotIndex - expectedSlot);
+      if (slotDistance > 1) {
+        return null;
+      }
+      const score = 0.9 - (0.18 * slotDistance) + (0.03 * (candidate.plausibilityScore ?? 0));
+      return {
+        rosterIndex: participantOutput.rosterIndex,
+        anchorMetric: relative.anchorMetric,
+        dominantDelta,
+        slotDistance,
+        score,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) =>
+      right.score - left.score ||
+      left.slotDistance - right.slotDistance ||
+      left.rosterIndex - right.rosterIndex
+    );
+
+  if (matches.length === 0) {
+    return null;
+  }
+  if (matches.length > 1) {
+    const [best, second] = matches;
+    if (
+      Math.abs((best.score ?? 0) - (second.score ?? 0)) < 0.08 &&
+      (best.slotDistance ?? 99) === (second.slotDistance ?? 99)
+    ) {
+      return null;
+    }
+  }
+
+  return matches[0];
+}
+
+function findVariantAnchoredParticipant(candidate, participantOutputs, familyLayout) {
+  if (!familyLayout) {
+    return null;
+  }
+
+  const variants = (familyLayout.rowVariantSummary ?? [])
+    .filter((variant) =>
+      (variant.assignedMetrics ?? []).includes(candidate.metric) ||
+      (variant.unresolvedMetrics ?? []).includes(candidate.metric),
+    );
+  if (variants.length === 0) {
+    return null;
+  }
+
+  const matches = participantOutputs
+    .map((participantOutput) => {
+      let best = null;
+      for (const variant of variants) {
+        const [start, end] = variant.slotBand ?? [];
+        if (!Number.isFinite(start) || !Number.isFinite(end)) {
+          continue;
+        }
+
+        const dominantSlot = Number.isFinite(variant.dominantSlot) ? variant.dominantSlot : null;
+        const dominantDistance = dominantSlot == null ? 0 : Math.abs(candidate.slotIndex - dominantSlot);
+        const inBand = candidate.slotIndex >= (start - 1) && candidate.slotIndex <= (end + 1);
+        if (!inBand && dominantDistance > 1) {
+          continue;
+        }
+
+        const matchingAssignedMetrics = (variant.assignedMetrics ?? [])
+          .map((metricKey) => participantOutput.metrics?.[metricKey] ?? null)
+          .filter((metricRecord) =>
+            metricRecord &&
+            metricRecord.familyKey === candidate.familyKey &&
+            Number.isFinite(metricRecord.slotIndex) &&
+            metricRecord.slotIndex >= (start - 1) &&
+            metricRecord.slotIndex <= (end + 1),
+          );
+        if (matchingAssignedMetrics.length === 0) {
+          continue;
+        }
+
+        const score = (
+          0.58 +
+          (0.12 * Math.min(2, matchingAssignedMetrics.length)) +
+          (0.08 * Math.max(0, 1 - (dominantDistance * 0.5))) +
+          (0.05 * Math.min(1, candidate.plausibilityScore ?? 0)) +
+          (0.03 * Math.min(1, (variant.replayCount ?? 0) / 2))
+        );
+        if (!best || score > best.score) {
+          best = {
+            rosterIndex: participantOutput.rosterIndex,
+            variantKey: variant.variantKey,
+            dominantDistance,
+            matchedMetricCount: matchingAssignedMetrics.length,
+            score,
+          };
+        }
+      }
+      return best;
+    })
+    .filter(Boolean)
+    .sort((left, right) =>
+      right.score - left.score ||
+      left.dominantDistance - right.dominantDistance ||
+      right.matchedMetricCount - left.matchedMetricCount ||
+      left.rosterIndex - right.rosterIndex
+    );
+
+  if (matches.length === 0) {
+    return null;
+  }
+  if (matches.length > 1) {
+    const [best, second] = matches;
+    if (
+      Math.abs((best.score ?? 0) - (second.score ?? 0)) < 0.08 &&
+      (best.dominantDistance ?? 99) === (second.dominantDistance ?? 99) &&
+      (best.matchedMetricCount ?? 0) === (second.matchedMetricCount ?? 0)
+    ) {
+      return null;
+    }
+  }
+
+  return matches[0];
 }
 
 function findSiblingAnchoredParticipant(candidate, participantOutputs) {
@@ -1286,7 +1608,13 @@ function main() {
   const provisionalSchema = fs.existsSync(provisionalSchemaPath) ? readJson(provisionalSchemaPath) : { promotedPatterns: [], rankedPatterns: [] };
   const candidateMatches = fs.existsSync(candidateMatchesPath) ? readJson(candidateMatchesPath) : { topMatches: [] };
   const roster = buildSummaryRoster(summaryJson);
-  const selectedPatterns = chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches, runManifest, roster, artifactDir, summaryJson);
+  const versionGroup = parseVersionGroup(runManifest.summary?.gameVersion ?? summaryJson.gameVersion ?? "unknown");
+  const familyLayouts = buildFamilyLayoutIndex(
+    path.dirname(artifactDir),
+    versionGroup,
+    new Set((runManifest.families ?? []).map((family) => family.familyKey)),
+  );
+  const selectedPatterns = chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches, runManifest, roster, artifactDir, summaryJson, familyLayouts);
   const orderedPatterns = orderPatternsForExtraction(selectedPatterns);
 
   const familyFieldIndex = new Map();
@@ -1359,16 +1687,32 @@ function main() {
     const acceptedSiblingAnchor = siblingAnchored && (siblingAnchored.compatibility?.score ?? 0) >= 0.85
       ? siblingAnchored
       : null;
+    const variantAnchored = findVariantAnchoredParticipant(candidate, participantOutputs, familyLayouts.get(candidate.familyKey));
+    const acceptedVariantAnchor = variantAnchored && (variantAnchored.score ?? 0) >= 0.76
+      ? variantAnchored
+      : null;
     const familyAnchored = findNearbyFamilyAnchor(candidate, participantOutputs);
     const acceptedFamilyAnchor = familyAnchored && (familyAnchored.score ?? 0) >= 0.7
       ? familyAnchored
       : null;
-    const rosterIndex = directRosterIndex ?? acceptedSiblingAnchor?.rosterIndex ?? acceptedFamilyAnchor?.rosterIndex ?? null;
+    const layoutAnchored = findLayoutAnchoredParticipant(candidate, participantOutputs, familyLayouts.get(candidate.familyKey));
+    const acceptedLayoutAnchor = layoutAnchored && (layoutAnchored.score ?? 0) >= 0.72
+      ? layoutAnchored
+      : null;
+    const rosterIndex =
+      directRosterIndex ??
+      acceptedSiblingAnchor?.rosterIndex ??
+      acceptedVariantAnchor?.rosterIndex ??
+      acceptedLayoutAnchor?.rosterIndex ??
+      acceptedFamilyAnchor?.rosterIndex ??
+      null;
 
     if (
       candidate.pattern.source === "bundle-recommended" &&
       !isBundleSlotTrustedBySupport(familySupportTrust, candidate) &&
       !acceptedSiblingAnchor &&
+      !acceptedVariantAnchor &&
+      !acceptedLayoutAnchor &&
       !acceptedFamilyAnchor
     ) {
       unresolvedCandidates.push({
@@ -1397,44 +1741,49 @@ function main() {
     if (!participantOutput) {
       continue;
     }
+    const rosterEntry = roster.find((entry) => entry.rosterIndex === rosterIndex) ?? null;
+    const refinedCandidate = maybeRefineCandidateForParticipant(candidate, rosterEntry);
 
-    if (candidate.metric === "health") {
+    if (refinedCandidate.metric === "health") {
       const sibling = participantOutput.metrics.healthMax ?? null;
       const siblingAnchored = sibling &&
-        sibling.familyKey === candidate.familyKey &&
-        Math.abs((sibling.slotIndex ?? candidate.slotIndex) - candidate.slotIndex) <= 1;
+        sibling.familyKey === refinedCandidate.familyKey &&
+        Math.abs((sibling.slotIndex ?? refinedCandidate.slotIndex) - refinedCandidate.slotIndex) <= 1;
       if (!siblingAnchored) {
         unresolvedCandidates.push({
-          familyKey: candidate.familyKey,
-          slotIndex: candidate.slotIndex,
-          metric: candidate.metric,
-          finalValue: candidate.finalValue,
-          patternConfidence: candidate.pattern.confidence,
+          familyKey: refinedCandidate.familyKey,
+          slotIndex: refinedCandidate.slotIndex,
+          metric: refinedCandidate.metric,
+          finalValue: refinedCandidate.finalValue,
+          patternConfidence: refinedCandidate.pattern.confidence,
           reason: "health-without-healthmax-anchor",
         });
         continue;
       }
     }
 
-    const existing = participantOutput.metrics[candidate.metric];
+    const existing = participantOutput.metrics[refinedCandidate.metric];
     const record = {
-      familyKey: candidate.familyKey,
-      slotIndex: candidate.slotIndex,
-      source: candidate.pattern.source,
-      confidence: candidate.pattern.confidence,
-      transformLabel: candidate.transformLabel,
-      plausibilityScore: candidate.plausibilityScore,
+      familyKey: refinedCandidate.familyKey,
+      slotIndex: refinedCandidate.slotIndex,
+      source: refinedCandidate.pattern.source,
+      confidence: refinedCandidate.pattern.confidence,
+      transform: refinedCandidate.transform ?? null,
+      transformLabel: refinedCandidate.transformLabel,
+      plausibilityScore: refinedCandidate.plausibilityScore,
       siblingAnchorScore: acceptedSiblingAnchor?.compatibility?.score ?? null,
+      layoutAnchorScore: acceptedLayoutAnchor?.score ?? null,
+      variantAnchorScore: acceptedVariantAnchor?.score ?? null,
       familyAnchorScore: acceptedFamilyAnchor?.score ?? null,
-      finalValue: candidate.finalValue,
-      timeline: candidate.series.map((point) => ({
+      finalValue: refinedCandidate.finalValue,
+      timeline: refinedCandidate.series.map((point) => ({
         timestamp: point.timestamp,
         value: point.value,
       })),
     };
 
-    if (!existing || candidateOutputScore(candidate.metric, record) > candidateOutputScore(candidate.metric, existing)) {
-      participantOutput.metrics[candidate.metric] = record;
+    if (!existing || candidateOutputScore(refinedCandidate.metric, record) > candidateOutputScore(refinedCandidate.metric, existing)) {
+      participantOutput.metrics[refinedCandidate.metric] = record;
     }
   }
 

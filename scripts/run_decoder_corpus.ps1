@@ -154,6 +154,41 @@ if (-not $SkipValidation) {
     }
 }
 
+if (-not $SkipCorpusSchema -and -not $SkipExtraction -and -not $SkipValidation) {
+    Write-Host "Rebuilding cross-replay corpus schema from refreshed extraction results" -ForegroundColor Cyan
+    node $corpusSchemaScript --artifact-root $resolvedArtifactRoot --corpus-manifest $manifestPath --output-path $corpusSchemaPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Refreshed corpus schema generation failed."
+    }
+
+    foreach ($entry in $processed) {
+        $extractedPath = if ($entry.Contains("extractedStatsPath")) { $entry.extractedStatsPath } else { Join-Path $entry.artifactDir "extracted-stats.json" }
+        Write-Host "Re-extracting replay-only stats for $($entry.replayName) with refreshed schema" -ForegroundColor Cyan
+        node $extractScript --artifact-dir $entry.artifactDir --schema-path $corpusSchemaPath --output-path $extractedPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Replay-only re-extraction failed for $($entry.replayName)"
+        }
+        $entry["extractedStatsPath"] = $extractedPath
+    }
+
+    foreach ($entry in $processed) {
+        $extractedPath = $entry.extractedStatsPath
+        $validationPath = if ($entry.Contains("validationReportPath")) { $entry.validationReportPath } else { Join-Path $entry.artifactDir "validation-report.json" }
+        Write-Host "Re-validating extracted stats for $($entry.replayName) with refreshed schema" -ForegroundColor Cyan
+        node $validateScript --extracted-path $extractedPath --fixture-dir $entry.fixtureDir --output-path $validationPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Refreshed validation failed for $($entry.replayName)"
+        }
+        $entry["validationReportPath"] = $validationPath
+    }
+
+    Write-Host "Finalizing cross-replay corpus schema after refreshed validation" -ForegroundColor Cyan
+    node $corpusSchemaScript --artifact-root $resolvedArtifactRoot --corpus-manifest $manifestPath --output-path $corpusSchemaPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Final corpus schema generation failed."
+    }
+}
+
 if (-not $SkipMovement) {
     $movementCoordinateModelPath = Join-Path $resolvedArtifactRoot "movement-coordinate-model.json"
     foreach ($entry in $processed) {

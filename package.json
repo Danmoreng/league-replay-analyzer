@@ -20,6 +20,7 @@
     "inspect:scalar-metric": "node ./scripts/inspect_scalar_metric_candidate.mjs",
     "build:scalar-family-bundles": "node ./scripts/build_scalar_family_bundle_candidates.mjs",
     "recommend:scalar-family-bundles": "node ./scripts/recommend_scalar_family_bundle_metrics.mjs",
+    "analyze:scalar-family-layout": "node ./scripts/analyze_scalar_family_layout.mjs",
     "summarize:scalar-hotspots": "node ./scripts/summarize_scalar_family_hotspots.mjs",
     "extract:replay-stats": "node ./scripts/extract_replay_stats.mjs",
     "validate:replay-stats": "node ./scripts/validate_extracted_stats.mjs",
