@@ -35,6 +35,7 @@
     "test:native": "pwsh -File ./scripts/test-native.ps1 -UseNinja",
     "fetch:riot": "node ./scripts/fetch-riot-match-data.mjs",
     "publish:riot-fixtures": "node ./scripts/publish-riot-fixtures.mjs",
+    "publish:replay-movement": "node ./scripts/publish-replay-movement-fixtures.mjs",
     "compare:riot": "node ./scripts/correlate-replay-api.mjs"
   },
   "devDependencies": {

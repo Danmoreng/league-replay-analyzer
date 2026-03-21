@@ -12,7 +12,12 @@ import {
   deriveRiotMatchIdFromReplayName,
   loadRiotFixtureBundle,
   type RiotFixtureBundle,
+  type RiotMatchParticipant,
 } from "./riotApiFixtures";
+import {
+  loadReplayMovementFixture,
+  type LoadedReplayMovementFixture,
+} from "./replayMovementFixtures";
 import { type PlayerSummary, type ReplaySummary } from "./replayParser";
 import { parseReplayBufferWithWasm } from "./wasmReplayParser";
 
@@ -21,7 +26,9 @@ const summary = ref<ReplaySummary | null>(null);
 const browserModel = ref<ReplayBrowserModel | null>(null);
 const riotBundle = ref<RiotFixtureBundle | null>(null);
 const apiMovement = ref<PlayerMovementData[]>([]);
+const replayMovement = ref<PlayerMovementData[]>([]);
 const riotFixtureStatus = ref("No Riot fixture loaded yet.");
+const replayMovementStatus = ref("No replay-derived movement fixture loaded yet.");
 const parserEngine = ref("C++/Wasm");
 const replayBuffer = ref<ArrayBuffer | null>(null);
 const loadedReplayName = ref("");
@@ -29,6 +36,7 @@ const status = ref("Pick a replay file to parse it with the C++/Wasm replay pars
 const errorMessage = ref("");
 const isLoading = ref(false);
 const activePage = ref<"summary" | "browser" | "inspector">("summary");
+const movementCompareMode = ref<"api" | "replay" | "overlay">("api");
 function toDdragonVersion(version: string): string {
   const match = version.match(/^(\d+)\.(\d+)/);
   if (!match) {
@@ -60,6 +68,10 @@ function getRoleLabel(primary?: string, secondary?: string): string {
     .replace(/_/g, " ")
     .toLowerCase()
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function normalizeRoleLabel(value?: string): string {
+  return getRoleLabel(value).toLowerCase();
 }
 
 const teams = computed(() => {
@@ -228,49 +240,231 @@ function buildApiMovementFromBundle(bundle: RiotFixtureBundle): PlayerMovementDa
     });
 }
 
-async function loadMovementData(): Promise<string> {
-  apiMovement.value = [];
+function findBundleParticipantForReplayAssignment(
+  assignment: LoadedReplayMovementFixture["movement"]["assignments"][number],
+  validation: LoadedReplayMovementFixture["validation"],
+  bundle: RiotFixtureBundle | null,
+): RiotMatchParticipant | null {
+  if (!bundle) {
+    return null;
+  }
 
+  const matchedParticipantId = validation?.assignments?.find(
+    (entry) => entry.rosterIndex === assignment.rosterIndex,
+  )?.matchedParticipantId;
+
+  if (matchedParticipantId != null) {
+    return bundle.match.info.participants.find(
+      (participant) => participant.participantId === matchedParticipantId,
+    ) ?? null;
+  }
+
+  let best: { participant: RiotMatchParticipant; score: number } | null = null;
+  for (const participant of bundle.match.info.participants) {
+    let score = 0;
+    if (participant.championName === assignment.champion) {
+      score += 5;
+    }
+    if (participant.teamId === assignment.team) {
+      score += 3;
+    }
+    if (normalizeRoleLabel(participant.lane) === normalizeRoleLabel(assignment.teamPosition)) {
+      score += 2;
+    }
+    if (normalizeRoleLabel(participant.role) === normalizeRoleLabel(assignment.teamPosition)) {
+      score += 1;
+    }
+    if (!best || score > best.score) {
+      best = { participant, score };
+    }
+  }
+
+  return best && best.score >= 5 ? best.participant : null;
+}
+
+function buildReplayMovementFromFixture(
+  fixture: LoadedReplayMovementFixture,
+  bundle: RiotFixtureBundle | null,
+  parsedSummary: ReplaySummary | null,
+): PlayerMovementData[] {
+  const summaryPlayers = parsedSummary?.players ?? [];
+  const gameVersion = parsedSummary?.gameVersion ?? bundle?.match.info.gameVersion ?? "16.6.1";
+
+  return fixture.movement.assignments
+    .filter((assignment) => assignment.trajectory.length > 0)
+    .map((assignment) => {
+      const bundleParticipant = findBundleParticipantForReplayAssignment(
+        assignment,
+        fixture.validation,
+        bundle,
+      );
+      const summaryPlayer = summaryPlayers[assignment.rosterIndex] ?? null;
+      const champion = assignment.champion || bundleParticipant?.championName || summaryPlayer?.champion || `P${assignment.rosterIndex + 1}`;
+
+      return {
+        champion,
+        team: assignment.team,
+        playerName: getPlayerDisplayName(
+          bundleParticipant?.riotIdGameName ?? summaryPlayer?.riotIdGameName,
+          bundleParticipant?.riotIdTagline ?? summaryPlayer?.riotIdTagLine,
+        ),
+        championIconSrc: getChampionIconSrc(champion, gameVersion),
+        roleLabel: getRoleLabel(assignment.teamPosition, bundleParticipant?.lane ?? summaryPlayer?.teamPosition),
+        positions: normalizeMovementPositions(
+          assignment.trajectory.map((position) => ({
+            x: position.x,
+            y: position.y,
+            timestamp: position.timestamp,
+          })),
+        ),
+      };
+    })
+    .sort((left, right) => {
+      if (left.team !== right.team) {
+        return left.team - right.team;
+      }
+      return left.champion.localeCompare(right.champion);
+    });
+}
+
+function summarizeReplayMovementFixture(fixture: LoadedReplayMovementFixture | null, playerCount: number): string {
+  if (!fixture) {
+    return "(No replay-derived movement fixture published for this replay yet)";
+  }
+
+  const assigned = fixture.validation?.summary?.assignmentCount ?? fixture.movement.assignments.length;
+  const passing = fixture.validation?.summary?.passingAssignmentCount ?? 0;
+  if (playerCount <= 0) {
+    return "(Replay-derived movement fixture loaded, but it had no assigned participant tracks)";
+  }
+
+  if (fixture.validation?.summary) {
+    return `(Loaded replay-derived movement for ${playerCount} participants, ${passing}/${assigned} current validation passes)`;
+  }
+
+  return `(Loaded replay-derived movement for ${playerCount} participants)`;
+}
+
+const hasApiMovement = computed(() => apiMovement.value.some((player) => player.positions.length > 0));
+const hasReplayMovement = computed(() => replayMovement.value.some((player) => player.positions.length > 0));
+const apiMovementCount = computed(() => apiMovement.value.filter((player) => player.positions.length > 0).length);
+const replayMovementCount = computed(() => replayMovement.value.filter((player) => player.positions.length > 0).length);
+
+const minimapPrimaryData = computed(() => {
+  if (movementCompareMode.value === "replay" && hasReplayMovement.value) {
+    return replayMovement.value;
+  }
+  if (movementCompareMode.value === "api" && hasApiMovement.value) {
+    return apiMovement.value;
+  }
+  if (hasApiMovement.value) {
+    return apiMovement.value;
+  }
+  return replayMovement.value;
+});
+
+const minimapComparisonData = computed(() => {
+  if (movementCompareMode.value !== "overlay") {
+    return [];
+  }
+  if (hasApiMovement.value && hasReplayMovement.value) {
+    return replayMovement.value;
+  }
+  return [];
+});
+
+const minimapPrimaryLabel = computed(() => {
+  if (movementCompareMode.value === "replay" || (!hasApiMovement.value && hasReplayMovement.value)) {
+    return "Replay";
+  }
+  return "API";
+});
+
+const minimapComparisonLabel = computed(() => "Replay");
+
+const minimapEmptyMessage = computed(() => {
+  if (!hasApiMovement.value && !hasReplayMovement.value) {
+    return "No Riot or replay-derived movement fixture is available for this replay.";
+  }
+  if (movementCompareMode.value === "replay" && !hasReplayMovement.value) {
+    return "No replay-derived participant movement fixture is available for this replay.";
+  }
+  return "No Riot timeline movement fixture is available for this replay.";
+});
+
+async function loadMovementData(matchId: string | null): Promise<string> {
+  apiMovement.value = [];
+  replayMovement.value = [];
+  replayMovementStatus.value = "No replay-derived movement fixture loaded yet.";
+
+  let apiStatus = "(No API movement fixture available)";
   if (riotBundle.value) {
     apiMovement.value = buildApiMovementFromBundle(riotBundle.value);
     const apiValid = apiMovement.value.filter((player) => player.positions.length > 0).length;
-    return apiValid > 0
+    apiStatus = apiValid > 0
       ? `(Loaded Riot timeline movement plus event anchors for ${apiValid} players)`
       : "(Riot timeline fixture did not contain participant positions)";
-  }
+  } else {
+    try {
+      const apiRes = await fetch(`api-positions.json?t=${Date.now()}`);
+      if (!apiRes.ok) {
+        apiStatus = `(No API movement fixture available: ${apiRes.status})`;
+      } else {
+        const apiRaw = await apiRes.json();
+        const players = summary.value?.players ?? [];
+        apiMovement.value = apiRaw.map((player: any) => {
+          const summaryPlayer = players[player.participantId - 1];
+          return {
+            champion: summaryPlayer?.champion ?? `P${player.participantId}`,
+            team: Number(summaryPlayer?.team ?? 100),
+            playerName: getPlayerDisplayName(summaryPlayer?.riotIdGameName, summaryPlayer?.riotIdTagLine),
+            championIconSrc: getChampionIconSrc(summaryPlayer?.champion ?? `P${player.participantId}`, summary.value?.gameVersion ?? "16.5.1"),
+            roleLabel: getRoleLabel(summaryPlayer?.teamPosition),
+            positions: player.positions.map((position: any) => ({
+              x: position.x,
+              y: position.y,
+              timestamp: position.timestamp,
+            })),
+          };
+        });
 
-  try {
-    const apiRes = await fetch(`api-positions.json?t=${Date.now()}`);
-    if (!apiRes.ok) {
-      return `(No API movement fixture available: ${apiRes.status})`;
+        const apiValid = apiMovement.value.filter((player) => player.positions.length > 0).length;
+        apiStatus = apiValid > 0
+          ? `(Loaded fallback API movement for ${apiValid} players)`
+          : "(Fallback API movement fixture had no positions)";
+      }
+    } catch (error) {
+      apiMovement.value = [];
+      apiStatus = `(API movement unavailable: ${error instanceof Error ? error.message : String(error)})`;
     }
-
-    const apiRaw = await apiRes.json();
-    const players = summary.value?.players ?? [];
-    apiMovement.value = apiRaw.map((player: any) => {
-      const summaryPlayer = players[player.participantId - 1];
-      return {
-        champion: summaryPlayer?.champion ?? `P${player.participantId}`,
-        team: Number(summaryPlayer?.team ?? 100),
-        playerName: getPlayerDisplayName(summaryPlayer?.riotIdGameName, summaryPlayer?.riotIdTagLine),
-        championIconSrc: getChampionIconSrc(summaryPlayer?.champion ?? `P${player.participantId}`, summary.value?.gameVersion ?? "16.5.1"),
-        roleLabel: getRoleLabel(summaryPlayer?.teamPosition),
-        positions: player.positions.map((position: any) => ({
-          x: position.x,
-          y: position.y,
-          timestamp: position.timestamp,
-        })),
-      };
-    });
-
-    const apiValid = apiMovement.value.filter((player) => player.positions.length > 0).length;
-    return apiValid > 0
-      ? `(Loaded fallback API movement for ${apiValid} players)`
-      : "(Fallback API movement fixture had no positions)";
-  } catch (error) {
-    apiMovement.value = [];
-    return `(API movement unavailable: ${error instanceof Error ? error.message : String(error)})`;
   }
+
+  let replayStatus = "(No replay-derived movement fixture available)";
+  if (matchId) {
+    try {
+      const replayFixture = await loadReplayMovementFixture(matchId);
+      replayMovement.value = replayFixture
+        ? buildReplayMovementFromFixture(replayFixture, riotBundle.value, summary.value)
+        : [];
+      replayMovementStatus.value = summarizeReplayMovementFixture(replayFixture, replayMovementCount.value);
+      replayStatus = replayMovementStatus.value;
+    } catch (error) {
+      replayMovement.value = [];
+      replayMovementStatus.value = `(Replay-derived movement unavailable: ${error instanceof Error ? error.message : String(error)})`;
+      replayStatus = replayMovementStatus.value;
+    }
+  } else {
+    replayMovementStatus.value = "(Replay filename did not map to a published replay movement fixture)";
+    replayStatus = replayMovementStatus.value;
+  }
+
+  movementCompareMode.value = hasApiMovement.value && hasReplayMovement.value
+    ? "overlay"
+    : hasReplayMovement.value
+      ? "replay"
+      : "api";
+
+  return `${apiStatus} ${replayStatus}`;
 }
 
 const maxGold = computed(() =>
@@ -418,7 +612,7 @@ async function loadReplay(file: File): Promise<void> {
 
     setDuration(parsedSummary.gameLengthMillis);
     seek(0);
-    const movementStatus = await loadMovementData();
+    const movementStatus = await loadMovementData(derivedMatchId);
     status.value = `Parsed ${file.name} successfully. ${movementStatus}`;
   } catch (error) {
     summary.value = null;
@@ -495,18 +689,62 @@ function onFileChange(event: Event): void {
                 <div class="d-flex justify-content-between align-items-start">
                   <div>
                     <h2 class="fs-5 mb-1">Match Timeline</h2>
-                    <p class="text-muted small" v-if="apiMovement.length">Riot timeline frame positions plus combat and objective event anchors rendered on the original Summoner&apos;s Rift minimap.</p>
+                    <p class="text-muted small" v-if="hasApiMovement && hasReplayMovement">Overlaying Riot timeline movement against replay-derived participant positions. Solid trails are API, dashed trails are replay-derived.</p>
+                    <p class="text-muted small" v-else-if="hasReplayMovement">Showing replay-derived participant positions from the decoder artifacts.</p>
+                    <p class="text-muted small" v-else-if="hasApiMovement">Riot timeline frame positions plus combat and objective event anchors rendered on the original Summoner&apos;s Rift minimap.</p>
                     <p class="text-muted small" v-else>No decoded movement frames are available yet.</p>
                   </div>
-                  <span v-if="apiMovement.length" class="badge bg-success-subtle text-success-emphasis">API Movement Ready</span>
-                  <span v-else class="badge bg-warning-subtle text-warning-emphasis">Movement Unavailable</span>
+                  <div class="d-flex flex-wrap gap-2 justify-content-end align-items-center">
+                    <span v-if="hasApiMovement" class="badge bg-success-subtle text-success-emphasis">API {{ apiMovementCount }}</span>
+                    <span v-else class="badge bg-secondary-subtle text-secondary-emphasis">API Missing</span>
+                    <span v-if="hasReplayMovement" class="badge bg-info-subtle text-info-emphasis">Replay {{ replayMovementCount }}</span>
+                    <span v-else class="badge bg-secondary-subtle text-secondary-emphasis">Replay Missing</span>
+                  </div>
+                </div>
+                <div class="d-flex flex-column flex-lg-row justify-content-between align-items-start align-items-lg-center gap-2">
+                  <div class="d-flex flex-column gap-1">
+                    <span class="text-muted x-small">{{ riotFixtureStatus }}</span>
+                    <span class="text-muted x-small">{{ replayMovementStatus }}</span>
+                  </div>
+                  <div v-if="hasApiMovement || hasReplayMovement" class="btn-group btn-group-sm movement-mode-toggle">
+                    <button
+                      type="button"
+                      class="btn"
+                      :class="movementCompareMode === 'api' ? 'btn-primary' : 'btn-outline-secondary'"
+                      :disabled="!hasApiMovement"
+                      @click="movementCompareMode = 'api'"
+                    >
+                      API
+                    </button>
+                    <button
+                      type="button"
+                      class="btn"
+                      :class="movementCompareMode === 'replay' ? 'btn-primary' : 'btn-outline-secondary'"
+                      :disabled="!hasReplayMovement"
+                      @click="movementCompareMode = 'replay'"
+                    >
+                      Replay
+                    </button>
+                    <button
+                      type="button"
+                      class="btn"
+                      :class="movementCompareMode === 'overlay' ? 'btn-primary' : 'btn-outline-secondary'"
+                      :disabled="!(hasApiMovement && hasReplayMovement)"
+                      @click="movementCompareMode = 'overlay'"
+                    >
+                      Compare
+                    </button>
+                  </div>
                 </div>
                 
                 <div class="movement-map-frame d-flex justify-content-center bg-black bg-opacity-25 rounded-3 p-2 p-xl-3 border border-secondary border-opacity-10">
                   <Minimap
                     class="movement-map"
-                    :player-data="apiMovement"
-                    empty-message="No Riot timeline movement fixture is available for this replay."
+                    :player-data="minimapPrimaryData"
+                    :comparison-data="minimapComparisonData"
+                    :primary-label="minimapPrimaryLabel"
+                    :comparison-label="minimapComparisonLabel"
+                    :empty-message="minimapEmptyMessage"
                   />
                 </div>
                 <Timeline class="main-timeline" />

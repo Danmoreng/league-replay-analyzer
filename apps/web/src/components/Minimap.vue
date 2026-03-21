@@ -6,13 +6,19 @@ import { type PlayerMovementData, usePlayback } from "../composables/usePlayback
 const props = withDefaults(
   defineProps<{
     playerData?: PlayerMovementData[];
+    comparisonData?: PlayerMovementData[];
     emptyMessage?: string;
     backgroundImageSrc?: string;
+    primaryLabel?: string;
+    comparisonLabel?: string;
   }>(),
   {
     playerData: () => [],
+    comparisonData: () => [],
     emptyMessage: "No map coordinates are available from the current parser output.",
     backgroundImageSrc: "/summoners-rift-minimap.png",
+    primaryLabel: "Primary",
+    comparisonLabel: "Comparison",
   },
 );
 
@@ -27,7 +33,11 @@ const roleOrder = ["Top", "Jungle", "Middle", "Bottom", "Support", "Utility", "U
 const renderablePlayers = computed(() =>
   props.playerData.filter((player) => player.positions.length > 0),
 );
+const renderableComparisonPlayers = computed(() =>
+  props.comparisonData.filter((player) => player.positions.length > 0),
+);
 const hasRenderablePlayers = computed(() => renderablePlayers.value.length > 0);
+const hasRenderableComparisonPlayers = computed(() => renderableComparisonPlayers.value.length > 0);
 
 function toCanvasCoord(leagueCoord: number): number {
   return (leagueCoord / leagueMapSize) * mapSize;
@@ -48,6 +58,10 @@ function getVisiblePositions(player: PlayerMovementData) {
   }
 
   return visible.length > 0 ? visible : [player.positions[0]];
+}
+
+function getComparisonColor(team: number, alpha = 1): string {
+  return team === 100 ? `rgba(147, 224, 255, ${alpha})` : `rgba(255, 211, 132, ${alpha})`;
 }
 
 function getRoleRank(roleLabel?: string): number {
@@ -117,7 +131,58 @@ function drawTrail(ctx: CanvasRenderingContext2D, player: PlayerMovementData, po
   }
 }
 
+function drawComparisonTrail(ctx: CanvasRenderingContext2D, player: PlayerMovementData, positions: PlayerMovementData["positions"]): void {
+  if (positions.length < 2) {
+    return;
+  }
+
+  const visibleTrail = positions.slice(-trailPointCount);
+  for (let index = 1; index < visibleTrail.length; index += 1) {
+    const previous = visibleTrail[index - 1];
+    const current = visibleTrail[index];
+    const alpha = 0.2 + ((0.55 * index) / (visibleTrail.length - 1));
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.setLineDash([8, 7]);
+    ctx.moveTo(toCanvasCoord(previous.x), mapSize - toCanvasCoord(previous.y));
+    ctx.lineTo(toCanvasCoord(current.x), mapSize - toCanvasCoord(current.y));
+    ctx.strokeStyle = getComparisonColor(player.team, alpha);
+    ctx.lineWidth = 2;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function drawComparisonMarker(ctx: CanvasRenderingContext2D, player: PlayerMovementData, positions: PlayerMovementData["positions"]): void {
+  if (positions.length === 0) {
+    return;
+  }
+
+  const current = positions[positions.length - 1];
+  const x = toCanvasCoord(current.x);
+  const y = mapSize - toCanvasCoord(current.y);
+
+  ctx.save();
+  ctx.strokeStyle = getComparisonColor(player.team, 0.95);
+  ctx.fillStyle = "rgba(8, 11, 18, 0.88)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(x, y, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawPlayers(ctx: CanvasRenderingContext2D): void {
+  for (const player of renderableComparisonPlayers.value) {
+    const visiblePositions = getVisiblePositions(player);
+    drawComparisonTrail(ctx, player, visiblePositions);
+    drawComparisonMarker(ctx, player, visiblePositions);
+  }
+
   for (const player of renderablePlayers.value) {
     const visiblePositions = getVisiblePositions(player);
     drawTrail(ctx, player, visiblePositions);
@@ -188,6 +253,10 @@ onUnmounted(() => {
           />
           <div v-else class="marker-dot" :class="player.team === 100 ? 'blue-team' : 'red-team'"></div>
         </div>
+      </div>
+      <div v-if="hasRenderableComparisonPlayers" class="comparison-legend">
+        <span class="legend-chip legend-primary">{{ primaryLabel }}</span>
+        <span class="legend-chip legend-comparison">{{ comparisonLabel }}</span>
       </div>
       <div v-if="!hasRenderablePlayers" class="empty-overlay">
         <p>{{ emptyMessage }}</p>
@@ -376,6 +445,51 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.9);
   color: #17202a;
   font-weight: 600;
+}
+
+.comparison-legend {
+  position: absolute;
+  z-index: 3;
+  left: 14px;
+  bottom: 14px;
+  display: flex;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(8, 11, 18, 0.84);
+  color: white;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.legend-primary::before,
+.legend-comparison::before {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  height: 0;
+  border-top: 3px solid currentColor;
+}
+
+.legend-primary {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.legend-comparison {
+  color: rgba(255, 211, 132, 0.95);
+}
+
+.legend-comparison::before {
+  border-top-style: dashed;
 }
 
 @media (max-width: 1080px) {
