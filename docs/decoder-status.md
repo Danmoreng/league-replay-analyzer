@@ -215,6 +215,14 @@ The most useful next backend steps are:
 - strengthen movement identity priors and assignment thresholds so weak families stay unmatched instead of mislabelled
 - keep using scalar/state extraction as the identity backbone for movement
 
+The next session should begin with more replay intake:
+
+- collect more `.rofl` files
+- collect matching Riot `match.json` and `timeline.json` fixtures for each replay when possible
+- rerun the full corpus pipeline before changing thresholds again
+
+The highest-value next implementation after intake is to upgrade the movement coordinate model from sparse decode-signature priors to stronger family-aware priors per version group.
+
 ## Related Docs
 
 Use these together with this status file:

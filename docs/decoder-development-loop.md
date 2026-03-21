@@ -402,3 +402,65 @@ The next concrete task should be:
 5. use the validated extraction output as the UI input contract
 
 That is the shortest path from investigation tooling to an actual decoder.
+
+## Next Session: Corpus Intake Plan
+
+The next session should start with more replay intake before changing decoder logic again. More corpus support is currently more valuable than another round of threshold tuning.
+
+### What To Collect
+
+For each new replay, prefer a complete fixture bundle:
+
+- the `.rofl` replay file
+- Riot `match.json`
+- Riot `timeline.json`
+
+The replay file alone is enough for discovery artifacts, but `match.json` and `timeline.json` are still needed for supervised validation, corpus promotion, and movement identity scoring.
+
+### Where To Put New Fixtures
+
+Keep using the existing layout:
+
+- replay file under `replays/`
+- API fixtures under `replays/api/<match-id-with-underscore>/`
+
+Example:
+
+- `replays/EUW1-1234567890.rofl`
+- `replays/api/EUW1_1234567890/match.json`
+- `replays/api/EUW1_1234567890/timeline.json`
+
+### Patch Preference
+
+Latest-patch replays are still useful and should be collected even if they are not `16.1`.
+
+Recommended priority:
+
+1. several more recent standard Summoner's Rift replays with full fixture bundles
+2. multiple replays from the same latest patch if possible
+3. any additional `15.22`, `15.23`, or `16.1` fixtures only if they are easy to obtain
+
+The main need is more examples per version group so replay-local winners can become corpus-backed patterns.
+
+### First Commands To Run After New Fixtures Land
+
+1. rerun the full decoder corpus pipeline:
+   - `& 'C:\Program Files\PowerShell\7\pwsh.exe' -File .\scripts\run_decoder_corpus.ps1 -Configuration Debug`
+2. inspect:
+   - `artifacts/corpus-schema.json`
+   - `artifacts/movement-identity-priors.json`
+   - `artifacts/movement-coordinate-model.json`
+3. compare which new version groups produce:
+   - promoted scalar patterns
+   - promoted movement patterns
+   - passing assigned movement tracks
+
+### Expected Next Decoder Work After Intake
+
+Once new replays are available, the next implementation priority should be:
+
+1. strengthen the movement coordinate model from decode-signature priors to family-aware priors per version group
+2. use those priors to hard-reject weak movement candidates, especially in noisy `0x00` families
+3. rerun corpus validation and measure whether the latest-patch replays produce stable replay-only scalar and movement extraction
+
+Do not port more of this logic into C++ until the larger corpus makes the movement and scalar patterns more stable.
