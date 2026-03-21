@@ -22,6 +22,92 @@ export const volatileBundleMetricKeys = new Set([
   "powerMax",
 ]);
 
+export function siblingAnchorMetric(metricKey) {
+  switch (metricKey) {
+    case "health":
+      return "healthMax";
+    case "power":
+      return "powerMax";
+    default:
+      return null;
+  }
+}
+
+export function evaluateSiblingAnchorCompatibility(metricKey, candidate, siblingRecord) {
+  const siblingMetric = siblingAnchorMetric(metricKey);
+  if (!siblingMetric || !candidate || !siblingRecord) {
+    return { compatible: false, score: 0 };
+  }
+  if (candidate.familyKey !== siblingRecord.familyKey) {
+    return { compatible: false, score: 0 };
+  }
+
+  const slotDistance = Math.abs((candidate.slotIndex ?? 0) - (siblingRecord.slotIndex ?? 0));
+  if (slotDistance > 1) {
+    return { compatible: false, score: 0 };
+  }
+
+  const siblingFinalValue = siblingRecord.finalValue;
+  const candidateFinalValue = candidate.finalValue;
+  if (!Number.isFinite(siblingFinalValue) || !Number.isFinite(candidateFinalValue) || siblingFinalValue <= 0) {
+    return { compatible: false, score: 0 };
+  }
+  if (candidateFinalValue < 0 || candidateFinalValue > (siblingFinalValue * 1.05)) {
+    return { compatible: false, score: 0 };
+  }
+
+  const candidateSeries = candidate.series ?? [];
+  const siblingSeries = siblingRecord.timeline ?? [];
+  const siblingValueByTimestamp = new Map(
+    siblingSeries
+      .filter((point) => Number.isFinite(point?.timestamp) && Number.isFinite(point?.value))
+      .map((point) => [point.timestamp, point.value]),
+  );
+  const overlap = candidateSeries.filter((point) => siblingValueByTimestamp.has(point.timestamp));
+  if (overlap.length === 0) {
+    return { compatible: false, score: 0 };
+  }
+
+  let underBoundCount = 0;
+  let meaningfullyBelowCount = 0;
+  for (const point of overlap) {
+    const siblingValue = siblingValueByTimestamp.get(point.timestamp);
+    if (!Number.isFinite(point.value) || !Number.isFinite(siblingValue) || siblingValue <= 0) {
+      continue;
+    }
+    if (point.value <= (siblingValue * 1.05)) {
+      underBoundCount += 1;
+    }
+    if (point.value <= (siblingValue * 0.98)) {
+      meaningfullyBelowCount += 1;
+    }
+  }
+
+  const underBoundRatio = underBoundCount / overlap.length;
+  const belowRatio = meaningfullyBelowCount / overlap.length;
+  if (underBoundRatio < 0.85) {
+    return { compatible: false, score: 0 };
+  }
+
+  const finalRatio = candidateFinalValue / siblingFinalValue;
+  const score = clamp(
+    (0.45 * underBoundRatio) +
+    (0.2 * belowRatio) +
+    (0.25 * Math.max(0, 1 - (slotDistance * 0.4))) +
+    (0.1 * Math.max(0, 1 - Math.abs(finalRatio - 0.6))),
+    0,
+    1,
+  );
+
+  return {
+    compatible: true,
+    score,
+    siblingMetric,
+    slotDistance,
+    finalRatio,
+  };
+}
+
 export function parsePatternDescriptor(groupKey) {
   const [versionGroup, familyKey, offsetText, decode] = String(groupKey ?? "").split("|");
   const offset = Number.parseInt(offsetText, 10);

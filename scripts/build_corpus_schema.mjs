@@ -294,7 +294,7 @@ function loadBundleReplayEntries(artifactDir) {
 
   const replayEntryByKey = new Map();
   for (const selectedPattern of extractedStats.selectedPatterns ?? []) {
-    if (selectedPattern.source !== "bundle-recommended") {
+    if (selectedPattern.source !== "bundle-recommended" && selectedPattern.source !== "bundle-promoted") {
       continue;
     }
 
@@ -603,11 +603,16 @@ function promoteBundleGroup(group) {
     return false;
   }
 
+  const normalizedRmseLimit =
+    (bundleSupport.passCount ?? 0) >= 2 && (group.support.medianCorrelation ?? 0) >= 0.5
+      ? 1.25
+      : 1.2;
+
   return (
     group.support.promotedReplays >= 1 &&
     group.support.medianParticipants >= 1 &&
     group.support.medianCorrelation >= 0.3 &&
-    group.support.medianNormalizedRmse <= 1.2 &&
+    group.support.medianNormalizedRmse <= normalizedRmseLimit &&
     bundleSupport.bundleScore >= 0.84 &&
     bundleSupport.replayOverlap >= 0.4 &&
     bundleSupport.strongMetricCount >= 3 &&

@@ -17,7 +17,9 @@ import {
   addFamilySupportTrust as addFamilySupportTrustToMap,
   buildBundleRecommendedPatterns as buildBundleRecommendedPatternsFromUtils,
   bundleSupportMetricKeys as bundleSupportMetricKeysFromUtils,
+  evaluateSiblingAnchorCompatibility,
   isBundleSlotTrusted as isBundleSlotTrustedBySupport,
+  siblingAnchorMetric,
   volatileBundleMetricKeys,
 } from "./lib/scalar-bundle-utils.mjs";
 
@@ -139,8 +141,19 @@ function computeSelectionScore(source, pattern) {
   switch (source) {
     case "bundle-promoted":
       return confidence + 0.42 + (0.06 * Math.min(3, pattern.bundleSupport?.strongMetricCount ?? 0));
-    case "bundle-recommended":
-      return confidence + 0.18 + (0.03 * Math.min(3, pattern.bundleSupport?.strongMetricCount ?? 0));
+    case "bundle-recommended": {
+      let score = confidence + 0.02 + (0.03 * Math.min(3, pattern.bundleSupport?.strongMetricCount ?? 0));
+      if ((pattern.bundleSupport?.passCount ?? 0) > 0) {
+        score += 0.08;
+      }
+      if (
+        (pattern.bundleSupport?.passCount ?? 0) === 0 &&
+        (volatileBundleMetricKeys.has(pattern.metric) || pattern.metric === "movementSpeed")
+      ) {
+        score -= 0.06;
+      }
+      return score;
+    }
     case "replay-promoted":
       return confidence + 0.25;
     case "corpus-promoted":
@@ -530,7 +543,8 @@ function evaluateSeriesPlausibility(metricKey, series) {
       const span = Math.max(...values) - Math.min(...values);
       const spanFactor = clamp(span / Math.max(Math.max(...values), 600), 0, 1);
       const nonNegativeFactor = values.filter((value) => value >= -1e-6).length / values.length;
-      return (0.5 * inRangeRatio) + (0.25 * nonNegativeFactor) + (0.25 * Math.max(0.35, spanFactor));
+      const extremeOutlierFactor = values.some((value) => value < -250 || value > 12000) ? 0.55 : 1;
+      return ((0.5 * inRangeRatio) + (0.25 * nonNegativeFactor) + (0.25 * Math.max(0.35, spanFactor))) * extremeOutlierFactor;
     }
     case "healthMax": {
       minExpected = 200;
@@ -543,7 +557,8 @@ function evaluateSeriesPlausibility(metricKey, series) {
         }
       }
       const stabilityRatio = values.length > 1 ? stabilityCount / (values.length - 1) : 1;
-      return (0.6 * inRangeRatio) + (0.4 * stabilityRatio);
+      const extremeOutlierFactor = values.some((value) => value < -250 || value > 14000) ? 0.5 : 1;
+      return ((0.6 * inRangeRatio) + (0.4 * stabilityRatio)) * extremeOutlierFactor;
     }
     case "power": {
       minExpected = 0;
@@ -552,7 +567,8 @@ function evaluateSeriesPlausibility(metricKey, series) {
       const span = Math.max(...values) - Math.min(...values);
       const spanFactor = clamp(span / Math.max(Math.max(...values), 250), 0, 1);
       const nonNegativeFactor = values.filter((value) => value >= -1e-6).length / values.length;
-      return (0.5 * inRangeRatio) + (0.2 * nonNegativeFactor) + (0.3 * Math.max(0.25, spanFactor));
+      const extremeOutlierFactor = values.some((value) => value < -200 || value > 7000) ? 0.55 : 1;
+      return ((0.5 * inRangeRatio) + (0.2 * nonNegativeFactor) + (0.3 * Math.max(0.25, spanFactor))) * extremeOutlierFactor;
     }
     case "powerMax": {
       minExpected = 0;
@@ -565,21 +581,28 @@ function evaluateSeriesPlausibility(metricKey, series) {
         }
       }
       const stabilityRatio = values.length > 1 ? stabilityCount / (values.length - 1) : 1;
-      return (0.6 * inRangeRatio) + (0.4 * stabilityRatio);
+      const extremeOutlierFactor = values.some((value) => value < -200 || value > 8000) ? 0.5 : 1;
+      return ((0.6 * inRangeRatio) + (0.4 * stabilityRatio)) * extremeOutlierFactor;
     }
     case "movementSpeed": {
       minExpected = 120;
       maxExpected = 1200;
       const inRangeRatio = values.filter((value) => value >= minExpected && value <= maxExpected).length / values.length;
       let moderateChanges = 0;
+      let extremeJumps = 0;
       for (let index = 1; index < values.length; index += 1) {
         const diff = Math.abs(values[index] - values[index - 1]);
         if (diff >= 1 && diff <= 220) {
           moderateChanges += 1;
         }
+        if (diff > 1000) {
+          extremeJumps += 1;
+        }
       }
       const changeRatio = values.length > 1 ? moderateChanges / (values.length - 1) : 0.5;
-      return (0.62 * inRangeRatio) + (0.38 * Math.max(0.2, changeRatio));
+      const extremeOutlierFactor = values.some((value) => value < -500 || value > 2500) ? 0.25 : 1;
+      const jumpPenalty = extremeJumps > 0 ? 0.35 : 1;
+      return ((0.62 * inRangeRatio) + (0.38 * Math.max(0.2, changeRatio))) * extremeOutlierFactor * jumpPenalty;
     }
     default:
       return 0.5;
@@ -861,6 +884,12 @@ function candidateOutputScore(metric, record) {
   if (record.transformLabel !== "identity") {
     score += 0.05;
   }
+  if (Number.isFinite(record.siblingAnchorScore)) {
+    score += 0.12 * record.siblingAnchorScore;
+  }
+  if (Number.isFinite(record.familyAnchorScore)) {
+    score += 0.08 * record.familyAnchorScore;
+  }
   if (volatileBundleMetricKeys.has(metric)) {
     if (record.transformLabel === "identity") {
       score -= 0.12;
@@ -920,6 +949,132 @@ function buildCandidateRows(pattern, familyFieldIndex, roster) {
   }
 
   return candidates;
+}
+
+function findSiblingAnchoredParticipant(candidate, participantOutputs) {
+  const siblingMetric = siblingAnchorMetric(candidate.metric);
+  if (!siblingMetric) {
+    return null;
+  }
+
+  const matches = participantOutputs
+    .map((participantOutput) => {
+      const siblingRecord = participantOutput.metrics[siblingMetric] ?? null;
+      const compatibility = evaluateSiblingAnchorCompatibility(candidate.metric, candidate, siblingRecord);
+      if (!compatibility.compatible) {
+        return null;
+      }
+      return {
+        rosterIndex: participantOutput.rosterIndex,
+        siblingMetric,
+        compatibility,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) =>
+      right.compatibility.score - left.compatibility.score ||
+      left.compatibility.slotDistance - right.compatibility.slotDistance ||
+      left.rosterIndex - right.rosterIndex
+    );
+
+  if (matches.length === 0) {
+    return null;
+  }
+  if (matches.length > 1) {
+    const [best, second] = matches;
+    if (
+      Math.abs((best.compatibility.score ?? 0) - (second.compatibility.score ?? 0)) < 0.08 &&
+      (best.compatibility.slotDistance ?? 99) === (second.compatibility.slotDistance ?? 99)
+    ) {
+      return null;
+    }
+  }
+
+  return matches[0];
+}
+
+function familyAnchorWeight(metricKey) {
+  switch (metricKey) {
+    case "xp":
+      return 1;
+    case "totalGold":
+      return 0.96;
+    case "level":
+      return 0.84;
+    case "minionsKilled":
+    case "jungleMinionsKilled":
+      return 0.74;
+    case "healthMax":
+      return 0.86;
+    case "powerMax":
+      return 0.82;
+    default:
+      return 0;
+  }
+}
+
+function findNearbyFamilyAnchor(candidate, participantOutputs) {
+  if (!["healthMax", "power"].includes(candidate.metric)) {
+    return null;
+  }
+
+  const maxDistance = candidate.metric === "healthMax" ? 2 : 1;
+  const matches = [];
+  for (const participantOutput of participantOutputs) {
+    for (const [metricKey, metricRecord] of Object.entries(participantOutput.metrics ?? {})) {
+      if (metricRecord.familyKey !== candidate.familyKey) {
+        continue;
+      }
+      const weight = familyAnchorWeight(metricKey);
+      if (weight <= 0) {
+        continue;
+      }
+      const slotDistance = Math.abs((metricRecord.slotIndex ?? candidate.slotIndex) - candidate.slotIndex);
+      if (slotDistance > maxDistance) {
+        continue;
+      }
+      if (
+        candidate.metric === "power" &&
+        metricKey === "powerMax" &&
+        Number.isFinite(metricRecord.finalValue) &&
+        Number.isFinite(candidate.finalValue) &&
+        candidate.finalValue > (metricRecord.finalValue * 1.05)
+      ) {
+        continue;
+      }
+
+      let score = weight - (0.22 * slotDistance) + (0.04 * (candidate.plausibilityScore ?? 0));
+      if (metricRecord.source === "bundle-promoted" || metricRecord.source === "corpus-promoted") {
+        score += 0.04;
+      }
+      matches.push({
+        rosterIndex: participantOutput.rosterIndex,
+        anchorMetric: metricKey,
+        score,
+        slotDistance,
+      });
+    }
+  }
+
+  matches.sort((left, right) =>
+    right.score - left.score ||
+    left.slotDistance - right.slotDistance ||
+    left.rosterIndex - right.rosterIndex
+  );
+  if (matches.length === 0) {
+    return null;
+  }
+  if (matches.length > 1) {
+    const [best, second] = matches;
+    if (
+      Math.abs((best.score ?? 0) - (second.score ?? 0)) < 0.08 &&
+      (best.slotDistance ?? 99) === (second.slotDistance ?? 99)
+    ) {
+      return null;
+    }
+  }
+
+  return matches[0];
 }
 
 function buildPatternEdges(pattern, candidates, roster) {
@@ -1194,7 +1349,28 @@ function main() {
 
   const unresolvedCandidates = [];
   for (const candidate of candidateRows) {
-    if (candidate.pattern.source === "bundle-recommended" && !isBundleSlotTrustedBySupport(familySupportTrust, candidate)) {
+    const slotKey = `${candidate.familyKey}|${candidate.slotIndex}`;
+    const directKey = `${candidate.familyKey}|${candidate.slotIndex}|${candidate.metric}`;
+    const directRosterIndex =
+      directAssignments.get(directKey) ??
+      finalSlotAssignments.get(slotKey) ??
+      null;
+    const siblingAnchored = findSiblingAnchoredParticipant(candidate, participantOutputs);
+    const acceptedSiblingAnchor = siblingAnchored && (siblingAnchored.compatibility?.score ?? 0) >= 0.85
+      ? siblingAnchored
+      : null;
+    const familyAnchored = findNearbyFamilyAnchor(candidate, participantOutputs);
+    const acceptedFamilyAnchor = familyAnchored && (familyAnchored.score ?? 0) >= 0.7
+      ? familyAnchored
+      : null;
+    const rosterIndex = directRosterIndex ?? acceptedSiblingAnchor?.rosterIndex ?? acceptedFamilyAnchor?.rosterIndex ?? null;
+
+    if (
+      candidate.pattern.source === "bundle-recommended" &&
+      !isBundleSlotTrustedBySupport(familySupportTrust, candidate) &&
+      !acceptedSiblingAnchor &&
+      !acceptedFamilyAnchor
+    ) {
       unresolvedCandidates.push({
         familyKey: candidate.familyKey,
         slotIndex: candidate.slotIndex,
@@ -1205,13 +1381,6 @@ function main() {
       });
       continue;
     }
-
-    const slotKey = `${candidate.familyKey}|${candidate.slotIndex}`;
-    const directKey = `${candidate.familyKey}|${candidate.slotIndex}|${candidate.metric}`;
-    const rosterIndex =
-      directAssignments.get(directKey) ??
-      finalSlotAssignments.get(slotKey) ??
-      null;
 
     if (rosterIndex == null) {
       unresolvedCandidates.push({
@@ -1229,6 +1398,24 @@ function main() {
       continue;
     }
 
+    if (candidate.metric === "health") {
+      const sibling = participantOutput.metrics.healthMax ?? null;
+      const siblingAnchored = sibling &&
+        sibling.familyKey === candidate.familyKey &&
+        Math.abs((sibling.slotIndex ?? candidate.slotIndex) - candidate.slotIndex) <= 1;
+      if (!siblingAnchored) {
+        unresolvedCandidates.push({
+          familyKey: candidate.familyKey,
+          slotIndex: candidate.slotIndex,
+          metric: candidate.metric,
+          finalValue: candidate.finalValue,
+          patternConfidence: candidate.pattern.confidence,
+          reason: "health-without-healthmax-anchor",
+        });
+        continue;
+      }
+    }
+
     const existing = participantOutput.metrics[candidate.metric];
     const record = {
       familyKey: candidate.familyKey,
@@ -1237,6 +1424,8 @@ function main() {
       confidence: candidate.pattern.confidence,
       transformLabel: candidate.transformLabel,
       plausibilityScore: candidate.plausibilityScore,
+      siblingAnchorScore: acceptedSiblingAnchor?.compatibility?.score ?? null,
+      familyAnchorScore: acceptedFamilyAnchor?.score ?? null,
       finalValue: candidate.finalValue,
       timeline: candidate.series.map((point) => ({
         timestamp: point.timestamp,
