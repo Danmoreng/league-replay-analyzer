@@ -345,7 +345,11 @@ function loadBundleReplayEntries(artifactDir) {
     const participantMetricRecords = [];
     for (const participant of extractedStats.participants ?? []) {
       const metricRecord = participant.metrics?.[selectedPattern.metric];
-      if (!metricRecord || metricRecord.familyKey !== selectedPattern.familyKey) {
+      if (
+        !metricRecord ||
+        metricRecord.familyKey !== selectedPattern.familyKey ||
+        metricRecord.patternKey !== selectedPattern.patternKey
+      ) {
         continue;
       }
       const validationParticipant = validationParticipantByRosterIndex.get(participant.rosterIndex);
@@ -699,6 +703,9 @@ function buildComparableSchema(schema) {
     ...schema,
     generatedAtUtc: null,
     schemaFingerprint: null,
+    aliasClusters: null,
+    rankedPatterns: null,
+    bundleRankedPatterns: null,
   };
 }
 

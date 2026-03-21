@@ -60,10 +60,13 @@ The strongest companion latest-patch slab remains `16.6 | 6912 / 0xC6 / h0`, whi
 
 Important caveat:
 
-- `61894` bundle-backed metrics are not all schema-promoted yet
-- `healthMax` is promoted
-- `power` and `movementSpeed` are still ranked bundle-family candidates
-- the remaining blocker is slot-variant drift inside the slab, not complete lack of replay-only signal
+- `61894` now has two promoted bundle-backed metrics:
+  - `healthMax`
+  - `power`
+- `movementSpeed` from the same slab is still replay-only but not schema-promoted yet
+- bundle-family promotion now only consumes the exact extracted pattern that produced a replay metric; weak sibling bundle candidates no longer inherit validation from a stronger chosen sibling
+- extraction no longer feeds weak `bundleRankedPatterns` back into selection; only bundle-promoted corpus families and replay-local bundle recommendations affect replay-only scalar extraction
+- the remaining scalar blocker is no longer “missing signal”; it is convergence drift inside promoted bundle support details and slot-variant handling inside `61894`
 
 ## Current Movement Discovery Status
 

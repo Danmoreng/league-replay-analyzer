@@ -65,6 +65,9 @@ function buildSchemaFingerprint(schema) {
   return JSON.stringify({
     ...schema,
     generatedAtUtc: null,
+    aliasClusters: null,
+    rankedPatterns: null,
+    bundleRankedPatterns: null,
   });
 }
 
@@ -931,12 +934,6 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
   for (const pattern of (corpusSchema.bundlePromotedPatterns ?? []).filter((entry) => familyKeys.has(entry.familyKey))) {
     appendMapList(bundlePromotedByFamilyMetric, `${pattern.familyKey}|${pattern.metric}`, pattern);
   }
-  const bundleRankedByFamilyMetric = new Map();
-  for (const pattern of (corpusSchema.bundleRankedPatterns ?? [])
-    .filter((entry) => familyKeys.has(entry.familyKey))
-    .filter((entry) => (entry.bundleSupport?.passCount ?? 0) >= 1)) {
-    appendMapList(bundleRankedByFamilyMetric, `${pattern.familyKey}|${pattern.metric}`, pattern);
-  }
 
   const bundleRecommended = buildBundleRecommendedPatternsFromUtils(artifactDir, runManifest, summaryJson, provisionalSchema, candidateMatches)
     .filter((pattern) => familyKeys.has(pattern.familyKey))
@@ -945,14 +942,6 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
         pattern,
         bundlePromotedByFamilyMetric.get(`${pattern.familyKey}|${pattern.metric}`) ?? [],
       );
-      const ranked = selectBestBundleClusterPattern(
-        pattern,
-        bundleRankedByFamilyMetric.get(`${pattern.familyKey}|${pattern.metric}`) ?? [],
-      );
-      const allowRankedTransformOverride =
-        pattern.metric === "powerMax" ||
-        !volatileBundleMetricKeys.has(pattern.metric) ||
-        (pattern.transform?.sampleCount ?? 0) < 8;
       const allowPromotedTransformOverride =
         pattern.metric === "powerMax" ||
         !volatileBundleMetricKeys.has(pattern.metric) ||
@@ -962,16 +951,11 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
         (promoted.transform?.sampleCount ?? 0) > (pattern.transform?.sampleCount ?? 0)
         ? promoted.transform
         : null;
-      const rankedTransform = ranked &&
-        allowRankedTransformOverride &&
-        (ranked.transform?.sampleCount ?? 0) > (pattern.transform?.sampleCount ?? 0)
-        ? ranked.transform
-        : null;
       const mergedPattern = promoted
         ? {
           ...pattern,
           confidence: Math.max(pattern.confidence ?? 0, promoted.confidence ?? 0),
-          transform: rankedTransform ?? promotedTransform ?? pattern.transform,
+          transform: promotedTransform ?? pattern.transform,
           recommendedRowBand: promoted.recommendedRowBand ?? pattern.recommendedRowBand,
           recommendedSlots: promoted.recommendedSlots ?? pattern.recommendedSlots,
           slotClusterKey: promoted.slotClusterKey ?? null,
@@ -985,32 +969,10 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
             passCount: Math.max(
               pattern.bundleSupport?.passCount ?? 0,
               promoted.bundleSupport?.passCount ?? 0,
-              ranked?.bundleSupport?.passCount ?? 0,
             ),
           },
         }
-        : ranked
-          ? {
-            ...pattern,
-            confidence: Math.max(pattern.confidence ?? 0, Math.min(0.92, (ranked.confidence ?? 0) * 0.92)),
-            transform: rankedTransform ?? pattern.transform,
-            recommendedRowBand: ranked.recommendedRowBand ?? pattern.recommendedRowBand,
-            recommendedSlots: ranked.recommendedSlots ?? pattern.recommendedSlots,
-            slotClusterKey: ranked.slotClusterKey ?? null,
-            bundleSupport: {
-              ...(pattern.bundleSupport ?? {}),
-              ...(ranked.bundleSupport ?? {}),
-              strongMetricCount: Math.max(
-                pattern.bundleSupport?.strongMetricCount ?? 0,
-                ranked.bundleSupport?.strongMetricCount ?? 0,
-              ),
-              passCount: Math.max(
-                pattern.bundleSupport?.passCount ?? 0,
-                ranked.bundleSupport?.passCount ?? 0,
-              ),
-            },
-          }
-          : pattern;
+        : pattern;
       const normalized = normalizePattern(mergedPattern, candidateMatches, promoted ? "bundle-promoted" : "bundle-recommended");
       return applyFamilyLayoutPrior(normalized, familyLayouts.get(normalized.familyKey));
     });
@@ -1874,6 +1836,7 @@ function main() {
 
     const existing = participantOutput.metrics[refinedCandidate.metric];
     const record = {
+      patternKey: refinedCandidate.pattern.patternKey,
       familyKey: refinedCandidate.familyKey,
       slotIndex: refinedCandidate.slotIndex,
       source: refinedCandidate.pattern.source,

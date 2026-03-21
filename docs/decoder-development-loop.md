@@ -353,11 +353,14 @@ Current 2026-03-21 expanded baseline from the 13-replay corpus:
   - `power`: `2 / 4`
   - `powerMax`: `1 / 1`
   - `healthMax`: `1 / 2`
-  - `movementSpeed`: `1 / 4`
-  - `health`: `0 / 2`
+- `movementSpeed`: `1 / 4`
+- `health`: `0 / 2`
 - the strongest latest-patch scalar slab remains `16.6 | 61894-0x00-h6`
 - `61894` now has real replay-only bundle-backed evidence for `power`, `healthMax`, and `movementSpeed`
+- `16.6 | 61894-0x00-h6 | power` is now promoted alongside `healthMax`
 - `16.6 | 6912-0xC6-h0` remains the strongest replay-only `powerMax` slab
+- bundle-family promotion now only consumes validation from the exact extracted bundle pattern that produced a replay metric
+- weak `bundleRankedPatterns` are now diagnostics only; they no longer feed back into replay-only extraction
 - movement coordinate priors now include family-aware and family-band layers, not just decode signatures
 - `EUN1-3926600040` now yields `2 / 3` passing replay-only labelled movement tracks
 - `EUN1-3927135846` now yields `1 / 1` passing replay-only labelled movement tracks
@@ -426,9 +429,9 @@ Do not return to movement as the main focus until:
 
 The next concrete task should be:
 
-1. split `16.6 | 61894-0x00-h6` bundle-family promotion by dominant slot cluster instead of flattening all slot variants into one metric bucket
-2. let `movementSpeed` and `power` compete as cluster-specific bundle candidates so bad `18/19` variants stop dragging down good `12/13` and `16/17` variants
-3. rerun the two-pass corpus loop and check whether `movementSpeed` can graduate from ranked-only to promoted on `16.6`
+1. compare the promoted runtime schema before and after a single refresh pass to isolate the remaining convergence delta
+2. keep bundle-family promotion strict: only the exact extracted bundle pattern may contribute validation back into corpus promotion
+3. once the promoted runtime schema fingerprint is stable, return to slot-clustered `16.6 | 61894-0x00-h6` work so `movementSpeed` can compete cleanly against the stronger `15/16/17` cluster
 4. improve `16.1` movement extraction and identity assignment, especially around `61733 / 0x00`, so bad tracks stay filtered instead of being weakly labelled
 5. use the validated extraction output as the UI input contract
 
