@@ -182,10 +182,13 @@ function compareCandidateToMetric(candidate, participant, metric, targetPoints) 
     predictedDiffs.push(predictedValues[index] - predictedValues[index - 1]);
     targetDiffs.push(targetValues[index] - targetValues[index - 1]);
   }
+  const absolutePredictedDiffs = predictedDiffs.map((value) => Math.abs(value));
+  const absoluteTargetDiffs = targetDiffs.map((value) => Math.abs(value));
 
   const overlap = rawValues.length;
   const correlation = pearsonCorrelation(predictedValues, targetValues);
   const deltaCorrelation = pearsonCorrelation(predictedDiffs, targetDiffs);
+  const absoluteDeltaCorrelation = pearsonCorrelation(absolutePredictedDiffs, absoluteTargetDiffs);
   const targetStdDev = standardDeviation(targetValues);
   const normalizedRmse = fit.rmse / Math.max(targetStdDev, 1);
 
@@ -208,9 +211,12 @@ function compareCandidateToMetric(candidate, participant, metric, targetPoints) 
   const rmseFactor = 1 / (1 + normalizedRmse);
   const correlationFactor = clamp(correlation, 0, 1);
   const deltaFactor = clamp(Number.isFinite(deltaCorrelation) ? deltaCorrelation : 0, 0, 1);
+  const absoluteDeltaFactor = clamp(Number.isFinite(absoluteDeltaCorrelation) ? absoluteDeltaCorrelation : 0, 0, 1);
   const monotonicFactor = metric.monotonic ? monotonicAgreement : 0.75;
   const slopeFactor = metric.monotonic && fit.slope < 0 ? 0.2 : 1;
-  const baseScore = overlapFactor * uniqueFactor * rmseFactor * ((0.5 * correlationFactor) + (0.2 * deltaFactor) + (0.3 * monotonicFactor)) * slopeFactor;
+  const baseScore = overlapFactor * uniqueFactor * rmseFactor *
+    ((0.45 * correlationFactor) + (0.15 * deltaFactor) + (0.15 * absoluteDeltaFactor) + (0.25 * monotonicFactor)) *
+    slopeFactor;
 
   let validatorScore = 1;
   if (correlation < metric.minCorrelation) {
@@ -237,6 +243,9 @@ function compareCandidateToMetric(candidate, participant, metric, targetPoints) 
     if (deltaCorrelation < 0.12) {
       validatorScore *= 0.75;
     }
+    if (absoluteDeltaCorrelation < 0.18) {
+      validatorScore *= 0.8;
+    }
   }
   if (boundedMaxMetrics.has(metric.key)) {
     if (fit.slope < 0) {
@@ -245,6 +254,17 @@ function compareCandidateToMetric(candidate, participant, metric, targetPoints) 
     if ((candidate.uniqueValues ?? 0) < 3) {
       validatorScore *= 0.6;
     }
+  }
+  if (metric.key === "health") {
+    if (correlation < 0.48) {
+      validatorScore *= 0.8;
+    }
+    if (absoluteDeltaCorrelation < 0.28) {
+      validatorScore *= 0.65;
+    }
+  }
+  if (metric.key === "power" && absoluteDeltaCorrelation < 0.22) {
+    validatorScore *= 0.7;
   }
   if (metric.key === "movementSpeed" && deltaCorrelation < 0.08) {
     validatorScore *= 0.7;
@@ -274,6 +294,7 @@ function compareCandidateToMetric(candidate, participant, metric, targetPoints) 
     overlap,
     correlation,
     deltaCorrelation,
+    absoluteDeltaCorrelation,
     normalizedRmse,
     slope: fit.slope,
     intercept: fit.intercept,
@@ -326,6 +347,7 @@ function summarizeReplayCandidate(candidateKey, matches, targetMetricKey) {
     passCount: supportMatches.filter((match) => match.passesValidation).length,
     avgCorrelation: average(supportMatches.map((match) => match.correlation)),
     avgDeltaCorrelation: average(supportMatches.map((match) => Number.isFinite(match.deltaCorrelation) ? match.deltaCorrelation : 0)),
+    avgAbsoluteDeltaCorrelation: average(supportMatches.map((match) => Number.isFinite(match.absoluteDeltaCorrelation) ? match.absoluteDeltaCorrelation : 0)),
     avgNormalizedRmse: average(supportMatches.map((match) => match.normalizedRmse)),
     avgValidatorScore: average(supportMatches.map((match) => match.validatorScore)),
     avgEffectiveScore: average(supportMatches.map((match) => match.effectiveScore)),
@@ -370,6 +392,7 @@ function summarizeCrossReplayGroup(groupKey, entries) {
     medianParticipants: median(entries.map((entry) => entry.supportParticipants)),
     medianCorrelation: median(entries.map((entry) => entry.avgCorrelation)),
     medianDeltaCorrelation: median(entries.map((entry) => entry.avgDeltaCorrelation)),
+    medianAbsoluteDeltaCorrelation: median(entries.map((entry) => entry.avgAbsoluteDeltaCorrelation)),
     medianNormalizedRmse: median(entries.map((entry) => entry.avgNormalizedRmse)),
     medianValidatorScore: median(entries.map((entry) => entry.avgValidatorScore)),
     medianEffectiveScore: median(entries.map((entry) => entry.avgEffectiveScore)),
@@ -389,6 +412,7 @@ function summarizeCrossReplayGroup(groupKey, entries) {
       slotIndex: entry.slotIndex,
       supportParticipants: entry.supportParticipants,
       avgCorrelation: entry.avgCorrelation,
+      avgAbsoluteDeltaCorrelation: entry.avgAbsoluteDeltaCorrelation,
       avgNormalizedRmse: entry.avgNormalizedRmse,
       avgSpecificityScore: entry.avgSpecificityScore,
       dominantConfusionMetric: entry.dominantConfusionMetric,
@@ -632,6 +656,7 @@ function main() {
         entry.replaySupport >= 2 &&
         entry.medianParticipants >= 3 &&
         entry.medianCorrelation >= Math.max(targetMetric.minCorrelation, 0.45) &&
+        entry.medianAbsoluteDeltaCorrelation >= 0.2 &&
         entry.medianNormalizedRmse <= Math.min(targetMetric.maxNormalizedRmse, 0.9) &&
         entry.medianSpecificityScore >= 0.5,
       )
@@ -641,6 +666,7 @@ function main() {
         entry.replaySupport >= 2 &&
         entry.medianParticipants >= 4 &&
         entry.medianCorrelation >= Math.max(targetMetric.minCorrelation, 0.55) &&
+        entry.medianAbsoluteDeltaCorrelation >= 0.32 &&
         entry.medianNormalizedRmse <= Math.min(targetMetric.maxNormalizedRmse, 0.75) &&
         entry.medianSpecificityScore >= 0.58 &&
         entry.medianConfusionScore <= 0.18 &&
