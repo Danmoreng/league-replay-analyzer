@@ -41,12 +41,14 @@ function Ensure-ResearchBranch {
         [string]$BranchName
     )
 
-    $currentBranch = (git -C $RepositoryRoot branch --show-current).Trim()
+    $currentBranchOutput = git -C $RepositoryRoot branch --show-current
+    $currentBranch = if ($null -eq $currentBranchOutput) { "" } else { ([string]$currentBranchOutput).Trim() }
     if ($currentBranch -eq $BranchName) {
         return
     }
 
-    $existing = (git -C $RepositoryRoot branch --list $BranchName).Trim()
+    $existingOutput = git -C $RepositoryRoot branch --list $BranchName
+    $existing = if ($null -eq $existingOutput) { "" } else { ([string]$existingOutput).Trim() }
     if ($existing) {
         Write-Status "Checking out existing branch $BranchName"
         git -C $RepositoryRoot checkout $BranchName | Out-Host
