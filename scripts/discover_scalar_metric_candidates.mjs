@@ -150,6 +150,96 @@ function buildFieldCandidate(family, slot, field) {
   };
 }
 
+function computeThresholdMaskAgreement(predictedValues, targetValues, relativeThreshold, mode = "lower") {
+  if (!predictedValues.length || predictedValues.length !== targetValues.length) {
+    return null;
+  }
+
+  const useLowerTail = mode !== "upper";
+  const predictedMax = Math.max(...predictedValues.filter(Number.isFinite));
+  const predictedMin = Math.min(...predictedValues.filter(Number.isFinite));
+  const targetMax = Math.max(...targetValues.filter(Number.isFinite));
+  const targetMin = Math.min(...targetValues.filter(Number.isFinite));
+  if (
+    !Number.isFinite(predictedMax) ||
+    !Number.isFinite(predictedMin) ||
+    !Number.isFinite(targetMax) ||
+    !Number.isFinite(targetMin)
+  ) {
+    return null;
+  }
+
+  const predictedRange = Math.max(predictedMax - predictedMin, 1e-6);
+  const targetRange = Math.max(targetMax - targetMin, 1e-6);
+  const predictedCutoff = useLowerTail
+    ? predictedMin + (predictedRange * relativeThreshold)
+    : predictedMin + (predictedRange * relativeThreshold);
+  const targetCutoff = useLowerTail
+    ? targetMin + (targetRange * relativeThreshold)
+    : targetMin + (targetRange * relativeThreshold);
+
+  let overlapCount = 0;
+  let unionCount = 0;
+  let targetFlagCount = 0;
+  let predictedFlagCount = 0;
+  for (let index = 0; index < predictedValues.length; index += 1) {
+    const predictedFlag = useLowerTail
+      ? predictedValues[index] <= predictedCutoff
+      : predictedValues[index] >= predictedCutoff;
+    const targetFlag = useLowerTail
+      ? targetValues[index] <= targetCutoff
+      : targetValues[index] >= targetCutoff;
+    if (predictedFlag && targetFlag) {
+      overlapCount += 1;
+    }
+    if (predictedFlag || targetFlag) {
+      unionCount += 1;
+    }
+    if (targetFlag) {
+      targetFlagCount += 1;
+    }
+    if (predictedFlag) {
+      predictedFlagCount += 1;
+    }
+  }
+
+  if (targetFlagCount === 0 && predictedFlagCount === 0) {
+    return 1;
+  }
+  if (unionCount === 0) {
+    return null;
+  }
+
+  const precision = overlapCount / Math.max(predictedFlagCount, 1);
+  const recall = overlapCount / Math.max(targetFlagCount, 1);
+  const jaccard = overlapCount / unionCount;
+  return (0.4 * jaccard) + (0.3 * precision) + (0.3 * recall);
+}
+
+function computePairedMetricAmbiguityPenalty(metricKey, match) {
+  let penalty = 1;
+
+  if (metricKey === "health" && match.bestConfusionMetric === "power") {
+    if ((match.lowTailAgreement ?? 0.5) < 0.45) {
+      penalty *= 0.72;
+    }
+    if ((match.specificityScore ?? 0) < 0.56) {
+      penalty *= 0.75;
+    }
+  }
+
+  if (metricKey === "power" && match.bestConfusionMetric === "health") {
+    if ((match.absoluteDeltaCorrelation ?? 0) < 0.35) {
+      penalty *= 0.72;
+    }
+    if ((match.specificityScore ?? 0) < 0.56) {
+      penalty *= 0.75;
+    }
+  }
+
+  return penalty;
+}
+
 function compareCandidateToMetric(candidate, participant, metric, targetPoints) {
   if (candidate.points.length < metric.minOverlap || targetPoints.length < metric.minOverlap) {
     return null;
@@ -184,6 +274,12 @@ function compareCandidateToMetric(candidate, participant, metric, targetPoints) 
   }
   const absolutePredictedDiffs = predictedDiffs.map((value) => Math.abs(value));
   const absoluteTargetDiffs = targetDiffs.map((value) => Math.abs(value));
+  const lowTailAgreement = metric.key === "health"
+    ? computeThresholdMaskAgreement(predictedValues, targetValues, 0.35)
+    : null;
+  const speedBoostAgreement = metric.key === "movementSpeed"
+    ? computeThresholdMaskAgreement(predictedValues, targetValues, 0.7, "upper")
+    : null;
 
   const overlap = rawValues.length;
   const correlation = pearsonCorrelation(predictedValues, targetValues);
@@ -212,10 +308,12 @@ function compareCandidateToMetric(candidate, participant, metric, targetPoints) 
   const correlationFactor = clamp(correlation, 0, 1);
   const deltaFactor = clamp(Number.isFinite(deltaCorrelation) ? deltaCorrelation : 0, 0, 1);
   const absoluteDeltaFactor = clamp(Number.isFinite(absoluteDeltaCorrelation) ? absoluteDeltaCorrelation : 0, 0, 1);
+  const lowTailFactor = clamp(Number.isFinite(lowTailAgreement) ? lowTailAgreement : 0.5, 0, 1);
+  const speedBoostFactor = clamp(Number.isFinite(speedBoostAgreement) ? speedBoostAgreement : 0.5, 0, 1);
   const monotonicFactor = metric.monotonic ? monotonicAgreement : 0.75;
   const slopeFactor = metric.monotonic && fit.slope < 0 ? 0.2 : 1;
   const baseScore = overlapFactor * uniqueFactor * rmseFactor *
-    ((0.45 * correlationFactor) + (0.15 * deltaFactor) + (0.15 * absoluteDeltaFactor) + (0.25 * monotonicFactor)) *
+    ((0.36 * correlationFactor) + (0.14 * deltaFactor) + (0.14 * absoluteDeltaFactor) + (0.18 * monotonicFactor) + (0.08 * lowTailFactor) + (0.1 * speedBoostFactor)) *
     slopeFactor;
 
   let validatorScore = 1;
@@ -262,12 +360,23 @@ function compareCandidateToMetric(candidate, participant, metric, targetPoints) 
     if (absoluteDeltaCorrelation < 0.28) {
       validatorScore *= 0.65;
     }
+    if (Number.isFinite(lowTailAgreement) && lowTailAgreement < 0.3) {
+      validatorScore *= 0.55;
+    }
   }
   if (metric.key === "power" && absoluteDeltaCorrelation < 0.22) {
     validatorScore *= 0.7;
   }
   if (metric.key === "movementSpeed" && deltaCorrelation < 0.08) {
     validatorScore *= 0.7;
+  }
+  if (metric.key === "movementSpeed") {
+    if (Number.isFinite(speedBoostAgreement) && speedBoostAgreement < 0.3) {
+      validatorScore *= 0.6;
+    }
+    if (correlation < 0.45) {
+      validatorScore *= 0.85;
+    }
   }
 
   const effectiveScore = baseScore * validatorScore;
@@ -295,6 +404,8 @@ function compareCandidateToMetric(candidate, participant, metric, targetPoints) 
     correlation,
     deltaCorrelation,
     absoluteDeltaCorrelation,
+    lowTailAgreement,
+    speedBoostAgreement,
     normalizedRmse,
     slope: fit.slope,
     intercept: fit.intercept,
@@ -348,9 +459,12 @@ function summarizeReplayCandidate(candidateKey, matches, targetMetricKey) {
     avgCorrelation: average(supportMatches.map((match) => match.correlation)),
     avgDeltaCorrelation: average(supportMatches.map((match) => Number.isFinite(match.deltaCorrelation) ? match.deltaCorrelation : 0)),
     avgAbsoluteDeltaCorrelation: average(supportMatches.map((match) => Number.isFinite(match.absoluteDeltaCorrelation) ? match.absoluteDeltaCorrelation : 0)),
+    avgLowTailAgreement: average(supportMatches.map((match) => Number.isFinite(match.lowTailAgreement) ? match.lowTailAgreement : 0.5)),
+    avgSpeedBoostAgreement: average(supportMatches.map((match) => Number.isFinite(match.speedBoostAgreement) ? match.speedBoostAgreement : 0.5)),
     avgNormalizedRmse: average(supportMatches.map((match) => match.normalizedRmse)),
     avgValidatorScore: average(supportMatches.map((match) => match.validatorScore)),
     avgEffectiveScore: average(supportMatches.map((match) => match.effectiveScore)),
+    avgAmbiguityPenalty: average(supportMatches.map((match) => match.ambiguityPenalty ?? 1)),
     avgSpecificityScore: average(specificityValues),
     avgConfusionScore: average(confusionScores),
     confidence,
@@ -376,6 +490,10 @@ function summarizeCrossReplayGroup(groupKey, entries) {
   const replayIds = [...new Set(entries.map((entry) => entry.replayId))];
   const familyKeys = [...new Set(entries.map((entry) => entry.familyKey))];
   const slotIndices = entries.map((entry) => entry.slotIndex);
+  const slotMin = Math.min(...slotIndices);
+  const slotMax = Math.max(...slotIndices);
+  const slotSpan = slotMax - slotMin;
+  const slotCompactness = 1 / (1 + (slotSpan / 8));
 
   return {
     groupKey,
@@ -387,20 +505,26 @@ function summarizeCrossReplayGroup(groupKey, entries) {
     offset: entries[0]?.offset ?? null,
     decodeLabel: entries[0]?.decodeLabel ?? null,
     rowArchetype: entries[0]?.rowArchetype ?? "unknown",
-    slotBand: [Math.min(...slotIndices), Math.max(...slotIndices)],
+    slotBand: [slotMin, slotMax],
+    slotSpan,
+    slotCompactness,
     medianSlotIndex: median(slotIndices),
     medianParticipants: median(entries.map((entry) => entry.supportParticipants)),
     medianCorrelation: median(entries.map((entry) => entry.avgCorrelation)),
     medianDeltaCorrelation: median(entries.map((entry) => entry.avgDeltaCorrelation)),
     medianAbsoluteDeltaCorrelation: median(entries.map((entry) => entry.avgAbsoluteDeltaCorrelation)),
+    medianLowTailAgreement: median(entries.map((entry) => entry.avgLowTailAgreement)),
+    medianSpeedBoostAgreement: median(entries.map((entry) => entry.avgSpeedBoostAgreement)),
     medianNormalizedRmse: median(entries.map((entry) => entry.avgNormalizedRmse)),
     medianValidatorScore: median(entries.map((entry) => entry.avgValidatorScore)),
     medianEffectiveScore: median(entries.map((entry) => entry.avgEffectiveScore)),
+    medianAmbiguityPenalty: median(entries.map((entry) => entry.avgAmbiguityPenalty)),
     medianSpecificityScore: median(entries.map((entry) => entry.avgSpecificityScore)),
     medianConfusionScore: median(entries.map((entry) => entry.avgConfusionScore)),
     confidence: average(entries.map((entry) => entry.confidence)) *
       (0.55 + Math.min(1, replayIds.length / 3)) *
-      (0.6 + median(entries.map((entry) => entry.avgSpecificityScore))),
+      (0.6 + median(entries.map((entry) => entry.avgSpecificityScore))) *
+      (0.55 + (0.45 * slotCompactness)),
     transform: {
       slopeMedian: median(entries.map((entry) => entry.transform?.slopeMedian).filter(Number.isFinite)),
       interceptMedian: median(entries.map((entry) => entry.transform?.interceptMedian).filter(Number.isFinite)),
@@ -413,6 +537,9 @@ function summarizeCrossReplayGroup(groupKey, entries) {
       supportParticipants: entry.supportParticipants,
       avgCorrelation: entry.avgCorrelation,
       avgAbsoluteDeltaCorrelation: entry.avgAbsoluteDeltaCorrelation,
+      avgLowTailAgreement: entry.avgLowTailAgreement,
+      avgSpeedBoostAgreement: entry.avgSpeedBoostAgreement,
+      avgAmbiguityPenalty: entry.avgAmbiguityPenalty,
       avgNormalizedRmse: entry.avgNormalizedRmse,
       avgSpecificityScore: entry.avgSpecificityScore,
       dominantConfusionMetric: entry.dominantConfusionMetric,
@@ -553,6 +680,10 @@ function main() {
             targetMatch.bestConfusionMetric = bestConfusionMetric;
             targetMatch.bestConfusionScore = bestConfusionScore;
             targetMatch.specificityScore = specificityScore;
+            const ambiguityPenalty = computePairedMetricAmbiguityPenalty(args.metric, targetMatch);
+            targetMatch.ambiguityPenalty = ambiguityPenalty;
+            targetMatch.effectiveScore *= ambiguityPenalty;
+            targetMatch.validatorScore *= ambiguityPenalty;
             targetMatch.discoveryScore = targetMatch.effectiveScore * (0.6 + specificityScore);
             replayMatches.push(targetMatch);
           }
@@ -657,6 +788,9 @@ function main() {
         entry.medianParticipants >= 3 &&
         entry.medianCorrelation >= Math.max(targetMetric.minCorrelation, 0.45) &&
         entry.medianAbsoluteDeltaCorrelation >= 0.2 &&
+        entry.slotCompactness >= 0.18 &&
+        (targetMetric.key !== "health" || entry.medianLowTailAgreement >= 0.34) &&
+        (targetMetric.key !== "movementSpeed" || entry.medianSpeedBoostAgreement >= 0.32) &&
         entry.medianNormalizedRmse <= Math.min(targetMetric.maxNormalizedRmse, 0.9) &&
         entry.medianSpecificityScore >= 0.5,
       )
@@ -667,6 +801,9 @@ function main() {
         entry.medianParticipants >= 4 &&
         entry.medianCorrelation >= Math.max(targetMetric.minCorrelation, 0.55) &&
         entry.medianAbsoluteDeltaCorrelation >= 0.32 &&
+        entry.slotCompactness >= 0.32 &&
+        (targetMetric.key !== "health" || entry.medianLowTailAgreement >= 0.42) &&
+        (targetMetric.key !== "movementSpeed" || entry.medianSpeedBoostAgreement >= 0.45) &&
         entry.medianNormalizedRmse <= Math.min(targetMetric.maxNormalizedRmse, 0.75) &&
         entry.medianSpecificityScore >= 0.58 &&
         entry.medianConfusionScore <= 0.18 &&
