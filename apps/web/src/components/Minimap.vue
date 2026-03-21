@@ -11,6 +11,7 @@ const props = withDefaults(
     backgroundImageSrc?: string;
     primaryLabel?: string;
     comparisonLabel?: string;
+    showSideColumns?: boolean;
   }>(),
   {
     playerData: () => [],
@@ -19,6 +20,7 @@ const props = withDefaults(
     backgroundImageSrc: "/summoners-rift-minimap.png",
     primaryLabel: "Primary",
     comparisonLabel: "Comparison",
+    showSideColumns: true,
   },
 );
 
@@ -221,8 +223,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="minimap-shell">
-    <div v-if="hasRenderablePlayers" class="team-column team-column-left">
+  <div class="minimap-shell" :class="{ 'minimap-shell-compact': !showSideColumns }">
+    <div v-if="showSideColumns && hasRenderablePlayers" class="team-column team-column-left">
       <div v-for="player in blueTeamPlayers" :key="`${player.team}-${player.champion}-${player.playerName}-left`" class="team-item">
         <img v-if="player.championIconSrc" :src="player.championIconSrc" :alt="player.champion" class="team-icon blue-team" />
         <div v-else class="team-icon team-fallback blue-team"></div>
@@ -263,7 +265,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div v-if="hasRenderablePlayers" class="team-column team-column-right">
+    <div v-if="showSideColumns && hasRenderablePlayers" class="team-column team-column-right">
       <div v-for="player in redTeamPlayers" :key="`${player.team}-${player.champion}-${player.playerName}-right`" class="team-item team-item-right">
         <div class="team-copy team-copy-right">
           <div class="team-role">{{ player.roleLabel }}</div>
@@ -291,6 +293,10 @@ onUnmounted(() => {
   flex-direction: column;
   justify-content: center;
   gap: 10px;
+}
+
+.minimap-shell-compact {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .team-item {

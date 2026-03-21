@@ -36,7 +36,6 @@ const status = ref("Pick a replay file to parse it with the C++/Wasm replay pars
 const errorMessage = ref("");
 const isLoading = ref(false);
 const activePage = ref<"summary" | "browser" | "inspector">("summary");
-const movementCompareMode = ref<"api" | "replay" | "overlay">("api");
 function toDdragonVersion(version: string): string {
   const match = version.match(/^(\d+)\.(\d+)/);
   if (!match) {
@@ -72,6 +71,16 @@ function getRoleLabel(primary?: string, secondary?: string): string {
 
 function normalizeRoleLabel(value?: string): string {
   return getRoleLabel(value).toLowerCase();
+}
+
+function getRoleRank(roleLabel?: string): number {
+  const normalized = normalizeRoleLabel(roleLabel);
+  if (normalized.includes("top")) return 0;
+  if (normalized.includes("jungle")) return 1;
+  if (normalized.includes("mid")) return 2;
+  if (normalized.includes("bottom") || normalized.includes("bot") || normalized.includes("adc")) return 3;
+  if (normalized.includes("support") || normalized.includes("utility")) return 4;
+  return 5;
 }
 
 const teams = computed(() => {
@@ -349,48 +358,34 @@ const hasApiMovement = computed(() => apiMovement.value.some((player) => player.
 const hasReplayMovement = computed(() => replayMovement.value.some((player) => player.positions.length > 0));
 const apiMovementCount = computed(() => apiMovement.value.filter((player) => player.positions.length > 0).length);
 const replayMovementCount = computed(() => replayMovement.value.filter((player) => player.positions.length > 0).length);
-
-const minimapPrimaryData = computed(() => {
-  if (movementCompareMode.value === "replay" && hasReplayMovement.value) {
-    return replayMovement.value;
-  }
-  if (movementCompareMode.value === "api" && hasApiMovement.value) {
-    return apiMovement.value;
-  }
-  if (hasApiMovement.value) {
-    return apiMovement.value;
-  }
-  return replayMovement.value;
-});
-
-const minimapComparisonData = computed(() => {
-  if (movementCompareMode.value !== "overlay") {
-    return [];
-  }
-  if (hasApiMovement.value && hasReplayMovement.value) {
-    return replayMovement.value;
-  }
-  return [];
-});
-
-const minimapPrimaryLabel = computed(() => {
-  if (movementCompareMode.value === "replay" || (!hasApiMovement.value && hasReplayMovement.value)) {
-    return "Replay";
-  }
-  return "API";
-});
-
-const minimapComparisonLabel = computed(() => "Replay");
-
-const minimapEmptyMessage = computed(() => {
-  if (!hasApiMovement.value && !hasReplayMovement.value) {
-    return "No Riot or replay-derived movement fixture is available for this replay.";
-  }
-  if (movementCompareMode.value === "replay" && !hasReplayMovement.value) {
-    return "No replay-derived participant movement fixture is available for this replay.";
-  }
-  return "No Riot timeline movement fixture is available for this replay.";
-});
+const hasDualMovement = computed(() => hasApiMovement.value && hasReplayMovement.value);
+const movementRosterPlayers = computed(() =>
+  (summary.value?.players ?? [])
+    .map((player) => ({
+      champion: player.champion,
+      team: Number(player.team ?? 100),
+      playerName: getPlayerDisplayName(player.riotIdGameName, player.riotIdTagLine),
+      championIconSrc: getChampionIconSrc(player.champion ?? "Unknown", summary.value?.gameVersion ?? "16.5.1"),
+      roleLabel: getRoleLabel(player.teamPosition),
+    }))
+    .sort((left, right) =>
+      left.team - right.team ||
+      getRoleRank(left.roleLabel) - getRoleRank(right.roleLabel) ||
+      left.champion.localeCompare(right.champion),
+    ),
+);
+const movementBlueRoster = computed(() => movementRosterPlayers.value.filter((player) => player.team === 100));
+const movementRedRoster = computed(() => movementRosterPlayers.value.filter((player) => player.team === 200));
+const apiMinimapEmptyMessage = computed(() =>
+  hasReplayMovement.value
+    ? "No Riot timeline movement fixture is available for this replay."
+    : "No Riot or replay-derived movement fixture is available for this replay.",
+);
+const replayMinimapEmptyMessage = computed(() =>
+  hasApiMovement.value
+    ? "No replay-derived participant movement fixture is available for this replay."
+    : "No Riot or replay-derived movement fixture is available for this replay.",
+);
 
 async function loadMovementData(matchId: string | null): Promise<string> {
   apiMovement.value = [];
@@ -457,12 +452,6 @@ async function loadMovementData(matchId: string | null): Promise<string> {
     replayMovementStatus.value = "(Replay filename did not map to a published replay movement fixture)";
     replayStatus = replayMovementStatus.value;
   }
-
-  movementCompareMode.value = hasApiMovement.value && hasReplayMovement.value
-    ? "overlay"
-    : hasReplayMovement.value
-      ? "replay"
-      : "api";
 
   return `${apiStatus} ${replayStatus}`;
 }
@@ -681,75 +670,131 @@ function onFileChange(event: Event): void {
             </div>
           </div>
 
-          <div class="row g-2">
-            <!-- Left Column: Visuals & Table -->
-            <div class="col-lg-8 d-flex flex-column gap-2">
-              
-              <div class="island p-3 d-flex flex-column gap-3">
-                <div class="d-flex justify-content-between align-items-start">
+          <div class="island p-3 d-flex flex-column gap-3">
+            <div class="d-flex justify-content-between align-items-start">
+              <div>
+                <h2 class="fs-5 mb-1">Match Timeline</h2>
+                <p class="text-muted small" v-if="hasDualMovement">Riot API and replay-derived positions are rendered side by side with the same playback timeline.</p>
+                <p class="text-muted small" v-else-if="hasReplayMovement">Showing replay-derived participant positions from the decoder artifacts.</p>
+                <p class="text-muted small" v-else-if="hasApiMovement">Riot timeline frame positions plus combat and objective event anchors rendered on the original Summoner&apos;s Rift minimap.</p>
+                <p class="text-muted small" v-else>No decoded movement frames are available yet.</p>
+              </div>
+              <div class="d-flex flex-wrap gap-2 justify-content-end align-items-center">
+                <span v-if="hasApiMovement" class="badge bg-success-subtle text-success-emphasis">API {{ apiMovementCount }}</span>
+                <span v-else class="badge bg-secondary-subtle text-secondary-emphasis">API Missing</span>
+                <span v-if="hasReplayMovement" class="badge bg-info-subtle text-info-emphasis">Replay {{ replayMovementCount }}</span>
+                <span v-else class="badge bg-secondary-subtle text-secondary-emphasis">Replay Missing</span>
+              </div>
+            </div>
+            <div class="d-flex flex-column flex-lg-row justify-content-between align-items-start align-items-lg-center gap-2">
+              <div class="d-flex flex-column gap-1">
+                <span class="text-muted x-small">{{ riotFixtureStatus }}</span>
+                <span class="text-muted x-small">{{ replayMovementStatus }}</span>
+              </div>
+              <span v-if="hasDualMovement" class="badge bg-primary-subtle text-primary-emphasis">Synced Timeline</span>
+            </div>
+
+            <div v-if="hasDualMovement" class="movement-compare-shell">
+              <div class="movement-roster-column movement-roster-column-left">
+                <div
+                  v-for="player in movementBlueRoster"
+                  :key="`${player.team}-${player.champion}-left`"
+                  class="movement-roster-item"
+                >
+                  <img v-if="player.championIconSrc" :src="player.championIconSrc" :alt="player.champion" class="movement-roster-icon blue-team" />
+                  <div v-else class="movement-roster-icon movement-roster-fallback blue-team"></div>
+                  <div class="movement-roster-copy">
+                    <div class="movement-roster-role">{{ player.roleLabel }}</div>
+                    <div class="movement-roster-champion">{{ player.champion }}</div>
+                    <div class="movement-roster-player">{{ player.playerName }}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="movement-map-panel">
+                <div class="movement-map-panel-header">
                   <div>
-                    <h2 class="fs-5 mb-1">Match Timeline</h2>
-                    <p class="text-muted small" v-if="hasApiMovement && hasReplayMovement">Overlaying Riot timeline movement against replay-derived participant positions. Solid trails are API, dashed trails are replay-derived.</p>
-                    <p class="text-muted small" v-else-if="hasReplayMovement">Showing replay-derived participant positions from the decoder artifacts.</p>
-                    <p class="text-muted small" v-else-if="hasApiMovement">Riot timeline frame positions plus combat and objective event anchors rendered on the original Summoner&apos;s Rift minimap.</p>
-                    <p class="text-muted small" v-else>No decoded movement frames are available yet.</p>
+                    <h3 class="fs-6 mb-1">Riot API</h3>
+                    <p class="text-muted x-small mb-0">Timeline frames plus event anchors.</p>
                   </div>
-                  <div class="d-flex flex-wrap gap-2 justify-content-end align-items-center">
-                    <span v-if="hasApiMovement" class="badge bg-success-subtle text-success-emphasis">API {{ apiMovementCount }}</span>
-                    <span v-else class="badge bg-secondary-subtle text-secondary-emphasis">API Missing</span>
-                    <span v-if="hasReplayMovement" class="badge bg-info-subtle text-info-emphasis">Replay {{ replayMovementCount }}</span>
-                    <span v-else class="badge bg-secondary-subtle text-secondary-emphasis">Replay Missing</span>
-                  </div>
+                  <span class="badge bg-success-subtle text-success-emphasis">{{ apiMovementCount }} players</span>
                 </div>
-                <div class="d-flex flex-column flex-lg-row justify-content-between align-items-start align-items-lg-center gap-2">
-                  <div class="d-flex flex-column gap-1">
-                    <span class="text-muted x-small">{{ riotFixtureStatus }}</span>
-                    <span class="text-muted x-small">{{ replayMovementStatus }}</span>
-                  </div>
-                  <div v-if="hasApiMovement || hasReplayMovement" class="btn-group btn-group-sm movement-mode-toggle">
-                    <button
-                      type="button"
-                      class="btn"
-                      :class="movementCompareMode === 'api' ? 'btn-primary' : 'btn-outline-secondary'"
-                      :disabled="!hasApiMovement"
-                      @click="movementCompareMode = 'api'"
-                    >
-                      API
-                    </button>
-                    <button
-                      type="button"
-                      class="btn"
-                      :class="movementCompareMode === 'replay' ? 'btn-primary' : 'btn-outline-secondary'"
-                      :disabled="!hasReplayMovement"
-                      @click="movementCompareMode = 'replay'"
-                    >
-                      Replay
-                    </button>
-                    <button
-                      type="button"
-                      class="btn"
-                      :class="movementCompareMode === 'overlay' ? 'btn-primary' : 'btn-outline-secondary'"
-                      :disabled="!(hasApiMovement && hasReplayMovement)"
-                      @click="movementCompareMode = 'overlay'"
-                    >
-                      Compare
-                    </button>
-                  </div>
-                </div>
-                
                 <div class="movement-map-frame d-flex justify-content-center bg-black bg-opacity-25 rounded-3 p-2 p-xl-3 border border-secondary border-opacity-10">
                   <Minimap
                     class="movement-map"
-                    :player-data="minimapPrimaryData"
-                    :comparison-data="minimapComparisonData"
-                    :primary-label="minimapPrimaryLabel"
-                    :comparison-label="minimapComparisonLabel"
-                    :empty-message="minimapEmptyMessage"
+                    :player-data="apiMovement"
+                    :empty-message="apiMinimapEmptyMessage"
+                    :show-side-columns="false"
                   />
                 </div>
-                <Timeline class="main-timeline" />
               </div>
 
+              <div class="movement-map-panel">
+                <div class="movement-map-panel-header">
+                  <div>
+                    <h3 class="fs-6 mb-1">Replay Decoder</h3>
+                    <p class="text-muted x-small mb-0">Participant-labelled `timestamp, x, y` from artifacts.</p>
+                  </div>
+                  <span class="badge bg-info-subtle text-info-emphasis">{{ replayMovementCount }} players</span>
+                </div>
+                <div class="movement-map-frame d-flex justify-content-center bg-black bg-opacity-25 rounded-3 p-2 p-xl-3 border border-secondary border-opacity-10">
+                  <Minimap
+                    class="movement-map"
+                    :player-data="replayMovement"
+                    :empty-message="replayMinimapEmptyMessage"
+                    :show-side-columns="false"
+                  />
+                </div>
+              </div>
+
+              <div class="movement-roster-column movement-roster-column-right">
+                <div
+                  v-for="player in movementRedRoster"
+                  :key="`${player.team}-${player.champion}-right`"
+                  class="movement-roster-item movement-roster-item-right"
+                >
+                  <div class="movement-roster-copy movement-roster-copy-right">
+                    <div class="movement-roster-role">{{ player.roleLabel }}</div>
+                    <div class="movement-roster-champion">{{ player.champion }}</div>
+                    <div class="movement-roster-player">{{ player.playerName }}</div>
+                  </div>
+                  <img v-if="player.championIconSrc" :src="player.championIconSrc" :alt="player.champion" class="movement-roster-icon red-team" />
+                  <div v-else class="movement-roster-icon movement-roster-fallback red-team"></div>
+                </div>
+              </div>
+            </div>
+
+            <div v-else class="movement-map-grid">
+              <div class="movement-map-panel">
+                <div class="movement-map-panel-header">
+                  <div>
+                    <h3 class="fs-6 mb-1">{{ hasReplayMovement ? "Replay Decoder" : "Riot API" }}</h3>
+                    <p class="text-muted x-small mb-0">
+                      {{ hasReplayMovement ? "Participant-labelled `timestamp, x, y` from artifacts." : "Timeline frames plus event anchors." }}
+                    </p>
+                  </div>
+                  <span
+                    class="badge"
+                    :class="hasReplayMovement ? 'bg-info-subtle text-info-emphasis' : 'bg-success-subtle text-success-emphasis'"
+                  >
+                    {{ hasReplayMovement ? replayMovementCount : apiMovementCount }} players
+                  </span>
+                </div>
+                <div class="movement-map-frame d-flex justify-content-center bg-black bg-opacity-25 rounded-3 p-2 p-xl-3 border border-secondary border-opacity-10">
+                  <Minimap
+                    class="movement-map"
+                    :player-data="hasReplayMovement ? replayMovement : apiMovement"
+                    :empty-message="hasReplayMovement ? replayMinimapEmptyMessage : apiMinimapEmptyMessage"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <Timeline class="main-timeline" />
+          </div>
+
+          <div class="row g-2">
+            <div class="col-lg-8 d-flex flex-column gap-2">
               <div class="island p-3">
                 <h2 class="fs-5 mb-3">Segment Preview (First 10)</h2>
                 <div class="table-responsive">
@@ -779,9 +824,7 @@ function onFileChange(event: Event): void {
               </div>
             </div>
 
-            <!-- Right Column: Capabilities & Details -->
             <div class="col-lg-4 d-flex flex-column gap-2">
-              
               <div class="island p-3">
                 <h2 class="fs-5 mb-3">Parser Capabilities</h2>
                 <div class="row g-2">
@@ -943,6 +986,101 @@ pre {
   width: 100%;
 }
 
+.movement-map-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.movement-map-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.movement-map-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.movement-compare-shell {
+  display: grid;
+  grid-template-columns: minmax(148px, 176px) minmax(0, 1fr) minmax(0, 1fr) minmax(148px, 176px);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.movement-roster-column {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+}
+
+.movement-roster-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 74px;
+  padding: 10px 11px;
+  background: rgba(8, 13, 20, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+}
+
+.movement-roster-item-right {
+  justify-content: flex-end;
+}
+
+.movement-roster-icon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: block;
+  object-fit: cover;
+  border-radius: 999px;
+  background: rgba(8, 11, 18, 0.92);
+}
+
+.movement-roster-fallback {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.movement-roster-copy {
+  min-width: 0;
+}
+
+.movement-roster-copy-right {
+  text-align: right;
+}
+
+.movement-roster-role {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.movement-roster-champion {
+  color: white;
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.movement-roster-player {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.74rem;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 code {
   color: var(--island-accent);
 }
@@ -961,6 +1099,12 @@ code {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.2);
+}
+
+@media (max-width: 1400px) {
+  .movement-compare-shell {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
 
