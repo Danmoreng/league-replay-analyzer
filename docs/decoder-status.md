@@ -59,6 +59,10 @@ The current movement pipeline:
 - scores pairs by axis correlation, path correlation, map-bounds ratio, and distance error
 - promotes replay-local movement patterns only when the same pair recurs across multiple rows
 - emits anonymous replay-derived trajectories into `artifacts/<replay-id>/extracted-movement.json`
+- learns a decode-signature movement coordinate prior in `artifacts/movement-coordinate-model.json`
+- learns corpus-backed movement identity priors into `artifacts/movement-identity-priors.json`
+- assigns extracted trajectories to participants replay-only into `artifacts/<replay-id>/participant-movement.json`
+- validates those participant-labelled tracks in `artifacts/<replay-id>/assigned-movement-validation-report.json`
 
 Current corpus-level result from the same 7 local replays:
 
@@ -73,7 +77,29 @@ The strongest current pattern is version-sensitive and appears to live in the ma
 - `15.23`: `61737 / 0x00`
 - `16.1`: `61733 / 0x00`
 
-That is promising, but it is not yet a final movement schema. The missing piece is stable replay-only identity assignment for those movement rows.
+Replay-only movement identity is now partially working, but still patch-fragile:
+
+- `EUW1-7596231295`: `2 / 2` participant-labelled movement assignments passed validation
+- `EUW1-7617298409`: `1 / 3` participant-labelled movement assignments passed validation
+- `EUW1-7596620123`: one near-pass (`Khazix`, normalized RMSE about `0.205`) but no passing assignments under the current threshold
+- `EUW1-7678536418` and newer replays still produce trajectories, but participant-labelled validation is currently poor
+
+Current best replay-only movement examples:
+
+- `EUW1-7596231295`: `FiddleSticks` jungle and `Jinx` bottom from family `17068 / 0xF1`
+- `EUW1-7617298409`: `Corki` bottom from family `61737 / 0x00`
+
+The new coordinate-model audit is now in place, but it is still early:
+
+- current model support is only `4` decode signatures
+- it is being used as a soft scoring prior during movement discovery
+- current support is enough to preserve good `15.22` and `15.23` fits, but not yet enough to cleanly fix weak `16.1` candidates
+
+That is meaningful progress, but it is still not a final movement schema. The main remaining problems are:
+
+- newer `16.1` candidates still mix good trajectory shapes with weak participant identity
+- some extracted tracks are still only partially champion-like even after outlier filtering
+- version-group movement priors are helping, but they are not yet strong enough to stabilize all role assignments
 
 ## What Is Actually Supported
 
@@ -185,8 +211,9 @@ The most useful next backend steps are:
 
 - improve cleaned-field ranking on surviving subfields, not just full aligned windows
 - stabilize participant assignment across several metrics simultaneously
-- test whether the current row/archetype logic holds on a second replay from another patch
-- revisit movement only after identity/state alignment is more defensible
+- improve movement candidate filtering on `16.1` families, especially `61733 / 0x00`
+- strengthen movement identity priors and assignment thresholds so weak families stay unmatched instead of mislabelled
+- keep using scalar/state extraction as the identity backbone for movement
 
 ## Related Docs
 

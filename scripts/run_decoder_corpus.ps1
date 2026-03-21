@@ -47,6 +47,10 @@ $validateScript = Join-Path $PSScriptRoot "validate_extracted_stats.mjs"
 $discoverMovementScript = Join-Path $PSScriptRoot "discover_movement_candidates.mjs"
 $extractMovementScript = Join-Path $PSScriptRoot "extract_replay_movement.mjs"
 $validateMovementScript = Join-Path $PSScriptRoot "validate_movement_candidates.mjs"
+$movementIdentityPriorsScript = Join-Path $PSScriptRoot "build_movement_identity_priors.mjs"
+$movementCoordinateModelScript = Join-Path $PSScriptRoot "build_movement_coordinate_model.mjs"
+$assignMovementScript = Join-Path $PSScriptRoot "assign_replay_movement.mjs"
+$validateAssignedMovementScript = Join-Path $PSScriptRoot "validate_assigned_movement.mjs"
 
 $replayFiles = Get-ChildItem -Path $resolvedReplayRoot -Filter "*.rofl" -File | Sort-Object Name
 if ($replayFiles.Count -eq 0) {
@@ -151,6 +155,7 @@ if (-not $SkipValidation) {
 }
 
 if (-not $SkipMovement) {
+    $movementCoordinateModelPath = Join-Path $resolvedArtifactRoot "movement-coordinate-model.json"
     foreach ($entry in $processed) {
         $movementCandidatePath = Join-Path $entry.artifactDir "movement-candidate-matches.json"
         $movementSchemaPath = Join-Path $entry.artifactDir "movement-provisional-schema.json"
@@ -158,7 +163,11 @@ if (-not $SkipMovement) {
         $movementValidationPath = Join-Path $entry.artifactDir "movement-validation-report.json"
 
         Write-Host "Discovering movement candidates for $($entry.replayName)" -ForegroundColor Cyan
-        node $discoverMovementScript --artifact-dir $entry.artifactDir --fixture-dir $entry.fixtureDir
+        if (Test-Path $movementCoordinateModelPath) {
+            node $discoverMovementScript --artifact-dir $entry.artifactDir --fixture-dir $entry.fixtureDir --coordinate-model-path $movementCoordinateModelPath
+        } else {
+            node $discoverMovementScript --artifact-dir $entry.artifactDir --fixture-dir $entry.fixtureDir
+        }
         if ($LASTEXITCODE -ne 0) {
             throw "Movement discovery failed for $($entry.replayName)"
         }
@@ -180,6 +189,41 @@ if (-not $SkipMovement) {
         $entry["movementExtractedPath"] = $movementExtractedPath
         $entry["movementValidationPath"] = $movementValidationPath
     }
+
+    $movementIdentityPriorsPath = Join-Path $resolvedArtifactRoot "movement-identity-priors.json"
+    Write-Host "Building movement identity priors" -ForegroundColor Cyan
+    node $movementIdentityPriorsScript --artifact-root $resolvedArtifactRoot --corpus-manifest $manifestPath --output-path $movementIdentityPriorsPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Movement identity prior generation failed."
+    }
+    $manifest["movementIdentityPriorsPath"] = $movementIdentityPriorsPath
+
+    foreach ($entry in $processed) {
+        $participantMovementPath = Join-Path $entry.artifactDir "participant-movement.json"
+        $assignedMovementValidationPath = Join-Path $entry.artifactDir "assigned-movement-validation-report.json"
+
+        Write-Host "Assigning movement tracks to participants for $($entry.replayName)" -ForegroundColor Cyan
+        node $assignMovementScript --artifact-dir $entry.artifactDir --priors-path $movementIdentityPriorsPath --output-path $participantMovementPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Movement participant assignment failed for $($entry.replayName)"
+        }
+
+        Write-Host "Validating participant-labelled movement for $($entry.replayName)" -ForegroundColor Cyan
+        node $validateAssignedMovementScript --participant-movement-path $participantMovementPath --fixture-dir $entry.fixtureDir --output-path $assignedMovementValidationPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Participant-labelled movement validation failed for $($entry.replayName)"
+        }
+
+        $entry["participantMovementPath"] = $participantMovementPath
+        $entry["assignedMovementValidationPath"] = $assignedMovementValidationPath
+    }
+
+    Write-Host "Building movement coordinate model" -ForegroundColor Cyan
+    node $movementCoordinateModelScript --artifact-root $resolvedArtifactRoot --corpus-manifest $manifestPath --output-path $movementCoordinateModelPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Movement coordinate model generation failed."
+    }
+    $manifest["movementCoordinateModelPath"] = $movementCoordinateModelPath
 }
 
 $manifest.generatedAtUtc = (Get-Date).ToUniversalTime().ToString("o")

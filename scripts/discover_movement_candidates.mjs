@@ -22,6 +22,7 @@ function parseArgs(argv) {
     artifactDir: null,
     fixtureDir: null,
     outputDir: null,
+    coordinateModelPath: null,
     minOverlap: 6,
     topMatches: 256,
     maxPairsPerSlot: 120,
@@ -35,6 +36,8 @@ function parseArgs(argv) {
       args.fixtureDir = argv[++index];
     } else if (arg === "--output-dir" && index + 1 < argv.length) {
       args.outputDir = argv[++index];
+    } else if (arg === "--coordinate-model-path" && index + 1 < argv.length) {
+      args.coordinateModelPath = argv[++index];
     } else if (arg === "--min-overlap" && index + 1 < argv.length) {
       args.minOverlap = Number.parseInt(argv[++index], 10);
     } else if (arg === "--top-matches" && index + 1 < argv.length) {
@@ -57,7 +60,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log("Usage: node ./scripts/discover_movement_candidates.mjs --artifact-dir <path> [--fixture-dir <path>] [--output-dir <path>]");
+  console.log("Usage: node ./scripts/discover_movement_candidates.mjs --artifact-dir <path> [--fixture-dir <path>] [--output-dir <path>] [--coordinate-model-path <path>]");
 }
 
 function buildFieldCandidate(familySummary, slotSummary, field) {
@@ -212,7 +215,45 @@ function computeSpeedRatio(points) {
   return plausibleSteps / validSteps;
 }
 
-function evaluateMapping(pairCandidate, targetSeries, mapping) {
+function buildCoordinateSignature(mapping, leftField, rightField) {
+  return `${mapping}|${leftField.decodeLabel}|${rightField.decodeLabel}`;
+}
+
+function scoreTransformAxis(fittedSlope, fittedIntercept, priorAxis) {
+  if (!priorAxis || !Number.isFinite(priorAxis.slopeMedian) || !Number.isFinite(priorAxis.interceptMedian)) {
+    return 1;
+  }
+
+  const slopeScale = Math.max(Math.abs(priorAxis.slopeMedian) * 0.5, (priorAxis.slopeMad ?? 0) * 4, 1e-9);
+  const interceptScale = Math.max(Math.abs(priorAxis.interceptMedian) * 0.1, (priorAxis.interceptMad ?? 0) * 4, 400);
+  const slopeDelta = Math.abs(fittedSlope - priorAxis.slopeMedian);
+  const interceptDelta = Math.abs(fittedIntercept - priorAxis.interceptMedian);
+  const slopeScore = 1 / (1 + (slopeDelta / slopeScale));
+  const interceptScore = 1 / (1 + (interceptDelta / interceptScale));
+  return Math.max(0, Math.min(1, Math.sqrt(slopeScore * interceptScore)));
+}
+
+function scoreCoordinateModel(mapping, pairCandidate, fitX, fitY, coordinateModel) {
+  if (!coordinateModel?.signatures) {
+    return { signatureKey: null, support: 0, score: 1 };
+  }
+
+  const signatureKey = buildCoordinateSignature(mapping, pairCandidate.left, pairCandidate.right);
+  const prior = coordinateModel.signatures[signatureKey];
+  if (!prior || (prior.support ?? 0) < 1) {
+    return { signatureKey, support: 0, score: 1 };
+  }
+
+  const xScore = scoreTransformAxis(fitX.slope, fitX.intercept, prior.transformX);
+  const yScore = scoreTransformAxis(fitY.slope, fitY.intercept, prior.transformY);
+  return {
+    signatureKey,
+    support: prior.support ?? 0,
+    score: Math.sqrt(xScore * yScore),
+  };
+}
+
+function evaluateMapping(pairCandidate, targetSeries, mapping, coordinateModel) {
   const rawXValues = [];
   const rawYValues = [];
   const targetXValues = [];
@@ -246,6 +287,7 @@ function evaluateMapping(pairCandidate, targetSeries, mapping) {
   if (!Number.isFinite(fitX.rmse) || !Number.isFinite(fitY.rmse)) {
     return null;
   }
+  const coordinateModelScore = scoreCoordinateModel(mapping, pairCandidate, fitX, fitY, coordinateModel);
 
   const predictedPoints = rawXValues.map((rawX, index) => ({
     timestamp: pairCandidate.points[index].timestamp,
@@ -300,12 +342,16 @@ function evaluateMapping(pairCandidate, targetSeries, mapping) {
   if (speedRatio < 0.75) {
     validatorScore *= clamp(speedRatio / 0.75, 0, 1);
   }
+  if ((coordinateModelScore.support ?? 0) >= 2 && coordinateModelScore.score < 0.45) {
+    validatorScore *= clamp(coordinateModelScore.score / 0.45, 0, 1);
+  }
 
   const effectiveScore =
     overlapFactor *
     varianceFactor *
     ((0.4 * correlationFactor) + (0.2 * pathFactor) + (0.2 * distanceFactor) + (0.1 * boundsRatio) + (0.1 * speedRatio)) *
-    validatorScore;
+    validatorScore *
+    (0.8 + (0.2 * coordinateModelScore.score));
 
   return {
     overlap: predictedPoints.length,
@@ -317,6 +363,9 @@ function evaluateMapping(pairCandidate, targetSeries, mapping) {
     normalizedDistanceRmse,
     boundsRatio,
     speedRatio,
+    coordinateModelSignature: coordinateModelScore.signatureKey,
+    coordinateModelSupport: coordinateModelScore.support,
+    coordinateModelScore: coordinateModelScore.score,
     validatorScore,
     effectiveScore,
     transformX: {
@@ -338,9 +387,9 @@ function evaluateMapping(pairCandidate, targetSeries, mapping) {
   };
 }
 
-function comparePairToParticipant(pairCandidate, participant, targetSeries) {
-  const normal = evaluateMapping(pairCandidate, targetSeries, "normal");
-  const swapped = evaluateMapping(pairCandidate, targetSeries, "swapped");
+function comparePairToParticipant(pairCandidate, participant, targetSeries, coordinateModel) {
+  const normal = evaluateMapping(pairCandidate, targetSeries, "normal", coordinateModel);
+  const swapped = evaluateMapping(pairCandidate, targetSeries, "swapped", coordinateModel);
   const best = [normal, swapped]
     .filter(Boolean)
     .sort((left, right) => right.effectiveScore - left.effectiveScore)[0];
@@ -371,6 +420,9 @@ function comparePairToParticipant(pairCandidate, participant, targetSeries) {
     normalizedDistanceRmse: best.normalizedDistanceRmse,
     boundsRatio: best.boundsRatio,
     speedRatio: best.speedRatio,
+    coordinateModelSignature: best.coordinateModelSignature,
+    coordinateModelSupport: best.coordinateModelSupport,
+    coordinateModelScore: best.coordinateModelScore,
     validatorScore: best.validatorScore,
     effectiveScore: best.effectiveScore,
     transformX: best.transformX,
@@ -561,6 +613,9 @@ function main() {
   const args = parseArgs(process.argv);
   const artifactDir = resolveAbsolute(repoRoot, args.artifactDir);
   const outputDir = args.outputDir ? resolveAbsolute(repoRoot, args.outputDir) : artifactDir;
+  const coordinateModelPath = args.coordinateModelPath
+    ? resolveAbsolute(repoRoot, args.coordinateModelPath)
+    : path.join(path.dirname(artifactDir), "movement-coordinate-model.json");
   const runManifestPath = path.join(artifactDir, "run-manifest.json");
   if (!fs.existsSync(runManifestPath)) {
     throw new Error(`Run manifest not found at ${runManifestPath}`);
@@ -578,6 +633,7 @@ function main() {
 
   const matchJson = readJson(matchPath);
   const timelineJson = readJson(timelinePath);
+  const coordinateModel = fs.existsSync(coordinateModelPath) ? readJson(coordinateModelPath) : null;
   const { participants, positionSeriesByParticipant } = buildPositionSeries(matchJson, timelineJson);
   const familySummaries = loadFamilySummaries(artifactDir, runManifest);
 
@@ -605,7 +661,7 @@ function main() {
           if (targetSeries.length < args.minOverlap) {
             continue;
           }
-          const match = comparePairToParticipant(pairCandidate, participant, buildMovementTargets(targetSeries));
+          const match = comparePairToParticipant(pairCandidate, participant, buildMovementTargets(targetSeries), coordinateModel);
           if (match) {
             allMatches.push(match);
           }
@@ -697,6 +753,7 @@ function main() {
       artifactDir,
       fixtureDir,
       familyCount: familySummaries.length,
+      coordinateModelPath: fs.existsSync(coordinateModelPath) ? coordinateModelPath : null,
     },
     thresholds: {
       minRows: 2,

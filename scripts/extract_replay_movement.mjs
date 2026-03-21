@@ -97,6 +97,79 @@ function computeBoundsRatio(points) {
   return inBounds / points.length;
 }
 
+function pointInBounds(point) {
+  return (
+    point.x >= summonersRiftBounds.minX &&
+    point.x <= summonersRiftBounds.maxX &&
+    point.y >= summonersRiftBounds.minY &&
+    point.y <= summonersRiftBounds.maxY
+  );
+}
+
+function filterTrajectoryPoints(points) {
+  return points.filter((point) => pointInBounds(point));
+}
+
+function computeTrajectoryStats(points) {
+  if (!points.length) {
+    return {
+      pointCount: 0,
+      uniquePointRatio: 0,
+      displacement: 0,
+      pathLength: 0,
+      xRange: 0,
+      yRange: 0,
+      movementQuality: 0,
+    };
+  }
+
+  let minX = points[0].x;
+  let maxX = points[0].x;
+  let minY = points[0].y;
+  let maxY = points[0].y;
+  let pathLength = 0;
+  const uniquePoints = new Set();
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index];
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minY = Math.min(minY, point.y);
+    maxY = Math.max(maxY, point.y);
+    uniquePoints.add(`${Math.round(point.x)}|${Math.round(point.y)}`);
+
+    if (index === 0) {
+      continue;
+    }
+
+    const previous = points[index - 1];
+    const dx = point.x - previous.x;
+    const dy = point.y - previous.y;
+    pathLength += Math.sqrt((dx * dx) + (dy * dy));
+  }
+
+  const first = points[0];
+  const last = points[points.length - 1];
+  const dx = last.x - first.x;
+  const dy = last.y - first.y;
+  const displacement = Math.sqrt((dx * dx) + (dy * dy));
+  const xRange = maxX - minX;
+  const yRange = maxY - minY;
+  const uniquePointRatio = uniquePoints.size / points.length;
+  const movementQuality = Math.min(1, ((xRange + yRange) / 6000)) * 0.45
+    + Math.min(1, (pathLength / 9000)) * 0.35
+    + uniquePointRatio * 0.2;
+
+  return {
+    pointCount: points.length,
+    uniquePointRatio,
+    displacement,
+    pathLength,
+    xRange,
+    yRange,
+    movementQuality,
+  };
+}
+
 function main() {
   const repoRoot = process.cwd();
   const args = parseArgs(process.argv);
@@ -164,19 +237,37 @@ function main() {
         continue;
       }
 
-      const boundsRatio = computeBoundsRatio(points);
-      if (boundsRatio < 0.85) {
+      const rawBoundsRatio = computeBoundsRatio(points);
+      if (rawBoundsRatio < 0.85) {
         continue;
       }
+      const filteredPoints = filterTrajectoryPoints(points);
+      if (filteredPoints.length < 4) {
+        continue;
+      }
+      const boundsRatio = computeBoundsRatio(filteredPoints);
 
       const entityKey = `${pattern.familyKey}|${candidate.slotIndex}|${pattern.xField.offset}|${pattern.yField.offset}|${pattern.mapping}`;
       entityKeys.push(entityKey);
+      const trajectoryStats = computeTrajectoryStats(filteredPoints);
       entities.push({
         entityKey,
         familyKey: pattern.familyKey,
+        patternKey: pattern.patternKey,
+        patternConfidence: pattern.confidence,
+        sourceMetrics: {
+          avgAxisCorrelation: pattern.support?.avgAxisCorrelation ?? 0,
+          avgPathCorrelation: pattern.support?.avgPathCorrelation ?? 0,
+          avgNormalizedDistanceRmse: pattern.support?.avgNormalizedDistanceRmse ?? Number.POSITIVE_INFINITY,
+          avgValidatorScore: pattern.support?.avgValidatorScore ?? 0,
+        },
         slotIndex: candidate.slotIndex,
+        rawPointCount: points.length,
+        filteredPointCount: filteredPoints.length,
+        rawBoundsRatio,
         boundsRatio,
-        trajectory: points,
+        trajectoryStats,
+        trajectory: filteredPoints,
       });
     }
 

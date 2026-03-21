@@ -15,6 +15,7 @@ Build an automatic replay-decoding loop that can:
 - promote only the strongest recurring patterns into a provisional schema
 - extract normalized participant stat timelines automatically
 - validate those extracted timelines against Riot timeline ground truth
+- convert anonymous movement tracks into replay-only participant-labelled paths when confidence allows
 
 The UI should remain a consumer and spot-check tool. Discovery and schema inference should happen outside the UI first.
 
@@ -226,6 +227,20 @@ The validation report should say:
 - which participant assignments were stable or unstable
 - whether the replay version looks compatible with the current provisional schema
 
+### Phase 8: Movement identity
+
+Once anonymous movement tracks exist, treat identity assignment as a separate step:
+
+1. build corpus-backed movement identity priors from already validated fixture replays
+2. collapse alias trajectories that come from the same family and slot
+3. score each canonical movement entity against replay participants using:
+   - version-group movement priors
+   - team-side spawn bias
+   - role-anchor proximity
+   - scalar-family proximity when it is genuinely nearby
+4. leave weak entities unmatched rather than forcing a label
+5. validate assigned paths separately from anonymous movement discovery
+
 ## Daily Workflow For Coding Sessions
 
 This is the practical loop to use in day-to-day work.
@@ -318,6 +333,9 @@ Current outputs:
 - `artifacts/<replay-id>/movement-provisional-schema.json`
 - `artifacts/<replay-id>/extracted-movement.json`
 - `artifacts/<replay-id>/movement-validation-report.json`
+- `artifacts/movement-identity-priors.json`
+- `artifacts/<replay-id>/participant-movement.json`
+- `artifacts/<replay-id>/assigned-movement-validation-report.json`
 
 Current 2026-03-21 baseline from the local 7-replay corpus:
 
@@ -326,7 +344,10 @@ Current 2026-03-21 baseline from the local 7-replay corpus:
 - validated replay-only extraction is now producing usable `level`, `xp`, `totalGold`, and `minionsKilled` timelines on multiple replays
 - the best current replay is still `EUW1-7779216102`, where replay-only extraction validates `level` for 3 participants, `totalGold` for 2, `xp` for 1, and `minionsKilled` for 1
 - movement discovery now exists as a separate pipeline and is already promoting replay-local movement patterns on `EUW1-7596620123`, `EUW1-7617298409`, and `EUW1-7678536418`
-- replay-only movement extraction currently emits anonymous trajectories, not stable participant-labelled champion paths
+- replay-only movement assignment now exists as a second-stage pipeline using learned priors plus replay-local heuristics
+- current best replay-only movement labelling is `EUW1-7596231295`, where `FiddleSticks` jungle and `Jinx` bottom both pass validation from replay-only extraction
+- `EUW1-7617298409` now also yields a validated replay-only `Corki` bottom path
+- newer `16.1` movement families still need stronger filtering and identity priors before they can be treated as reliable
 
 ### 4. Movement discovery runner
 
@@ -336,12 +357,18 @@ Use the same corpus runner, `scripts/run_decoder_corpus.ps1`, for movement disco
 - builds `movement-provisional-schema.json`
 - extracts anonymous replay-derived movement tracks into `extracted-movement.json`
 - writes `movement-validation-report.json`
+- builds `movement-identity-priors.json`
+- assigns participant-labelled movement into `participant-movement.json`
+- writes `assigned-movement-validation-report.json`
 
 Current movement files:
 
 - `scripts/discover_movement_candidates.mjs`
 - `scripts/extract_replay_movement.mjs`
 - `scripts/validate_movement_candidates.mjs`
+- `scripts/build_movement_identity_priors.mjs`
+- `scripts/assign_replay_movement.mjs`
+- `scripts/validate_assigned_movement.mjs`
 
 ### 5. Only then improve the UI
 
@@ -370,7 +397,8 @@ The next concrete task should be:
 
 1. tighten corpus promotion so exact promoted patterns are less noisy while still inheriting version-group alias support
 2. improve replay-only row assignment on `level`, `xp`, `totalGold`, and `cs`, especially for the weaker `15.22` and `15.23` replays
-3. convert anonymous movement trajectories into stable participant-labelled paths using scalar identity and early-path role heuristics
-4. use the validated extraction output as the UI input contract
+3. improve `16.1` movement extraction and identity assignment, especially around `61733 / 0x00`, so bad tracks stay filtered instead of being weakly labelled
+4. widen replay-only participant-labelled movement coverage on `15.22` and `15.23`
+5. use the validated extraction output as the UI input contract
 
 That is the shortest path from investigation tooling to an actual decoder.
