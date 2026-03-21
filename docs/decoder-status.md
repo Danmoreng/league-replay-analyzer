@@ -32,10 +32,10 @@ The decoder now has a working offline corpus pipeline:
 - replay-only stat extraction
 - offline validation against Riot timeline fixtures
 
-The latest full corpus run on `2026-03-21` covered 7 local replay fixtures and produced:
+The latest full corpus run on `2026-03-21` covered 13 local replay fixtures and produced:
 
-- `133` promoted exact corpus-backed patterns from `886` ranked exact patterns
-- `40` version-group alias clusters in `artifacts/corpus-schema.json`
+- `258` promoted exact corpus-backed patterns from `1577` ranked exact patterns
+- `82` version-group alias clusters in `artifacts/corpus-schema.json`
 - validated replay-only `level`, `xp`, `totalGold`, and `minionsKilled` timelines across multiple replays
 
 Current best validated replay-only result:
@@ -68,12 +68,13 @@ The current movement pipeline:
 - assigns extracted trajectories to participants replay-only into `artifacts/<replay-id>/participant-movement.json`
 - validates those participant-labelled tracks in `artifacts/<replay-id>/assigned-movement-validation-report.json`
 
-Current corpus-level result from the same 7 local replays:
+Current corpus-level result from the same 13 local replays:
 
+- `EUN1-3926600040`: `0` promoted movement patterns, `5` extracted trajectories from strong ranked fallback families
 - `EUW1-7596620123`: `2` promoted movement patterns, `4` extracted trajectories
-- `EUW1-7617298409`: `3` promoted movement patterns, `5` extracted trajectories
-- `EUW1-7678536418`: `8` promoted movement patterns, `11` extracted trajectories
-- other replays currently show participant-level movement matches but not enough repeated-row support for promotion
+- `EUW1-7617298409`: `2` promoted movement patterns, `4` extracted trajectories
+- `EUW1-7678536418`: `8` promoted movement patterns, `9` extracted trajectories
+- other replays currently show anonymous movement candidates, but many still lack repeated-row support for promotion
 
 The strongest current pattern is version-sensitive and appears to live in the main `0x00` state family for several patch groups:
 
@@ -83,29 +84,33 @@ The strongest current pattern is version-sensitive and appears to live in the ma
 
 Replay-only movement identity is now partially working, but still patch-fragile:
 
-- `EUW1-7596231295`: `2 / 2` participant-labelled movement assignments passed validation
-- `EUW1-7617298409`: `1 / 2` participant-labelled movement assignments passed validation after stronger family-aware filtering
-- `EUN1-3926600040`: `2 / 2` participant-labelled movement assignments now pass validation on `16.6`
+- `EUN1-3926600040`: `2 / 5` participant-labelled movement assignments pass validation on `16.6`
+- `EUN1-3927135846`: `1 / 1` participant-labelled movement assignment passes on `16.6`
+- `EUW1-7596231295`: `1 / 2` participant-labelled movement assignments passes on `15.22`
+- `EUW1-7617298409`: `1 / 3` participant-labelled movement assignments passes on `15.23`
+- `EUW1-7689604967`: `1 / 2` participant-labelled movement assignments passes on `16.1`
+- `EUW1-7779216102`: `1 / 2` participant-labelled movement assignments passes on `15.24`
 - `EUW1-7596620123`: one near-pass (`Khazix`, normalized RMSE about `0.205`) but no passing assignments under the current threshold
-- `EUW1-7678536418`: `1 / 4` participant-labelled movement assignments now passes on `16.1` (`Belveth` jungle, family `61733 / 0x00`)
+- `EUW1-7678536418`: one near-pass on `16.1` (`Neeko`), but no passing assignment in the latest run
 
 Current best replay-only movement examples:
 
-- `EUW1-7596231295`: `FiddleSticks` jungle and `Jinx` bottom from family `17068 / 0xF1`
-- `EUW1-7617298409`: `Corki` bottom from family `61737 / 0x00`
-- `EUN1-3926600040`: `Zaahen` middle from `29298 / 0x72` and `Diana` jungle from `51483 / 0xF1`
+- `EUN1-3926600040`: `Diana` jungle from `51483 / 0xF1` and `Leona` support from `58082 / 0xE2`
+- `EUN1-3927135846`: `Malzahar` from a replay-only latest-patch track
+- `EUW1-7617298409`: `Briar` from `61737 / 0x00`
+- `EUW1-7779216102`: `Brand` from a replay-only movement family on the original target replay
 
 The coordinate-model audit is now materially more useful:
 
 - the model now includes family-aware and family-band priors in addition to plain decode signatures
 - the latest full run reduced noisy candidate counts on `15.23`, `16.1`, and `16.6` movement families
-- it improved `EUN1-3926600040` from `1 / 1` passing movement assignment to `2 / 2`
-- it also improved `EUW1-7678536418` from `0 / 5` passing movement assignments to `1 / 4`
+- movement fallback extraction now prefers family diversity before taking multiple windows from the same family
+- that diversity rule is important on `16.6`, where strong single-row families like `51483 / 0xF1`, `58082 / 0xE2`, and `61897 / 0x00` would otherwise be crowded out by repeated aliases from one family
 
 That is meaningful progress, but it is still not a final movement schema. The main remaining problems are:
 
-- newer `16.6` replays still need cross-replay family support beyond a single strong replay before movement priors can become hard constraints
-- `16.1` candidates still mix good trajectory shapes with weak participant identity outside the best `61733 / 0x00` slots
+- newer `16.6` replays still need stronger participant assignment so the good family-diverse candidates stop collapsing onto the wrong roles
+- `16.1` candidates still mix good trajectory shapes with weak participant identity inside `61733 / 0x00`
 - some extracted tracks are still only partially champion-like even after outlier filtering
 - version-group movement priors are helping, but they are not yet strong enough to stabilize all role assignments
 

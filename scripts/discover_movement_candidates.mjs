@@ -229,7 +229,7 @@ function buildFamilyCoordinateMapping(versionGroup, familyKey, mapping) {
 }
 
 function buildFamilyBandMapping(versionGroup, pairCandidate, mapping) {
-  const lengthBand = Math.floor((pairCandidate.familyLength ?? 0) / 1024);
+  const lengthBand = Math.floor((pairCandidate.familyLength ?? 0) / 4096) * 4;
   const firstByte = Number.isFinite(pairCandidate.familyFirstByte)
     ? pairCandidate.familyFirstByte.toString(16).toUpperCase().padStart(2, "0")
     : "??";
@@ -283,9 +283,34 @@ function scoreCoordinateModel(versionGroup, mapping, pairCandidate, fitX, fitY, 
   const familySignaturePrior = coordinateModel.familySignatures?.[familySignatureKey] ?? null;
   const familyMappingPrior = coordinateModel.familyMappings?.[familyMappingKey] ?? null;
   const familyBandPrior = coordinateModel.familyBands?.[familyBandKey] ?? null;
+  const familyBandClusters = coordinateModel.familyBandClusters?.[familyBandKey] ?? [];
   const signaturePrior = coordinateModel.signatures?.[signatureKey] ?? null;
 
   const scoredPriors = [];
+  if (Array.isArray(familyBandClusters)) {
+    const scoredClusters = familyBandClusters
+      .map((cluster) => ({
+        cluster,
+        score: scoreSingleCoordinatePrior(fitX, fitY, cluster),
+      }))
+      .filter((clusterScore) => (clusterScore.cluster.replayCount ?? 0) >= 2)
+      .sort((left, right) =>
+        right.score - left.score
+        || (right.cluster.replayCount ?? 0) - (left.cluster.replayCount ?? 0),
+      );
+
+    const bestCluster = scoredClusters[0];
+    if (bestCluster) {
+      scoredPriors.push({
+        source: "family_band_cluster",
+        key: `${familyBandKey}|${bestCluster.cluster.clusterId}`,
+        support: bestCluster.cluster.support ?? 0,
+        replaySupport: bestCluster.cluster.replayCount ?? 0,
+        score: bestCluster.score,
+        weight: 0.5,
+      });
+    }
+  }
   if ((familySignaturePrior?.replayCount ?? 0) >= 1) {
     scoredPriors.push({
       source: "family_signature",
@@ -293,7 +318,7 @@ function scoreCoordinateModel(versionGroup, mapping, pairCandidate, fitX, fitY, 
       support: familySignaturePrior.support ?? 0,
       replaySupport: familySignaturePrior.replayCount ?? 0,
       score: scoreSingleCoordinatePrior(fitX, fitY, familySignaturePrior),
-      weight: 0.55,
+      weight: 0.45,
     });
   }
   if ((familyMappingPrior?.replayCount ?? 0) >= 1) {
@@ -303,7 +328,7 @@ function scoreCoordinateModel(versionGroup, mapping, pairCandidate, fitX, fitY, 
       support: familyMappingPrior.support ?? 0,
       replaySupport: familyMappingPrior.replayCount ?? 0,
       score: scoreSingleCoordinatePrior(fitX, fitY, familyMappingPrior),
-      weight: 0.3,
+      weight: 0.25,
     });
   }
   if ((familyBandPrior?.replayCount ?? 0) >= 1) {
@@ -313,7 +338,7 @@ function scoreCoordinateModel(versionGroup, mapping, pairCandidate, fitX, fitY, 
       support: familyBandPrior.support ?? 0,
       replaySupport: familyBandPrior.replayCount ?? 0,
       score: scoreSingleCoordinatePrior(fitX, fitY, familyBandPrior),
-      weight: 0.2,
+      weight: 0.15,
     });
   }
   if ((signaturePrior?.replayCount ?? 0) >= 1) {
@@ -323,7 +348,7 @@ function scoreCoordinateModel(versionGroup, mapping, pairCandidate, fitX, fitY, 
       support: signaturePrior.support ?? 0,
       replaySupport: signaturePrior.replayCount ?? 0,
       score: scoreSingleCoordinatePrior(fitX, fitY, signaturePrior),
-      weight: 0.15,
+      weight: 0.1,
     });
   }
 
@@ -452,6 +477,8 @@ function evaluateMapping(pairCandidate, targetSeries, mapping, coordinateModel, 
     validatorScore *= clamp(speedRatio / 0.75, 0, 1);
   }
   if (coordinateModelScore.source === "family_signature" && (coordinateModelScore.replaySupport ?? 0) >= 2 && coordinateModelScore.score < 0.5) {
+    validatorScore *= clamp(coordinateModelScore.score / 0.5, 0, 1);
+  } else if (coordinateModelScore.source === "family_band_cluster" && (coordinateModelScore.replaySupport ?? 0) >= 2 && coordinateModelScore.score < 0.5) {
     validatorScore *= clamp(coordinateModelScore.score / 0.5, 0, 1);
   } else if (coordinateModelScore.source === "family_mapping" && (coordinateModelScore.replaySupport ?? 0) >= 3 && coordinateModelScore.score < 0.45) {
     validatorScore *= clamp(coordinateModelScore.score / 0.45, 0, 1);

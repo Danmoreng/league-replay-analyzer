@@ -83,7 +83,7 @@ function buildFamilyMappingKey(versionGroup, pattern) {
 }
 
 function buildFamilyBandKey(versionGroup, pattern) {
-  const lengthBand = Math.floor((pattern.familyLength ?? 0) / 1024);
+  const lengthBand = Math.floor((pattern.familyLength ?? 0) / 4096) * 4;
   const firstByte = Number.isFinite(pattern.familyFirstByte)
     ? pattern.familyFirstByte.toString(16).toUpperCase().padStart(2, "0")
     : "??";
@@ -105,6 +105,46 @@ function includeSchemaPattern(pattern) {
     return false;
   }
   return true;
+}
+
+function includeRankedPattern(pattern, index) {
+  if (index >= 24) {
+    return false;
+  }
+  const support = pattern?.support ?? {};
+  if ((support.rows ?? 0) < 1 || (support.participants ?? 0) < 5) {
+    return false;
+  }
+  if (!Number.isFinite(support.avgAxisCorrelation) || support.avgAxisCorrelation < 0.5) {
+    return false;
+  }
+  if (!Number.isFinite(support.avgNormalizedDistanceRmse) || support.avgNormalizedDistanceRmse > 0.26) {
+    return false;
+  }
+  if (!Number.isFinite(support.avgValidatorScore) || support.avgValidatorScore < 0.65) {
+    return false;
+  }
+  return true;
+}
+
+function scoreEntryAgainstPrior(entry, prior) {
+  const xScore = scoreAxisAgainstPrior(entry.transformX, prior.transformX);
+  const yScore = scoreAxisAgainstPrior(entry.transformY, prior.transformY);
+  return Math.sqrt(xScore * yScore);
+}
+
+function scoreAxisAgainstPrior(axis, priorAxis) {
+  if (!axis || !priorAxis) {
+    return 0;
+  }
+
+  const slopeScale = Math.max(Math.abs(priorAxis.slopeMedian) * 0.5, (priorAxis.slopeMad ?? 0) * 4, 1e-9);
+  const interceptScale = Math.max(Math.abs(priorAxis.interceptMedian) * 0.1, (priorAxis.interceptMad ?? 0) * 4, 400);
+  const slopeDelta = Math.abs((axis.slopeMedian ?? 0) - priorAxis.slopeMedian);
+  const interceptDelta = Math.abs((axis.interceptMedian ?? 0) - priorAxis.interceptMedian);
+  const slopeScore = 1 / (1 + (slopeDelta / slopeScale));
+  const interceptScore = 1 / (1 + (interceptDelta / interceptScale));
+  return Math.max(0, Math.min(1, Math.sqrt(slopeScore * interceptScore)));
 }
 
 function summarizeBucket(entries) {
@@ -154,6 +194,97 @@ function summarizeBucket(entries) {
   };
 }
 
+function clusterFamilyBandEntries(entries) {
+  const sortedEntries = entries
+    .slice()
+    .sort((left, right) =>
+      entryPriority(right) - entryPriority(left)
+      || right.averageAxisCorrelation - left.averageAxisCorrelation
+      || left.normalizedDistanceRmse - right.normalizedDistanceRmse,
+    );
+
+  const clusters = [];
+  for (const entry of sortedEntries) {
+    let bestCluster = null;
+    let bestScore = 0;
+    for (const cluster of clusters) {
+      const similarity = scoreEntryAgainstPrior(entry, cluster);
+      if (similarity > bestScore) {
+        bestScore = similarity;
+        bestCluster = cluster;
+      }
+    }
+
+    const minimumScore = entry.source === "ranked_candidate" ? 0.72 : 0.58;
+    if (bestCluster && bestScore >= minimumScore) {
+      bestCluster.entries.push(entry);
+      continue;
+    }
+
+    clusters.push({
+      entries: [entry],
+      transformX: {
+        slopeMedian: entry.transformX.slopeMedian,
+        slopeMad: 0,
+        interceptMedian: entry.transformX.interceptMedian,
+        interceptMad: 0,
+      },
+      transformY: {
+        slopeMedian: entry.transformY.slopeMedian,
+        slopeMad: 0,
+        interceptMedian: entry.transformY.interceptMedian,
+        interceptMad: 0,
+      },
+    });
+
+    if (bestCluster) {
+      continue;
+    }
+  }
+
+  return clusters
+    .map((cluster, index) => summarizeCluster(cluster.entries, index))
+    .sort((left, right) =>
+      right.replayCount - left.replayCount
+      || right.support - left.support
+      || right.passingCount - left.passingCount
+      || right.nearPassingCount - left.nearPassingCount,
+    );
+}
+
+function summarizeCluster(entries, index) {
+  const summary = summarizeBucket(entries);
+  const signatureCounts = new Map();
+  for (const entry of entries) {
+    const current = signatureCounts.get(entry.signatureKey) ?? 0;
+    signatureCounts.set(entry.signatureKey, current + 1);
+  }
+
+  return {
+    clusterId: `c${index + 1}`,
+    ...summary,
+    signatureCount: signatureCounts.size,
+    rankedCandidateCount: entries.filter((entry) => entry.label === "ranked_candidate").length,
+    dominantSignatures: [...signatureCounts.entries()]
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+      .slice(0, 6)
+      .map(([signatureKey, support]) => ({ signatureKey, support })),
+  };
+}
+
+function entryPriority(entry) {
+  if (entry.label === "passing") {
+    return 4;
+  }
+  if (entry.label === "near_passing") {
+    return 3;
+  }
+  if (entry.label === "schema_candidate") {
+    return 2;
+  }
+  return 1;
+}
+
 function main() {
   const repoRoot = process.cwd();
   const args = parseArgs(process.argv);
@@ -182,6 +313,7 @@ function main() {
   const familySignatureBuckets = new Map();
   const familyMappingBuckets = new Map();
   const familyBandBuckets = new Map();
+  const familyBandClusterInputBuckets = new Map();
   for (const replay of manifest.processed ?? []) {
     const artifactDir = replay.artifactDir ? resolveAbsolute(repoRoot, replay.artifactDir) : path.join(artifactRoot, replay.replayId);
     const summaryPath = path.join(artifactDir, "summary.json");
@@ -226,6 +358,7 @@ function main() {
         versionGroup,
         familyKey: pattern.familyKey,
         patternKey: pattern.patternKey,
+        signatureKey,
         champion: assignment.champion,
         label,
         source: "assigned_validation",
@@ -253,6 +386,9 @@ function main() {
       const familyBandList = familyBandBuckets.get(familyBandKey) ?? [];
       familyBandList.push(entry);
       familyBandBuckets.set(familyBandKey, familyBandList);
+      const familyBandClusterInputList = familyBandClusterInputBuckets.get(familyBandKey) ?? [];
+      familyBandClusterInputList.push(entry);
+      familyBandClusterInputBuckets.set(familyBandKey, familyBandClusterInputList);
     }
 
     for (const pattern of movementSchema.promotedPatterns ?? []) {
@@ -265,6 +401,7 @@ function main() {
         versionGroup,
         familyKey: pattern.familyKey,
         patternKey: pattern.patternKey,
+        signatureKey: buildSignatureKey(pattern),
         champion: null,
         label: "schema_candidate",
         source: "movement_schema",
@@ -294,6 +431,35 @@ function main() {
       const familyBandList = familyBandBuckets.get(familyBandKey) ?? [];
       familyBandList.push(entry);
       familyBandBuckets.set(familyBandKey, familyBandList);
+      const familyBandClusterInputList = familyBandClusterInputBuckets.get(familyBandKey) ?? [];
+      familyBandClusterInputList.push(entry);
+      familyBandClusterInputBuckets.set(familyBandKey, familyBandClusterInputList);
+    }
+
+    for (const [index, pattern] of (movementSchema.rankedPatterns ?? []).entries()) {
+      if (!includeRankedPattern(pattern, index)) {
+        continue;
+      }
+
+      const familyBandKey = buildFamilyBandKey(versionGroup, pattern);
+      const entry = {
+        replayId: replay.replayId,
+        versionGroup,
+        familyKey: pattern.familyKey,
+        patternKey: pattern.patternKey,
+        signatureKey: buildSignatureKey(pattern),
+        champion: null,
+        label: "ranked_candidate",
+        source: "movement_schema",
+        averageAxisCorrelation: pattern.support.avgAxisCorrelation,
+        normalizedDistanceRmse: pattern.support.avgNormalizedDistanceRmse,
+        pathCorrelation: pattern.support.avgPathCorrelation,
+        transformX: pattern.transformX,
+        transformY: pattern.transformY,
+      };
+      const familyBandClusterInputList = familyBandClusterInputBuckets.get(familyBandKey) ?? [];
+      familyBandClusterInputList.push(entry);
+      familyBandClusterInputBuckets.set(familyBandKey, familyBandClusterInputList);
     }
   }
 
@@ -317,6 +483,11 @@ function main() {
       .sort((left, right) => right[1].length - left[1].length || left[0].localeCompare(right[0]))
       .map(([key, entries]) => [key, summarizeBucket(entries)]),
   );
+  const familyBandClusters = Object.fromEntries(
+    [...familyBandClusterInputBuckets.entries()]
+      .sort((left, right) => right[1].length - left[1].length || left[0].localeCompare(right[0]))
+      .map(([key, entries]) => [key, clusterFamilyBandEntries(entries)]),
+  );
 
   const model = {
     generatedAtUtc: new Date().toISOString(),
@@ -324,10 +495,12 @@ function main() {
     familySignatureCount: Object.keys(familySignatures).length,
     familyMappingCount: Object.keys(familyMappings).length,
     familyBandCount: Object.keys(familyBands).length,
+    familyBandClusterCount: Object.keys(familyBandClusters).length,
     signatures,
     familySignatures,
     familyMappings,
     familyBands,
+    familyBandClusters,
   };
 
   writeJson(outputPath, model);

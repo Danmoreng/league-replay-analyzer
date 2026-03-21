@@ -97,6 +97,97 @@ function computeBoundsRatio(points) {
   return inBounds / points.length;
 }
 
+function scoreFallbackPattern(pattern) {
+  const support = pattern.support ?? {};
+  const validatorScore = Math.min(1, Math.max(0, support.avgValidatorScore ?? 0));
+  const axisScore = Math.min(1, Math.max(0, support.avgAxisCorrelation ?? 0));
+  const pathScore = Math.min(1, Math.max(0, support.avgPathCorrelation ?? 0));
+  const rmseScore = 1 - Math.min(1, Math.max(0, support.avgNormalizedDistanceRmse ?? 1));
+  const effectiveScore = Math.min(1, Math.max(0, (support.avgEffectiveScore ?? 0) / 0.5));
+  const replaySupport = Math.min(1, Math.max(0, (pattern.coordinateModelReplaySupport ?? 0) / 3));
+
+  return (
+    (validatorScore * 0.3) +
+    (axisScore * 0.2) +
+    (pathScore * 0.2) +
+    (rmseScore * 0.15) +
+    (effectiveScore * 0.1) +
+    (replaySupport * 0.05)
+  );
+}
+
+function selectFallbackPatterns(rankedPatterns, maxPatterns) {
+  const ranked = (rankedPatterns ?? [])
+    .filter((pattern) => {
+      const support = pattern.support ?? {};
+      return (
+        (support.avgValidatorScore ?? 0) >= 0.78 &&
+        (support.avgAxisCorrelation ?? 0) >= 0.52 &&
+        (support.avgPathCorrelation ?? 0) >= 0.35 &&
+        (support.avgNormalizedDistanceRmse ?? Number.POSITIVE_INFINITY) <= 0.22 &&
+        (support.avgEffectiveScore ?? 0) >= 0.34
+      );
+    })
+    .map((pattern) => ({
+      pattern,
+      fallbackScore: scoreFallbackPattern(pattern),
+    }))
+    .sort((left, right) =>
+      right.fallbackScore - left.fallbackScore
+      || (right.pattern.support?.avgEffectiveScore ?? 0) - (left.pattern.support?.avgEffectiveScore ?? 0)
+      || (right.pattern.coordinateModelReplaySupport ?? 0) - (left.pattern.coordinateModelReplaySupport ?? 0)
+      || left.pattern.patternKey.localeCompare(right.pattern.patternKey),
+    );
+
+  const selected = [];
+  const selectedKeys = new Set();
+  const byFamily = new Map();
+  for (const entry of ranked) {
+    const list = byFamily.get(entry.pattern.familyKey) ?? [];
+    list.push(entry);
+    byFamily.set(entry.pattern.familyKey, list);
+  }
+
+  // Prefer family diversity before taking alternate windows from the same family.
+  const familyEntries = [...byFamily.entries()]
+    .map(([familyKey, entries]) => ({
+      familyKey,
+      entries,
+      bestScore: entries[0]?.fallbackScore ?? 0,
+    }))
+    .sort((left, right) =>
+      right.bestScore - left.bestScore
+      || left.familyKey.localeCompare(right.familyKey),
+    );
+
+  for (const family of familyEntries) {
+    const first = family.entries[0];
+    if (!first || selectedKeys.has(first.pattern.patternKey)) {
+      continue;
+    }
+    selected.push(first.pattern);
+    selectedKeys.add(first.pattern.patternKey);
+    if (selected.length >= maxPatterns) {
+      return selected;
+    }
+  }
+
+  for (const family of familyEntries) {
+    for (const entry of family.entries.slice(1)) {
+      if (selectedKeys.has(entry.pattern.patternKey)) {
+        continue;
+      }
+      selected.push(entry.pattern);
+      selectedKeys.add(entry.pattern.patternKey);
+      if (selected.length >= maxPatterns) {
+        return selected;
+      }
+    }
+  }
+
+  return selected;
+}
+
 function pointInBounds(point) {
   return (
     point.x >= summonersRiftBounds.minX &&
@@ -192,11 +283,7 @@ function main() {
   const runManifest = readJson(runManifestPath);
   const schema = readJson(schemaPath);
   const promotedPatterns = schema.promotedPatterns ?? [];
-  const rankedFallback = (schema.rankedPatterns ?? [])
-    .filter((pattern) =>
-      (pattern.support?.avgValidatorScore ?? 0) >= 0.85 &&
-      (pattern.support?.avgNormalizedDistanceRmse ?? Number.POSITIVE_INFINITY) <= 0.2,
-    );
+  const rankedFallback = selectFallbackPatterns(schema.rankedPatterns ?? [], args.maxPatterns);
   const patterns = (promotedPatterns.length ? promotedPatterns : rankedFallback)
     .slice(0, args.maxPatterns);
 

@@ -233,13 +233,14 @@ Once anonymous movement tracks exist, treat identity assignment as a separate st
 
 1. build corpus-backed movement identity priors from already validated fixture replays
 2. collapse alias trajectories that come from the same family and slot
-3. score each canonical movement entity against replay participants using:
+3. when promoted movement patterns are sparse, extract fallback candidates with family diversity first instead of taking several near-duplicate windows from one family
+4. score each canonical movement entity against replay participants using:
    - version-group movement priors
    - team-side spawn bias
    - role-anchor proximity
    - scalar-family proximity when it is genuinely nearby
-4. leave weak entities unmatched rather than forcing a label
-5. validate assigned paths separately from anonymous movement discovery
+5. leave weak entities unmatched rather than forcing a label
+6. validate assigned paths separately from anonymous movement discovery
 
 ## Daily Workflow For Coding Sessions
 
