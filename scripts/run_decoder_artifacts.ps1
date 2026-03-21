@@ -18,7 +18,8 @@ param (
     [int]$TopWindows = 16,
     [int]$TopFields = 16,
     [switch]$SkipScalar,
-    [switch]$Clean
+    [switch]$Clean,
+    [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
@@ -113,6 +114,122 @@ function Write-Utf8File {
     }
 
     Set-Content -Path $Path -Value $Content -Encoding utf8
+}
+
+function Get-FileFingerprint {
+    param([string]$Path)
+
+    $item = Get-Item -LiteralPath $Path
+    return [ordered]@{
+        path = $item.FullName
+        length = if ($item.PSIsContainer) { $null } else { [int64]$item.Length }
+        lastWriteTimeUtc = $item.LastWriteTimeUtc.ToString("o")
+    }
+}
+
+function Read-JsonFile {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $null
+    }
+
+    return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json -AsHashtable
+}
+
+function ConvertTo-UtcDateTime {
+    param([object]$Value)
+
+    if ($Value -is [DateTime]) {
+        return $Value.ToUniversalTime()
+    }
+
+    return [DateTime]::Parse([string]$Value, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+}
+
+function Test-RunManifestFresh {
+    param(
+        [string]$RunManifestPath,
+        [string]$ReplayArtifactDir,
+        [hashtable]$ExpectedReplay,
+        [hashtable]$ExpectedAnalyzer,
+        [hashtable]$ExpectedRunnerScript,
+        [hashtable]$ExpectedParameters
+    )
+
+    $manifest = Read-JsonFile -Path $RunManifestPath
+    if ($null -eq $manifest) {
+        return $false
+    }
+
+    if (-not $manifest.ContainsKey("inputs") -or -not $manifest.ContainsKey("parameters") -or -not $manifest.ContainsKey("families")) {
+        return $false
+    }
+
+    $actualReplay = $manifest.inputs.replay
+    $actualAnalyzer = $manifest.inputs.analyzerExe
+    $actualRunnerScript = $manifest.inputs.runnerScript
+    if ($null -eq $actualReplay -or $null -eq $actualAnalyzer -or $null -eq $actualRunnerScript) {
+        return $false
+    }
+
+    foreach ($pair in @(
+            @{ expected = $ExpectedReplay; actual = $actualReplay },
+            @{ expected = $ExpectedAnalyzer; actual = $actualAnalyzer },
+            @{ expected = $ExpectedRunnerScript; actual = $actualRunnerScript })) {
+        if ([string]$pair.expected.path -ne [string]$pair.actual.path) {
+            return $false
+        }
+
+        if ([string]$pair.expected.length -ne [string]$pair.actual.length) {
+            return $false
+        }
+
+        $expectedTime = ConvertTo-UtcDateTime -Value $pair.expected.lastWriteTimeUtc
+        $actualTime = ConvertTo-UtcDateTime -Value $pair.actual.lastWriteTimeUtc
+        if ($expectedTime -ne $actualTime) {
+            return $false
+        }
+    }
+
+    foreach ($parameterKey in $ExpectedParameters.Keys) {
+        if (-not $manifest.parameters.ContainsKey($parameterKey)) {
+            return $false
+        }
+
+        if ([string]$ExpectedParameters[$parameterKey] -ne [string]$manifest.parameters[$parameterKey]) {
+            return $false
+        }
+    }
+
+    if ($manifest.parameters.Count -ne $ExpectedParameters.Count) {
+        return $false
+    }
+
+    foreach ($requiredFile in @("summary.json", "family-scan.json")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $ReplayArtifactDir $requiredFile))) {
+            return $false
+        }
+    }
+
+    foreach ($family in @($manifest.families)) {
+        $familyDir = Join-Path (Join-Path $ReplayArtifactDir "families") ([string]$family.familyKey)
+        if (-not (Test-Path -LiteralPath $familyDir)) {
+            return $false
+        }
+
+        foreach ($relativeFile in @($family.files.Values)) {
+            if ($null -eq $relativeFile) {
+                continue
+            }
+
+            if (-not (Test-Path -LiteralPath (Join-Path $familyDir $relativeFile))) {
+                return $false
+            }
+        }
+    }
+
+    return $true
 }
 
 function Get-HeaderSize {
@@ -210,6 +327,39 @@ if (-not (Test-Path $replayArtifactDir)) {
 }
 
 $resolvedAnalyzerExe = Resolve-AnalyzerExecutable -ExplicitPath $AnalyzerExe -RepoRoot $repoRoot -BuildDir $BuildDir -Configuration $Configuration
+$runManifestPath = Join-Path $replayArtifactDir "run-manifest.json"
+$parameterManifest = [ordered]@{
+    configuration = $Configuration
+    minLength = $MinLength
+    minRecords = $MinRecords
+    topFamilies = $TopFamilies
+    topEntitySlots = $TopEntitySlots
+    topScalarSlots = $TopScalarSlots
+    dynamicSlotCount = $DynamicSlotCount
+    mixedSlotCount = $MixedSlotCount
+    handleSlotCount = $HandleSlotCount
+    topWindows = $TopWindows
+    topFields = $TopFields
+    skipScalar = [bool]$SkipScalar
+}
+$inputManifest = [ordered]@{
+    replay = Get-FileFingerprint -Path $resolvedReplayPath
+    analyzerExe = Get-FileFingerprint -Path $resolvedAnalyzerExe
+    runnerScript = Get-FileFingerprint -Path $PSCommandPath
+}
+
+if (-not $Clean -and -not $Force) {
+    if (Test-RunManifestFresh `
+            -RunManifestPath $runManifestPath `
+            -ReplayArtifactDir $replayArtifactDir `
+            -ExpectedReplay $inputManifest.replay `
+            -ExpectedAnalyzer $inputManifest.analyzerExe `
+            -ExpectedRunnerScript $inputManifest.runnerScript `
+            -ExpectedParameters $parameterManifest) {
+        Write-Host "Reusing cached decoder artifacts for $replayId" -ForegroundColor Green
+        return
+    }
+}
 
 $usedNativeBatch = $false
 
@@ -294,24 +444,12 @@ try {
             gameLengthMillis = $batchJson.summary.gameLengthMillis
             playerCount = $batchJson.summary.playerCount
         }
-        parameters = [ordered]@{
-            configuration = $Configuration
-            minLength = $MinLength
-            minRecords = $MinRecords
-            topFamilies = $TopFamilies
-            topEntitySlots = $TopEntitySlots
-            topScalarSlots = $TopScalarSlots
-            dynamicSlotCount = $DynamicSlotCount
-            mixedSlotCount = $MixedSlotCount
-            handleSlotCount = $HandleSlotCount
-            topWindows = $TopWindows
-            topFields = $TopFields
-            skipScalar = [bool]$SkipScalar
-        }
+        inputs = $inputManifest
+        parameters = $parameterManifest
         families = $familyManifests
     }
 
-    Write-Utf8File -Path (Join-Path $replayArtifactDir "run-manifest.json") -Content ($runManifest | ConvertTo-Json -Depth 8)
+    Write-Utf8File -Path $runManifestPath -Content ($runManifest | ConvertTo-Json -Depth 8)
     Write-Host "Wrote decoder artifacts to $replayArtifactDir using native batch mode" -ForegroundColor Green
     $usedNativeBatch = $true
 } catch {
@@ -446,24 +584,12 @@ if (-not $usedNativeBatch) {
             gameLengthMillis = $summaryResult.Json.gameLengthMillis
             playerCount = $summaryResult.Json.playerCount
         }
-        parameters = [ordered]@{
-            configuration = $Configuration
-            minLength = $MinLength
-            minRecords = $MinRecords
-            topFamilies = $TopFamilies
-            topEntitySlots = $TopEntitySlots
-            topScalarSlots = $TopScalarSlots
-            dynamicSlotCount = $DynamicSlotCount
-            mixedSlotCount = $MixedSlotCount
-            handleSlotCount = $HandleSlotCount
-            topWindows = $TopWindows
-            topFields = $TopFields
-            skipScalar = [bool]$SkipScalar
-        }
+        inputs = $inputManifest
+        parameters = $parameterManifest
         families = $familyManifests
     }
 
-    Write-Utf8File -Path (Join-Path $replayArtifactDir "run-manifest.json") -Content ($runManifest | ConvertTo-Json -Depth 8)
+    Write-Utf8File -Path $runManifestPath -Content ($runManifest | ConvertTo-Json -Depth 8)
 
     Write-Host "Wrote decoder artifacts to $replayArtifactDir" -ForegroundColor Green
 }

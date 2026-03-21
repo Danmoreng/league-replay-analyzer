@@ -10,6 +10,7 @@ param (
     [int]$TopFamilies = 8,
     [int]$TopWindows = 16,
     [int]$TopFields = 16,
+    [switch]$Force,
     [switch]$CleanReplayArtifacts,
     [switch]$SkipSchema,
     [switch]$SkipCorpusSchema,
@@ -32,6 +33,83 @@ function Resolve-AbsolutePath {
     }
 
     return [System.IO.Path]::GetFullPath((Join-Path $BasePath $Path))
+}
+
+function Get-LatestWriteTimeUtc {
+    param([string[]]$Paths)
+
+    $latest = [DateTime]::MinValue
+    foreach ($path in $Paths) {
+        if (-not $path) {
+            continue
+        }
+
+        if (-not (Test-Path -LiteralPath $path)) {
+            return $null
+        }
+
+        $candidate = (Get-Item -LiteralPath $path).LastWriteTimeUtc
+        if ($candidate -gt $latest) {
+            $latest = $candidate
+        }
+    }
+
+    return $latest
+}
+
+function Test-OutputsFresh {
+    param(
+        [string[]]$OutputPaths,
+        [string[]]$InputPaths
+    )
+
+    if ($Force -or -not $OutputPaths -or $OutputPaths.Count -eq 0) {
+        return $false
+    }
+
+    $latestInput = Get-LatestWriteTimeUtc -Paths $InputPaths
+    if ($null -eq $latestInput) {
+        return $false
+    }
+
+    foreach ($outputPath in $OutputPaths) {
+        if (-not $outputPath -or -not (Test-Path -LiteralPath $outputPath)) {
+            return $false
+        }
+
+        $outputTime = (Get-Item -LiteralPath $outputPath).LastWriteTimeUtc
+        if ($outputTime -lt $latestInput) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Get-CorpusSchemaInputs {
+    param(
+        [object[]]$Entries,
+        [string]$SchemaScriptPath,
+        [switch]$IncludeValidation
+    )
+
+    $inputs = @($SchemaScriptPath)
+    foreach ($entry in $Entries) {
+        $inputs += @(
+            (Join-Path $entry.artifactDir "run-manifest.json"),
+            (Join-Path $entry.artifactDir "provisional-schema.json"),
+            (Join-Path $entry.artifactDir "candidate-matches.json")
+        )
+
+        if ($IncludeValidation) {
+            $inputs += @(
+                (Join-Path $entry.artifactDir "extracted-stats.json"),
+                (Join-Path $entry.artifactDir "validation-report.json")
+            )
+        }
+    }
+
+    return $inputs
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -77,18 +155,33 @@ foreach ($replayFile in $replayFiles) {
         -TopFamilies $TopFamilies `
         -TopWindows $TopWindows `
         -TopFields $TopFields `
+        -Force:$Force `
         -Clean:$CleanReplayArtifacts
 
-    if ($LASTEXITCODE -ne 0) {
+    if (-not $?) {
         throw "Artifact generation failed for $($replayFile.FullName)"
     }
 
     $artifactDir = Join-Path $resolvedArtifactRoot $replayFile.BaseName
     if (-not $SkipSchema) {
-        Write-Host "Building provisional schema for $($replayFile.Name)" -ForegroundColor Cyan
-        node $schemaScript --artifact-dir $artifactDir --fixture-dir $fixtureDir
-        if ($LASTEXITCODE -ne 0) {
-            throw "Provisional schema generation failed for $($replayFile.FullName)"
+        $provisionalSchemaPath = Join-Path $artifactDir "provisional-schema.json"
+        $candidateMatchesPath = Join-Path $artifactDir "candidate-matches.json"
+        $schemaOutputs = @($provisionalSchemaPath, $candidateMatchesPath)
+        $schemaInputs = @(
+            (Join-Path $artifactDir "run-manifest.json"),
+            (Join-Path $fixtureDir "match.json"),
+            (Join-Path $fixtureDir "timeline.json"),
+            $schemaScript
+        )
+
+        if (Test-OutputsFresh -OutputPaths $schemaOutputs -InputPaths $schemaInputs) {
+            Write-Host "Reusing provisional schema for $($replayFile.Name)" -ForegroundColor Green
+        } else {
+            Write-Host "Building provisional schema for $($replayFile.Name)" -ForegroundColor Cyan
+            node $schemaScript --artifact-dir $artifactDir --fixture-dir $fixtureDir
+            if ($LASTEXITCODE -ne 0) {
+                throw "Provisional schema generation failed for $($replayFile.FullName)"
+            }
         }
     }
 
@@ -113,10 +206,14 @@ $manifest | ConvertTo-Json -Depth 6 | Set-Content -Path $manifestPath -Encoding 
 $corpusSchemaPath = Join-Path $resolvedArtifactRoot "corpus-schema.json"
 
 if (-not $SkipCorpusSchema) {
-    Write-Host "Building cross-replay corpus schema" -ForegroundColor Cyan
-    node $corpusSchemaScript --artifact-root $resolvedArtifactRoot --corpus-manifest $manifestPath --output-path $corpusSchemaPath
-    if ($LASTEXITCODE -ne 0) {
-        throw "Corpus schema generation failed."
+    if (Test-OutputsFresh -OutputPaths @($corpusSchemaPath) -InputPaths (Get-CorpusSchemaInputs -Entries $processed -SchemaScriptPath $corpusSchemaScript)) {
+        Write-Host "Reusing cross-replay corpus schema" -ForegroundColor Green
+    } else {
+        Write-Host "Building cross-replay corpus schema" -ForegroundColor Cyan
+        node $corpusSchemaScript --artifact-root $resolvedArtifactRoot --corpus-manifest $manifestPath --output-path $corpusSchemaPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Corpus schema generation failed."
+        }
     }
     $manifest.corpusSchemaPath = $corpusSchemaPath
 }
@@ -128,10 +225,19 @@ if (-not $SkipExtraction) {
 
     foreach ($entry in $processed) {
         $extractedPath = Join-Path $entry.artifactDir "extracted-stats.json"
-        Write-Host "Extracting replay-only stats for $($entry.replayName)" -ForegroundColor Cyan
-        node $extractScript --artifact-dir $entry.artifactDir --schema-path $corpusSchemaPath --output-path $extractedPath
-        if ($LASTEXITCODE -ne 0) {
-            throw "Replay-only extraction failed for $($entry.replayName)"
+        if (Test-OutputsFresh -OutputPaths @($extractedPath) -InputPaths @(
+                $extractScript,
+                $corpusSchemaPath,
+                (Join-Path $entry.artifactDir "run-manifest.json"),
+                (Join-Path $entry.artifactDir "provisional-schema.json"),
+                (Join-Path $entry.artifactDir "candidate-matches.json"))) {
+            Write-Host "Reusing replay-only stats for $($entry.replayName)" -ForegroundColor Green
+        } else {
+            Write-Host "Extracting replay-only stats for $($entry.replayName)" -ForegroundColor Cyan
+            node $extractScript --artifact-dir $entry.artifactDir --schema-path $corpusSchemaPath --output-path $extractedPath
+            if ($LASTEXITCODE -ne 0) {
+                throw "Replay-only extraction failed for $($entry.replayName)"
+            }
         }
         $entry["extractedStatsPath"] = $extractedPath
     }
@@ -145,28 +251,49 @@ if (-not $SkipValidation) {
         }
 
         $validationPath = Join-Path $entry.artifactDir "validation-report.json"
-        Write-Host "Validating extracted stats for $($entry.replayName)" -ForegroundColor Cyan
-        node $validateScript --extracted-path $extractedPath --fixture-dir $entry.fixtureDir --output-path $validationPath
-        if ($LASTEXITCODE -ne 0) {
-            throw "Validation failed for $($entry.replayName)"
+        if (Test-OutputsFresh -OutputPaths @($validationPath) -InputPaths @(
+                $validateScript,
+                $extractedPath,
+                (Join-Path $entry.fixtureDir "match.json"),
+                (Join-Path $entry.fixtureDir "timeline.json"))) {
+            Write-Host "Reusing validation report for $($entry.replayName)" -ForegroundColor Green
+        } else {
+            Write-Host "Validating extracted stats for $($entry.replayName)" -ForegroundColor Cyan
+            node $validateScript --extracted-path $extractedPath --fixture-dir $entry.fixtureDir --output-path $validationPath
+            if ($LASTEXITCODE -ne 0) {
+                throw "Validation failed for $($entry.replayName)"
+            }
         }
         $entry["validationReportPath"] = $validationPath
     }
 }
 
 if (-not $SkipCorpusSchema -and -not $SkipExtraction -and -not $SkipValidation) {
-    Write-Host "Rebuilding cross-replay corpus schema from refreshed extraction results" -ForegroundColor Cyan
-    node $corpusSchemaScript --artifact-root $resolvedArtifactRoot --corpus-manifest $manifestPath --output-path $corpusSchemaPath
-    if ($LASTEXITCODE -ne 0) {
-        throw "Refreshed corpus schema generation failed."
+    if (Test-OutputsFresh -OutputPaths @($corpusSchemaPath) -InputPaths (Get-CorpusSchemaInputs -Entries $processed -SchemaScriptPath $corpusSchemaScript -IncludeValidation)) {
+        Write-Host "Reusing refreshed cross-replay corpus schema" -ForegroundColor Green
+    } else {
+        Write-Host "Rebuilding cross-replay corpus schema from refreshed extraction results" -ForegroundColor Cyan
+        node $corpusSchemaScript --artifact-root $resolvedArtifactRoot --corpus-manifest $manifestPath --output-path $corpusSchemaPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Refreshed corpus schema generation failed."
+        }
     }
 
     foreach ($entry in $processed) {
         $extractedPath = if ($entry.Contains("extractedStatsPath")) { $entry.extractedStatsPath } else { Join-Path $entry.artifactDir "extracted-stats.json" }
-        Write-Host "Re-extracting replay-only stats for $($entry.replayName) with refreshed schema" -ForegroundColor Cyan
-        node $extractScript --artifact-dir $entry.artifactDir --schema-path $corpusSchemaPath --output-path $extractedPath
-        if ($LASTEXITCODE -ne 0) {
-            throw "Replay-only re-extraction failed for $($entry.replayName)"
+        if (Test-OutputsFresh -OutputPaths @($extractedPath) -InputPaths @(
+                $extractScript,
+                $corpusSchemaPath,
+                (Join-Path $entry.artifactDir "run-manifest.json"),
+                (Join-Path $entry.artifactDir "provisional-schema.json"),
+                (Join-Path $entry.artifactDir "candidate-matches.json"))) {
+            Write-Host "Reusing replay-only stats for $($entry.replayName) with refreshed schema" -ForegroundColor Green
+        } else {
+            Write-Host "Re-extracting replay-only stats for $($entry.replayName) with refreshed schema" -ForegroundColor Cyan
+            node $extractScript --artifact-dir $entry.artifactDir --schema-path $corpusSchemaPath --output-path $extractedPath
+            if ($LASTEXITCODE -ne 0) {
+                throw "Replay-only re-extraction failed for $($entry.replayName)"
+            }
         }
         $entry["extractedStatsPath"] = $extractedPath
     }
@@ -174,18 +301,30 @@ if (-not $SkipCorpusSchema -and -not $SkipExtraction -and -not $SkipValidation) 
     foreach ($entry in $processed) {
         $extractedPath = $entry.extractedStatsPath
         $validationPath = if ($entry.Contains("validationReportPath")) { $entry.validationReportPath } else { Join-Path $entry.artifactDir "validation-report.json" }
-        Write-Host "Re-validating extracted stats for $($entry.replayName) with refreshed schema" -ForegroundColor Cyan
-        node $validateScript --extracted-path $extractedPath --fixture-dir $entry.fixtureDir --output-path $validationPath
-        if ($LASTEXITCODE -ne 0) {
-            throw "Refreshed validation failed for $($entry.replayName)"
+        if (Test-OutputsFresh -OutputPaths @($validationPath) -InputPaths @(
+                $validateScript,
+                $extractedPath,
+                (Join-Path $entry.fixtureDir "match.json"),
+                (Join-Path $entry.fixtureDir "timeline.json"))) {
+            Write-Host "Reusing validation report for $($entry.replayName) with refreshed schema" -ForegroundColor Green
+        } else {
+            Write-Host "Re-validating extracted stats for $($entry.replayName) with refreshed schema" -ForegroundColor Cyan
+            node $validateScript --extracted-path $extractedPath --fixture-dir $entry.fixtureDir --output-path $validationPath
+            if ($LASTEXITCODE -ne 0) {
+                throw "Refreshed validation failed for $($entry.replayName)"
+            }
         }
         $entry["validationReportPath"] = $validationPath
     }
 
-    Write-Host "Finalizing cross-replay corpus schema after refreshed validation" -ForegroundColor Cyan
-    node $corpusSchemaScript --artifact-root $resolvedArtifactRoot --corpus-manifest $manifestPath --output-path $corpusSchemaPath
-    if ($LASTEXITCODE -ne 0) {
-        throw "Final corpus schema generation failed."
+    if (Test-OutputsFresh -OutputPaths @($corpusSchemaPath) -InputPaths (Get-CorpusSchemaInputs -Entries $processed -SchemaScriptPath $corpusSchemaScript -IncludeValidation)) {
+        Write-Host "Reusing finalized cross-replay corpus schema" -ForegroundColor Green
+    } else {
+        Write-Host "Finalizing cross-replay corpus schema after refreshed validation" -ForegroundColor Cyan
+        node $corpusSchemaScript --artifact-root $resolvedArtifactRoot --corpus-manifest $manifestPath --output-path $corpusSchemaPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Final corpus schema generation failed."
+        }
     }
 }
 
@@ -197,26 +336,50 @@ if (-not $SkipMovement) {
         $movementExtractedPath = Join-Path $entry.artifactDir "extracted-movement.json"
         $movementValidationPath = Join-Path $entry.artifactDir "movement-validation-report.json"
 
-        Write-Host "Discovering movement candidates for $($entry.replayName)" -ForegroundColor Cyan
-        if (Test-Path $movementCoordinateModelPath) {
-            node $discoverMovementScript --artifact-dir $entry.artifactDir --fixture-dir $entry.fixtureDir --coordinate-model-path $movementCoordinateModelPath
+        if (Test-OutputsFresh -OutputPaths @($movementCandidatePath, $movementSchemaPath) -InputPaths @(
+                $discoverMovementScript,
+                (Join-Path $entry.artifactDir "run-manifest.json"),
+                (Join-Path $entry.fixtureDir "match.json"),
+                (Join-Path $entry.fixtureDir "timeline.json"),
+                $movementCoordinateModelPath)) {
+            Write-Host "Reusing movement candidates for $($entry.replayName)" -ForegroundColor Green
         } else {
-            node $discoverMovementScript --artifact-dir $entry.artifactDir --fixture-dir $entry.fixtureDir
-        }
-        if ($LASTEXITCODE -ne 0) {
-            throw "Movement discovery failed for $($entry.replayName)"
+            Write-Host "Discovering movement candidates for $($entry.replayName)" -ForegroundColor Cyan
+            if (Test-Path $movementCoordinateModelPath) {
+                node $discoverMovementScript --artifact-dir $entry.artifactDir --fixture-dir $entry.fixtureDir --coordinate-model-path $movementCoordinateModelPath
+            } else {
+                node $discoverMovementScript --artifact-dir $entry.artifactDir --fixture-dir $entry.fixtureDir
+            }
+            if ($LASTEXITCODE -ne 0) {
+                throw "Movement discovery failed for $($entry.replayName)"
+            }
         }
 
-        Write-Host "Extracting movement tracks for $($entry.replayName)" -ForegroundColor Cyan
-        node $extractMovementScript --artifact-dir $entry.artifactDir --schema-path $movementSchemaPath --output-path $movementExtractedPath
-        if ($LASTEXITCODE -ne 0) {
-            throw "Movement extraction failed for $($entry.replayName)"
+        if (Test-OutputsFresh -OutputPaths @($movementExtractedPath) -InputPaths @(
+                $extractMovementScript,
+                $movementSchemaPath,
+                (Join-Path $entry.artifactDir "run-manifest.json"))) {
+            Write-Host "Reusing movement tracks for $($entry.replayName)" -ForegroundColor Green
+        } else {
+            Write-Host "Extracting movement tracks for $($entry.replayName)" -ForegroundColor Cyan
+            node $extractMovementScript --artifact-dir $entry.artifactDir --schema-path $movementSchemaPath --output-path $movementExtractedPath
+            if ($LASTEXITCODE -ne 0) {
+                throw "Movement extraction failed for $($entry.replayName)"
+            }
         }
 
-        Write-Host "Validating movement candidates for $($entry.replayName)" -ForegroundColor Cyan
-        node $validateMovementScript --candidate-matches-path $movementCandidatePath --provisional-schema-path $movementSchemaPath --output-path $movementValidationPath
-        if ($LASTEXITCODE -ne 0) {
-            throw "Movement validation failed for $($entry.replayName)"
+        if (Test-OutputsFresh -OutputPaths @($movementValidationPath) -InputPaths @(
+                $validateMovementScript,
+                $movementCandidatePath,
+                $movementSchemaPath,
+                (Join-Path $entry.fixtureDir "timeline.json"))) {
+            Write-Host "Reusing movement validation for $($entry.replayName)" -ForegroundColor Green
+        } else {
+            Write-Host "Validating movement candidates for $($entry.replayName)" -ForegroundColor Cyan
+            node $validateMovementScript --candidate-matches-path $movementCandidatePath --provisional-schema-path $movementSchemaPath --output-path $movementValidationPath
+            if ($LASTEXITCODE -ne 0) {
+                throw "Movement validation failed for $($entry.replayName)"
+            }
         }
 
         $entry["movementCandidatePath"] = $movementCandidatePath
@@ -226,10 +389,23 @@ if (-not $SkipMovement) {
     }
 
     $movementIdentityPriorsPath = Join-Path $resolvedArtifactRoot "movement-identity-priors.json"
-    Write-Host "Building movement identity priors" -ForegroundColor Cyan
-    node $movementIdentityPriorsScript --artifact-root $resolvedArtifactRoot --corpus-manifest $manifestPath --output-path $movementIdentityPriorsPath
-    if ($LASTEXITCODE -ne 0) {
-        throw "Movement identity prior generation failed."
+    $movementPriorsInputs = @($movementIdentityPriorsScript)
+    foreach ($entry in $processed) {
+        $movementPriorsInputs += @(
+            $entry.movementCandidatePath,
+            $entry.movementSchemaPath,
+            $entry.movementExtractedPath,
+            $entry.movementValidationPath
+        )
+    }
+    if (Test-OutputsFresh -OutputPaths @($movementIdentityPriorsPath) -InputPaths $movementPriorsInputs) {
+        Write-Host "Reusing movement identity priors" -ForegroundColor Green
+    } else {
+        Write-Host "Building movement identity priors" -ForegroundColor Cyan
+        node $movementIdentityPriorsScript --artifact-root $resolvedArtifactRoot --corpus-manifest $manifestPath --output-path $movementIdentityPriorsPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Movement identity prior generation failed."
+        }
     }
     $manifest["movementIdentityPriorsPath"] = $movementIdentityPriorsPath
 
@@ -237,26 +413,52 @@ if (-not $SkipMovement) {
         $participantMovementPath = Join-Path $entry.artifactDir "participant-movement.json"
         $assignedMovementValidationPath = Join-Path $entry.artifactDir "assigned-movement-validation-report.json"
 
-        Write-Host "Assigning movement tracks to participants for $($entry.replayName)" -ForegroundColor Cyan
-        node $assignMovementScript --artifact-dir $entry.artifactDir --priors-path $movementIdentityPriorsPath --output-path $participantMovementPath
-        if ($LASTEXITCODE -ne 0) {
-            throw "Movement participant assignment failed for $($entry.replayName)"
+        if (Test-OutputsFresh -OutputPaths @($participantMovementPath) -InputPaths @(
+                $assignMovementScript,
+                $movementIdentityPriorsPath,
+                $entry.movementExtractedPath,
+                (Join-Path $entry.artifactDir "extracted-stats.json"))) {
+            Write-Host "Reusing participant-labelled movement for $($entry.replayName)" -ForegroundColor Green
+        } else {
+            Write-Host "Assigning movement tracks to participants for $($entry.replayName)" -ForegroundColor Cyan
+            node $assignMovementScript --artifact-dir $entry.artifactDir --priors-path $movementIdentityPriorsPath --output-path $participantMovementPath
+            if ($LASTEXITCODE -ne 0) {
+                throw "Movement participant assignment failed for $($entry.replayName)"
+            }
         }
 
-        Write-Host "Validating participant-labelled movement for $($entry.replayName)" -ForegroundColor Cyan
-        node $validateAssignedMovementScript --participant-movement-path $participantMovementPath --fixture-dir $entry.fixtureDir --output-path $assignedMovementValidationPath
-        if ($LASTEXITCODE -ne 0) {
-            throw "Participant-labelled movement validation failed for $($entry.replayName)"
+        if (Test-OutputsFresh -OutputPaths @($assignedMovementValidationPath) -InputPaths @(
+                $validateAssignedMovementScript,
+                $participantMovementPath,
+                (Join-Path $entry.fixtureDir "timeline.json"))) {
+            Write-Host "Reusing participant-labelled movement validation for $($entry.replayName)" -ForegroundColor Green
+        } else {
+            Write-Host "Validating participant-labelled movement for $($entry.replayName)" -ForegroundColor Cyan
+            node $validateAssignedMovementScript --participant-movement-path $participantMovementPath --fixture-dir $entry.fixtureDir --output-path $assignedMovementValidationPath
+            if ($LASTEXITCODE -ne 0) {
+                throw "Participant-labelled movement validation failed for $($entry.replayName)"
+            }
         }
 
         $entry["participantMovementPath"] = $participantMovementPath
         $entry["assignedMovementValidationPath"] = $assignedMovementValidationPath
     }
 
-    Write-Host "Building movement coordinate model" -ForegroundColor Cyan
-    node $movementCoordinateModelScript --artifact-root $resolvedArtifactRoot --corpus-manifest $manifestPath --output-path $movementCoordinateModelPath
-    if ($LASTEXITCODE -ne 0) {
-        throw "Movement coordinate model generation failed."
+    $movementModelInputs = @($movementCoordinateModelScript)
+    foreach ($entry in $processed) {
+        $movementModelInputs += @(
+            $entry.movementValidationPath,
+            $entry.assignedMovementValidationPath
+        )
+    }
+    if (Test-OutputsFresh -OutputPaths @($movementCoordinateModelPath) -InputPaths $movementModelInputs) {
+        Write-Host "Reusing movement coordinate model" -ForegroundColor Green
+    } else {
+        Write-Host "Building movement coordinate model" -ForegroundColor Cyan
+        node $movementCoordinateModelScript --artifact-root $resolvedArtifactRoot --corpus-manifest $manifestPath --output-path $movementCoordinateModelPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Movement coordinate model generation failed."
+        }
     }
     $manifest["movementCoordinateModelPath"] = $movementCoordinateModelPath
 }
