@@ -34,43 +34,61 @@ The decoder now has a working offline corpus pipeline:
 - a two-pass corpus convergence loop so `corpus-schema.json` is rebuilt again after fresh extraction and validation results exist
 - the scalar corpus loop now reaches a real fixed point again after the bundle transform-sample amplification bug was removed
 
-The latest full corpus run on `2026-03-21` covered 13 local replay fixtures and produced:
+The latest full corpus run on `2026-03-21` covered 18 local replay fixtures and produced:
 
-- `258` promoted exact corpus-backed patterns from `1577` ranked exact patterns
-- `82` version-group alias clusters in `artifacts/corpus-schema.json`
-- validated replay-only `xp`, `totalGold`, `level`, `power`, `powerMax`, `healthMax`, and `movementSpeed` timelines across at least some replays
+- `349` promoted exact corpus-backed patterns in the final `artifacts/corpus-schema.json`
+- `128` remaining ranked exact patterns in that same final schema
+- `1` promoted bundle-backed pattern and `14` remaining ranked bundle-backed patterns
+- a larger latest-patch cohort with `11` local `16.6` replays
+- validated replay-only `xp`, `totalGold`, `level`, `power`, `powerMax`, `healthMax`, `minionsKilled`, `jungleMinionsKilled`, and `movementSpeed` timelines across at least some replays
 
 Current validated replay-only scalar coverage:
 
-- `xp`: `10 / 12` participant passes
-- `totalGold`: `11 / 11`
-- `level`: `2 / 3`
-- `power`: `2 / 4`
+- `xp`: `11 / 13` participant passes
+- `totalGold`: `13 / 16`
+- `level`: `2 / 2`
+- `power`: `5 / 8`
 - `powerMax`: `1 / 1`
 - `healthMax`: `1 / 2`
-- `movementSpeed`: `1 / 4`
-- `health`: `0 / 2`
+- `movementSpeed`: `1 / 8`
+- `minionsKilled`: `1 / 1`
+- `jungleMinionsKilled`: `1 / 1`
+- `health`: `0 / 1`
 
-Current strongest latest-patch scalar family is still `16.6 | 61894 / 0x00 / h6`, now with real bundle-backed replay-only evidence for:
+Current strongest stable latest-patch bundle-backed scalar is now:
+
+- `16.6 | 6912 / 0xC6 / h0 | powerMax | s14`
+
+`16.6 | 61894 / 0x00 / h6` is still an important latest-patch exploratory slab because it carries replay-local evidence for:
 
 - `power`
 - `healthMax`
 - `movementSpeed`
 
-The strongest companion latest-patch slab remains `16.6 | 6912 / 0xC6 / h0`, which currently carries the best replay-only `powerMax` result.
-
 Important caveat:
 
-- `61894` now has two promoted bundle-backed metrics:
-  - `healthMax`
-  - `power`
-- `movementSpeed` from the same slab is still replay-only but not schema-promoted yet
+- the final schema now promotes only one bundle-backed pattern:
+  - `bundle-family|16.6|6912-0xC6-h0|powerMax|s14`
+- `6912 / 0xC6 / h0 | power` has useful replay-local validation, but it is still not stable enough to survive final bundle promotion
+- `61894 / 0x00 / h6 | movementSpeed` is still replay-only and not schema-promoted
 - bundle-family promotion now only consumes the exact extracted pattern that produced a replay metric; weak sibling bundle candidates no longer inherit validation from a stronger chosen sibling
 - extraction no longer feeds weak `bundleRankedPatterns` back into selection; only bundle-promoted corpus families and replay-local bundle recommendations affect replay-only scalar extraction
 - bundle-backed transform sample counts are now bounded to replay-local evidence instead of recursively re-importing corpus-level counts
 - slot-cluster-aware bundle resolution for `16.6 | 61894 / 0x00 / h6` is now implemented and uses `artifacts/scalar-family-layout/16.6/61894-0x00-h6.json` as the canonical layout prior
-- the latest full corpus rerun confirmed that ranked bundle evidence now separates the late `s17`/`s18` region more cleanly, but `movementSpeed` is still not promoted into `corpus-schema.json`
-- the remaining scalar blocker is no longer family-wide slot flattening; it is extraction/promotion consistency for the `movementSpeed` cluster path and expanding `movementSpeed`/`health` beyond the current partial wins
+- replay extraction now deduplicates bundle-backed selections by family, metric, and slot cluster, so a promoted cluster like `6912 / 0xC6 / h0 | powerMax | s14` does not materialize duplicate decodes in one replay
+- the latest full corpus rerun confirmed that `61894` ranked bundle evidence now separates the late `s17`/`s18` region more cleanly, but `movementSpeed` is still not promoted into `corpus-schema.json`
+- the remaining scalar blocker is no longer family-wide slot flattening; it is ambiguous multi-slot exact evidence in a few replays plus insufficiently stable `power` promotion around `6912`
+
+Latest replay intake that changed the corpus most:
+
+- `EUN1-3927636043` is the strongest new scalar anchor replay:
+  - passing replay-only `totalGold` on `Sion`
+  - passing replay-only `minionsKilled` on `Riven`
+  - passing replay-only `totalGold`, `powerMax`, and `power` on `Morgana`
+- `EUN1-3927615048` adds replay-only `totalGold` and `power` on `Janna`
+- `EUN1-3927662924` adds replay-only `totalGold` and `power` on `Lux`
+- `EUN1-3927581495` adds a small but clean `xp` hit on `Vladimir`
+- `EUN1-3927556233` currently acts mostly as negative latest-patch evidence: no validated scalar timelines survived the final rerun
 
 ## Current Movement Discovery Status
 
@@ -98,17 +116,21 @@ The current movement pipeline:
 - rebuilds participant-labelled trajectories from the exact matched hypothesis for that replay/entity instead of using a pattern-wide median transform
 - validates those participant-labelled tracks in `artifacts/<replay-id>/assigned-movement-validation-report.json`
 
-Current corpus-level result from the same 13 local replays:
+Current corpus-level result from the same 18 local replays:
 
 - the latest full rerun now assigns replay-only labelled movement in every local replay, but assignment quality is still patch-sensitive and uneven
 - strongest current validation examples:
-  - `EUW1-7678536418`: `4 / 4` passing assignments
+  - `EUW1-7689604967`: `4 / 4` passing assignments
+  - `EUW1-7617298409`: `3 / 3` passing assignments
   - `EUW1-7648140653`: `6 / 7` passing assignments
-  - `EUN1-3926600040`: `5 / 7` passing assignments
-  - `EUN1-3926619035`: `3 / 4` passing assignments
+  - `EUW1-7779216102`: `6 / 8` passing assignments
+  - `EUN1-3927110403`: `6 / 9` passing assignments
 - weaker latest-patch cases still exist:
+  - `EUN1-3927135846`: `4 / 6` passing assignments
+  - `EUN1-3927615048`: `4 / 6` passing assignments
+  - `EUN1-3927636043`: `4 / 6` passing assignments
   - `EUN1-3927084741`: `3 / 7` passing assignments
-  - `EUN1-3927135846`: `4 / 8` passing assignments
+  - `EUN1-3927556233`: `0 / 4` passing assignments
 - promotion is still sparse; most useful movement output is currently coming from replay-local ranked fallback plus identity assignment rather than broad corpus-promoted movement schemas
 
 The strongest current pattern is version-sensitive and appears to live in the main `0x00` state family for several patch groups:
@@ -119,26 +141,32 @@ The strongest current pattern is version-sensitive and appears to live in the ma
 
 Replay-only movement identity is now materially better than the earlier median-based path, but it is still patch-fragile:
 
-- `EUN1-3926581873`: `4 / 6` passing assignments
-- `EUN1-3926600040`: `5 / 7` passing assignments
-- `EUN1-3926619035`: `3 / 4` passing assignments
+- `EUN1-3926581873`: `3 / 7` passing assignments
+- `EUN1-3926600040`: `5 / 8` passing assignments
+- `EUN1-3926619035`: `2 / 3` passing assignments
 - `EUN1-3927084741`: `3 / 7` passing assignments
-- `EUN1-3927110403`: `5 / 9` passing assignments
-- `EUN1-3927135846`: `4 / 8` passing assignments
+- `EUN1-3927110403`: `6 / 9` passing assignments
+- `EUN1-3927135846`: `4 / 6` passing assignments
+- `EUN1-3927556233`: `0 / 4` passing assignments
+- `EUN1-3927581495`: `2 / 4` passing assignments
+- `EUN1-3927615048`: `4 / 6` passing assignments
+- `EUN1-3927636043`: `4 / 6` passing assignments
+- `EUN1-3927662924`: `2 / 6` passing assignments
 - `EUW1-7596231295`: `5 / 7` passing assignments
 - `EUW1-7596620123`: `2 / 4` passing assignments
-- `EUW1-7617298409`: `3 / 4` passing assignments
+- `EUW1-7617298409`: `3 / 3` passing assignments
 - `EUW1-7648140653`: `6 / 7` passing assignments
-- `EUW1-7678536418`: `4 / 4` passing assignments
-- `EUW1-7689604967`: `5 / 6` passing assignments
-- `EUW1-7779216102`: `5 / 8` passing assignments
+- `EUW1-7678536418`: `1 / 2` passing assignments
+- `EUW1-7689604967`: `4 / 4` passing assignments
+- `EUW1-7779216102`: `6 / 8` passing assignments
 
 Current best replay-only movement examples:
 
-- `EUW1-7678536418`: latest-patch `61733 / 0x00` tracks now validate cleanly across all four assigned champions in this replay
-- `EUN1-3926600040`: several latest-patch `16.6` assignments now pass simultaneously instead of relying on one or two isolated tracks
+- `EUN1-3927615048`: the best new latest-patch movement replay in this intake; enough assigned tracks now pass to keep it useful as movement evidence
+- `EUN1-3927636043`: also a useful latest-patch movement replay, and it is more valuable overall because it carries strong scalar validation too
 - `EUW1-7648140653`: `16.1` assignment quality is now good enough to keep most rendered tracks under the current validation gate
 - `EUN1-3927135846`: still produces useful latest-patch movement evidence, but this replay remains a good example of why weak assignments should stay filtered
+- `EUN1-3927556233`: useful mainly as a negative control because it still fails all labelled movement validation in the current pipeline
 
 The coordinate-model audit is now materially more useful:
 
@@ -274,9 +302,9 @@ For a new replay or continued work on the current replay:
 
 The most useful next backend steps are:
 
-- finish the extraction/promotion path for slot-clustered `16.6 | 61894 / 0x00 / h6` so `movementSpeed` uses the same exact cluster evidence in replay extraction that the corpus-ranking path now uses
-- use the discovered layout artifact (`artifacts/scalar-family-layout/16.6/61894-0x00-h6.json`) as the authoritative cluster prior whenever bundle-backed replay entries are resolved
-- keep `movementSpeed` and `power` cluster-specific so bad `18/19` variants cannot drag down the stronger `12/13` or `16/17/18` regions again
+- continue pushing `16.6 | 6912 / 0xC6 / h0` state decoding, especially separating the stronger `power | s14` evidence from weaker nearby variants so it can survive final bundle promotion the way `powerMax | s14` now does
+- split ambiguous multi-slot exact `16.6 | 61894 / 0x00 / h6 | movementSpeed` patterns before participant assignment so one replay-local winner cannot straddle both the correct late slot and a bad neighboring slot
+- keep `movementSpeed` and `power` cluster-specific so bad `18/19` variants cannot drag down the stronger `12/13`, `s14`, or `16/17/18` regions again
 - keep using scalar/state extraction as the identity backbone for movement
 - continue improving `16.1` movement family filtering and identity assignment, especially around `61733 / 0x00`
 
@@ -286,7 +314,7 @@ The next session should begin with more replay intake:
 - collect matching Riot `match.json` and `timeline.json` fixtures for each replay when possible
 - rerun the full corpus pipeline before changing thresholds again
 
-The highest-value next implementation is now to remove the remaining stale cluster propagation in replay extraction so the exact slot-cluster resolver and the replay-selected `movementSpeed` pattern agree, then rerun the scalar promotion check for `16.6`.
+The highest-value next implementation is now to stabilize `16.6 | 6912 / 0xC6 / h0 | power` around the same `s14` cluster that already supports `powerMax`, then revisit `61894` `movementSpeed` only after ambiguous multi-slot exact patterns are split cleanly.
 
 ## Related Docs
 
