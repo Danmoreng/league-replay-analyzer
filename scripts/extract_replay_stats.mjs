@@ -777,6 +777,33 @@ function normalizePattern(pattern, candidateMatches, source) {
   };
 }
 
+function buildBundleSelectionKey(pattern) {
+  if (pattern.source !== "bundle-promoted" && pattern.source !== "bundle-recommended") {
+    return null;
+  }
+
+  const slotClusterKey = pattern.slotClusterKey ?? null;
+  if (slotClusterKey) {
+    return `${pattern.familyKey}|${pattern.metric}|${slotClusterKey}`;
+  }
+
+  const slotKey = (pattern.recommendedSlots ?? [])
+    .map((slot) => slot.slotIndex)
+    .filter(Number.isFinite)
+    .sort((left, right) => left - right)
+    .join(",");
+  if (slotKey.length > 0) {
+    return `${pattern.familyKey}|${pattern.metric}|slots:${slotKey}`;
+  }
+
+  const [rowStart, rowEnd] = pattern.recommendedRowBand ?? [];
+  if (Number.isFinite(rowStart) && Number.isFinite(rowEnd)) {
+    return `${pattern.familyKey}|${pattern.metric}|band:${rowStart}-${rowEnd}`;
+  }
+
+  return `${pattern.familyKey}|${pattern.metric}|pattern:${pattern.patternKey}`;
+}
+
 function evaluateSeriesPlausibility(metricKey, series) {
   if (!series.length) {
     return 0;
@@ -1102,6 +1129,7 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
 
   const selected = [];
   const selectedKeys = new Set();
+  const selectedBundleKeys = new Set();
   const selectedMetricCounts = new Map();
   const selectedMetricFamilies = new Map();
   const candidates = [...bundleRecommended, ...candidateLocal, ...corpusPromoted, ...localPromoted, ...localRanked, ...rankedCorpus]
@@ -1133,6 +1161,10 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
     if (selectedKeys.has(pattern.patternKey)) {
       continue;
     }
+    const bundleSelectionKey = buildBundleSelectionKey(pattern);
+    if (bundleSelectionKey && selectedBundleKeys.has(bundleSelectionKey)) {
+      continue;
+    }
     const metricCount = selectedMetricCounts.get(pattern.metric) ?? 0;
     const metricCap = (metricCaps.get(pattern.metric) ?? 1) + (
       pattern.source !== "bundle-recommended" &&
@@ -1152,6 +1184,9 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
     }
     selected.push(pattern);
     selectedKeys.add(pattern.patternKey);
+    if (bundleSelectionKey) {
+      selectedBundleKeys.add(bundleSelectionKey);
+    }
     selectedMetricCounts.set(pattern.metric, metricCount + 1);
     const metricFamilies = selectedMetricFamilies.get(pattern.metric) ?? new Set();
     metricFamilies.add(pattern.familyKey);
