@@ -13,6 +13,12 @@ import {
   resolveAbsolute,
   writeJson,
 } from "./lib/decoder-schema-utils.mjs";
+import {
+  addFamilySupportTrust as addFamilySupportTrustToMap,
+  buildBundleRecommendedPatterns as buildBundleRecommendedPatternsFromUtils,
+  bundleSupportMetricKeys as bundleSupportMetricKeysFromUtils,
+  isBundleSlotTrusted as isBundleSlotTrustedBySupport,
+} from "./lib/scalar-bundle-utils.mjs";
 
 function parseArgs(argv) {
   const args = {
@@ -130,6 +136,8 @@ function getMetricBounds(metricKey) {
 function computeSelectionScore(source, pattern) {
   const confidence = pattern.confidence ?? 0;
   switch (source) {
+    case "bundle-promoted":
+      return confidence + 0.42 + (0.06 * Math.min(3, pattern.bundleSupport?.strongMetricCount ?? 0));
     case "bundle-recommended":
       return confidence + 0.18 + (0.03 * Math.min(3, pattern.bundleSupport?.strongMetricCount ?? 0));
     case "replay-promoted":
@@ -696,9 +704,32 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
     .slice(0, 12)
     .map((pattern) => normalizePattern(pattern, candidateMatches, "corpus-ranked"));
 
-  const bundleRecommended = buildBundleRecommendedPatterns(artifactDir, runManifest, summaryJson, provisionalSchema, candidateMatches)
+  const bundlePromotedByFamilyMetric = new Map(
+    (corpusSchema.bundlePromotedPatterns ?? [])
+      .filter((pattern) => familyKeys.has(pattern.familyKey))
+      .map((pattern) => [`${pattern.familyKey}|${pattern.metric}`, pattern]),
+  );
+
+  const bundleRecommended = buildBundleRecommendedPatternsFromUtils(artifactDir, runManifest, summaryJson, provisionalSchema, candidateMatches)
     .filter((pattern) => familyKeys.has(pattern.familyKey))
-    .map((pattern) => normalizePattern(pattern, candidateMatches, "bundle-recommended"));
+    .map((pattern) => {
+      const promoted = bundlePromotedByFamilyMetric.get(`${pattern.familyKey}|${pattern.metric}`) ?? null;
+      const mergedPattern = promoted
+        ? {
+          ...pattern,
+          confidence: Math.max(pattern.confidence ?? 0, promoted.confidence ?? 0),
+          bundleSupport: {
+            ...(pattern.bundleSupport ?? {}),
+            ...(promoted.bundleSupport ?? {}),
+            strongMetricCount: Math.max(
+              pattern.bundleSupport?.strongMetricCount ?? 0,
+              promoted.bundleSupport?.strongMetricCount ?? 0,
+            ),
+          },
+        }
+        : pattern;
+      return normalizePattern(mergedPattern, candidateMatches, promoted ? "bundle-promoted" : "bundle-recommended");
+    });
   const preferredBundleFamilyKeys = new Set(bundleRecommended.map((pattern) => pattern.familyKey));
 
   const selected = [];
@@ -1047,8 +1078,8 @@ function main() {
     const metricAssignments = assignPatternCandidates(patternEdges);
     for (const assignment of metricAssignments) {
       directAssignments.set(`${assignment.familyKey}|${assignment.slotIndex}|${assignment.metric}`, assignment.rosterIndex);
-      if (bundleSupportMetricKeys.has(assignment.metric)) {
-        addFamilySupportTrust(familySupportTrust, assignment, pattern.confidence);
+      if (bundleSupportMetricKeysFromUtils.has(assignment.metric)) {
+        addFamilySupportTrustToMap(familySupportTrust, assignment, pattern.confidence);
       }
     }
   }
@@ -1076,7 +1107,7 @@ function main() {
 
   const unresolvedCandidates = [];
   for (const candidate of candidateRows) {
-    if (candidate.pattern.source === "bundle-recommended" && !isBundleSlotTrusted(familySupportTrust, candidate)) {
+    if (candidate.pattern.source === "bundle-recommended" && !isBundleSlotTrustedBySupport(familySupportTrust, candidate)) {
       unresolvedCandidates.push({
         familyKey: candidate.familyKey,
         slotIndex: candidate.slotIndex,

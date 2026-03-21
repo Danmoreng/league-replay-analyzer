@@ -10,6 +10,10 @@ import {
   resolveAbsolute,
   writeJson,
 } from "./lib/decoder-schema-utils.mjs";
+import {
+  loadBundleFamilyArtifacts,
+  parseBundlePatternKey,
+} from "./lib/scalar-bundle-utils.mjs";
 
 function parseArgs(argv) {
   const args = {
@@ -251,6 +255,141 @@ function loadReplayEntries(artifactDir, maxRankedPatterns) {
   };
 }
 
+function buildBundleFamilyPatternKey(versionGroup, familyKey, metric) {
+  return `bundle-family|${versionGroup}|${familyKey}|${metric}`;
+}
+
+function loadBundleReplayEntries(artifactDir) {
+  const runManifestPath = path.join(artifactDir, "run-manifest.json");
+  const summaryPath = path.join(artifactDir, "summary.json");
+  const extractedStatsPath = path.join(artifactDir, "extracted-stats.json");
+  const validationReportPath = path.join(artifactDir, "validation-report.json");
+  if (!fs.existsSync(runManifestPath) || !fs.existsSync(summaryPath) || !fs.existsSync(extractedStatsPath) || !fs.existsSync(validationReportPath)) {
+    return [];
+  }
+
+  const runManifest = readJson(runManifestPath);
+  const summaryJson = readJson(summaryPath);
+  const extractedStats = readJson(extractedStatsPath);
+  const validationReport = readJson(validationReportPath);
+  const replayId = runManifest.replayId;
+  const gameVersion = getReplayGameVersion(runManifest, summaryJson);
+  const versionGroup = parseVersionGroup(gameVersion);
+  const artifactRoot = path.dirname(artifactDir);
+  const familySummaryByKey = new Map((runManifest.families ?? []).map((family) => [family.familyKey, family]));
+  const validationParticipantByRosterIndex = new Map((validationReport.participants ?? []).map((participant) => [participant.rosterIndex, participant]));
+
+  const replayEntries = [];
+  for (const selectedPattern of extractedStats.selectedPatterns ?? []) {
+    if (selectedPattern.source !== "bundle-recommended") {
+      continue;
+    }
+
+    const descriptor = parseBundlePatternKey(selectedPattern.patternKey);
+    if (!descriptor) {
+      continue;
+    }
+
+    const familySummary = familySummaryByKey.get(selectedPattern.familyKey) ?? null;
+    const bundleArtifacts = loadBundleFamilyArtifacts(artifactRoot, versionGroup, selectedPattern.familyKey);
+    const bundleEntry = bundleArtifacts?.bundleCatalog?.bundles?.[descriptor.bundleIndex] ?? null;
+    const metricBundleEntry = bundleEntry?.metrics?.find((entry) => entry.metric === selectedPattern.metric) ?? null;
+
+    const participantMetricRecords = [];
+    for (const participant of extractedStats.participants ?? []) {
+      const metricRecord = participant.metrics?.[selectedPattern.metric];
+      if (!metricRecord || metricRecord.familyKey !== selectedPattern.familyKey) {
+        continue;
+      }
+      const validationParticipant = validationParticipantByRosterIndex.get(participant.rosterIndex);
+      const validationMetric = validationParticipant?.metrics?.[selectedPattern.metric] ?? null;
+      participantMetricRecords.push({
+        rosterIndex: participant.rosterIndex,
+        slotIndex: metricRecord.slotIndex,
+        metricRecord,
+        validationMetric,
+      });
+    }
+
+    if (participantMetricRecords.length === 0) {
+      continue;
+    }
+
+    const slotCounts = new Map();
+    for (const record of participantMetricRecords) {
+      slotCounts.set(record.slotIndex, (slotCounts.get(record.slotIndex) ?? 0) + 1);
+    }
+    const dominantSlotEntry = [...slotCounts.entries()].sort((left, right) => right[1] - left[1] || left[0] - right[0])[0] ?? null;
+
+    const validationMetrics = participantMetricRecords
+      .map((record) => record.validationMetric)
+      .filter(Boolean);
+    const passCount = validationMetrics.filter((metric) => metric.passes).length;
+    const avgCorrelation = average(validationMetrics.map((metric) => metric.correlation).filter(Number.isFinite));
+    const avgNormalizedRmse = average(validationMetrics.map((metric) => metric.normalizedRmse).filter(Number.isFinite));
+    const avgValidatorScore = validationMetrics.length > 0
+      ? average(validationMetrics.map((metric) => metric.passes ? 1 : 0))
+      : 0;
+    const avgEffectiveScore = validationMetrics.length > 0
+      ? average(validationMetrics.map((metric) => {
+        const corr = Number.isFinite(metric.correlation) ? Math.max(0, metric.correlation) : 0;
+        const rmsePenalty = Number.isFinite(metric.normalizedRmse) ? Math.min(1.5, metric.normalizedRmse) : 1.5;
+        return corr * Math.max(0, 1.2 - rmsePenalty);
+      }))
+      : 0;
+    const bundleScore = bundleEntry?.bundleScore ?? bundleArtifacts?.recommendation?.primaryBundle?.bundleScore ?? 0;
+    const replayOverlap = bundleEntry?.replayOverlap ?? bundleArtifacts?.recommendation?.primaryBundle?.replayOverlap ?? 0;
+    const strongMetricCount = bundleEntry?.strongMetricCount ?? bundleArtifacts?.recommendation?.primaryBundle?.strongMetricCount ?? 0;
+    const recommendedSlots = selectedPattern.recommendedSlots ?? [];
+    const recommendedRowBand = selectedPattern.recommendedRowBand ?? [0, 0];
+    const confidenceBoost = (0.82 + (0.18 * Math.min(1, bundleScore))) * (0.7 + (0.3 * Math.min(1, replayOverlap)));
+
+    replayEntries.push({
+      replayId,
+      gameVersion,
+      versionGroup,
+      patternKey: buildBundleFamilyPatternKey(versionGroup, selectedPattern.familyKey, selectedPattern.metric),
+      sourcePatternKey: selectedPattern.patternKey,
+      familyKey: selectedPattern.familyKey,
+      family: familySummary ? `${familySummary.length} / 0x${familySummary.firstByte.toString(16).toUpperCase().padStart(2, "0")}` : selectedPattern.familyKey,
+      familyLength: familySummary?.length ?? null,
+      familyFirstByte: familySummary?.firstByte ?? null,
+      offset: descriptor.offset,
+      decode: descriptor.decode,
+      metric: selectedPattern.metric,
+      metricLabel: selectedPattern.metric,
+      rowArchetype: "bundle_state_like",
+      rowBand: recommendedRowBand,
+      confidence: selectedPattern.confidence * confidenceBoost,
+      supportParticipants: participantMetricRecords.length,
+      supportRows: slotCounts.size,
+      averageCorrelation: avgCorrelation,
+      averageNormalizedRmse: avgNormalizedRmse,
+      averageValidatorScore: avgValidatorScore,
+      averageEffectiveScore: avgEffectiveScore,
+      promoted: passCount > 0,
+      dominantSlot: dominantSlotEntry?.[0] ?? null,
+      dominantSlotSupport: dominantSlotEntry ? dominantSlotEntry[1] / participantMetricRecords.length : 0,
+      slotFrequencies: [...slotCounts.entries()].map(([slotIndex, count]) => ({ slotIndex, count })),
+      recommendedSlots: recommendedSlots
+        .map((slot) => slot.slotIndex)
+        .filter((value, index, array) => array.indexOf(value) === index),
+      transform: selectedPattern.transform ?? { slopeMedian: 1, interceptMedian: 0, sampleCount: 0 },
+      bundleSupport: {
+        bundleIndex: descriptor.bundleIndex,
+        bundleScore,
+        replayOverlap,
+        strongMetricCount,
+        metricReplaySupport: metricBundleEntry?.replaySupport ?? 0,
+        metricMedianParticipants: metricBundleEntry?.medianParticipants ?? 0,
+        passCount,
+      },
+    });
+  }
+
+  return replayEntries;
+}
+
 function summarizeGroup(patternKey, entries, replayCountByVersionGroup, aliasSupport = null) {
   const confidenceValues = entries.map((entry) => entry.confidence);
   const participantValues = entries.map((entry) => entry.supportParticipants);
@@ -304,6 +443,7 @@ function summarizeGroup(patternKey, entries, replayCountByVersionGroup, aliasSup
     .sort((left, right) => right[1] - left[1] || left[0] - right[0])
     .slice(0, 8)
     .map(([slotIndex, count]) => ({ slotIndex, replayCount: count }));
+  const bundleEntries = entries.filter((entry) => entry.bundleSupport);
 
   const exemplar = entries[0];
   const baseConfidence =
@@ -339,6 +479,17 @@ function summarizeGroup(patternKey, entries, replayCountByVersionGroup, aliasSup
       interceptMedian: median(intercepts),
       sampleCount: transformSampleCount,
     },
+    sourceType: bundleEntries.length > 0 ? "bundle-family" : "exact-pattern",
+    bundleSupport: bundleEntries.length > 0
+      ? {
+        bundleScore: median(bundleEntries.map((entry) => entry.bundleSupport.bundleScore ?? 0)),
+        replayOverlap: median(bundleEntries.map((entry) => entry.bundleSupport.replayOverlap ?? 0)),
+        strongMetricCount: median(bundleEntries.map((entry) => entry.bundleSupport.strongMetricCount ?? 0)),
+        metricReplaySupport: median(bundleEntries.map((entry) => entry.bundleSupport.metricReplaySupport ?? 0)),
+        metricMedianParticipants: median(bundleEntries.map((entry) => entry.bundleSupport.metricMedianParticipants ?? 0)),
+        passCount: bundleEntries.reduce((sum, entry) => sum + (entry.bundleSupport.passCount ?? 0), 0),
+      }
+      : null,
     aliasSupport: aliasSupport
       ? {
         aliasClusterKey: aliasSupport.aliasClusterKey,
@@ -407,6 +558,24 @@ function promoteGroup(group, minReplaySupport, minMedianParticipants) {
   );
 }
 
+function promoteBundleGroup(group) {
+  const bundleSupport = group.bundleSupport ?? null;
+  if (!bundleSupport) {
+    return false;
+  }
+
+  return (
+    group.support.promotedReplays >= 1 &&
+    group.support.medianParticipants >= 1 &&
+    group.support.medianCorrelation >= 0.3 &&
+    group.support.medianNormalizedRmse <= 1.2 &&
+    bundleSupport.bundleScore >= 0.84 &&
+    bundleSupport.replayOverlap >= 0.45 &&
+    bundleSupport.strongMetricCount >= 3 &&
+    group.transform.sampleCount >= 1
+  );
+}
+
 function main() {
   const repoRoot = process.cwd();
   const args = parseArgs(process.argv);
@@ -424,12 +593,14 @@ function main() {
 
   const corpusManifest = readJson(corpusManifestPath);
   const replayArtifacts = [];
+  const bundleReplayEntries = [];
   for (const processed of corpusManifest.processed ?? []) {
     const artifactDir = processed.artifactDir ?? path.join(artifactRoot, processed.replayName.replace(/\.rofl$/i, ""));
     const replayArtifact = loadReplayEntries(artifactDir, args.maxRankedPatterns);
     if (replayArtifact) {
       replayArtifacts.push(replayArtifact);
     }
+    bundleReplayEntries.push(...loadBundleReplayEntries(artifactDir));
   }
 
   if (replayArtifacts.length === 0) {
@@ -494,6 +665,20 @@ function main() {
     );
 
   const promotedPatterns = rankedPatterns.filter((group) => promoteGroup(group, args.minReplaySupport, args.minMedianParticipants));
+  const bundlePatternGroups = new Map();
+  for (const entry of bundleReplayEntries) {
+    const list = bundlePatternGroups.get(entry.patternKey) ?? [];
+    list.push(entry);
+    bundlePatternGroups.set(entry.patternKey, list);
+  }
+  const bundleRankedPatterns = [...bundlePatternGroups.entries()]
+    .map(([patternKey, entries]) => summarizeGroup(patternKey, entries, replayCountByVersionGroup, null))
+    .sort((left, right) =>
+      right.confidence - left.confidence ||
+      right.support.promotedReplays - left.support.promotedReplays ||
+      right.support.medianCorrelation - left.support.medianCorrelation
+    );
+  const bundlePromotedPatterns = bundleRankedPatterns.filter((group) => promoteBundleGroup(group));
 
   const corpusSchema = {
     generatedAtUtc: new Date().toISOString(),
@@ -524,11 +709,14 @@ function main() {
       .slice(0, 128),
     promotedPatterns,
     rankedPatterns: rankedPatterns.slice(0, 128),
+    bundlePromotedPatterns,
+    bundleRankedPatterns: bundleRankedPatterns.slice(0, 64),
   };
 
   writeJson(outputPath, corpusSchema);
   console.log(`Wrote corpus schema to ${outputPath}`);
   console.log(`Promoted ${promotedPatterns.length} corpus patterns from ${rankedPatterns.length} ranked patterns.`);
+  console.log(`Promoted ${bundlePromotedPatterns.length} bundle-backed patterns from ${bundleRankedPatterns.length} ranked bundle patterns.`);
 }
 
 main();
