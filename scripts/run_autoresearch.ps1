@@ -30,8 +30,8 @@ function Get-CodexLauncher {
     $codexCommand = Get-Command codex -ErrorAction Stop
     $pwshCommand = Get-Command pwsh -ErrorAction Stop
     return @{
-        FilePath = $pwshCommand.Source
-        Prefix = @("-NoProfile", "-File", $codexCommand.Source)
+        PowerShellPath = $pwshCommand.Source
+        CodexPath = $codexCommand.Source
     }
 }
 
@@ -120,29 +120,34 @@ while ($true) {
     $startedAtUtc = [DateTime]::UtcNow.ToString("o")
 
     $argumentList = @()
-    $argumentList += $launcher.Prefix
-    $argumentList += "exec"
-    if ($DangerouslyBypassApprovalsAndSandbox) {
-        $argumentList += "--dangerously-bypass-approvals-and-sandbox"
+    $promptFileLiteral = $promptFile.Replace("'", "''")
+    $codexPathLiteral = $launcher.CodexPath.Replace("'", "''")
+    $repositoryRootLiteral = $repositoryRoot.Replace("'", "''")
+    $messagePathLiteral = $messagePath.Replace("'", "''")
+    $modelClause = if ($Model) {
+        "-m '$($Model.Replace("'", "''"))'"
     }
     else {
-        $argumentList += "--full-auto"
+        ""
     }
-    $argumentList += "--json"
-    $argumentList += "-C"
-    $argumentList += $repositoryRoot
-    $argumentList += "-o"
-    $argumentList += $messagePath
-    if ($Model) {
-        $argumentList += "-m"
-        $argumentList += $Model
+    $modeClause = if ($DangerouslyBypassApprovalsAndSandbox) {
+        "--dangerously-bypass-approvals-and-sandbox"
     }
-    $argumentList += $prompt
+    else {
+        "--full-auto"
+    }
+    $command = @"
+$prompt = Get-Content -Raw -LiteralPath '$promptFileLiteral'
+$prompt | & '$codexPathLiteral' exec $modeClause --json -C '$repositoryRootLiteral' -o '$messagePathLiteral' $modelClause -
+"@
+    $argumentList += "-NoProfile"
+    $argumentList += "-Command"
+    $argumentList += $command
 
     Write-Status "Starting iteration $iteration"
 
     $process = Start-Process `
-        -FilePath $launcher.FilePath `
+        -FilePath $launcher.PowerShellPath `
         -ArgumentList $argumentList `
         -WorkingDirectory $repositoryRoot `
         -RedirectStandardOutput $stdoutPath `
