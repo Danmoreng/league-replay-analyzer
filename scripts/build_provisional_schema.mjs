@@ -518,8 +518,8 @@ function buildPatternSummary(patternKey, candidates) {
     rowBand: [Math.min(...slotIndices), Math.max(...slotIndices)],
     offset: exemplar.offset,
     width: exemplar.width,
-    decode: exemplar.decodeLabel,
-    metric: exemplar.metricKey,
+    decode: exemplar.decode,
+    metric: exemplar.metric,
     metricLabel: exemplar.metricLabel,
     confidence,
     support: {

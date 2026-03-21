@@ -212,6 +212,12 @@ if (-not (Test-Path $replayArtifactDir)) {
 $resolvedAnalyzerExe = Resolve-AnalyzerExecutable -ExplicitPath $AnalyzerExe -RepoRoot $repoRoot -BuildDir $BuildDir -Configuration $Configuration
 
 Write-Host "Scanning replay families for $replayId" -ForegroundColor Cyan
+$summaryResult = Invoke-DecoderJson -Executable $resolvedAnalyzerExe -Arguments @(
+    "--summary",
+    $resolvedReplayPath
+)
+Write-Utf8File -Path (Join-Path $replayArtifactDir "summary.json") -Content $summaryResult.Raw
+
 $familyScanResult = Invoke-DecoderJson -Executable $resolvedAnalyzerExe -Arguments @(
     "--scan-families-json",
     $resolvedReplayPath,
@@ -327,6 +333,11 @@ $runManifest = [ordered]@{
     replayPath = $resolvedReplayPath
     analyzerExe = $resolvedAnalyzerExe
     generatedAtUtc = (Get-Date).ToUniversalTime().ToString("o")
+    summary = [ordered]@{
+        gameVersion = $summaryResult.Json.gameVersion
+        gameLengthMillis = $summaryResult.Json.gameLengthMillis
+        playerCount = $summaryResult.Json.playerCount
+    }
     parameters = [ordered]@{
         configuration = $Configuration
         minLength = $MinLength

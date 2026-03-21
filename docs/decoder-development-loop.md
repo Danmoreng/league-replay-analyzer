@@ -284,15 +284,33 @@ Current file:
 
 ### 3. Extraction runner
 
-Add a runner that:
+Use `scripts/run_decoder_corpus.ps1` for the current end-to-end corpus pass. It now:
 
-- consumes provisional schema JSON
+- regenerates replay artifacts
+- rebuilds replay-local provisional schemas
+- builds a corpus schema at `artifacts/corpus-schema.json`
+- runs replay-only extraction into `artifacts/<replay-id>/extracted-stats.json`
+- runs offline validation into `artifacts/<replay-id>/validation-report.json`
+
+The replay-only extractor itself lives in `scripts/extract_replay_stats.mjs` and:
+
+- prefers corpus-promoted patterns when they exist
+- otherwise falls back to replay-local promoted patterns
+- uses replay `summary.json` metadata for player identity and final stat anchors
 - decodes replay fields automatically
 - writes normalized participant timelines
 
-Suggested future outputs:
+Current files:
+
+- `scripts/run_decoder_corpus.ps1`
+- `scripts/build_corpus_schema.mjs`
+- `scripts/extract_replay_stats.mjs`
+- `scripts/validate_extracted_stats.mjs`
+
+Current outputs:
 
 - `artifacts/<replay-id>/provisional-schema.json`
+- `artifacts/corpus-schema.json`
 - `artifacts/<replay-id>/extracted-stats.json`
 - `artifacts/<replay-id>/validation-report.json`
 
@@ -321,8 +339,8 @@ Do not return to movement as the main focus until:
 
 The next concrete task should be:
 
-1. build a non-UI artifact runner
-2. build provisional schema generation from those artifacts
-3. extract participant stat timelines automatically
+1. tighten corpus promotion so validated patterns survive across at least one version group with 2+ replays
+2. improve replay-only row assignment on `level`, `xp`, `totalGold`, and `cs`
+3. use the validated extraction output as the UI input contract
 
 That is the shortest path from investigation tooling to an actual decoder.
