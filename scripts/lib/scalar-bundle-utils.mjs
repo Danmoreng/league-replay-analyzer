@@ -452,6 +452,196 @@ export function loadBundleFamilyArtifacts(artifactRoot, versionGroup, familyKey)
   };
 }
 
+export function loadScalarFamilyLayout(artifactRoot, versionGroup, familyKey) {
+  const layoutPath = path.join(
+    artifactRoot,
+    "scalar-family-layout",
+    versionGroup,
+    `${familyKey.replace(/[^A-Za-z0-9._-]+/g, "_")}.json`,
+  );
+  if (!fs.existsSync(layoutPath)) {
+    return null;
+  }
+  return readJson(layoutPath);
+}
+
+function normalizeSlotBand(slotBand, fallbackSlot = null) {
+  const [start, end] = Array.isArray(slotBand) ? slotBand : [null, null];
+  if (Number.isFinite(start) && Number.isFinite(end)) {
+    return start <= end ? [start, end] : [end, start];
+  }
+  if (Number.isFinite(fallbackSlot)) {
+    return [fallbackSlot, fallbackSlot];
+  }
+  return null;
+}
+
+function enumerateSlotBand(slotBand) {
+  const normalized = normalizeSlotBand(slotBand);
+  if (!normalized) {
+    return [];
+  }
+  const [start, end] = normalized;
+  const slots = [];
+  for (let slotIndex = start; slotIndex <= end; slotIndex += 1) {
+    slots.push(slotIndex);
+  }
+  return slots;
+}
+
+function variantAnchorSlot(variant) {
+  if (Number.isFinite(variant?.dominantSlot)) {
+    return Math.round(variant.dominantSlot);
+  }
+  const band = normalizeSlotBand(variant?.slotBand);
+  if (band) {
+    return Math.round((band[0] + band[1]) / 2);
+  }
+  return null;
+}
+
+export function buildLayoutSlotClusters(familyLayout) {
+  const clusters = new Map();
+
+  for (const variant of familyLayout?.rowVariantSummary ?? []) {
+    const anchorSlot = variantAnchorSlot(variant);
+    if (!Number.isFinite(anchorSlot)) {
+      continue;
+    }
+
+    const band = normalizeSlotBand(variant.slotBand, anchorSlot) ?? [anchorSlot, anchorSlot];
+    const assignedMetrics = [...new Set((variant.assignedMetrics ?? []).filter(Boolean))];
+    const unresolvedMetrics = [...new Set((variant.unresolvedMetrics ?? []).filter(Boolean))];
+    const replayCount = Number.isFinite(variant.replayCount) ? variant.replayCount : 1;
+    const existing = clusters.get(anchorSlot) ?? {
+      key: `s${anchorSlot}`,
+      center: anchorSlot,
+      slotBand: [band[0], band[1]],
+      replayCount: 0,
+      variantCount: 0,
+      qualityWeight: 0,
+      assignedMetrics: new Set(),
+      unresolvedMetrics: new Set(),
+    };
+
+    existing.slotBand = [
+      Math.min(existing.slotBand[0], band[0]),
+      Math.max(existing.slotBand[1], band[1]),
+    ];
+    existing.replayCount += replayCount;
+    existing.variantCount += 1;
+    existing.qualityWeight += replayCount * (
+      1 +
+      (0.9 * assignedMetrics.length) +
+      (0.2 * unresolvedMetrics.length)
+    );
+    for (const metric of assignedMetrics) {
+      existing.assignedMetrics.add(metric);
+    }
+    for (const metric of unresolvedMetrics) {
+      existing.unresolvedMetrics.add(metric);
+    }
+    clusters.set(anchorSlot, existing);
+  }
+
+  return [...clusters.values()]
+    .map((cluster) => ({
+      key: cluster.key,
+      center: cluster.center,
+      slotBand: cluster.slotBand,
+      slots: enumerateSlotBand(cluster.slotBand),
+      replayCount: cluster.replayCount,
+      variantCount: cluster.variantCount,
+      qualityWeight: cluster.qualityWeight,
+      assignedMetrics: [...cluster.assignedMetrics].sort(),
+      unresolvedMetrics: [...cluster.unresolvedMetrics].sort(),
+    }))
+    .sort((left, right) =>
+      left.center - right.center ||
+      right.replayCount - left.replayCount ||
+      right.qualityWeight - left.qualityWeight
+    );
+}
+
+function collectEntrySlots(entry) {
+  const directSlots = uniqueSortedNumbers([
+    ...(entry?.recommendedSlots ?? []),
+    ...(entry?.slots ?? []),
+  ]);
+  if (directSlots.length > 0 && Number.isFinite(entry?.dominantSlot)) {
+    const dominantSlot = Math.round(entry.dominantSlot);
+    const localSlots = directSlots.filter((slotIndex) => Math.abs(slotIndex - dominantSlot) <= 1);
+    if (localSlots.length > 0) {
+      return localSlots;
+    }
+  }
+  if (directSlots.length > 0) {
+    return directSlots;
+  }
+
+  const rowBandSlots = enumerateSlotBand(entry?.rowBand);
+  if (rowBandSlots.length > 0) {
+    return rowBandSlots;
+  }
+
+  if (Number.isFinite(entry?.dominantSlot)) {
+    return [Math.round(entry.dominantSlot)];
+  }
+
+  return [];
+}
+
+export function resolveLayoutSlotCluster(familyLayout, entry) {
+  const clusters = buildLayoutSlotClusters(familyLayout);
+  if (clusters.length === 0) {
+    return null;
+  }
+
+  const metric = entry?.metric ?? null;
+  const entrySlots = collectEntrySlots(entry);
+  const entryCenter = Number.isFinite(entry?.dominantSlot)
+    ? Math.round(entry.dominantSlot)
+    : (entrySlots.length > 0 ? median(entrySlots) : null);
+
+  return [...clusters]
+    .map((cluster) => {
+      const exactOverlap = entrySlots.filter((slotIndex) => cluster.slots.includes(slotIndex)).length;
+      const nearOverlap = entrySlots.filter((slotIndex) =>
+        cluster.slots.some((clusterSlot) => Math.abs(clusterSlot - slotIndex) <= 1),
+      ).length;
+      const dominantDistance = Number.isFinite(entry?.dominantSlot) && Number.isFinite(cluster.center)
+        ? Math.abs(Math.round(entry.dominantSlot) - cluster.center)
+        : null;
+      const centerDistance = Number.isFinite(entryCenter) && Number.isFinite(cluster.center)
+        ? Math.abs(entryCenter - cluster.center)
+        : 4;
+      const metricAffinity = metric && cluster.assignedMetrics.includes(metric)
+        ? 2.4
+        : (metric && cluster.unresolvedMetrics.includes(metric) ? 0.8 : -0.2);
+      const overlapScore = (0.6 * exactOverlap) + (0.22 * nearOverlap);
+      const distanceScore = 2.1 - Math.min(3.5, centerDistance * 1.2);
+      const dominantScore = dominantDistance == null
+        ? 0
+        : (
+          dominantDistance === 0
+            ? 2.4
+            : (dominantDistance === 1 ? 0.7 : -Math.min(1.6, dominantDistance * 0.7))
+        );
+      const qualityScore = Math.min(0.7, 0.08 * cluster.qualityWeight);
+      const replayScore = Math.min(0.3, 0.04 * cluster.replayCount);
+      return {
+        cluster,
+        score: metricAffinity + overlapScore + distanceScore + dominantScore + qualityScore + replayScore,
+      };
+    })
+    .sort((left, right) =>
+      right.score - left.score ||
+      right.cluster.qualityWeight - left.cluster.qualityWeight ||
+      right.cluster.replayCount - left.cluster.replayCount ||
+      left.cluster.center - right.cluster.center
+    )[0]?.cluster ?? null;
+}
+
 export function buildBundleRecommendedPatterns(artifactDir, runManifest, summaryJson, provisionalSchema, candidateMatches) {
   const artifactRoot = path.dirname(artifactDir);
   const versionGroup = parseVersionGroup(runManifest.summary?.gameVersion ?? summaryJson.gameVersion ?? "unknown");

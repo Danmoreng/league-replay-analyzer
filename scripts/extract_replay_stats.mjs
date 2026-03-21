@@ -671,6 +671,9 @@ function normalizePattern(pattern, candidateMatches, source) {
     transform: pattern.transform?.sampleCount > 0 ? pattern.transform : derivePatternTransform(pattern, candidateMatches),
     selectionScore: computeSelectionScore(source, pattern),
     source,
+    slotClusterKey: pattern.slotClusterKey ?? null,
+    slotClusterCenter: pattern.slotClusterCenter ?? null,
+    slotClusterBand: pattern.slotClusterBand ?? null,
     bundleSupport: pattern.bundleSupport ?? null,
   };
 }
@@ -977,6 +980,8 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
           recommendedRowBand: promoted.recommendedRowBand ?? pattern.recommendedRowBand,
           recommendedSlots: promoted.recommendedSlots ?? pattern.recommendedSlots,
           slotClusterKey: promoted.slotClusterKey ?? null,
+          slotClusterCenter: promoted.slotClusterCenter ?? pattern.slotClusterCenter ?? null,
+          slotClusterBand: promoted.slotClusterBand ?? pattern.slotClusterBand ?? null,
           bundleSupport: {
             ...(pattern.bundleSupport ?? {}),
             ...(promoted.bundleSupport ?? {}),
@@ -1999,6 +2004,9 @@ function main() {
       recommendedRowBand: pattern.recommendedRowBand,
       recommendedSlots: pattern.recommendedSlots,
       transform: pattern.transform,
+      slotClusterKey: pattern.slotClusterKey ?? null,
+      slotClusterCenter: pattern.slotClusterCenter ?? null,
+      slotClusterBand: pattern.slotClusterBand ?? null,
     })),
     participants: participantOutputs,
     unresolvedCandidates,

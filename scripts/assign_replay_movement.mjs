@@ -98,6 +98,14 @@ function buildScalarIndex(participant) {
   return byFamily;
 }
 
+function applyTransformsToSamples(rawSamples, transformX, transformY) {
+  return (rawSamples ?? []).map((sample) => ({
+    timestamp: sample.timestamp,
+    x: ((transformX?.slope ?? 1) * sample.rawX) + (transformX?.intercept ?? 0),
+    y: ((transformY?.slope ?? 1) * sample.rawY) + (transformY?.intercept ?? 0),
+  }));
+}
+
 function chooseEarlyPoint(trajectory) {
   if (!trajectory.length) {
     return null;
@@ -176,21 +184,77 @@ function computeEntityQuality(entity) {
   const sourceMetrics = entity.sourceMetrics ?? {};
   const trajectoryStats = entity.trajectoryStats ?? computeTrajectoryStats(entity.trajectory ?? []);
   const axisScore = clamp(sourceMetrics.avgAxisCorrelation ?? 0, 0, 1);
+  const minAxisScore = clamp(sourceMetrics.avgMinAxisCorrelation ?? 0, 0, 1);
   const pathScore = clamp((sourceMetrics.avgPathCorrelation ?? 0), 0, 1);
   const validatorScore = clamp(sourceMetrics.avgValidatorScore ?? 0, 0, 1);
   const rmseScore = 1 - clamp(sourceMetrics.avgNormalizedDistanceRmse ?? 1, 0, 1);
+  const rangeScore = clamp(sourceMetrics.avgRangeRatio ?? 0, 0, 1);
   const boundsScore = clamp(entity.boundsRatio ?? 0, 0, 1);
 
   return clamp(
-    (validatorScore * 0.3)
-    + (axisScore * 0.2)
-    + (pathScore * 0.15)
+    (validatorScore * 0.26)
+    + (axisScore * 0.15)
+    + (minAxisScore * 0.16)
+    + (pathScore * 0.12)
     + (rmseScore * 0.15)
+    + (rangeScore * 0.11)
     + (boundsScore * 0.1)
     + ((trajectoryStats.movementQuality ?? 0) * 0.1),
     0,
     1,
   );
+}
+
+function findSupportHypothesis(entity, participant) {
+  let best = null;
+  for (const hypothesis of entity.supportHypotheses ?? []) {
+    let score = 0;
+    if (participant.champion && hypothesis.champion && participant.champion === hypothesis.champion) {
+      score += 4;
+    }
+    if (participant.team != null && hypothesis.teamId != null && Number(participant.team) === Number(hypothesis.teamId)) {
+      score += 2;
+    }
+    if (participant.teamPosition && hypothesis.teamPosition && participant.teamPosition === hypothesis.teamPosition) {
+      score += 2;
+    }
+
+    if (!best || score > best.score || (score === best.score && (hypothesis.effectiveScore ?? 0) > (best.hypothesis.effectiveScore ?? 0))) {
+      best = { hypothesis, score };
+    }
+  }
+
+  if (!best || best.score < 6) {
+    return null;
+  }
+  return best.hypothesis;
+}
+
+function resolveEntityProjection(entity, participant) {
+  const exactHypothesis = findSupportHypothesis(entity, participant);
+  if (exactHypothesis) {
+    return {
+      trajectory: exactHypothesis.trajectory ?? entity.trajectory ?? [],
+      trajectoryStats: exactHypothesis.trajectoryStats ?? computeTrajectoryStats(exactHypothesis.trajectory ?? []),
+      sourceMetrics: {
+        avgAxisCorrelation: ((exactHypothesis.xCorrelation ?? 0) + (exactHypothesis.yCorrelation ?? 0)) / 2,
+        avgMinAxisCorrelation: exactHypothesis.minAxisCorrelation ?? 0,
+        avgPathCorrelation: exactHypothesis.pathCorrelation ?? 0,
+        avgNormalizedDistanceRmse: exactHypothesis.normalizedDistanceRmse ?? Number.POSITIVE_INFINITY,
+        avgRangeRatio: exactHypothesis.rangeRatio ?? 0,
+        avgValidatorScore: exactHypothesis.validatorScore ?? 0,
+        avgEffectiveScore: exactHypothesis.effectiveScore ?? 0,
+      },
+      directSupport: exactHypothesis,
+    };
+  }
+
+  return {
+    trajectory: entity.trajectory ?? [],
+    trajectoryStats: entity.trajectoryStats ?? computeTrajectoryStats(entity.trajectory ?? []),
+    sourceMetrics: entity.sourceMetrics ?? {},
+    directSupport: null,
+  };
 }
 
 function canonicalizeEntities(entities) {
@@ -259,13 +323,35 @@ function lookupPriorScore(priors, versionGroup, entity, participant) {
 }
 
 function scoreEntityForParticipant(entity, participant, scalarSlotsByFamily, priors, versionGroup) {
-  const startPoint = entity.trajectory[0];
-  const earlyPoint = chooseEarlyPoint(entity.trajectory);
+  const projection = resolveEntityProjection(entity, participant);
+  const trajectory = projection.trajectory;
+  if (!trajectory.length) {
+    return {
+      score: 0,
+      components: {
+        entityQuality: 0,
+      },
+      resolved: projection,
+    };
+  }
+
+  const sourceMetrics = projection.sourceMetrics;
+  const startPoint = trajectory[0];
+  const earlyPoint = chooseEarlyPoint(trajectory);
   const fountainAnchor = Number(participant.team) === 200 ? redFountain : blueFountain;
   const oppositeFountain = Number(participant.team) === 200 ? blueFountain : redFountain;
   const roleAnchor = getRoleAnchor(participant.team, participant.teamPosition);
-  const trajectoryStats = entity.trajectoryStats ?? computeTrajectoryStats(entity.trajectory ?? []);
-  const entityQuality = entity.entityQuality ?? computeEntityQuality(entity);
+  const trajectoryStats = projection.trajectoryStats ?? computeTrajectoryStats(trajectory);
+  const entityQuality = computeEntityQuality({
+    ...entity,
+    trajectory,
+    trajectoryStats,
+    sourceMetrics,
+  });
+  const minAxisScore = clamp(sourceMetrics?.avgMinAxisCorrelation ?? 0, 0, 1);
+  const rangeScore = clamp(sourceMetrics?.avgRangeRatio ?? 0, 0, 1);
+  const directSupportScore = clamp((projection.directSupport?.effectiveScore ?? 0) / 0.35, 0, 1);
+  const directValidatorScore = clamp(projection.directSupport?.validatorScore ?? 0, 0, 1);
   const { exactPriorScore, familyPriorScore } = lookupPriorScore(priors, versionGroup, entity, participant);
 
   const sameTeamDistance = distance(startPoint, fountainAnchor);
@@ -302,19 +388,43 @@ function scoreEntityForParticipant(entity, participant, scalarSlotsByFamily, pri
   );
 
   const rawScore =
-    (0.15 * teamScore) +
-    (0.2 * roleScore) +
+    (0.14 * teamScore) +
+    (0.18 * roleScore) +
     (0.1 * scalarFamilyScore) +
-    (0.1 * centerBias) +
-    (0.15 * trajectoryScore) +
-    (0.2 * exactPriorScore) +
-    (0.1 * familyPriorScore);
-  const score = rawScore * (0.55 + (0.45 * entityQuality));
+    (0.08 * centerBias) +
+    (0.12 * trajectoryScore) +
+    (0.12 * minAxisScore) +
+    (0.11 * rangeScore) +
+    (0.1 * directSupportScore) +
+    (0.05 * directValidatorScore) +
+    (0.1 * exactPriorScore) +
+    (0.05 * familyPriorScore);
+
+  let evidenceGate = 1;
+  if (entityQuality < 0.55) {
+    evidenceGate *= clamp(entityQuality / 0.55, 0, 1);
+  }
+  if (minAxisScore < 0.18) {
+    evidenceGate *= clamp(minAxisScore / 0.18, 0, 1);
+  }
+  if (rangeScore < 0.3) {
+    evidenceGate *= clamp(rangeScore / 0.3, 0, 1);
+  }
+  if ((trajectoryStats.movementQuality ?? 0) < 0.2) {
+    evidenceGate *= clamp((trajectoryStats.movementQuality ?? 0) / 0.2, 0, 1);
+  }
+
+  const score = rawScore * (0.45 + (0.55 * entityQuality)) * evidenceGate;
 
   return {
     score,
     components: {
       entityQuality,
+      minAxisScore,
+      rangeScore,
+      directSupportScore,
+      directValidatorScore,
+      evidenceGate,
       teamScore,
       roleScore,
       scalarFamilyScore,
@@ -325,6 +435,7 @@ function scoreEntityForParticipant(entity, participant, scalarSlotsByFamily, pri
       sameTeamDistance,
       oppositeTeamDistance,
     },
+    resolved: projection,
   };
 }
 
@@ -459,10 +570,11 @@ function main() {
         score: assignment.scoreEntry.score,
         scoreComponents: assignment.scoreEntry.components,
         entityQuality: entity.entityQuality,
-        sourceMetrics: entity.sourceMetrics ?? {},
-        trajectoryStats: entity.trajectoryStats ?? computeTrajectoryStats(entity.trajectory ?? []),
+        sourceMetrics: assignment.scoreEntry.resolved?.sourceMetrics ?? entity.sourceMetrics ?? {},
+        trajectoryStats: assignment.scoreEntry.resolved?.trajectoryStats ?? entity.trajectoryStats ?? computeTrajectoryStats(entity.trajectory ?? []),
         aliasEntityKeys: entity.aliasEntityKeys ?? [entity.entityKey],
-        trajectory: entity.trajectory,
+        directSupport: assignment.scoreEntry.resolved?.directSupport ?? null,
+        trajectory: assignment.scoreEntry.resolved?.trajectory ?? entity.trajectory,
       };
     }),
     unmatchedParticipants: participantsWithScores

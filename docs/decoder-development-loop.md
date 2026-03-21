@@ -362,10 +362,13 @@ Current 2026-03-21 expanded baseline from the 13-replay corpus:
 - bundle-family promotion now only consumes validation from the exact extracted bundle pattern that produced a replay metric
 - weak `bundleRankedPatterns` are now diagnostics only; they no longer feed back into replay-only extraction
 - the scalar corpus loop now converges again after bounding bundle-backed transform sample counts to replay-local evidence
+- slot-cluster-aware bundle resolution for `16.6 | 61894-0x00-h6` is now implemented in the corpus builder and uses the discovered family layout artifact as its cluster prior
+- the latest corpus rerun still leaves `movementSpeed` ranked-only rather than promoted, which means the remaining problem is extraction/promotion consistency, not family-wide clustering
 - movement coordinate priors now include family-aware and family-band layers, not just decode signatures
-- `EUN1-3926600040` now yields `2 / 3` passing replay-only labelled movement tracks
-- `EUN1-3927135846` now yields `1 / 1` passing replay-only labelled movement tracks
-- `EUW1-7779216102` still yields `1 / 2` passing replay-only labelled movement tracks
+- movement extraction/assignment now carries exact replay-local transform hypotheses through to participant labelling rather than rebuilding tracks from pattern medians
+- `EUN1-3926600040` now yields `5 / 7` passing replay-only labelled movement tracks
+- `EUN1-3927135846` now yields `4 / 8` passing replay-only labelled movement tracks
+- `EUW1-7678536418` now yields `4 / 4` passing replay-only labelled movement tracks
 
 ### 4. Scalar family layout analysis
 
@@ -382,7 +385,7 @@ Current layout finding:
 - earlier cluster around `12` carrying `totalGold` and some `power`
 - unresolved variants still around `18` and `19`
 
-That means the next scalar promotion step should be slot-cluster-aware, not just family-wide.
+That slot-cluster-aware promotion step is now implemented. The remaining gap is making replay extraction select and preserve the same exact cluster evidence that the corpus-ranking path now resolves.
 
 ### 5. Movement discovery runner
 
@@ -433,7 +436,7 @@ The next concrete task should be:
 1. keep bundle-family promotion strict: only the exact extracted bundle pattern may contribute validation back into corpus promotion
 2. use the new runtime drift inspector when promotion changes are made:
    `node ./scripts/inspect_runtime_schema_drift.mjs --before <old-schema> --after <new-schema>`
-3. return to slot-clustered `16.6 | 61894-0x00-h6` work so `movementSpeed` can compete cleanly against the stronger `15/16/17` cluster
+3. fix the remaining replay extraction mismatch so `16.6 | 61894-0x00-h6 | movementSpeed` uses the exact slot-cluster evidence (`s18` in the current target case) all the way through selected replay output
 4. improve `16.1` movement extraction and identity assignment, especially around `61733 / 0x00`, so bad tracks stay filtered instead of being weakly labelled
 5. use the validated extraction output as the UI input contract
 

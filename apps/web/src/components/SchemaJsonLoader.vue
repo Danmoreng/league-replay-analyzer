@@ -120,6 +120,35 @@
             </table>
           </div>
         </div>
+        <div class="col-12" v-if="deepReport.likelyFieldPatterns.length">
+          <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0 small">
+              <thead class="text-muted x-small text-uppercase bg-body">
+                <tr>
+                  <th>Field Map</th>
+                  <th>Family</th>
+                  <th>Rows</th>
+                  <th>Participants</th>
+                  <th>Corr</th>
+                  <th>nRMSE</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="pattern in deepReport.likelyFieldPatterns.slice(0, 10)" :key="pattern.patternKey">
+                  <td>
+                    <div><code>+{{ pattern.laneIndex }}</code> <code>{{ pattern.decodeLabel }}</code> -> {{ pattern.metricLabel }}</div>
+                    <div class="text-muted x-small">{{ pattern.championPreview.join(', ') }}</div>
+                  </td>
+                  <td><code>{{ pattern.familyLabel }}</code></td>
+                  <td>{{ pattern.rowPreview.join(', ') }}</td>
+                  <td>{{ pattern.distinctParticipants }}</td>
+                  <td>{{ pattern.averageCorrelation.toFixed(2) }}</td>
+                  <td>{{ pattern.averageNormalizedRmse.toFixed(2) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
         <div class="col-12" v-if="deepReport.participantAssignments.topCandidates.length">
           <div class="table-responsive">
             <table class="table table-sm table-hover align-middle mb-0 small">

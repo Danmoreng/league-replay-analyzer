@@ -68,7 +68,9 @@ Important caveat:
 - bundle-family promotion now only consumes the exact extracted pattern that produced a replay metric; weak sibling bundle candidates no longer inherit validation from a stronger chosen sibling
 - extraction no longer feeds weak `bundleRankedPatterns` back into selection; only bundle-promoted corpus families and replay-local bundle recommendations affect replay-only scalar extraction
 - bundle-backed transform sample counts are now bounded to replay-local evidence instead of recursively re-importing corpus-level counts
-- the remaining scalar blocker is no longer corpus convergence itself; it is slot-variant handling inside `61894` and expanding `movementSpeed`/`health` beyond the current partial wins
+- slot-cluster-aware bundle resolution for `16.6 | 61894 / 0x00 / h6` is now implemented and uses `artifacts/scalar-family-layout/16.6/61894-0x00-h6.json` as the canonical layout prior
+- the latest full corpus rerun confirmed that ranked bundle evidence now separates the late `s17`/`s18` region more cleanly, but `movementSpeed` is still not promoted into `corpus-schema.json`
+- the remaining scalar blocker is no longer family-wide slot flattening; it is extraction/promotion consistency for the `movementSpeed` cluster path and expanding `movementSpeed`/`health` beyond the current partial wins
 
 ## Current Movement Discovery Status
 
@@ -84,6 +86,7 @@ The current movement pipeline:
 - fits affine transforms against Riot participant `position.x/y`
 - scores pairs by axis correlation, path correlation, map-bounds ratio, and distance error
 - promotes replay-local movement patterns only when the same pair recurs across multiple rows
+- carries exact replay-local transform hypotheses and raw aligned samples through discovery and extraction instead of collapsing tracks to family medians
 - emits anonymous replay-derived trajectories into `artifacts/<replay-id>/extracted-movement.json`
 - learns movement coordinate priors in `artifacts/movement-coordinate-model.json` at several levels:
   - decode signature
@@ -92,15 +95,21 @@ The current movement pipeline:
   - version-group family band
 - learns corpus-backed movement identity priors into `artifacts/movement-identity-priors.json`
 - assigns extracted trajectories to participants replay-only into `artifacts/<replay-id>/participant-movement.json`
+- rebuilds participant-labelled trajectories from the exact matched hypothesis for that replay/entity instead of using a pattern-wide median transform
 - validates those participant-labelled tracks in `artifacts/<replay-id>/assigned-movement-validation-report.json`
 
 Current corpus-level result from the same 13 local replays:
 
-- `EUN1-3926600040`: `0` promoted movement patterns, `4` extracted trajectories from strong ranked fallback families
-- `EUW1-7596620123`: `3` promoted movement patterns, `6` extracted trajectories
-- `EUW1-7617298409`: `1` promoted movement patterns, `2` extracted trajectories
-- `EUW1-7678536418`: `2` promoted movement patterns, `4` extracted trajectories
-- other replays currently show anonymous movement candidates, but many still lack repeated-row support for promotion
+- the latest full rerun now assigns replay-only labelled movement in every local replay, but assignment quality is still patch-sensitive and uneven
+- strongest current validation examples:
+  - `EUW1-7678536418`: `4 / 4` passing assignments
+  - `EUW1-7648140653`: `6 / 7` passing assignments
+  - `EUN1-3926600040`: `5 / 7` passing assignments
+  - `EUN1-3926619035`: `3 / 4` passing assignments
+- weaker latest-patch cases still exist:
+  - `EUN1-3927084741`: `3 / 7` passing assignments
+  - `EUN1-3927135846`: `4 / 8` passing assignments
+- promotion is still sparse; most useful movement output is currently coming from replay-local ranked fallback plus identity assignment rather than broad corpus-promoted movement schemas
 
 The strongest current pattern is version-sensitive and appears to live in the main `0x00` state family for several patch groups:
 
@@ -108,20 +117,28 @@ The strongest current pattern is version-sensitive and appears to live in the ma
 - `15.23`: `61737 / 0x00`
 - `16.1`: `61733 / 0x00`
 
-Replay-only movement identity is now partially working, but still patch-fragile:
+Replay-only movement identity is now materially better than the earlier median-based path, but it is still patch-fragile:
 
-- `EUN1-3926600040`: `2 / 3` participant-labelled movement assignments pass validation on `16.6`
-- `EUN1-3927135846`: `1 / 1` participant-labelled movement assignment passes on `16.6`
-- `EUW1-7596231295`: `1 / 2` participant-labelled movement assignments pass on `15.22`
-- `EUW1-7779216102`: `1 / 2` participant-labelled movement assignments pass on `15.24`
-- other replays still produce assignments, but many remain non-passing under the current threshold
+- `EUN1-3926581873`: `4 / 6` passing assignments
+- `EUN1-3926600040`: `5 / 7` passing assignments
+- `EUN1-3926619035`: `3 / 4` passing assignments
+- `EUN1-3927084741`: `3 / 7` passing assignments
+- `EUN1-3927110403`: `5 / 9` passing assignments
+- `EUN1-3927135846`: `4 / 8` passing assignments
+- `EUW1-7596231295`: `5 / 7` passing assignments
+- `EUW1-7596620123`: `2 / 4` passing assignments
+- `EUW1-7617298409`: `3 / 4` passing assignments
+- `EUW1-7648140653`: `6 / 7` passing assignments
+- `EUW1-7678536418`: `4 / 4` passing assignments
+- `EUW1-7689604967`: `5 / 6` passing assignments
+- `EUW1-7779216102`: `5 / 8` passing assignments
 
 Current best replay-only movement examples:
 
-- `EUN1-3926600040`: `Diana` jungle from `61897 / 0x00` and `Swain` middle from `51483 / 0xF1`
-- `EUN1-3927135846`: `Pyke` support from a replay-only latest-patch track
-- `EUW1-7596231295`: `Malzahar` from `17068 / 0xF1`
-- `EUW1-7779216102`: `Brand` from `19313 / 0xF1`
+- `EUW1-7678536418`: latest-patch `61733 / 0x00` tracks now validate cleanly across all four assigned champions in this replay
+- `EUN1-3926600040`: several latest-patch `16.6` assignments now pass simultaneously instead of relying on one or two isolated tracks
+- `EUW1-7648140653`: `16.1` assignment quality is now good enough to keep most rendered tracks under the current validation gate
+- `EUN1-3927135846`: still produces useful latest-patch movement evidence, but this replay remains a good example of why weak assignments should stay filtered
 
 The coordinate-model audit is now materially more useful:
 
@@ -257,9 +274,9 @@ For a new replay or continued work on the current replay:
 
 The most useful next backend steps are:
 
-- split bundle-family scalar promotion by slot cluster inside `16.6 | 61894 / 0x00 / h6` instead of flattening all slot variants into one family-wide metric group
-- use the discovered layout artifact (`artifacts/scalar-family-layout/16.6/61894-0x00-h6.json`) as the basis for those slot-cluster priors
-- let `movementSpeed` and `power` compete as cluster-specific bundle candidates so bad `18/19` variants stop dragging down good `12/13` or `16/17` variants
+- finish the extraction/promotion path for slot-clustered `16.6 | 61894 / 0x00 / h6` so `movementSpeed` uses the same exact cluster evidence in replay extraction that the corpus-ranking path now uses
+- use the discovered layout artifact (`artifacts/scalar-family-layout/16.6/61894-0x00-h6.json`) as the authoritative cluster prior whenever bundle-backed replay entries are resolved
+- keep `movementSpeed` and `power` cluster-specific so bad `18/19` variants cannot drag down the stronger `12/13` or `16/17/18` regions again
 - keep using scalar/state extraction as the identity backbone for movement
 - continue improving `16.1` movement family filtering and identity assignment, especially around `61733 / 0x00`
 
@@ -269,7 +286,7 @@ The next session should begin with more replay intake:
 - collect matching Riot `match.json` and `timeline.json` fixtures for each replay when possible
 - rerun the full corpus pipeline before changing thresholds again
 
-The highest-value next implementation is now slot-clustered bundle promotion for `61894 / 0x00 / h6`, followed by another corpus rerun to see whether `movementSpeed` can graduate from ranked-only to promoted replay-only schema support on `16.6`.
+The highest-value next implementation is now to remove the remaining stale cluster propagation in replay extraction so the exact slot-cluster resolver and the replay-selected `movementSpeed` pattern agree, then rerun the scalar promotion check for `16.6`.
 
 ## Related Docs
 

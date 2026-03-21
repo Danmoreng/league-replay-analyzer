@@ -55,9 +55,9 @@ function buildFieldIndex(cleanedJson) {
   return fieldIndex;
 }
 
-function alignFieldSamples(xField, yField, mapping, transformX, transformY) {
+function alignRawFieldSamples(xField, yField, mapping) {
   const yByTimestamp = new Map((yField.samples ?? []).map((sample) => [sample.timestamp, sample.decoded]));
-  const points = [];
+  const samples = [];
   for (const sample of xField.samples ?? []) {
     const pairedValue = yByTimestamp.get(sample.timestamp);
     if (!Number.isFinite(sample.decoded) || !Number.isFinite(pairedValue) || !Number.isFinite(sample.timestamp)) {
@@ -66,15 +66,21 @@ function alignFieldSamples(xField, yField, mapping, transformX, transformY) {
 
     const rawX = mapping === "normal" ? sample.decoded : pairedValue;
     const rawY = mapping === "normal" ? pairedValue : sample.decoded;
-    const x = ((transformX?.slopeMedian ?? 1) * rawX) + (transformX?.interceptMedian ?? 0);
-    const y = ((transformY?.slopeMedian ?? 1) * rawY) + (transformY?.interceptMedian ?? 0);
-    points.push({
+    samples.push({
       timestamp: sample.timestamp,
-      x,
-      y,
+      rawX,
+      rawY,
     });
   }
-  return points;
+  return samples;
+}
+
+function applyTransformsToSamples(rawSamples, transformX, transformY) {
+  return rawSamples.map((sample) => ({
+    timestamp: sample.timestamp,
+    x: ((transformX?.slope ?? 1) * sample.rawX) + (transformX?.intercept ?? 0),
+    y: ((transformY?.slope ?? 1) * sample.rawY) + (transformY?.intercept ?? 0),
+  }));
 }
 
 function computeBoundsRatio(points) {
@@ -101,8 +107,10 @@ function scoreFallbackPattern(pattern) {
   const support = pattern.support ?? {};
   const validatorScore = Math.min(1, Math.max(0, support.avgValidatorScore ?? 0));
   const axisScore = Math.min(1, Math.max(0, support.avgAxisCorrelation ?? 0));
+  const minAxisScore = Math.min(1, Math.max(0, support.avgMinAxisCorrelation ?? 0));
   const pathScore = Math.min(1, Math.max(0, support.avgPathCorrelation ?? 0));
   const rmseScore = 1 - Math.min(1, Math.max(0, support.avgNormalizedDistanceRmse ?? 1));
+  const rangeScore = Math.min(1, Math.max(0, support.avgRangeRatio ?? 0));
   const effectiveScore = Math.min(1, Math.max(0, (support.avgEffectiveScore ?? 0) / 0.5));
   const replaySupport = Math.min(1, Math.max(0, (pattern.coordinateModelReplaySupport ?? 0) / 3));
   const bestRawPairScore = Math.min(
@@ -116,10 +124,12 @@ function scoreFallbackPattern(pattern) {
   );
 
   return (
-    (validatorScore * 0.25) +
-    (axisScore * 0.18) +
-    (pathScore * 0.17) +
+    (validatorScore * 0.22) +
+    (axisScore * 0.14) +
+    (minAxisScore * 0.16) +
+    (pathScore * 0.14) +
     (rmseScore * 0.15) +
+    (rangeScore * 0.08) +
     (effectiveScore * 0.1) +
     (replaySupport * 0.05) +
     (bestRawPairScore * 0.1)
@@ -136,21 +146,27 @@ function selectFallbackPatterns(rankedPatterns, maxPatterns) {
         bestRawPairScore >= 0.3 &&
         (support.avgValidatorScore ?? 0) >= 0.62 &&
         (support.avgAxisCorrelation ?? 0) >= 0.35 &&
+        (support.avgMinAxisCorrelation ?? 0) >= 0.15 &&
         (support.avgPathCorrelation ?? 0) >= 0.18 &&
-        (support.avgNormalizedDistanceRmse ?? Number.POSITIVE_INFINITY) <= 0.29;
+        (support.avgNormalizedDistanceRmse ?? Number.POSITIVE_INFINITY) <= 0.29 &&
+        (support.avgRangeRatio ?? 0) >= 0.3;
       return (
         (
           (support.avgValidatorScore ?? 0) >= 0.78 &&
           (support.avgAxisCorrelation ?? 0) >= 0.52 &&
+          (support.avgMinAxisCorrelation ?? 0) >= 0.22 &&
           (support.avgPathCorrelation ?? 0) >= 0.35 &&
           (support.avgNormalizedDistanceRmse ?? Number.POSITIVE_INFINITY) <= 0.22 &&
+          (support.avgRangeRatio ?? 0) >= 0.38 &&
           (support.avgEffectiveScore ?? 0) >= 0.34
         ) ||
         (
           (support.avgValidatorScore ?? 0) >= 0.64 &&
           (support.avgAxisCorrelation ?? 0) >= 0.38 &&
+          (support.avgMinAxisCorrelation ?? 0) >= 0.16 &&
           (support.avgPathCorrelation ?? 0) >= 0.2 &&
           (support.avgNormalizedDistanceRmse ?? Number.POSITIVE_INFINITY) <= 0.28 &&
+          (support.avgRangeRatio ?? 0) >= 0.32 &&
           (support.avgEffectiveScore ?? 0) >= 0.28
         ) ||
         strongLocalCandidate
@@ -289,6 +305,31 @@ function computeTrajectoryStats(points) {
   };
 }
 
+function normalizeSupportMatch(supportMatch) {
+  return {
+    participantId: supportMatch.participantId,
+    champion: supportMatch.champion,
+    teamId: supportMatch.teamId,
+    teamPosition: supportMatch.teamPosition,
+    overlap: supportMatch.overlap,
+    mapping: supportMatch.mapping,
+    xCorrelation: supportMatch.xCorrelation,
+    yCorrelation: supportMatch.yCorrelation,
+    minAxisCorrelation: supportMatch.minAxisCorrelation,
+    pathCorrelation: supportMatch.pathCorrelation,
+    distanceRmse: supportMatch.distanceRmse,
+    normalizedDistanceRmse: supportMatch.normalizedDistanceRmse,
+    boundsRatio: supportMatch.boundsRatio,
+    speedRatio: supportMatch.speedRatio,
+    rangeRatio: supportMatch.rangeRatio,
+    validatorScore: supportMatch.validatorScore,
+    effectiveScore: supportMatch.effectiveScore,
+    passesValidation: supportMatch.passesValidation,
+    transformX: supportMatch.transformX,
+    transformY: supportMatch.transformY,
+  };
+}
+
 function main() {
   const repoRoot = process.cwd();
   const args = parseArgs(process.argv);
@@ -341,48 +382,81 @@ function main() {
         continue;
       }
 
-      const points = alignFieldSamples(
+      const rawSamples = alignRawFieldSamples(
         xField,
         yField,
         pattern.mapping,
-        pattern.transformX,
-        pattern.transformY,
       );
-      if (points.length < 4) {
+      if (rawSamples.length < 4) {
         continue;
       }
 
-      const rawBoundsRatio = computeBoundsRatio(points);
-      if (rawBoundsRatio < 0.85) {
+      const supportHypotheses = [];
+      for (const supportMatch of candidate.supportMatches ?? []) {
+        if (
+          !Number.isFinite(supportMatch?.transformX?.slope) ||
+          !Number.isFinite(supportMatch?.transformX?.intercept) ||
+          !Number.isFinite(supportMatch?.transformY?.slope) ||
+          !Number.isFinite(supportMatch?.transformY?.intercept)
+        ) {
+          continue;
+        }
+        const transformedPoints = applyTransformsToSamples(rawSamples, supportMatch.transformX, supportMatch.transformY);
+        const rawBoundsRatio = computeBoundsRatio(transformedPoints);
+        const filteredPoints = filterTrajectoryPoints(transformedPoints);
+        if (filteredPoints.length < 4) {
+          continue;
+        }
+        const boundsRatio = computeBoundsRatio(filteredPoints);
+        const trajectoryStats = computeTrajectoryStats(filteredPoints);
+        supportHypotheses.push({
+          ...normalizeSupportMatch(supportMatch),
+          rawBoundsRatio,
+          boundsRatio,
+          trajectoryStats,
+          trajectory: filteredPoints,
+        });
+      }
+
+      supportHypotheses.sort((left, right) =>
+        (Number(right.passesValidation) - Number(left.passesValidation))
+        || right.effectiveScore - left.effectiveScore
+        || right.validatorScore - left.validatorScore
+        || left.normalizedDistanceRmse - right.normalizedDistanceRmse,
+      );
+
+      const exemplarHypothesis = supportHypotheses[0] ?? null;
+      if (!exemplarHypothesis) {
         continue;
       }
-      const filteredPoints = filterTrajectoryPoints(points);
-      if (filteredPoints.length < 4) {
-        continue;
-      }
-      const boundsRatio = computeBoundsRatio(filteredPoints);
 
       const entityKey = `${pattern.familyKey}|${candidate.slotIndex}|${pattern.xField.offset}|${pattern.yField.offset}|${pattern.mapping}`;
       entityKeys.push(entityKey);
-      const trajectoryStats = computeTrajectoryStats(filteredPoints);
       entities.push({
         entityKey,
         familyKey: pattern.familyKey,
         patternKey: pattern.patternKey,
         patternConfidence: pattern.confidence,
         sourceMetrics: {
-          avgAxisCorrelation: pattern.support?.avgAxisCorrelation ?? 0,
-          avgPathCorrelation: pattern.support?.avgPathCorrelation ?? 0,
-          avgNormalizedDistanceRmse: pattern.support?.avgNormalizedDistanceRmse ?? Number.POSITIVE_INFINITY,
-          avgValidatorScore: pattern.support?.avgValidatorScore ?? 0,
+          avgAxisCorrelation: ((exemplarHypothesis.xCorrelation ?? 0) + (exemplarHypothesis.yCorrelation ?? 0)) / 2,
+          avgMinAxisCorrelation: exemplarHypothesis.minAxisCorrelation ?? 0,
+          avgPathCorrelation: exemplarHypothesis.pathCorrelation ?? 0,
+          avgNormalizedDistanceRmse: exemplarHypothesis.normalizedDistanceRmse ?? Number.POSITIVE_INFINITY,
+          avgRangeRatio: exemplarHypothesis.rangeRatio ?? 0,
+          avgValidatorScore: exemplarHypothesis.validatorScore ?? 0,
+          avgEffectiveScore: exemplarHypothesis.effectiveScore ?? 0,
         },
+        patternSupport: pattern.support ?? null,
         slotIndex: candidate.slotIndex,
-        rawPointCount: points.length,
-        filteredPointCount: filteredPoints.length,
-        rawBoundsRatio,
-        boundsRatio,
-        trajectoryStats,
-        trajectory: filteredPoints,
+        rawPointCount: rawSamples.length,
+        filteredPointCount: exemplarHypothesis.trajectory.length,
+        rawBoundsRatio: exemplarHypothesis.rawBoundsRatio,
+        boundsRatio: exemplarHypothesis.boundsRatio,
+        trajectoryStats: exemplarHypothesis.trajectoryStats,
+        trajectory: exemplarHypothesis.trajectory,
+        rawSamples,
+        mapping: pattern.mapping,
+        supportHypotheses,
       });
     }
 

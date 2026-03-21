@@ -23,9 +23,32 @@ export interface ReplayDeepFamilySummary {
   score: number;
 }
 
+export interface ReplayLikelyFieldPattern {
+  patternKey: string;
+  familyKey: string;
+  familyLabel: string;
+  familyLength: number;
+  familyFirstByte: number;
+  laneIndex: number;
+  decodeLabel: string;
+  metricKey: string;
+  metricLabel: string;
+  distinctRows: number;
+  distinctParticipants: number;
+  supportCount: number;
+  averageCorrelation: number;
+  averageNormalizedRmse: number;
+  averageScore: number;
+  bestScore: number;
+  archetypes: string[];
+  rowPreview: number[];
+  championPreview: string[];
+}
+
 export interface ReplayDeepAnalysisReport {
   families: ReplayDeepFamilySummary[];
   topMatches: ReplayScalarMetricMatch[];
+  likelyFieldPatterns: ReplayLikelyFieldPattern[];
   participantAssignments: ReplayParticipantSlotAssignmentReport;
   scalarReport: ReplayScalarCorrelationReport;
   summary: string;
@@ -151,6 +174,112 @@ export function correlateCleanedFields(
   ], bundle);
 }
 
+function average(values: number[]): number {
+  if (values.length === 0) {
+    return 0;
+  }
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function buildLikelyFieldPatterns(
+  participantAssignments: ReplayParticipantSlotAssignmentReport,
+): ReplayLikelyFieldPattern[] {
+  const grouped = new Map<string, {
+    familyKey: string;
+    familyLabel: string;
+    familyLength: number;
+    familyFirstByte: number;
+    laneIndex: number;
+    decodeLabel: string;
+    metricKey: string;
+    metricLabel: string;
+    rows: Set<number>;
+    participants: Set<number>;
+    champions: Set<string>;
+    archetypes: Set<string>;
+    scores: number[];
+    correlations: number[];
+    normalizedRmses: number[];
+  }>();
+
+  for (const candidate of participantAssignments.topCandidates.slice(0, 24)) {
+    for (const support of candidate.support) {
+      const patternKey = `${support.familyKey}:${support.laneIndex}:${support.decodeLabel}:${support.metricKey}`;
+      const group = grouped.get(patternKey) ?? {
+        familyKey: support.familyKey,
+        familyLabel: candidate.familyLabel,
+        familyLength: support.familyLength,
+        familyFirstByte: support.familyFirstByte,
+        laneIndex: support.laneIndex,
+        decodeLabel: support.decodeLabel,
+        metricKey: support.metricKey,
+        metricLabel: support.metricLabel,
+        rows: new Set<number>(),
+        participants: new Set<number>(),
+        champions: new Set<string>(),
+        archetypes: new Set<string>(),
+        scores: [],
+        correlations: [],
+        normalizedRmses: [],
+      };
+      group.rows.add(support.slotIndex);
+      group.participants.add(support.participantId);
+      group.champions.add(support.champion);
+      group.archetypes.add(candidate.archetype);
+      group.scores.push(support.score);
+      group.correlations.push(support.correlation);
+      group.normalizedRmses.push(support.normalizedRmse);
+      grouped.set(patternKey, group);
+    }
+  }
+
+  return Array.from(grouped.entries()).map(([patternKey, group]) => {
+    const averageScore = average(group.scores);
+    const averageCorrelation = average(group.correlations);
+    const averageNormalizedRmse = average(group.normalizedRmses);
+    const distinctRows = group.rows.size;
+    const distinctParticipants = group.participants.size;
+    const supportCount = group.scores.length;
+    const bestScore = Math.max(...group.scores);
+
+    return {
+      patternKey,
+      familyKey: group.familyKey,
+      familyLabel: group.familyLabel,
+      familyLength: group.familyLength,
+      familyFirstByte: group.familyFirstByte,
+      laneIndex: group.laneIndex,
+      decodeLabel: group.decodeLabel,
+      metricKey: group.metricKey,
+      metricLabel: group.metricLabel,
+      distinctRows,
+      distinctParticipants,
+      supportCount,
+      averageCorrelation,
+      averageNormalizedRmse,
+      averageScore,
+      bestScore,
+      archetypes: Array.from(group.archetypes).sort(),
+      rowPreview: Array.from(group.rows).sort((left, right) => left - right).slice(0, 6),
+      championPreview: Array.from(group.champions).sort().slice(0, 4),
+    };
+  }).sort((left, right) => {
+    if (right.distinctParticipants !== left.distinctParticipants) {
+      return right.distinctParticipants - left.distinctParticipants;
+    }
+    if (right.distinctRows !== left.distinctRows) {
+      return right.distinctRows - left.distinctRows;
+    }
+    if (right.averageScore !== left.averageScore) {
+      return right.averageScore - left.averageScore;
+    }
+    if (left.averageNormalizedRmse !== right.averageNormalizedRmse) {
+      return left.averageNormalizedRmse - right.averageNormalizedRmse;
+    }
+    return right.averageCorrelation - left.averageCorrelation;
+  });
+}
+
 export function buildReplayDeepAnalysisReport(
   inputs: ReplayDeepFamilyInput[],
   bundle: RiotFixtureBundle,
@@ -202,6 +331,7 @@ export function buildReplayDeepAnalysisReport(
   return {
     families,
     topMatches: scalarReport.topScalarMatches.slice(0, 24),
+    likelyFieldPatterns: buildLikelyFieldPatterns(participantAssignments).slice(0, 24),
     participantAssignments,
     scalarReport,
     summary,

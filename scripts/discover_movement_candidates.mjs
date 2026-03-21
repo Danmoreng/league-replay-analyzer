@@ -168,6 +168,35 @@ function computeStepDistances(points) {
   return distances;
 }
 
+function computeAxisRange(points, key) {
+  if (!points.length) {
+    return 0;
+  }
+
+  let minValue = points[0][key];
+  let maxValue = points[0][key];
+  for (const point of points) {
+    minValue = Math.min(minValue, point[key]);
+    maxValue = Math.max(maxValue, point[key]);
+  }
+  return maxValue - minValue;
+}
+
+function compareAxisRange(predictedRange, targetRange) {
+  if (!Number.isFinite(predictedRange) || !Number.isFinite(targetRange)) {
+    return 0;
+  }
+  if (predictedRange <= 1e-6 || targetRange <= 1e-6) {
+    return predictedRange <= 1e-6 && targetRange <= 1e-6 ? 1 : 0;
+  }
+
+  const ratio = predictedRange / targetRange;
+  if (!Number.isFinite(ratio) || ratio <= 0) {
+    return 0;
+  }
+  return clamp(Math.min(ratio, 1 / ratio), 0, 1);
+}
+
 function computeBoundsRatio(points) {
   if (!points.length) {
     return 0;
@@ -456,9 +485,18 @@ function evaluateMapping(pairCandidate, targetSeries, mapping, coordinateModel, 
   const normalizedDistanceRmse = distanceRmse / summonersRiftBounds.maxX;
   const boundsRatio = computeBoundsRatio(predictedPoints);
   const speedRatio = computeSpeedRatio(predictedPoints);
+  const predictedXRange = computeAxisRange(predictedPoints, "x");
+  const predictedYRange = computeAxisRange(predictedPoints, "y");
+  const targetXRange = computeAxisRange(targetPoints, "x");
+  const targetYRange = computeAxisRange(targetPoints, "y");
+  const xRangeRatio = compareAxisRange(predictedXRange, targetXRange);
+  const yRangeRatio = compareAxisRange(predictedYRange, targetYRange);
+  const rangeRatio = Math.sqrt(xRangeRatio * yRangeRatio);
   const pathVariance = standardDeviation(predictedSteps);
   const varianceFactor = clamp(pathVariance / 1500, 0.2, 1);
   const correlationFactor = clamp((xCorrelation + yCorrelation) / 2, 0, 1);
+  const minAxisCorrelation = Math.min(xCorrelation, yCorrelation);
+  const minAxisFactor = clamp(minAxisCorrelation, 0, 1);
   const pathFactor = clamp(Number.isFinite(pathCorrelation) ? pathCorrelation : 0, 0, 1);
   const distanceFactor = 1 / (1 + (normalizedDistanceRmse * 6));
   const overlapFactor = Math.min(1, predictedPoints.length / 12);
@@ -476,6 +514,12 @@ function evaluateMapping(pairCandidate, targetSeries, mapping, coordinateModel, 
   if (speedRatio < 0.75) {
     validatorScore *= clamp(speedRatio / 0.75, 0, 1);
   }
+  if (minAxisCorrelation < 0.2) {
+    validatorScore *= clamp(minAxisCorrelation / 0.2, 0, 1);
+  }
+  if (rangeRatio < 0.35) {
+    validatorScore *= clamp(rangeRatio / 0.35, 0, 1);
+  }
   if (coordinateModelScore.source === "family_signature" && (coordinateModelScore.replaySupport ?? 0) >= 2 && coordinateModelScore.score < 0.5) {
     validatorScore *= clamp(coordinateModelScore.score / 0.5, 0, 1);
   } else if (coordinateModelScore.source === "family_band_cluster" && (coordinateModelScore.replaySupport ?? 0) >= 2 && coordinateModelScore.score < 0.5) {
@@ -491,20 +535,28 @@ function evaluateMapping(pairCandidate, targetSeries, mapping, coordinateModel, 
   const effectiveScore =
     overlapFactor *
     varianceFactor *
-    ((0.4 * correlationFactor) + (0.2 * pathFactor) + (0.2 * distanceFactor) + (0.1 * boundsRatio) + (0.1 * speedRatio)) *
+    ((0.32 * correlationFactor) + (0.18 * minAxisFactor) + (0.16 * pathFactor) + (0.16 * distanceFactor) + (0.1 * boundsRatio) + (0.08 * speedRatio)) *
     validatorScore *
-    (0.8 + (0.2 * coordinateModelScore.score));
+    (0.7 + (0.15 * coordinateModelScore.score) + (0.15 * rangeRatio));
 
   return {
     overlap: predictedPoints.length,
     mapping,
     xCorrelation,
     yCorrelation,
+    minAxisCorrelation,
     pathCorrelation,
     distanceRmse,
     normalizedDistanceRmse,
     boundsRatio,
     speedRatio,
+    predictedXRange,
+    predictedYRange,
+    targetXRange,
+    targetYRange,
+    xRangeRatio,
+    yRangeRatio,
+    rangeRatio,
     coordinateModelSignature: coordinateModelScore.signatureKey,
     coordinateModelSupport: coordinateModelScore.support,
     coordinateModelReplaySupport: coordinateModelScore.replaySupport,
@@ -528,9 +580,11 @@ function evaluateMapping(pairCandidate, targetSeries, mapping, coordinateModel, 
     passesValidation:
       predictedPoints.length >= 6 &&
       correlationFactor >= 0.45 &&
+      minAxisCorrelation >= 0.2 &&
       normalizedDistanceRmse <= 0.2 &&
       boundsRatio >= 0.85 &&
-      speedRatio >= 0.75,
+      speedRatio >= 0.75 &&
+      rangeRatio >= 0.35,
   };
 }
 
@@ -562,11 +616,19 @@ function comparePairToParticipant(pairCandidate, participant, targetSeries, coor
     mapping: best.mapping,
     xCorrelation: best.xCorrelation,
     yCorrelation: best.yCorrelation,
+    minAxisCorrelation: best.minAxisCorrelation,
     pathCorrelation: best.pathCorrelation,
     distanceRmse: best.distanceRmse,
     normalizedDistanceRmse: best.normalizedDistanceRmse,
     boundsRatio: best.boundsRatio,
     speedRatio: best.speedRatio,
+    predictedXRange: best.predictedXRange,
+    predictedYRange: best.predictedYRange,
+    targetXRange: best.targetXRange,
+    targetYRange: best.targetYRange,
+    xRangeRatio: best.xRangeRatio,
+    yRangeRatio: best.yRangeRatio,
+    rangeRatio: best.rangeRatio,
     coordinateModelSignature: best.coordinateModelSignature,
     coordinateModelSupport: best.coordinateModelSupport,
     coordinateModelReplaySupport: best.coordinateModelReplaySupport,
@@ -626,8 +688,10 @@ function summarizeRawPair(rawPairKey, matches) {
 
   const exemplar = supportMatches[0];
   const averageAxisCorrelation = supportMatches.reduce((sum, match) => sum + ((match.xCorrelation + match.yCorrelation) / 2), 0) / supportMatches.length;
+  const averageMinAxisCorrelation = supportMatches.reduce((sum, match) => sum + (match.minAxisCorrelation ?? 0), 0) / supportMatches.length;
   const averagePathCorrelation = supportMatches.reduce((sum, match) => sum + match.pathCorrelation, 0) / supportMatches.length;
   const averageNormalizedDistanceRmse = supportMatches.reduce((sum, match) => sum + match.normalizedDistanceRmse, 0) / supportMatches.length;
+  const averageRangeRatio = supportMatches.reduce((sum, match) => sum + (match.rangeRatio ?? 0), 0) / supportMatches.length;
   const averageValidatorScore = supportMatches.reduce((sum, match) => sum + match.validatorScore, 0) / supportMatches.length;
   const averageEffectiveScore = supportMatches.reduce((sum, match) => sum + match.effectiveScore, 0) / supportMatches.length;
   const passCount = supportMatches.filter((match) => match.passesValidation).length;
@@ -652,8 +716,10 @@ function summarizeRawPair(rawPairKey, matches) {
     champions: supportMatches.map((match) => match.champion),
     passCount,
     averageAxisCorrelation,
+    averageMinAxisCorrelation,
     averagePathCorrelation,
     averageNormalizedDistanceRmse,
+    averageRangeRatio,
     averageValidatorScore,
     averageEffectiveScore,
     aggregateScore,
@@ -667,7 +733,30 @@ function summarizeRawPair(rawPairKey, matches) {
       interceptMedian: median(supportMatches.map((match) => match.transformY.intercept).filter(Number.isFinite)),
       sampleCount: supportMatches.filter((match) => Number.isFinite(match.transformY.slope) && Number.isFinite(match.transformY.intercept)).length,
     },
-    supportMatches: supportMatches.slice(0, 8),
+    supportMatches: supportMatches.slice(0, 8).map((match) => ({
+      participantId: match.participantId,
+      champion: match.champion,
+      teamId: match.teamId,
+      teamPosition: match.teamPosition,
+      overlap: match.overlap,
+      mapping: match.mapping,
+      xCorrelation: match.xCorrelation,
+      yCorrelation: match.yCorrelation,
+      minAxisCorrelation: match.minAxisCorrelation,
+      pathCorrelation: match.pathCorrelation,
+      distanceRmse: match.distanceRmse,
+      normalizedDistanceRmse: match.normalizedDistanceRmse,
+      boundsRatio: match.boundsRatio,
+      speedRatio: match.speedRatio,
+      rangeRatio: match.rangeRatio,
+      coordinateModelScore: match.coordinateModelScore,
+      coordinateModelReplaySupport: match.coordinateModelReplaySupport,
+      validatorScore: match.validatorScore,
+      effectiveScore: match.effectiveScore,
+      passesValidation: match.passesValidation,
+      transformX: match.transformX,
+      transformY: match.transformY,
+    })),
   };
 }
 
@@ -684,8 +773,10 @@ function buildPatternSummary(patternKey, candidates) {
   const slotIndices = candidates.map((candidate) => candidate.slotIndex);
   const participantIds = [...new Set(supportMatches.map((match) => match.participantId))];
   const averageAxisCorrelation = supportMatches.reduce((sum, match) => sum + ((match.xCorrelation + match.yCorrelation) / 2), 0) / Math.max(supportMatches.length, 1);
+  const averageMinAxisCorrelation = supportMatches.reduce((sum, match) => sum + (match.minAxisCorrelation ?? 0), 0) / Math.max(supportMatches.length, 1);
   const averagePathCorrelation = supportMatches.reduce((sum, match) => sum + match.pathCorrelation, 0) / Math.max(supportMatches.length, 1);
   const averageNormalizedDistanceRmse = supportMatches.reduce((sum, match) => sum + match.normalizedDistanceRmse, 0) / Math.max(supportMatches.length, 1);
+  const averageRangeRatio = supportMatches.reduce((sum, match) => sum + (match.rangeRatio ?? 0), 0) / Math.max(supportMatches.length, 1);
   const averageValidatorScore = supportMatches.reduce((sum, match) => sum + match.validatorScore, 0) / Math.max(supportMatches.length, 1);
   const averageEffectiveScore = supportMatches.reduce((sum, match) => sum + match.effectiveScore, 0) / Math.max(supportMatches.length, 1);
   const confidence =
@@ -728,8 +819,10 @@ function buildPatternSummary(patternKey, candidates) {
       participants: participantIds.length,
       rows: new Set(slotIndices).size,
       avgAxisCorrelation: averageAxisCorrelation,
+      avgMinAxisCorrelation: averageMinAxisCorrelation,
       avgPathCorrelation: averagePathCorrelation,
       avgNormalizedDistanceRmse: averageNormalizedDistanceRmse,
+      avgRangeRatio: averageRangeRatio,
       avgValidatorScore: averageValidatorScore,
       avgEffectiveScore: averageEffectiveScore,
     },
@@ -740,10 +833,13 @@ function buildPatternSummary(patternKey, candidates) {
       champions: candidate.champions,
       aggregateScore: candidate.aggregateScore,
       averageAxisCorrelation: candidate.averageAxisCorrelation,
+      averageMinAxisCorrelation: candidate.averageMinAxisCorrelation,
       averagePathCorrelation: candidate.averagePathCorrelation,
       averageNormalizedDistanceRmse: candidate.averageNormalizedDistanceRmse,
+      averageRangeRatio: candidate.averageRangeRatio,
       transformX: candidate.transformX,
       transformY: candidate.transformY,
+      supportMatches: candidate.supportMatches ?? [],
     })),
     participantHits: supportMatches.slice(0, 32).map((match) => ({
       participantId: match.participantId,
@@ -753,8 +849,10 @@ function buildPatternSummary(patternKey, candidates) {
       slotIndex: match.slotIndex,
       xCorrelation: match.xCorrelation,
       yCorrelation: match.yCorrelation,
+      minAxisCorrelation: match.minAxisCorrelation,
       pathCorrelation: match.pathCorrelation,
       normalizedDistanceRmse: match.normalizedDistanceRmse,
+      rangeRatio: match.rangeRatio,
       effectiveScore: match.effectiveScore,
     })),
   };
@@ -882,7 +980,9 @@ function main() {
     pattern.support.rows >= 2 &&
     pattern.support.participants >= 4 &&
     pattern.support.avgAxisCorrelation >= 0.45 &&
+    pattern.support.avgMinAxisCorrelation >= 0.18 &&
     pattern.support.avgNormalizedDistanceRmse <= 0.2 &&
+    pattern.support.avgRangeRatio >= 0.35 &&
     pattern.support.avgValidatorScore >= 0.55,
   );
 
@@ -914,7 +1014,9 @@ function main() {
       minRows: 2,
       minParticipants: 4,
       minAverageAxisCorrelation: 0.45,
+      minAverageMinAxisCorrelation: 0.18,
       maxAverageNormalizedDistanceRmse: 0.2,
+      minAverageRangeRatio: 0.35,
       minAverageValidatorScore: 0.55,
     },
     promotedPatterns,
