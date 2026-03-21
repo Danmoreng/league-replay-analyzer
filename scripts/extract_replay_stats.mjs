@@ -162,6 +162,8 @@ function computeSelectionScore(source, pattern) {
       return confidence + 0.05;
     case "corpus-ranked":
       return confidence + 0.02 + (0.01 * Math.min(3, pattern.support?.replays ?? 0));
+    case "candidate-ranked":
+      return confidence + 0.22 + (0.03 * Math.min(1, pattern.transform?.sampleCount ?? 0));
     default:
       return confidence;
   }
@@ -195,6 +197,12 @@ function uniqueSortedNumbers(values) {
   return [...new Set(values.filter(Number.isFinite))].sort((left, right) => left - right);
 }
 
+function appendMapList(map, key, value) {
+  const list = map.get(key) ?? [];
+  list.push(value);
+  map.set(key, list);
+}
+
 function collectPatternSlots(pattern) {
   const directSlots = (pattern.rawWindowCandidates ?? [])
     .map((candidate) => candidate.slotIndex)
@@ -213,6 +221,56 @@ function collectPatternSlots(pattern) {
   }
 
   return [];
+}
+
+function scoreBundleClusterMatch(localPattern, corpusPattern) {
+  const localSlots = uniqueSortedNumbers(
+    (localPattern.recommendedSlots ?? [])
+      .map((slot) => slot.slotIndex)
+      .filter(Number.isFinite),
+  );
+  const corpusSlots = uniqueSortedNumbers(
+    (corpusPattern.recommendedSlots ?? [])
+      .map((slot) => slot.slotIndex)
+      .filter(Number.isFinite),
+  );
+  const exactOverlap = localSlots.filter((slotIndex) => corpusSlots.includes(slotIndex)).length;
+  const nearOverlap = localSlots.filter((slotIndex) =>
+    corpusSlots.some((candidate) => Math.abs(candidate - slotIndex) <= 1),
+  ).length;
+  const localBand = localPattern.recommendedRowBand ?? localPattern.rowBand ?? [0, 0];
+  const corpusBand = corpusPattern.recommendedRowBand ?? corpusPattern.rowBand ?? [0, 0];
+  const localCenter = (localBand[0] + localBand[1]) / 2;
+  const corpusCenter = (corpusBand[0] + corpusBand[1]) / 2;
+  const centerDistance = Number.isFinite(localCenter) && Number.isFinite(corpusCenter)
+    ? Math.abs(localCenter - corpusCenter)
+    : 3;
+
+  let score = corpusPattern.confidence ?? 0;
+  if (exactOverlap > 0) {
+    score += 0.35 + (0.06 * exactOverlap);
+  } else if (nearOverlap > 0) {
+    score += 0.18 + (0.04 * nearOverlap);
+  } else {
+    score -= Math.min(0.3, centerDistance * 0.08);
+  }
+  score += 0.04 * Math.min(3, corpusPattern.bundleSupport?.passCount ?? 0);
+  score += 0.02 * Math.min(3, corpusPattern.bundleSupport?.strongMetricCount ?? 0);
+  score -= Math.min(0.2, centerDistance * 0.03);
+  return score;
+}
+
+function selectBestBundleClusterPattern(localPattern, candidates) {
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return null;
+  }
+
+  return [...candidates]
+    .sort((left, right) =>
+      scoreBundleClusterMatch(localPattern, right) - scoreBundleClusterMatch(localPattern, left) ||
+      (right.bundleSupport?.passCount ?? 0) - (left.bundleSupport?.passCount ?? 0) ||
+      (right.confidence ?? 0) - (left.confidence ?? 0),
+    )[0] ?? null;
 }
 
 function buildBundleFamilySupportAnchors(localRankedPatterns, familyKey) {
@@ -837,27 +895,62 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
     .slice(0, 12)
     .map((pattern) => normalizePattern(pattern, candidateMatches, "corpus-ranked"));
 
-  const bundlePromotedByFamilyMetric = new Map(
-    (corpusSchema.bundlePromotedPatterns ?? [])
-      .filter((pattern) => familyKeys.has(pattern.familyKey))
-      .map((pattern) => [`${pattern.familyKey}|${pattern.metric}`, pattern]),
-  );
-  const bundleRankedByFamilyMetric = new Map(
-    (corpusSchema.bundleRankedPatterns ?? [])
-      .filter((pattern) => familyKeys.has(pattern.familyKey))
-      .filter((pattern) => (pattern.bundleSupport?.passCount ?? 0) >= 1)
-      .map((pattern) => [`${pattern.familyKey}|${pattern.metric}`, pattern]),
-  );
+  const weakCandidateMetricKeys = new Set([
+    "health",
+    "healthMax",
+    "movementSpeed",
+    "power",
+    "powerMax",
+  ]);
+  const candidateLocal = [];
+  for (const familyKey of familyKeys) {
+    for (const metricKey of weakCandidateMetricKeys) {
+      if (!isMetricAssignable(metricKey, roster)) {
+        continue;
+      }
+      candidateLocal.push(
+        ...buildCandidateMatchOverrideOptions(candidateMatches, familyKey, metricKey)
+          .slice(0, 3)
+          .map((pattern) => normalizePattern(pattern, candidateMatches, "candidate-ranked")),
+      );
+    }
+  }
+
+  const bundlePromotedByFamilyMetric = new Map();
+  for (const pattern of (corpusSchema.bundlePromotedPatterns ?? []).filter((entry) => familyKeys.has(entry.familyKey))) {
+    appendMapList(bundlePromotedByFamilyMetric, `${pattern.familyKey}|${pattern.metric}`, pattern);
+  }
+  const bundleRankedByFamilyMetric = new Map();
+  for (const pattern of (corpusSchema.bundleRankedPatterns ?? [])
+    .filter((entry) => familyKeys.has(entry.familyKey))
+    .filter((entry) => (entry.bundleSupport?.passCount ?? 0) >= 1)) {
+    appendMapList(bundleRankedByFamilyMetric, `${pattern.familyKey}|${pattern.metric}`, pattern);
+  }
 
   const bundleRecommended = buildBundleRecommendedPatternsFromUtils(artifactDir, runManifest, summaryJson, provisionalSchema, candidateMatches)
     .filter((pattern) => familyKeys.has(pattern.familyKey))
     .map((pattern) => {
-      const promoted = bundlePromotedByFamilyMetric.get(`${pattern.familyKey}|${pattern.metric}`) ?? null;
-      const ranked = bundleRankedByFamilyMetric.get(`${pattern.familyKey}|${pattern.metric}`) ?? null;
+      const promoted = selectBestBundleClusterPattern(
+        pattern,
+        bundlePromotedByFamilyMetric.get(`${pattern.familyKey}|${pattern.metric}`) ?? [],
+      );
+      const ranked = selectBestBundleClusterPattern(
+        pattern,
+        bundleRankedByFamilyMetric.get(`${pattern.familyKey}|${pattern.metric}`) ?? [],
+      );
       const allowRankedTransformOverride =
         pattern.metric === "powerMax" ||
         !volatileBundleMetricKeys.has(pattern.metric) ||
         (pattern.transform?.sampleCount ?? 0) < 8;
+      const allowPromotedTransformOverride =
+        pattern.metric === "powerMax" ||
+        !volatileBundleMetricKeys.has(pattern.metric) ||
+        (pattern.transform?.sampleCount ?? 0) < 8;
+      const promotedTransform = promoted &&
+        allowPromotedTransformOverride &&
+        (promoted.transform?.sampleCount ?? 0) > (pattern.transform?.sampleCount ?? 0)
+        ? promoted.transform
+        : null;
       const rankedTransform = ranked &&
         allowRankedTransformOverride &&
         (ranked.transform?.sampleCount ?? 0) > (pattern.transform?.sampleCount ?? 0)
@@ -867,7 +960,10 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
         ? {
           ...pattern,
           confidence: Math.max(pattern.confidence ?? 0, promoted.confidence ?? 0),
-          transform: rankedTransform ?? pattern.transform,
+          transform: rankedTransform ?? promotedTransform ?? pattern.transform,
+          recommendedRowBand: promoted.recommendedRowBand ?? pattern.recommendedRowBand,
+          recommendedSlots: promoted.recommendedSlots ?? pattern.recommendedSlots,
+          slotClusterKey: promoted.slotClusterKey ?? null,
           bundleSupport: {
             ...(pattern.bundleSupport ?? {}),
             ...(promoted.bundleSupport ?? {}),
@@ -887,6 +983,9 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
             ...pattern,
             confidence: Math.max(pattern.confidence ?? 0, Math.min(0.92, (ranked.confidence ?? 0) * 0.92)),
             transform: rankedTransform ?? pattern.transform,
+            recommendedRowBand: ranked.recommendedRowBand ?? pattern.recommendedRowBand,
+            recommendedSlots: ranked.recommendedSlots ?? pattern.recommendedSlots,
+            slotClusterKey: ranked.slotClusterKey ?? null,
             bundleSupport: {
               ...(pattern.bundleSupport ?? {}),
               ...(ranked.bundleSupport ?? {}),
@@ -909,7 +1008,7 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
   const selected = [];
   const selectedKeys = new Set();
   const selectedMetricCounts = new Map();
-  const candidates = [...bundleRecommended, ...corpusPromoted, ...localPromoted, ...localRanked, ...rankedCorpus]
+  const candidates = [...bundleRecommended, ...candidateLocal, ...corpusPromoted, ...localPromoted, ...localRanked, ...rankedCorpus]
       .map((pattern) => {
         let bonus = 0;
       if (

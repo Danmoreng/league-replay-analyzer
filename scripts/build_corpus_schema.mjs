@@ -268,8 +268,42 @@ function loadReplayEntries(artifactDir, maxRankedPatterns) {
   };
 }
 
-function buildBundleFamilyPatternKey(versionGroup, familyKey, metric) {
-  return `bundle-family|${versionGroup}|${familyKey}|${metric}`;
+function computeBundleSlotCluster(entry) {
+  if (Number.isFinite(entry?.dominantSlot)) {
+    return {
+      key: `s${Math.round(entry.dominantSlot)}`,
+      center: Math.round(entry.dominantSlot),
+    };
+  }
+
+  const recommendedSlots = (entry?.recommendedSlots ?? []).filter(Number.isFinite);
+  if (recommendedSlots.length > 0) {
+    const center = Math.round(median(recommendedSlots));
+    return {
+      key: `s${center}`,
+      center,
+    };
+  }
+
+  const [rowStart, rowEnd] = entry?.rowBand ?? [];
+  if (Number.isFinite(rowStart) && Number.isFinite(rowEnd)) {
+    const center = Math.round((rowStart + rowEnd) / 2);
+    return {
+      key: `s${center}`,
+      center,
+    };
+  }
+
+  return {
+    key: "s-unknown",
+    center: null,
+  };
+}
+
+function buildBundleFamilyPatternKey(versionGroup, familyKey, metric, slotClusterKey = null) {
+  return slotClusterKey
+    ? `bundle-family|${versionGroup}|${familyKey}|${metric}|${slotClusterKey}`
+    : `bundle-family|${versionGroup}|${familyKey}|${metric}`;
 }
 
 function loadBundleReplayEntries(artifactDir) {
@@ -371,11 +405,19 @@ function loadBundleReplayEntries(artifactDir) {
       }
       : (selectedPattern.transform ?? { slopeMedian: 1, interceptMedian: 0, sampleCount: 0 });
 
+    const slotCluster = computeBundleSlotCluster({
+      dominantSlot: dominantSlotEntry?.[0] ?? null,
+      recommendedSlots: recommendedSlots
+        .map((slot) => slot.slotIndex)
+        .filter(Number.isFinite),
+      rowBand: recommendedRowBand,
+    });
+
     const replayEntry = {
       replayId,
       gameVersion,
       versionGroup,
-      patternKey: buildBundleFamilyPatternKey(versionGroup, selectedPattern.familyKey, selectedPattern.metric),
+      patternKey: buildBundleFamilyPatternKey(versionGroup, selectedPattern.familyKey, selectedPattern.metric, slotCluster.key),
       sourcePatternKey: selectedPattern.patternKey,
       familyKey: selectedPattern.familyKey,
       family: familySummary ? `${familySummary.length} / 0x${familySummary.firstByte.toString(16).toUpperCase().padStart(2, "0")}` : selectedPattern.familyKey,
@@ -397,6 +439,8 @@ function loadBundleReplayEntries(artifactDir) {
       promoted: passCount > 0,
       dominantSlot: dominantSlotEntry?.[0] ?? null,
       dominantSlotSupport: dominantSlotEntry ? dominantSlotEntry[1] / participantMetricRecords.length : 0,
+      slotClusterKey: slotCluster.key,
+      slotClusterCenter: slotCluster.center,
       slotFrequencies: [...slotCounts.entries()].map(([slotIndex, count]) => ({ slotIndex, count })),
       recommendedSlots: recommendedSlots
         .map((slot) => slot.slotIndex)
@@ -497,8 +541,21 @@ function summarizeGroup(patternKey, entries, replayCountByVersionGroup, aliasSup
     .slice(0, 8)
     .map(([slotIndex, count]) => ({ slotIndex, replayCount: count }));
   const bundleEntries = entries.filter((entry) => entry.bundleSupport);
-
   const exemplar = entries[0];
+  const slotClusterCenter = exemplar.slotClusterCenter ?? null;
+  const clusterRecommendedSlots = Number.isFinite(slotClusterCenter)
+    ? recommendedSlots.filter((slot) => Math.abs(slot.slotIndex - slotClusterCenter) <= 1)
+    : recommendedSlots;
+  const effectiveRecommendedSlots = clusterRecommendedSlots.length > 0
+    ? clusterRecommendedSlots
+    : recommendedSlots;
+  const effectiveRowBand = effectiveRecommendedSlots.length > 0
+    ? [
+      effectiveRecommendedSlots[0].slotIndex,
+      effectiveRecommendedSlots[effectiveRecommendedSlots.length - 1].slotIndex,
+    ]
+    : [Math.round(median(rowStarts)), Math.round(median(rowEnds))];
+
   const baseConfidence =
     average(confidenceValues) *
     (0.5 + Math.min(1, entries.length / 3)) *
@@ -523,9 +580,11 @@ function summarizeGroup(patternKey, entries, replayCountByVersionGroup, aliasSup
     metricLabel: exemplar.metricLabel,
     decode: exemplar.decode,
     offset: exemplar.offset,
+    slotClusterKey: exemplar.slotClusterKey ?? null,
+    slotClusterCenter: exemplar.slotClusterCenter ?? null,
     rowArchetype: mode(entries.map((entry) => entry.rowArchetype)) ?? "unknown",
-    recommendedRowBand: [Math.round(median(rowStarts)), Math.round(median(rowEnds))],
-    recommendedSlots,
+    recommendedRowBand: effectiveRowBand,
+    recommendedSlots: effectiveRecommendedSlots,
     confidence,
     transform: {
       slopeMedian: median(slopes),
@@ -582,6 +641,7 @@ function summarizeGroup(patternKey, entries, replayCountByVersionGroup, aliasSup
         averageValidatorScore: entry.averageValidatorScore,
         dominantSlot: entry.dominantSlot,
         dominantSlotSupport: entry.dominantSlotSupport,
+        slotClusterKey: entry.slotClusterKey ?? null,
         transform: entry.transform,
       })),
   };
