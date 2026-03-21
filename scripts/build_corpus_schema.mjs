@@ -681,6 +681,10 @@ function promoteBundleGroup(group) {
     return false;
   }
 
+  if (group.metric === "movementSpeed" && (bundleSupport.passCount ?? 0) < 2) {
+    return false;
+  }
+
   const normalizedRmseLimit =
     (bundleSupport.passCount ?? 0) >= 2 && (group.support.medianCorrelation ?? 0) >= 0.5
       ? 1.25

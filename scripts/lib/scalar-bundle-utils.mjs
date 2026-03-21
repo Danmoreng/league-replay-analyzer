@@ -3,6 +3,7 @@ import path from "path";
 
 import {
   clamp,
+  median,
   parseVersionGroup,
   readJson,
 } from "./decoder-schema-utils.mjs";
@@ -174,16 +175,17 @@ export function collectPatternSlots(pattern) {
   return [];
 }
 
-export function buildBundleFamilySupportAnchors(localRankedPatterns, familyKey) {
+export function buildBundleFamilySupportClusters(localRankedPatterns, familyKey) {
   const supportPatterns = localRankedPatterns
     .filter((pattern) => pattern.familyKey === familyKey)
     .filter((pattern) => bundleSupportMetricKeys.has(pattern.metric))
     .filter((pattern) => (pattern.confidence ?? 0) >= 0.28);
   if (supportPatterns.length === 0) {
-    return null;
+    return [];
   }
 
   const slotWeights = new Map();
+  const slotHits = new Map();
   for (const pattern of supportPatterns) {
     const slots = collectPatternSlots(pattern);
     if (slots.length === 0) {
@@ -193,42 +195,73 @@ export function buildBundleFamilySupportAnchors(localRankedPatterns, familyKey) 
     const patternWeight = Math.max(0.05, (pattern.confidence ?? 0) * metricWeight);
     for (const slotIndex of slots) {
       slotWeights.set(slotIndex, (slotWeights.get(slotIndex) ?? 0) + patternWeight);
+      const hits = slotHits.get(slotIndex) ?? [];
+      hits.push(pattern);
+      slotHits.set(slotIndex, hits);
     }
   }
 
   const rankedSlots = [...slotWeights.entries()]
     .sort((left, right) => right[1] - left[1] || left[0] - right[0]);
   if (rankedSlots.length === 0) {
-    return null;
+    return [];
   }
 
-  const primarySlot = rankedSlots[0][0];
-  const anchorSlots = rankedSlots
-    .filter(([slotIndex, weight]) =>
-      Math.abs(slotIndex - primarySlot) <= 1 ||
-      weight >= (rankedSlots[0][1] * 0.7),
-    )
-    .map(([slotIndex]) => slotIndex);
-  const compactSlots = uniqueSortedNumbers(anchorSlots);
-  if (compactSlots.length === 0) {
-    return null;
+  const slotEntries = [...slotWeights.entries()].sort((left, right) => left[0] - right[0]);
+  const clusters = [];
+  let currentCluster = [];
+  for (const entry of slotEntries) {
+    if (currentCluster.length === 0) {
+      currentCluster.push(entry);
+      continue;
+    }
+
+    const previousSlot = currentCluster[currentCluster.length - 1][0];
+    if ((entry[0] - previousSlot) <= 2) {
+      currentCluster.push(entry);
+      continue;
+    }
+
+    clusters.push(currentCluster);
+    currentCluster = [entry];
+  }
+  if (currentCluster.length > 0) {
+    clusters.push(currentCluster);
   }
 
-  const championHints = [...new Set(
-    supportPatterns.flatMap((pattern) =>
-      (pattern.participantHits ?? [])
-        .filter((hit) => compactSlots.includes(hit.slotIndex ?? compactSlots[0]))
-        .slice(0, 4)
-        .map((hit) => hit.champion),
-    ).filter(Boolean),
-  )];
+  return clusters
+    .map((clusterEntries, clusterIndex) => {
+      const compactSlots = clusterEntries.map(([slotIndex]) => slotIndex);
+      const clusterPatterns = compactSlots.flatMap((slotIndex) => slotHits.get(slotIndex) ?? []);
+      const clusterWeights = clusterEntries.map(([, weight]) => weight);
+      const championHints = [...new Set(
+        clusterPatterns.flatMap((pattern) =>
+          (pattern.participantHits ?? [])
+            .filter((hit) => compactSlots.includes(hit.slotIndex ?? compactSlots[0]))
+            .slice(0, 4)
+            .map((hit) => hit.champion),
+        ).filter(Boolean),
+      )];
 
-  return {
-    slots: compactSlots,
-    band: [compactSlots[0], compactSlots[compactSlots.length - 1]],
-    supportMetricCount: new Set(supportPatterns.map((pattern) => pattern.metric)).size,
-    championHints,
-  };
+      return {
+        clusterKey: `c${clusterIndex}`,
+        slots: compactSlots,
+        band: [compactSlots[0], compactSlots[compactSlots.length - 1]],
+        center: median(compactSlots),
+        supportMetricCount: new Set(clusterPatterns.map((pattern) => pattern.metric)).size,
+        weightedScore: clusterWeights.reduce((sum, value) => sum + value, 0),
+        championHints,
+      };
+    })
+    .sort((left, right) =>
+      right.weightedScore - left.weightedScore ||
+      right.supportMetricCount - left.supportMetricCount ||
+      left.center - right.center
+    );
+}
+
+export function buildBundleFamilySupportAnchors(localRankedPatterns, familyKey) {
+  return buildBundleFamilySupportClusters(localRankedPatterns, familyKey)[0] ?? null;
 }
 
 export function clampSlotsToAnchor(recommendedSlots, rowBand, supportAnchor) {
@@ -262,6 +295,43 @@ export function clampSlotsToAnchor(recommendedSlots, rowBand, supportAnchor) {
     recommendedSlots: normalizedSlots,
     rowBand: normalizedBand,
   };
+}
+
+export function selectBundleSupportCluster(metricRecommendation, supportClusters, acceptedLocalOverride = null) {
+  if (!Array.isArray(supportClusters) || supportClusters.length === 0) {
+    return null;
+  }
+
+  const overrideSlots = acceptedLocalOverride ? collectPatternSlots(acceptedLocalOverride) : [];
+  const overrideCenter = overrideSlots.length > 0 ? median(overrideSlots) : null;
+  const recommendationCenter = Number.isFinite(metricRecommendation?.medianSlotIndex)
+    ? metricRecommendation.medianSlotIndex
+    : overrideCenter;
+
+  return [...supportClusters]
+    .map((cluster) => {
+      let score = cluster.weightedScore + (0.14 * cluster.supportMetricCount);
+      if (Number.isFinite(recommendationCenter) && Number.isFinite(cluster.center)) {
+        score -= Math.min(1.2, Math.abs(recommendationCenter - cluster.center) * 0.22);
+      }
+      if (overrideSlots.length > 0) {
+        const overlap = overrideSlots.filter((slotIndex) => cluster.slots.includes(slotIndex)).length;
+        const nearOverlap = overrideSlots.filter((slotIndex) =>
+          cluster.slots.some((clusterSlot) => Math.abs(clusterSlot - slotIndex) <= 1),
+        ).length;
+        if (overlap > 0) {
+          score += 0.5 + (0.08 * overlap);
+        } else if (nearOverlap > 0) {
+          score += 0.22 + (0.04 * nearOverlap);
+        }
+      }
+      return { cluster, score };
+    })
+    .sort((left, right) =>
+      right.score - left.score ||
+      right.cluster.weightedScore - left.cluster.weightedScore ||
+      right.cluster.supportMetricCount - left.cluster.supportMetricCount
+    )[0]?.cluster ?? null;
 }
 
 export function decodeCategory(decodeLabel) {
@@ -401,7 +471,8 @@ export function buildBundleRecommendedPatterns(artifactDir, runManifest, summary
     if (bundles.length === 0 && !bundleArtifacts.recommendation.primaryBundle) {
       continue;
     }
-    const supportAnchor = buildBundleFamilySupportAnchors(localRankedPatterns, familyKey);
+    const supportClusters = buildBundleFamilySupportClusters(localRankedPatterns, familyKey);
+    const supportAnchor = supportClusters[0] ?? null;
 
     const selectedBundles = bundles.length > 0
       ? bundles
@@ -449,6 +520,12 @@ export function buildBundleRecommendedPatterns(artifactDir, runManifest, summary
           continue;
         }
 
+        const selectedSupportCluster = selectBundleSupportCluster(
+          metricRecommendation,
+          supportClusters,
+          acceptedLocalOverride,
+        ) ?? supportAnchor;
+
         const roundedSlot = Math.round(metricRecommendation.medianSlotIndex ?? bundle.slotBand?.[0] ?? 0);
         const slotFloor = Math.floor(metricRecommendation.medianSlotIndex ?? roundedSlot);
         const slotCeil = Math.ceil(metricRecommendation.medianSlotIndex ?? roundedSlot);
@@ -461,7 +538,7 @@ export function buildBundleRecommendedPatterns(artifactDir, runManifest, summary
           Math.min(slotFloor, Math.floor(bundle.slotBand?.[0] ?? slotFloor)),
           Math.max(slotCeil, Math.ceil(bundle.slotBand?.[1] ?? slotCeil)),
         ];
-        const anchoredSelection = clampSlotsToAnchor(recommendedSlots, rowBand, supportAnchor);
+        const anchoredSelection = clampSlotsToAnchor(recommendedSlots, rowBand, selectedSupportCluster);
         const bundleConfidence = clamp(
           (0.45 * (bundle.bundleScore ?? 0)) +
           (0.55 * (metricRecommendation.bundleCandidateScore ?? 0)),
@@ -486,7 +563,7 @@ export function buildBundleRecommendedPatterns(artifactDir, runManifest, summary
             replayOverlap: bundle.replayOverlap,
             strongMetricCount: bundle.strongMetricCount,
             localOverridePatternKey: acceptedLocalOverride?.patternKey ?? null,
-            supportAnchor,
+            supportAnchor: selectedSupportCluster,
             bundleIndex,
           },
         });

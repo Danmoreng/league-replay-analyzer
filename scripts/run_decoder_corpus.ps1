@@ -100,11 +100,11 @@ function Read-JsonHashtable {
 function Get-CorpusSchemaInputs {
     param(
         [object[]]$Entries,
-        [string]$SchemaScriptPath,
+        [string[]]$SchemaScriptPaths,
         [switch]$IncludeValidation
     )
 
-    $inputs = @($SchemaScriptPath)
+    $inputs = @($SchemaScriptPaths)
     foreach ($entry in $Entries) {
         $inputs += @(
             (Join-Path $entry.artifactDir "run-manifest.json"),
@@ -217,6 +217,10 @@ $movementIdentityPriorsScript = Join-Path $PSScriptRoot "build_movement_identity
 $movementCoordinateModelScript = Join-Path $PSScriptRoot "build_movement_coordinate_model.mjs"
 $assignMovementScript = Join-Path $PSScriptRoot "assign_replay_movement.mjs"
 $validateAssignedMovementScript = Join-Path $PSScriptRoot "validate_assigned_movement.mjs"
+$decoderSchemaUtilsScript = Join-Path $PSScriptRoot "lib/decoder-schema-utils.mjs"
+$scalarBundleUtilsScript = Join-Path $PSScriptRoot "lib/scalar-bundle-utils.mjs"
+$corpusSchemaInputs = @($corpusSchemaScript, $decoderSchemaUtilsScript, $scalarBundleUtilsScript)
+$extractStatsInputs = @($extractScript, $decoderSchemaUtilsScript, $scalarBundleUtilsScript)
 
 $replayFiles = Get-ChildItem -Path $resolvedReplayRoot -Filter "*.rofl" -File | Sort-Object Name
 if ($replayFiles.Count -eq 0) {
@@ -295,7 +299,7 @@ $corpusSchemaPath = Join-Path $resolvedArtifactRoot "corpus-schema.json"
 $corpusSchemaFingerprint = $null
 
 if (-not $SkipCorpusSchema) {
-    if (Test-OutputsFresh -OutputPaths @($corpusSchemaPath) -InputPaths (Get-CorpusSchemaInputs -Entries $processed -SchemaScriptPath $corpusSchemaScript)) {
+    if (Test-OutputsFresh -OutputPaths @($corpusSchemaPath) -InputPaths (Get-CorpusSchemaInputs -Entries $processed -SchemaScriptPaths $corpusSchemaInputs)) {
         Write-Host "Reusing cross-replay corpus schema" -ForegroundColor Green
     } else {
         Write-Host "Building cross-replay corpus schema" -ForegroundColor Cyan
@@ -316,7 +320,7 @@ if (-not $SkipExtraction) {
     foreach ($entry in $processed) {
         $extractedPath = Join-Path $entry.artifactDir "extracted-stats.json"
         if (Test-ExtractedStatsFresh -ExtractedPath $extractedPath -ExpectedSchemaFingerprint $corpusSchemaFingerprint -InputPaths @(
-                $extractScript,
+                $extractStatsInputs +
                 (Join-Path $entry.artifactDir "run-manifest.json"),
                 (Join-Path $entry.artifactDir "provisional-schema.json"),
                 (Join-Path $entry.artifactDir "candidate-matches.json"))) {
@@ -365,7 +369,7 @@ if (-not $SkipCorpusSchema -and -not $SkipExtraction -and -not $SkipValidation) 
         $seenSchemaFingerprints += $corpusSchemaFingerprint
     }
     for ($iteration = 1; $iteration -le $MaxSchemaIterations; $iteration += 1) {
-        $refreshedSchemaInputs = Get-CorpusSchemaInputs -Entries $processed -SchemaScriptPath $corpusSchemaScript -IncludeValidation
+        $refreshedSchemaInputs = Get-CorpusSchemaInputs -Entries $processed -SchemaScriptPaths $corpusSchemaInputs -IncludeValidation
         if (Test-OutputsFresh -OutputPaths @($corpusSchemaPath) -InputPaths $refreshedSchemaInputs) {
             if ($iteration -eq 1) {
                 Write-Host "Reusing refreshed cross-replay corpus schema" -ForegroundColor Green
@@ -402,7 +406,7 @@ if (-not $SkipCorpusSchema -and -not $SkipExtraction -and -not $SkipValidation) 
         foreach ($entry in $processed) {
             $extractedPath = if ($entry.Contains("extractedStatsPath")) { $entry.extractedStatsPath } else { Join-Path $entry.artifactDir "extracted-stats.json" }
             if (Test-ExtractedStatsFresh -ExtractedPath $extractedPath -ExpectedSchemaFingerprint $nextFingerprint -InputPaths @(
-                    $extractScript,
+                    $extractStatsInputs +
                     (Join-Path $entry.artifactDir "run-manifest.json"),
                     (Join-Path $entry.artifactDir "provisional-schema.json"),
                     (Join-Path $entry.artifactDir "candidate-matches.json"))) {

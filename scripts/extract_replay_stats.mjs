@@ -894,6 +894,8 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
     ["minionsKilled", 2],
     ["jungleMinionsKilled", 1],
     ["health", 2],
+    // Keep one bundle-backed slab candidate and one exact-family alternative.
+    ["movementSpeed", 2],
     ["power", 2],
     ["powerMax", 2],
   ]);
@@ -1123,6 +1125,13 @@ function buildCandidateRows(pattern, familyFieldIndex, roster) {
 
     const transformed = pickBestTransform(pattern, fieldEntry.field, roster);
     if (!transformed) {
+      continue;
+    }
+    if (
+      pattern.metric === "movementSpeed" &&
+      pattern.source === "bundle-recommended" &&
+      (transformed.transform.sampleCount ?? 0) < 4
+    ) {
       continue;
     }
     const plausibilityFloor = pattern.source === "bundle-recommended" ? 0.45 : 0.55;
