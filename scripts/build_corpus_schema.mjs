@@ -93,6 +93,19 @@ function buildTransformSummary(matches) {
   };
 }
 
+function compareScoreVectors(left, right) {
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const leftValue = left[index] ?? 0;
+    const rightValue = right[index] ?? 0;
+    if (leftValue === rightValue) {
+      continue;
+    }
+    return leftValue - rightValue;
+  }
+  return 0;
+}
+
 function qualifyReplayPattern(entry) {
   return (
     entry.supportParticipants >= 6 &&
@@ -279,7 +292,7 @@ function loadBundleReplayEntries(artifactDir) {
   const familySummaryByKey = new Map((runManifest.families ?? []).map((family) => [family.familyKey, family]));
   const validationParticipantByRosterIndex = new Map((validationReport.participants ?? []).map((participant) => [participant.rosterIndex, participant]));
 
-  const replayEntries = [];
+  const replayEntryByKey = new Map();
   for (const selectedPattern of extractedStats.selectedPatterns ?? []) {
     if (selectedPattern.source !== "bundle-recommended") {
       continue;
@@ -344,7 +357,7 @@ function loadBundleReplayEntries(artifactDir) {
     const recommendedRowBand = selectedPattern.recommendedRowBand ?? [0, 0];
     const confidenceBoost = (0.82 + (0.18 * Math.min(1, bundleScore))) * (0.7 + (0.3 * Math.min(1, replayOverlap)));
 
-    replayEntries.push({
+    const replayEntry = {
       replayId,
       gameVersion,
       versionGroup,
@@ -384,10 +397,36 @@ function loadBundleReplayEntries(artifactDir) {
         metricMedianParticipants: metricBundleEntry?.medianParticipants ?? 0,
         passCount,
       },
-    });
+    };
+
+    const existing = replayEntryByKey.get(replayEntry.patternKey);
+    if (!existing) {
+      replayEntryByKey.set(replayEntry.patternKey, replayEntry);
+      continue;
+    }
+
+    const existingScore = [
+      existing.bundleSupport?.passCount ?? 0,
+      existing.averageValidatorScore ?? 0,
+      existing.averageCorrelation ?? -1,
+      -(existing.averageNormalizedRmse ?? Number.POSITIVE_INFINITY),
+      existing.averageEffectiveScore ?? 0,
+      existing.confidence ?? 0,
+    ];
+    const nextScore = [
+      replayEntry.bundleSupport?.passCount ?? 0,
+      replayEntry.averageValidatorScore ?? 0,
+      replayEntry.averageCorrelation ?? -1,
+      -(replayEntry.averageNormalizedRmse ?? Number.POSITIVE_INFINITY),
+      replayEntry.averageEffectiveScore ?? 0,
+      replayEntry.confidence ?? 0,
+    ];
+    if (compareScoreVectors(nextScore, existingScore) > 0) {
+      replayEntryByKey.set(replayEntry.patternKey, replayEntry);
+    }
   }
 
-  return replayEntries;
+  return [...replayEntryByKey.values()];
 }
 
 function summarizeGroup(patternKey, entries, replayCountByVersionGroup, aliasSupport = null) {
@@ -570,7 +609,7 @@ function promoteBundleGroup(group) {
     group.support.medianCorrelation >= 0.3 &&
     group.support.medianNormalizedRmse <= 1.2 &&
     bundleSupport.bundleScore >= 0.84 &&
-    bundleSupport.replayOverlap >= 0.45 &&
+    bundleSupport.replayOverlap >= 0.4 &&
     bundleSupport.strongMetricCount >= 3 &&
     group.transform.sampleCount >= 1
   );

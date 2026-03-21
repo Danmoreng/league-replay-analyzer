@@ -16,6 +16,12 @@ export const bundleSupportMetricKeys = new Set([
   "jungleMinionsKilled",
 ]);
 
+export const volatileBundleMetricKeys = new Set([
+  "health",
+  "power",
+  "powerMax",
+]);
+
 export function parsePatternDescriptor(groupKey) {
   const [versionGroup, familyKey, offsetText, decode] = String(groupKey ?? "").split("|");
   const offset = Number.parseInt(offsetText, 10);
@@ -197,6 +203,17 @@ export function scoreLocalOverrideMatch(pattern, descriptor, supportAnchor) {
   const offsetDistance = Math.abs((pattern.offset ?? descriptor.offset) - descriptor.offset);
   score -= Math.min(0.1, offsetDistance * 0.015);
 
+  const transformSampleCount = pattern.transform?.sampleCount ?? 0;
+  if (transformSampleCount >= 8) {
+    score += 0.08;
+  } else if (transformSampleCount >= 4) {
+    score += 0.04;
+  } else if (volatileBundleMetricKeys.has(pattern.metric)) {
+    score -= 0.22;
+  } else if (transformSampleCount <= 1) {
+    score -= 0.08;
+  }
+
   const patternSlots = collectPatternSlots(pattern);
   if (supportAnchor && patternSlots.length > 0) {
     const overlap = patternSlots.filter((slotIndex) => supportAnchor.slots.includes(slotIndex)).length;
@@ -314,10 +331,14 @@ export function buildBundleRecommendedPatterns(artifactDir, runManifest, summary
           continue;
         }
 
+        const localOverrideOptions = localRankedPatterns
+          .filter((pattern) => pattern.familyKey === descriptor.familyKey && pattern.metric === metricRecommendation.metric);
+        const candidateOverrideOptions = volatileBundleMetricKeys.has(metricRecommendation.metric) && localOverrideOptions.length > 0
+          ? []
+          : buildCandidateMatchOverrideOptions(candidateMatches, descriptor.familyKey, metricRecommendation.metric);
         const overrideOptions = [
-          ...localRankedPatterns
-            .filter((pattern) => pattern.familyKey === descriptor.familyKey && pattern.metric === metricRecommendation.metric),
-          ...buildCandidateMatchOverrideOptions(candidateMatches, descriptor.familyKey, metricRecommendation.metric),
+          ...localOverrideOptions,
+          ...candidateOverrideOptions,
         ];
         const localOverride = overrideOptions
           .map((pattern) => ({
@@ -328,9 +349,19 @@ export function buildBundleRecommendedPatterns(artifactDir, runManifest, summary
             right.overrideScore - left.overrideScore ||
             (right.pattern.confidence ?? 0) - (left.pattern.confidence ?? 0)
           )[0]?.pattern ?? null;
-        const acceptedLocalOverride = localOverride && scoreLocalOverrideMatch(localOverride, descriptor, supportAnchor) >= 0.28
+        const minimumOverrideScore = volatileBundleMetricKeys.has(metricRecommendation.metric) ? 0.34 : 0.28;
+        const acceptedLocalOverride = localOverride &&
+          scoreLocalOverrideMatch(localOverride, descriptor, supportAnchor) >= minimumOverrideScore &&
+          (
+            !volatileBundleMetricKeys.has(metricRecommendation.metric) ||
+            (localOverride.transform?.sampleCount ?? 0) >= 4
+          )
           ? localOverride
           : null;
+
+        if (volatileBundleMetricKeys.has(metricRecommendation.metric) && !acceptedLocalOverride) {
+          continue;
+        }
 
         const roundedSlot = Math.round(metricRecommendation.medianSlotIndex ?? bundle.slotBand?.[0] ?? 0);
         const slotFloor = Math.floor(metricRecommendation.medianSlotIndex ?? roundedSlot);
