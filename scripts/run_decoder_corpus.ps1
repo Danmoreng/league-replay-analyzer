@@ -10,6 +10,7 @@ param (
     [int]$TopFamilies = 8,
     [int]$TopWindows = 16,
     [int]$TopFields = 16,
+    [int]$MaxSchemaIterations = 3,
     [switch]$Force,
     [switch]$CleanReplayArtifacts,
     [switch]$SkipSchema,
@@ -86,6 +87,16 @@ function Test-OutputsFresh {
     return $true
 }
 
+function Read-JsonHashtable {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $null
+    }
+
+    return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json -AsHashtable
+}
+
 function Get-CorpusSchemaInputs {
     param(
         [object[]]$Entries,
@@ -110,6 +121,83 @@ function Get-CorpusSchemaInputs {
     }
 
     return $inputs
+}
+
+function Get-CorpusSchemaFingerprint {
+    param([string]$SchemaPath)
+
+    $schema = Read-JsonHashtable -Path $SchemaPath
+    if ($null -eq $schema) {
+        return $null
+    }
+
+    if ($schema.ContainsKey("schemaFingerprint") -and $schema.schemaFingerprint) {
+        return [string]$schema.schemaFingerprint
+    }
+
+    if ($schema.ContainsKey("generatedAtUtc")) {
+        $schema.generatedAtUtc = $null
+    }
+
+    return $schema | ConvertTo-Json -Compress -Depth 100
+}
+
+function Get-ExtractedStatsSchemaFingerprint {
+    param([string]$ExtractedPath)
+
+    $extracted = Read-JsonHashtable -Path $ExtractedPath
+    if ($null -eq $extracted -or -not $extracted.ContainsKey("schemaFingerprint")) {
+        return $null
+    }
+
+    return [string]$extracted.schemaFingerprint
+}
+
+function Get-ValidationExtractedStatsFingerprint {
+    param([string]$ValidationPath)
+
+    $validation = Read-JsonHashtable -Path $ValidationPath
+    if ($null -eq $validation -or -not $validation.ContainsKey("extractedStatsFingerprint")) {
+        return $null
+    }
+
+    return [string]$validation.extractedStatsFingerprint
+}
+
+function Test-ExtractedStatsFresh {
+    param(
+        [string]$ExtractedPath,
+        [string]$ExpectedSchemaFingerprint,
+        [string[]]$InputPaths
+    )
+
+    if (-not $ExpectedSchemaFingerprint) {
+        return $false
+    }
+
+    if ((Get-ExtractedStatsSchemaFingerprint -ExtractedPath $ExtractedPath) -ne $ExpectedSchemaFingerprint) {
+        return $false
+    }
+
+    return Test-OutputsFresh -OutputPaths @($ExtractedPath) -InputPaths $InputPaths
+}
+
+function Test-ValidationReportFresh {
+    param(
+        [string]$ValidationPath,
+        [string]$ExpectedExtractedFingerprint,
+        [string[]]$InputPaths
+    )
+
+    if (-not $ExpectedExtractedFingerprint) {
+        return $false
+    }
+
+    if ((Get-ValidationExtractedStatsFingerprint -ValidationPath $ValidationPath) -ne $ExpectedExtractedFingerprint) {
+        return $false
+    }
+
+    return Test-OutputsFresh -OutputPaths @($ValidationPath) -InputPaths $InputPaths
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -204,6 +292,7 @@ $manifest = [ordered]@{
 $manifestPath = Join-Path $resolvedArtifactRoot "corpus-manifest.json"
 $manifest | ConvertTo-Json -Depth 6 | Set-Content -Path $manifestPath -Encoding utf8
 $corpusSchemaPath = Join-Path $resolvedArtifactRoot "corpus-schema.json"
+$corpusSchemaFingerprint = $null
 
 if (-not $SkipCorpusSchema) {
     if (Test-OutputsFresh -OutputPaths @($corpusSchemaPath) -InputPaths (Get-CorpusSchemaInputs -Entries $processed -SchemaScriptPath $corpusSchemaScript)) {
@@ -216,6 +305,7 @@ if (-not $SkipCorpusSchema) {
         }
     }
     $manifest.corpusSchemaPath = $corpusSchemaPath
+    $corpusSchemaFingerprint = Get-CorpusSchemaFingerprint -SchemaPath $corpusSchemaPath
 }
 
 if (-not $SkipExtraction) {
@@ -225,9 +315,8 @@ if (-not $SkipExtraction) {
 
     foreach ($entry in $processed) {
         $extractedPath = Join-Path $entry.artifactDir "extracted-stats.json"
-        if (Test-OutputsFresh -OutputPaths @($extractedPath) -InputPaths @(
+        if (Test-ExtractedStatsFresh -ExtractedPath $extractedPath -ExpectedSchemaFingerprint $corpusSchemaFingerprint -InputPaths @(
                 $extractScript,
-                $corpusSchemaPath,
                 (Join-Path $entry.artifactDir "run-manifest.json"),
                 (Join-Path $entry.artifactDir "provisional-schema.json"),
                 (Join-Path $entry.artifactDir "candidate-matches.json"))) {
@@ -251,7 +340,7 @@ if (-not $SkipValidation) {
         }
 
         $validationPath = Join-Path $entry.artifactDir "validation-report.json"
-        if (Test-OutputsFresh -OutputPaths @($validationPath) -InputPaths @(
+        if (Test-ValidationReportFresh -ValidationPath $validationPath -ExpectedExtractedFingerprint (Get-ExtractedStatsSchemaFingerprint -ExtractedPath $extractedPath) -InputPaths @(
                 $validateScript,
                 $extractedPath,
                 (Join-Path $entry.fixtureDir "match.json"),
@@ -269,62 +358,95 @@ if (-not $SkipValidation) {
 }
 
 if (-not $SkipCorpusSchema -and -not $SkipExtraction -and -not $SkipValidation) {
-    if (Test-OutputsFresh -OutputPaths @($corpusSchemaPath) -InputPaths (Get-CorpusSchemaInputs -Entries $processed -SchemaScriptPath $corpusSchemaScript -IncludeValidation)) {
-        Write-Host "Reusing refreshed cross-replay corpus schema" -ForegroundColor Green
-    } else {
-        Write-Host "Rebuilding cross-replay corpus schema from refreshed extraction results" -ForegroundColor Cyan
-        node $corpusSchemaScript --artifact-root $resolvedArtifactRoot --corpus-manifest $manifestPath --output-path $corpusSchemaPath
-        if ($LASTEXITCODE -ne 0) {
-            throw "Refreshed corpus schema generation failed."
-        }
+    $converged = $false
+    $cycleDetected = $false
+    $seenSchemaFingerprints = @()
+    if ($corpusSchemaFingerprint) {
+        $seenSchemaFingerprints += $corpusSchemaFingerprint
     }
-
-    foreach ($entry in $processed) {
-        $extractedPath = if ($entry.Contains("extractedStatsPath")) { $entry.extractedStatsPath } else { Join-Path $entry.artifactDir "extracted-stats.json" }
-        if (Test-OutputsFresh -OutputPaths @($extractedPath) -InputPaths @(
-                $extractScript,
-                $corpusSchemaPath,
-                (Join-Path $entry.artifactDir "run-manifest.json"),
-                (Join-Path $entry.artifactDir "provisional-schema.json"),
-                (Join-Path $entry.artifactDir "candidate-matches.json"))) {
-            Write-Host "Reusing replay-only stats for $($entry.replayName) with refreshed schema" -ForegroundColor Green
+    for ($iteration = 1; $iteration -le $MaxSchemaIterations; $iteration += 1) {
+        $refreshedSchemaInputs = Get-CorpusSchemaInputs -Entries $processed -SchemaScriptPath $corpusSchemaScript -IncludeValidation
+        if (Test-OutputsFresh -OutputPaths @($corpusSchemaPath) -InputPaths $refreshedSchemaInputs) {
+            if ($iteration -eq 1) {
+                Write-Host "Reusing refreshed cross-replay corpus schema" -ForegroundColor Green
+            } else {
+                Write-Host "Reusing converged cross-replay corpus schema on iteration $iteration" -ForegroundColor Green
+            }
         } else {
-            Write-Host "Re-extracting replay-only stats for $($entry.replayName) with refreshed schema" -ForegroundColor Cyan
-            node $extractScript --artifact-dir $entry.artifactDir --schema-path $corpusSchemaPath --output-path $extractedPath
+            if ($iteration -eq 1) {
+                Write-Host "Rebuilding cross-replay corpus schema from refreshed extraction results" -ForegroundColor Cyan
+            } else {
+                Write-Host "Rebuilding cross-replay corpus schema for convergence iteration $iteration" -ForegroundColor Cyan
+            }
+            node $corpusSchemaScript --artifact-root $resolvedArtifactRoot --corpus-manifest $manifestPath --output-path $corpusSchemaPath
             if ($LASTEXITCODE -ne 0) {
-                throw "Replay-only re-extraction failed for $($entry.replayName)"
+                throw "Refreshed corpus schema generation failed."
             }
         }
-        $entry["extractedStatsPath"] = $extractedPath
-    }
 
-    foreach ($entry in $processed) {
-        $extractedPath = $entry.extractedStatsPath
-        $validationPath = if ($entry.Contains("validationReportPath")) { $entry.validationReportPath } else { Join-Path $entry.artifactDir "validation-report.json" }
-        if (Test-OutputsFresh -OutputPaths @($validationPath) -InputPaths @(
-                $validateScript,
-                $extractedPath,
-                (Join-Path $entry.fixtureDir "match.json"),
-                (Join-Path $entry.fixtureDir "timeline.json"))) {
-            Write-Host "Reusing validation report for $($entry.replayName) with refreshed schema" -ForegroundColor Green
-        } else {
-            Write-Host "Re-validating extracted stats for $($entry.replayName) with refreshed schema" -ForegroundColor Cyan
-            node $validateScript --extracted-path $extractedPath --fixture-dir $entry.fixtureDir --output-path $validationPath
-            if ($LASTEXITCODE -ne 0) {
-                throw "Refreshed validation failed for $($entry.replayName)"
+        $nextFingerprint = Get-CorpusSchemaFingerprint -SchemaPath $corpusSchemaPath
+        if ($nextFingerprint -eq $corpusSchemaFingerprint) {
+            Write-Host "Corpus schema converged after $iteration refresh iteration(s)" -ForegroundColor Green
+            $converged = $true
+            break
+        }
+
+        $repeatedFingerprint = $false
+        if ($nextFingerprint -and $seenSchemaFingerprints -contains $nextFingerprint) {
+            $repeatedFingerprint = $true
+        }
+        if ($nextFingerprint) {
+            $seenSchemaFingerprints += $nextFingerprint
+        }
+
+        foreach ($entry in $processed) {
+            $extractedPath = if ($entry.Contains("extractedStatsPath")) { $entry.extractedStatsPath } else { Join-Path $entry.artifactDir "extracted-stats.json" }
+            if (Test-ExtractedStatsFresh -ExtractedPath $extractedPath -ExpectedSchemaFingerprint $nextFingerprint -InputPaths @(
+                    $extractScript,
+                    (Join-Path $entry.artifactDir "run-manifest.json"),
+                    (Join-Path $entry.artifactDir "provisional-schema.json"),
+                    (Join-Path $entry.artifactDir "candidate-matches.json"))) {
+                Write-Host "Reusing replay-only stats for $($entry.replayName) with refreshed schema" -ForegroundColor Green
+            } else {
+                Write-Host "Re-extracting replay-only stats for $($entry.replayName) with refreshed schema" -ForegroundColor Cyan
+                node $extractScript --artifact-dir $entry.artifactDir --schema-path $corpusSchemaPath --output-path $extractedPath
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Replay-only re-extraction failed for $($entry.replayName)"
+                }
             }
+            $entry["extractedStatsPath"] = $extractedPath
         }
-        $entry["validationReportPath"] = $validationPath
+
+        foreach ($entry in $processed) {
+            $extractedPath = $entry.extractedStatsPath
+            $validationPath = if ($entry.Contains("validationReportPath")) { $entry.validationReportPath } else { Join-Path $entry.artifactDir "validation-report.json" }
+            if (Test-ValidationReportFresh -ValidationPath $validationPath -ExpectedExtractedFingerprint (Get-ExtractedStatsSchemaFingerprint -ExtractedPath $extractedPath) -InputPaths @(
+                    $validateScript,
+                    $extractedPath,
+                    (Join-Path $entry.fixtureDir "match.json"),
+                    (Join-Path $entry.fixtureDir "timeline.json"))) {
+                Write-Host "Reusing validation report for $($entry.replayName) with refreshed schema" -ForegroundColor Green
+            } else {
+                Write-Host "Re-validating extracted stats for $($entry.replayName) with refreshed schema" -ForegroundColor Cyan
+                node $validateScript --extracted-path $extractedPath --fixture-dir $entry.fixtureDir --output-path $validationPath
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Refreshed validation failed for $($entry.replayName)"
+                }
+            }
+            $entry["validationReportPath"] = $validationPath
+        }
+
+        $corpusSchemaFingerprint = $nextFingerprint
+        if ($repeatedFingerprint) {
+            Write-Host "Detected repeating corpus schema cycle after $iteration refresh iteration(s); stopping at the repeated schema state" -ForegroundColor Yellow
+            $cycleDetected = $true
+            break
+        }
     }
 
-    if (Test-OutputsFresh -OutputPaths @($corpusSchemaPath) -InputPaths (Get-CorpusSchemaInputs -Entries $processed -SchemaScriptPath $corpusSchemaScript -IncludeValidation)) {
-        Write-Host "Reusing finalized cross-replay corpus schema" -ForegroundColor Green
-    } else {
-        Write-Host "Finalizing cross-replay corpus schema after refreshed validation" -ForegroundColor Cyan
-        node $corpusSchemaScript --artifact-root $resolvedArtifactRoot --corpus-manifest $manifestPath --output-path $corpusSchemaPath
-        if ($LASTEXITCODE -ne 0) {
-            throw "Final corpus schema generation failed."
-        }
+    if (-not $converged -and -not $cycleDetected) {
+        Write-Host "Corpus schema did not fully converge after $MaxSchemaIterations refresh iteration(s)" -ForegroundColor Yellow
+        $corpusSchemaFingerprint = Get-CorpusSchemaFingerprint -SchemaPath $corpusSchemaPath
     }
 }
 

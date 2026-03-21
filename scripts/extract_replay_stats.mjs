@@ -57,6 +57,17 @@ function printHelp() {
   console.log("Usage: node ./scripts/extract_replay_stats.mjs --artifact-dir <path> [--schema-path <path>] [--output-path <path>]");
 }
 
+function buildSchemaFingerprint(schema) {
+  if (!schema || typeof schema !== "object") {
+    return null;
+  }
+
+  return JSON.stringify({
+    ...schema,
+    generatedAtUtc: null,
+  });
+}
+
 function scoreMetricValue(metricKey, expected, actual) {
   if (!Number.isFinite(expected) || !Number.isFinite(actual)) {
     return 0;
@@ -1890,6 +1901,7 @@ function main() {
     replayId: runManifest.replayId,
     generatedAtUtc: new Date().toISOString(),
     schemaPath,
+    schemaFingerprint: corpusSchema.schemaFingerprint ?? buildSchemaFingerprint(corpusSchema),
     gameVersion: runManifest.summary?.gameVersion ?? summaryJson.gameVersion ?? "unknown",
     roster: roster.map((entry) => ({
       rosterIndex: entry.rosterIndex,

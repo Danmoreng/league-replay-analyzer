@@ -205,6 +205,7 @@ function main() {
     generatedAtUtc: new Date().toISOString(),
     fixtureDir,
     extractedPath,
+    extractedStatsFingerprint: extracted.schemaFingerprint ?? null,
     summary: {
       participantCount: validationParticipants.length,
       matchedParticipantCount: validationParticipants.filter((participant) => participant.status === "matched").length,

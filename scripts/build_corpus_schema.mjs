@@ -694,6 +694,14 @@ function promoteBundleGroup(group) {
   );
 }
 
+function buildComparableSchema(schema) {
+  return {
+    ...schema,
+    generatedAtUtc: null,
+    schemaFingerprint: null,
+  };
+}
+
 function main() {
   const repoRoot = process.cwd();
   const args = parseArgs(process.argv);
@@ -800,6 +808,7 @@ function main() {
 
   const corpusSchema = {
     generatedAtUtc: new Date().toISOString(),
+    schemaFingerprint: null,
     source: {
       artifactRoot,
       corpusManifestPath,
@@ -830,9 +839,24 @@ function main() {
     bundlePromotedPatterns,
     bundleRankedPatterns: bundleRankedPatterns.slice(0, 64),
   };
+  corpusSchema.schemaFingerprint = JSON.stringify(buildComparableSchema(corpusSchema));
 
-  writeJson(outputPath, corpusSchema);
-  console.log(`Wrote corpus schema to ${outputPath}`);
+  const nextComparable = corpusSchema.schemaFingerprint;
+  let wroteSchema = true;
+  if (fs.existsSync(outputPath)) {
+    const existingSchema = readJson(outputPath);
+    const existingComparable = JSON.stringify(buildComparableSchema(existingSchema));
+    if (existingComparable === nextComparable) {
+      wroteSchema = false;
+    }
+  }
+
+  if (wroteSchema) {
+    writeJson(outputPath, corpusSchema);
+    console.log(`Wrote corpus schema to ${outputPath}`);
+  } else {
+    console.log(`Corpus schema unchanged at ${outputPath}`);
+  }
   console.log(`Promoted ${promotedPatterns.length} corpus patterns from ${rankedPatterns.length} ranked patterns.`);
   console.log(`Promoted ${bundlePromotedPatterns.length} bundle-backed patterns from ${bundleRankedPatterns.length} ranked bundle patterns.`);
 }
