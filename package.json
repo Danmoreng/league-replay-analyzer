@@ -15,6 +15,7 @@
     "build:wasm": "pwsh -File ./scripts/build-wasm.ps1",
     "build:provisional-schema": "node ./scripts/build_provisional_schema.mjs",
     "build:corpus-schema": "node ./scripts/build_corpus_schema.mjs",
+    "discover:scalar-metric": "node ./scripts/discover_scalar_metric_candidates.mjs",
     "extract:replay-stats": "node ./scripts/extract_replay_stats.mjs",
     "validate:replay-stats": "node ./scripts/validate_extracted_stats.mjs",
     "discover:movement": "node ./scripts/discover_movement_candidates.mjs",

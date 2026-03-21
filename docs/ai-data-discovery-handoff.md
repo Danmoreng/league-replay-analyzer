@@ -101,7 +101,7 @@ The real discovery path should read:
 - `artifacts/<replay-id>/summary.json`
 - `replays/api/<match-id>/timeline.json`
 
-The next script to build should be an artifact-driven cohort scanner, for example:
+Use the artifact-driven cohort scanner:
 
 - `scripts/discover_scalar_metric_candidates.mjs`
 
@@ -192,13 +192,15 @@ The schema flow should remain:
 
 Do not hand-maintain a patch-offset table unless we later decide to create a stable schema registry after repeated proof.
 
-## 6. Concrete Next Implementation
+## 6. Current Discovery Command
 
-Build a new script:
+Use:
 
-- `scripts/discover_scalar_metric_candidates.mjs`
+```powershell
+node .\scripts\discover_scalar_metric_candidates.mjs --artifact-root .\artifacts --version-group 16.6 --metric health
+```
 
-Responsibilities:
+Current responsibilities of that script:
 
 - load replay artifacts for a chosen version group
 - load fixture scalar series for one target metric
@@ -210,11 +212,10 @@ Responsibilities:
   - grouped support by exact family+offset+decode
   - grouped support by family band when exact families drift
 
-Suggested first run:
+Current baseline result:
 
-```powershell
-node .\scripts\discover_scalar_metric_candidates.mjs --artifact-root .\artifacts --version-group 16.6 --metric health
-```
+- the first `16.6` health scan produces a short watchlist but `0` strict cross-replay recommendations
+- that means the discovery path is working, but the current `health` evidence is still too confused with `power`, `movementSpeed`, and some generic state windows to promote automatically
 
 ## 7. Validation Workflow
 
