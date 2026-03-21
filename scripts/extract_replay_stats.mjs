@@ -999,6 +999,7 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
   const selected = [];
   const selectedKeys = new Set();
   const selectedMetricCounts = new Map();
+  const selectedMetricFamilies = new Map();
   const candidates = [...bundleRecommended, ...candidateLocal, ...corpusPromoted, ...localPromoted, ...localRanked, ...rankedCorpus]
       .map((pattern) => {
         let bonus = 0;
@@ -1039,9 +1040,18 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
     if (metricCount >= metricCap) {
       continue;
     }
+    if (pattern.metric === "movementSpeed") {
+      const selectedFamilies = selectedMetricFamilies.get(pattern.metric) ?? new Set();
+      if (metricCount > 0 && selectedFamilies.has(pattern.familyKey)) {
+        continue;
+      }
+    }
     selected.push(pattern);
     selectedKeys.add(pattern.patternKey);
     selectedMetricCounts.set(pattern.metric, metricCount + 1);
+    const metricFamilies = selectedMetricFamilies.get(pattern.metric) ?? new Set();
+    metricFamilies.add(pattern.familyKey);
+    selectedMetricFamilies.set(pattern.metric, metricFamilies);
   }
 
   if (selected.length > 0) {
@@ -1432,6 +1442,81 @@ function familyAnchorWeight(metricKey) {
   }
 }
 
+function crossFamilyAnchorWeight(metricKey) {
+  switch (metricKey) {
+    case "xp":
+      return 1;
+    case "totalGold":
+      return 0.94;
+    case "level":
+      return 0.82;
+    case "healthMax":
+      return 0.88;
+    case "power":
+      return 0.78;
+    case "powerMax":
+      return 0.75;
+    default:
+      return 0;
+  }
+}
+
+function findCrossFamilySlotAnchor(candidate, participantOutputs) {
+  if (candidate.metric !== "movementSpeed") {
+    return null;
+  }
+
+  const matches = [];
+  for (const participantOutput of participantOutputs) {
+    for (const [metricKey, metricRecord] of Object.entries(participantOutput.metrics ?? {})) {
+      const weight = crossFamilyAnchorWeight(metricKey);
+      if (weight <= 0) {
+        continue;
+      }
+      const slotDistance = Math.abs((metricRecord.slotIndex ?? candidate.slotIndex) - candidate.slotIndex);
+      if (slotDistance > 2) {
+        continue;
+      }
+
+      let score = weight - (0.2 * slotDistance) + (0.05 * (candidate.plausibilityScore ?? 0));
+      if (metricRecord.familyKey === candidate.familyKey) {
+        score += 0.06;
+      }
+      if (metricRecord.source === "bundle-promoted" || metricRecord.source === "corpus-promoted") {
+        score += 0.04;
+      }
+      matches.push({
+        rosterIndex: participantOutput.rosterIndex,
+        anchorMetric: metricKey,
+        score,
+        slotDistance,
+        sameFamily: metricRecord.familyKey === candidate.familyKey,
+      });
+    }
+  }
+
+  matches.sort((left, right) =>
+    right.score - left.score ||
+    left.slotDistance - right.slotDistance ||
+    Number(right.sameFamily) - Number(left.sameFamily) ||
+    left.rosterIndex - right.rosterIndex
+  );
+  if (matches.length === 0) {
+    return null;
+  }
+  if (matches.length > 1) {
+    const [best, second] = matches;
+    if (
+      Math.abs((best.score ?? 0) - (second.score ?? 0)) < 0.08 &&
+      (best.slotDistance ?? 99) === (second.slotDistance ?? 99)
+    ) {
+      return null;
+    }
+  }
+
+  return matches[0];
+}
+
 function findNearbyFamilyAnchor(candidate, participantOutputs) {
   if (!["healthMax", "power"].includes(candidate.metric)) {
     return null;
@@ -1788,6 +1873,10 @@ function main() {
     const acceptedVariantAnchor = variantAnchored && (variantAnchored.score ?? 0) >= 0.76
       ? variantAnchored
       : null;
+    const crossFamilyAnchored = findCrossFamilySlotAnchor(candidate, participantOutputs);
+    const acceptedCrossFamilyAnchor = crossFamilyAnchored && (crossFamilyAnchored.score ?? 0) >= 0.78
+      ? crossFamilyAnchored
+      : null;
     const familyAnchored = findNearbyFamilyAnchor(candidate, participantOutputs);
     const acceptedFamilyAnchor = familyAnchored && (familyAnchored.score ?? 0) >= 0.7
       ? familyAnchored
@@ -1800,6 +1889,7 @@ function main() {
       directRosterIndex ??
       acceptedSiblingAnchor?.rosterIndex ??
       acceptedVariantAnchor?.rosterIndex ??
+      acceptedCrossFamilyAnchor?.rosterIndex ??
       acceptedLayoutAnchor?.rosterIndex ??
       acceptedFamilyAnchor?.rosterIndex ??
       null;
@@ -1872,7 +1962,7 @@ function main() {
       siblingAnchorScore: acceptedSiblingAnchor?.compatibility?.score ?? null,
       layoutAnchorScore: acceptedLayoutAnchor?.score ?? null,
       variantAnchorScore: acceptedVariantAnchor?.score ?? null,
-      familyAnchorScore: acceptedFamilyAnchor?.score ?? null,
+      familyAnchorScore: acceptedFamilyAnchor?.score ?? acceptedCrossFamilyAnchor?.score ?? null,
       finalValue: refinedCandidate.finalValue,
       timeline: refinedCandidate.series.map((point) => ({
         timestamp: point.timestamp,

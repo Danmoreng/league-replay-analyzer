@@ -13,7 +13,7 @@ function parseArgs(argv) {
     artifactDir: null,
     outputPath: null,
     schemaPath: null,
-    maxPatterns: 4,
+    maxPatterns: 10,
   };
 
   for (let index = 2; index < argv.length; index += 1) {
@@ -105,14 +105,24 @@ function scoreFallbackPattern(pattern) {
   const rmseScore = 1 - Math.min(1, Math.max(0, support.avgNormalizedDistanceRmse ?? 1));
   const effectiveScore = Math.min(1, Math.max(0, (support.avgEffectiveScore ?? 0) / 0.5));
   const replaySupport = Math.min(1, Math.max(0, (pattern.coordinateModelReplaySupport ?? 0) / 3));
+  const bestRawPairScore = Math.min(
+    1,
+    Math.max(
+      0,
+      ((pattern.rawPairCandidates ?? []).reduce((best, candidate) =>
+        Math.max(best, candidate.aggregateScore ?? 0), 0
+      )) / 0.45,
+    ),
+  );
 
   return (
-    (validatorScore * 0.3) +
-    (axisScore * 0.2) +
-    (pathScore * 0.2) +
+    (validatorScore * 0.25) +
+    (axisScore * 0.18) +
+    (pathScore * 0.17) +
     (rmseScore * 0.15) +
     (effectiveScore * 0.1) +
-    (replaySupport * 0.05)
+    (replaySupport * 0.05) +
+    (bestRawPairScore * 0.1)
   );
 }
 
@@ -120,12 +130,30 @@ function selectFallbackPatterns(rankedPatterns, maxPatterns) {
   const ranked = (rankedPatterns ?? [])
     .filter((pattern) => {
       const support = pattern.support ?? {};
+      const bestRawPairScore = (pattern.rawPairCandidates ?? []).reduce((best, candidate) =>
+        Math.max(best, candidate.aggregateScore ?? 0), 0);
+      const strongLocalCandidate =
+        bestRawPairScore >= 0.3 &&
+        (support.avgValidatorScore ?? 0) >= 0.62 &&
+        (support.avgAxisCorrelation ?? 0) >= 0.35 &&
+        (support.avgPathCorrelation ?? 0) >= 0.18 &&
+        (support.avgNormalizedDistanceRmse ?? Number.POSITIVE_INFINITY) <= 0.29;
       return (
-        (support.avgValidatorScore ?? 0) >= 0.78 &&
-        (support.avgAxisCorrelation ?? 0) >= 0.52 &&
-        (support.avgPathCorrelation ?? 0) >= 0.35 &&
-        (support.avgNormalizedDistanceRmse ?? Number.POSITIVE_INFINITY) <= 0.22 &&
-        (support.avgEffectiveScore ?? 0) >= 0.34
+        (
+          (support.avgValidatorScore ?? 0) >= 0.78 &&
+          (support.avgAxisCorrelation ?? 0) >= 0.52 &&
+          (support.avgPathCorrelation ?? 0) >= 0.35 &&
+          (support.avgNormalizedDistanceRmse ?? Number.POSITIVE_INFINITY) <= 0.22 &&
+          (support.avgEffectiveScore ?? 0) >= 0.34
+        ) ||
+        (
+          (support.avgValidatorScore ?? 0) >= 0.64 &&
+          (support.avgAxisCorrelation ?? 0) >= 0.38 &&
+          (support.avgPathCorrelation ?? 0) >= 0.2 &&
+          (support.avgNormalizedDistanceRmse ?? Number.POSITIVE_INFINITY) <= 0.28 &&
+          (support.avgEffectiveScore ?? 0) >= 0.28
+        ) ||
+        strongLocalCandidate
       );
     })
     .map((pattern) => ({
@@ -304,7 +332,7 @@ function main() {
       continue;
     }
 
-    const rawCandidates = (pattern.rawPairCandidates ?? []).slice(0, 8);
+    const rawCandidates = (pattern.rawPairCandidates ?? []).slice(0, 14);
     const entityKeys = [];
     for (const candidate of rawCandidates) {
       const xField = fieldIndex.get(`${candidate.slotIndex}|${pattern.xField.offset}|${pattern.xField.decode}`);
