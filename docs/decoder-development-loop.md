@@ -123,7 +123,7 @@ Store them under a replay-specific artifact directory, for example:
 - `artifacts/<replay-id>/families/<family-key>/schema.json`
 - `artifacts/<replay-id>/families/<family-key>/cleaned.json`
 
-These artifact files do not exist yet by default. They are the intended next step for automation.
+The batch runner now exists as `scripts/run_decoder_artifacts.ps1` and writes this layout by default.
 
 ### Phase 2: Candidate normalization
 
@@ -257,14 +257,14 @@ This is the recommended build order for the next few work items.
 
 ### 1. Batch artifact runner
 
-Add a script under `scripts/` that:
+Use `scripts/run_decoder_artifacts.ps1` to:
 
 - runs family scan
 - picks top families
 - runs entity/schema/cleaned analysis for each family
 - writes JSON artifacts to disk
 
-Suggested future file:
+Current file:
 
 - `scripts/run_decoder_artifacts.ps1`
 
