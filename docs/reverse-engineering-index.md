@@ -17,6 +17,7 @@ This file consolidates the replay reverse-engineering documentation into a small
 
 ## Active Working References
 
+- `docs/decoder-development-loop.md`
 - `docs/decoder-status.md`
 - `docs/replay-format-notes.md`
 - `docs/riot-api-fixtures.md`
