@@ -24,3 +24,4 @@ thirdparty/reference/
 .env
 replays/
 apps/web/public/riot-api-fixtures/
+tmp/
