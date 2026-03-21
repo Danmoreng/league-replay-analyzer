@@ -77,6 +77,18 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function median(values) {
+  if (values.length === 0) {
+    return 0;
+  }
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  if ((sorted.length % 2) === 1) {
+    return sorted[middle];
+  }
+  return (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
 function standardDeviation(values) {
   if (values.length < 2) {
     return 0;
@@ -443,6 +455,8 @@ function summarizeRawWindow(windowKey, matches) {
     const averageValidatorScore = supportMatches.reduce((sum, match) => sum + match.validatorScore, 0) / supportMatches.length;
     const averageEffectiveScore = supportMatches.reduce((sum, match) => sum + match.effectiveScore, 0) / supportMatches.length;
     const passCount = supportMatches.filter((match) => match.passesValidation).length;
+    const slopeMedian = median(supportMatches.map((match) => match.slope).filter(Number.isFinite));
+    const interceptMedian = median(supportMatches.map((match) => match.intercept).filter(Number.isFinite));
     const participantSupportFactor = Math.min(1, supportMatches.length / 4);
     const aggregateScore = averageEffectiveScore * (0.5 + participantSupportFactor) * (0.5 + (passCount / supportMatches.length));
 
@@ -467,6 +481,11 @@ function summarizeRawWindow(windowKey, matches) {
       averageValidatorScore,
       averageEffectiveScore,
       aggregateScore,
+      transform: {
+        slopeMedian,
+        interceptMedian,
+        sampleCount: supportMatches.filter((match) => Number.isFinite(match.slope) && Number.isFinite(match.intercept)).length,
+      },
     };
 
     if (!bestAggregate || aggregate.aggregateScore > bestAggregate.aggregateScore) {
@@ -493,6 +512,8 @@ function buildPatternSummary(patternKey, candidates) {
   const averageNormalizedRmse = supportMatches.reduce((sum, match) => sum + match.normalizedRmse, 0) / Math.max(supportMatches.length, 1);
   const averageValidatorScore = supportMatches.reduce((sum, match) => sum + match.validatorScore, 0) / Math.max(supportMatches.length, 1);
   const averageEffectiveScore = supportMatches.reduce((sum, match) => sum + match.effectiveScore, 0) / Math.max(supportMatches.length, 1);
+  const slopeMedian = median(supportMatches.map((match) => match.slope).filter(Number.isFinite));
+  const interceptMedian = median(supportMatches.map((match) => match.intercept).filter(Number.isFinite));
   const dominantArchetype = [...new Set(candidates.map((candidate) => candidate.rowArchetype))].sort((left, right) => {
     const leftCount = candidates.filter((candidate) => candidate.rowArchetype === left).length;
     const rightCount = candidates.filter((candidate) => candidate.rowArchetype === right).length;
@@ -521,6 +542,11 @@ function buildPatternSummary(patternKey, candidates) {
     decode: exemplar.decode,
     metric: exemplar.metric,
     metricLabel: exemplar.metricLabel,
+    transform: {
+      slopeMedian,
+      interceptMedian,
+      sampleCount: supportMatches.filter((match) => Number.isFinite(match.slope) && Number.isFinite(match.intercept)).length,
+    },
     confidence,
     support: {
       replays: 1,
@@ -536,6 +562,7 @@ function buildPatternSummary(patternKey, candidates) {
       rawWindowKey: candidate.rawWindowKey,
       participantIds: candidate.participantIds,
       champions: candidate.champions,
+      transform: candidate.transform,
       aggregateScore: candidate.aggregateScore,
       averageCorrelation: candidate.averageCorrelation,
       averageNormalizedRmse: candidate.averageNormalizedRmse,
@@ -650,6 +677,7 @@ function main() {
       averageNormalizedRmse: bestAggregate.averageNormalizedRmse,
       averageValidatorScore: bestAggregate.averageValidatorScore,
       averageEffectiveScore: bestAggregate.averageEffectiveScore,
+      transform: bestAggregate.transform,
       aggregateScore: bestAggregate.aggregateScore,
       supportMatches: bestAggregate.supportMatches
         .slice(0, 8)
@@ -658,6 +686,8 @@ function main() {
           champion: match.champion,
           correlation: match.correlation,
           normalizedRmse: match.normalizedRmse,
+          slope: match.slope,
+          intercept: match.intercept,
           validatorScore: match.validatorScore,
           effectiveScore: match.effectiveScore,
           passesValidation: match.passesValidation,

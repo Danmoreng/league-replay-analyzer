@@ -294,9 +294,10 @@ Use `scripts/run_decoder_corpus.ps1` for the current end-to-end corpus pass. It 
 
 The replay-only extractor itself lives in `scripts/extract_replay_stats.mjs` and:
 
-- prefers corpus-promoted patterns when they exist
-- otherwise falls back to replay-local promoted patterns
+- builds one ranked pool from corpus-promoted, replay-promoted, replay-ranked, and corpus-ranked candidates
+- treats corpus support as a boost, not an override of stronger replay-local patterns
 - uses replay `summary.json` metadata for player identity and final stat anchors
+- solves row-to-player assignment per family from aggregated multi-metric evidence
 - decodes replay fields automatically
 - writes normalized participant timelines
 
@@ -313,6 +314,13 @@ Current outputs:
 - `artifacts/corpus-schema.json`
 - `artifacts/<replay-id>/extracted-stats.json`
 - `artifacts/<replay-id>/validation-report.json`
+
+Current 2026-03-21 baseline from the local 7-replay corpus:
+
+- corpus builder now emits semantic alias clusters in addition to exact promoted patterns
+- latest full run promoted `133` exact corpus-backed patterns from `886` ranked exact patterns
+- validated replay-only extraction is now producing usable `level`, `xp`, `totalGold`, and `minionsKilled` timelines on multiple replays
+- the best current replay is still `EUW1-7779216102`, where replay-only extraction validates `level` for 3 participants, `totalGold` for 2, `xp` for 1, and `minionsKilled` for 1
 
 ### 4. Only then improve the UI
 
@@ -339,8 +347,8 @@ Do not return to movement as the main focus until:
 
 The next concrete task should be:
 
-1. tighten corpus promotion so validated patterns survive across at least one version group with 2+ replays
-2. improve replay-only row assignment on `level`, `xp`, `totalGold`, and `cs`
+1. tighten corpus promotion so exact promoted patterns are less noisy while still inheriting version-group alias support
+2. improve replay-only row assignment on `level`, `xp`, `totalGold`, and `cs`, especially for the weaker `15.22` and `15.23` replays
 3. use the validated extraction output as the UI input contract
 
 That is the shortest path from investigation tooling to an actual decoder.

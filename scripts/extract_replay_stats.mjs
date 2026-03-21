@@ -96,6 +96,22 @@ function derivePatternTransform(pattern, candidateMatches) {
   };
 }
 
+function computeSelectionScore(source, pattern) {
+  const confidence = pattern.confidence ?? 0;
+  switch (source) {
+    case "replay-promoted":
+      return confidence + 0.25;
+    case "corpus-promoted":
+      return confidence + 0.12 + (0.02 * Math.min(3, pattern.aliasSupport?.support?.replays ?? pattern.support?.replays ?? 0));
+    case "replay-ranked":
+      return confidence + 0.05;
+    case "corpus-ranked":
+      return confidence + 0.02 + (0.01 * Math.min(3, pattern.support?.replays ?? 0));
+    default:
+      return confidence;
+  }
+}
+
 function normalizePattern(pattern, candidateMatches, source) {
   const recommendedSlots = pattern.recommendedSlots
     ? pattern.recommendedSlots
@@ -112,6 +128,7 @@ function normalizePattern(pattern, candidateMatches, source) {
     offset: pattern.offset,
     decode: pattern.decode,
     transform: pattern.transform?.sampleCount > 0 ? pattern.transform : derivePatternTransform(pattern, candidateMatches),
+    selectionScore: computeSelectionScore(source, pattern),
     source,
   };
 }
@@ -243,23 +260,26 @@ function pickBestTransform(pattern, field, roster) {
 
 function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches, runManifest, roster) {
   const familyKeys = new Set((runManifest.families ?? []).map((family) => family.familyKey));
-  const promoted = (corpusSchema.promotedPatterns ?? [])
+  const metricCaps = new Map([
+    ["level", 3],
+    ["xp", 2],
+    ["totalGold", 2],
+    ["currentGold", 1],
+    ["minionsKilled", 2],
+    ["jungleMinionsKilled", 1],
+  ]);
+
+  const corpusPromoted = (corpusSchema.promotedPatterns ?? [])
     .filter((pattern) => familyKeys.has(pattern.familyKey))
     .filter((pattern) => isMetricAssignable(pattern.metric, roster))
     .sort((left, right) => right.confidence - left.confidence)
     .map((pattern) => normalizePattern(pattern, candidateMatches, "corpus-promoted"));
-  if (promoted.length > 0) {
-    return promoted;
-  }
 
   const localPromoted = (provisionalSchema.promotedPatterns ?? [])
     .filter((pattern) => familyKeys.has(pattern.familyKey))
     .filter((pattern) => isMetricAssignable(pattern.metric, roster))
     .sort((left, right) => right.confidence - left.confidence)
     .map((pattern) => normalizePattern(pattern, candidateMatches, "replay-promoted"));
-  if (localPromoted.length > 0) {
-    return localPromoted;
-  }
 
   const localRanked = (provisionalSchema.rankedPatterns ?? [])
     .filter((pattern) => familyKeys.has(pattern.familyKey))
@@ -267,9 +287,6 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
     .sort((left, right) => right.confidence - left.confidence)
     .slice(0, 16)
     .map((pattern) => normalizePattern(pattern, candidateMatches, "replay-ranked"));
-  if (localRanked.length > 0) {
-    return localRanked;
-  }
 
   const rankedCorpus = (corpusSchema.rankedPatterns ?? [])
     .filter((pattern) => familyKeys.has(pattern.familyKey))
@@ -278,8 +295,33 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
     .sort((left, right) => right.confidence - left.confidence)
     .slice(0, 12)
     .map((pattern) => normalizePattern(pattern, candidateMatches, "corpus-ranked"));
-  if (rankedCorpus.length > 0) {
-    return rankedCorpus;
+
+  const selected = [];
+  const selectedKeys = new Set();
+  const selectedMetricCounts = new Map();
+  const candidates = [...corpusPromoted, ...localPromoted, ...localRanked, ...rankedCorpus]
+    .sort((left, right) =>
+      right.selectionScore - left.selectionScore ||
+      right.confidence - left.confidence ||
+      left.patternKey.localeCompare(right.patternKey),
+    );
+
+  for (const pattern of candidates) {
+    if (selectedKeys.has(pattern.patternKey)) {
+      continue;
+    }
+    const metricCount = selectedMetricCounts.get(pattern.metric) ?? 0;
+    const metricCap = metricCaps.get(pattern.metric) ?? 1;
+    if (metricCount >= metricCap) {
+      continue;
+    }
+    selected.push(pattern);
+    selectedKeys.add(pattern.patternKey);
+    selectedMetricCounts.set(pattern.metric, metricCount + 1);
+  }
+
+  if (selected.length > 0) {
+    return selected;
   }
 
   return [];
@@ -327,7 +369,7 @@ function buildCandidateRows(pattern, familyFieldIndex, roster) {
   return candidates;
 }
 
-function assignPatternCandidates(pattern, candidates, roster) {
+function buildPatternEdges(pattern, candidates, roster) {
   const edges = [];
   for (const candidate of candidates) {
     for (const rosterEntry of roster) {
@@ -352,6 +394,10 @@ function assignPatternCandidates(pattern, candidates, roster) {
   }
 
   edges.sort((left, right) => right.score - left.score);
+  return edges;
+}
+
+function assignPatternCandidates(edges) {
   const assignedSlots = new Set();
   const assignedRoster = new Set();
   const assignments = [];
@@ -366,6 +412,94 @@ function assignPatternCandidates(pattern, candidates, roster) {
   }
 
   return assignments;
+}
+
+function addFamilyAssignmentEvidence(familyAssignmentEvidence, edge, patternConfidence) {
+  const familyMap = familyAssignmentEvidence.get(edge.familyKey) ?? new Map();
+  const slotMap = familyMap.get(edge.slotIndex) ?? new Map();
+  slotMap.set(edge.rosterIndex, (slotMap.get(edge.rosterIndex) ?? 0) + (edge.score * patternConfidence));
+  familyMap.set(edge.slotIndex, slotMap);
+  familyAssignmentEvidence.set(edge.familyKey, familyMap);
+}
+
+function solveFamilyAssignments(familyMap) {
+  const slotIndices = [...familyMap.keys()].sort((left, right) => left - right);
+  if (!slotIndices.length) {
+    return new Map();
+  }
+
+  const rosterIndices = [...new Set(
+    slotIndices.flatMap((slotIndex) => [...(familyMap.get(slotIndex) ?? new Map()).keys()]),
+  )].sort((left, right) => left - right);
+  const rosterBitByIndex = new Map(rosterIndices.map((rosterIndex, index) => [rosterIndex, index]));
+  const slotOptions = slotIndices.map((slotIndex) =>
+    [...(familyMap.get(slotIndex) ?? new Map()).entries()]
+      .map(([rosterIndex, score]) => ({ rosterIndex, score }))
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 8),
+  );
+
+  if (slotIndices.length > 12 || rosterIndices.length > 12) {
+    const assignments = new Map();
+    const usedRoster = new Set();
+    const flattened = slotIndices.flatMap((slotIndex, slotOffset) =>
+      slotOptions[slotOffset].map((option) => ({
+        slotIndex,
+        rosterIndex: option.rosterIndex,
+        score: option.score,
+      })),
+    ).sort((left, right) => right.score - left.score);
+    for (const option of flattened) {
+      if (assignments.has(option.slotIndex) || usedRoster.has(option.rosterIndex)) {
+        continue;
+      }
+      assignments.set(option.slotIndex, option.rosterIndex);
+      usedRoster.add(option.rosterIndex);
+    }
+    return assignments;
+  }
+
+  const memo = new Map();
+  function search(slotOffset, usedMask) {
+    if (slotOffset >= slotIndices.length) {
+      return { score: 0, assignments: [] };
+    }
+
+    const memoKey = `${slotOffset}|${usedMask}`;
+    if (memo.has(memoKey)) {
+      return memo.get(memoKey);
+    }
+
+    let best = search(slotOffset + 1, usedMask);
+    for (const option of slotOptions[slotOffset]) {
+      const rosterBit = rosterBitByIndex.get(option.rosterIndex);
+      if (rosterBit == null) {
+        continue;
+      }
+      const bitMask = (1 << rosterBit);
+      if ((usedMask & bitMask) !== 0) {
+        continue;
+      }
+
+      const suffix = search(slotOffset + 1, usedMask | bitMask);
+      const score = option.score + suffix.score;
+      if (score > best.score) {
+        best = {
+          score,
+          assignments: [
+            { slotIndex: slotIndices[slotOffset], rosterIndex: option.rosterIndex },
+            ...suffix.assignments,
+          ],
+        };
+      }
+    }
+
+    memo.set(memoKey, best);
+    return best;
+  }
+
+  const solution = search(0, 0);
+  return new Map(solution.assignments.map((assignment) => [assignment.slotIndex, assignment.rosterIndex]));
 }
 
 function main() {
@@ -408,7 +542,7 @@ function main() {
     familyFieldIndex.set(family.familyKey, buildFieldIndex(readJson(cleanedPath)));
   }
 
-  const slotAssignmentEvidence = new Map();
+  const familyAssignmentEvidence = new Map();
   const directAssignments = new Map();
   const candidateRows = [];
 
@@ -421,27 +555,25 @@ function main() {
     const patternCandidates = buildCandidateRows(pattern, fieldIndex, roster);
     candidateRows.push(...patternCandidates.map((candidate) => ({ ...candidate, pattern })));
 
-    const metricAssignments = assignPatternCandidates(pattern, patternCandidates, roster);
+    const patternEdges = buildPatternEdges(pattern, patternCandidates, roster);
+    for (const edge of patternEdges) {
+      addFamilyAssignmentEvidence(familyAssignmentEvidence, edge, pattern.confidence);
+    }
+
+    const metricAssignments = assignPatternCandidates(patternEdges);
     for (const assignment of metricAssignments) {
-      const key = `${assignment.familyKey}|${assignment.slotIndex}|${assignment.rosterIndex}`;
-      slotAssignmentEvidence.set(key, (slotAssignmentEvidence.get(key) ?? 0) + (assignment.score * pattern.confidence));
       directAssignments.set(`${assignment.familyKey}|${assignment.slotIndex}|${assignment.metric}`, assignment.rosterIndex);
     }
   }
 
   const finalSlotAssignments = new Map();
-  const groupedEvidence = new Map();
-  for (const [evidenceKey, score] of slotAssignmentEvidence.entries()) {
-    const [familyKey, slotIndexText, rosterIndexText] = evidenceKey.split("|");
-    const slotKey = `${familyKey}|${slotIndexText}`;
-    const list = groupedEvidence.get(slotKey) ?? [];
-    list.push({ rosterIndex: Number.parseInt(rosterIndexText, 10), score });
-    groupedEvidence.set(slotKey, list);
-  }
-  for (const [slotKey, entries] of groupedEvidence.entries()) {
-    const best = [...entries].sort((left, right) => right.score - left.score)[0];
-    if (best && best.score >= 0.2) {
-      finalSlotAssignments.set(slotKey, best.rosterIndex);
+  for (const [familyKey, familyMap] of familyAssignmentEvidence.entries()) {
+    const familyAssignments = solveFamilyAssignments(familyMap);
+    for (const [slotIndex, rosterIndex] of familyAssignments.entries()) {
+      const rosterScore = familyMap.get(slotIndex)?.get(rosterIndex) ?? 0;
+      if (rosterScore >= 0.2) {
+        finalSlotAssignments.set(`${familyKey}|${slotIndex}`, rosterIndex);
+      }
     }
   }
 

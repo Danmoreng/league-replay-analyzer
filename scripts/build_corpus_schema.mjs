@@ -16,7 +16,7 @@ function parseArgs(argv) {
     artifactRoot: "artifacts",
     corpusManifest: null,
     outputPath: null,
-    maxRankedPatterns: 32,
+    maxRankedPatterns: 128,
     minReplaySupport: 2,
     minMedianParticipants: 6,
   };
@@ -54,6 +54,19 @@ function buildPatternKey(pattern) {
   return `${pattern.familyKey}|${pattern.offset}|${pattern.decode}|${pattern.metric}`;
 }
 
+function computeRowCenter(rowBand) {
+  return (rowBand[0] + rowBand[1]) / 2;
+}
+
+function computeRowSpan(rowBand) {
+  return Math.max(0, rowBand[1] - rowBand[0]);
+}
+
+function buildAliasClusterKey(entry) {
+  const centerBucket = Math.round(computeRowCenter(entry.rowBand) / 4);
+  return `${entry.versionGroup}|${entry.metric}|${entry.rowArchetype}|c${centerBucket}`;
+}
+
 function getReplayGameVersion(runManifest, summaryJson) {
   return runManifest?.summary?.gameVersion ?? summaryJson?.gameVersion ?? "unknown";
 }
@@ -83,6 +96,78 @@ function qualifyReplayPattern(entry) {
     entry.averageNormalizedRmse <= 1.0 &&
     entry.averageValidatorScore >= 0.6
   );
+}
+
+function summarizeAliasCluster(aliasClusterKey, entries, replayCountByVersionGroup) {
+  const confidenceValues = entries.map((entry) => entry.confidence);
+  const participantValues = entries.map((entry) => entry.supportParticipants);
+  const rowValues = entries.map((entry) => entry.supportRows);
+  const correlationValues = entries.map((entry) => entry.averageCorrelation);
+  const rmseValues = entries.map((entry) => entry.averageNormalizedRmse);
+  const validatorValues = entries.map((entry) => entry.averageValidatorScore);
+  const effectiveValues = entries.map((entry) => entry.averageEffectiveScore);
+  const rowStarts = entries.map((entry) => entry.rowBand[0]);
+  const rowEnds = entries.map((entry) => entry.rowBand[1]);
+  const slopes = entries.map((entry) => entry.transform.slopeMedian).filter(Number.isFinite);
+  const intercepts = entries.map((entry) => entry.transform.interceptMedian).filter(Number.isFinite);
+  const transformSampleCount = entries.reduce((sum, entry) => sum + (entry.transform.sampleCount ?? 0), 0);
+  const familyKeys = [...new Set(entries.map((entry) => entry.familyKey))];
+  const replayIds = [...new Set(entries.map((entry) => entry.replayId))];
+  const versionGroups = [...new Set(entries.map((entry) => entry.versionGroup))];
+
+  const versionGroup = versionGroups[0] ?? "unknown";
+  const replayCount = replayCountByVersionGroup.get(versionGroup) ?? 0;
+  let heldOutEligible = 0;
+  let heldOutHits = 0;
+  if (replayCount >= 2) {
+    for (const entry of entries) {
+      const trainEntries = entries.filter((candidate) => candidate.replayId !== entry.replayId && qualifyReplayPattern(candidate));
+      if (trainEntries.length === 0) {
+        continue;
+      }
+      heldOutEligible += 1;
+      if (qualifyReplayPattern(entry)) {
+        heldOutHits += 1;
+      }
+    }
+  }
+
+  const heldOutRate = heldOutEligible > 0 ? heldOutHits / heldOutEligible : null;
+  const exemplar = [...entries].sort((left, right) => right.confidence - left.confidence)[0];
+  const confidence =
+    average(confidenceValues) *
+    (0.6 + Math.min(1, replayIds.length / 2)) *
+    (0.6 + Math.min(1, familyKeys.length / 2)) *
+    (heldOutRate == null ? 0.95 : (0.5 + heldOutRate));
+
+  return {
+    aliasClusterKey,
+    versionGroup,
+    metric: exemplar.metric,
+    metricLabel: exemplar.metricLabel,
+    rowArchetype: mode(entries.map((entry) => entry.rowArchetype)) ?? "unknown",
+    recommendedRowBand: [Math.round(median(rowStarts)), Math.round(median(rowEnds))],
+    confidence,
+    support: {
+      replays: replayIds.length,
+      replayIds,
+      families: familyKeys,
+      medianParticipants: median(participantValues),
+      medianRows: median(rowValues),
+      medianCorrelation: median(correlationValues),
+      medianNormalizedRmse: median(rmseValues),
+      medianValidatorScore: median(validatorValues),
+      medianEffectiveScore: median(effectiveValues),
+      heldOutEligible,
+      heldOutHits,
+      heldOutRate,
+    },
+    transform: {
+      slopeMedian: median(slopes),
+      interceptMedian: median(intercepts),
+      sampleCount: transformSampleCount,
+    },
+  };
 }
 
 function loadReplayEntries(artifactDir, maxRankedPatterns) {
@@ -154,7 +239,7 @@ function loadReplayEntries(artifactDir, maxRankedPatterns) {
       recommendedSlots: (pattern.rawWindowCandidates ?? [])
         .map((candidate) => candidate.slotIndex)
         .filter((value, index, array) => array.indexOf(value) === index),
-      transform: buildTransformSummary(topMatches),
+      transform: pattern.transform?.sampleCount > 0 ? pattern.transform : buildTransformSummary(topMatches),
     };
   });
 
@@ -166,7 +251,7 @@ function loadReplayEntries(artifactDir, maxRankedPatterns) {
   };
 }
 
-function summarizeGroup(patternKey, entries, replayCountByVersionGroup) {
+function summarizeGroup(patternKey, entries, replayCountByVersionGroup, aliasSupport = null) {
   const confidenceValues = entries.map((entry) => entry.confidence);
   const participantValues = entries.map((entry) => entry.supportParticipants);
   const rowValues = entries.map((entry) => entry.supportRows);
@@ -178,6 +263,7 @@ function summarizeGroup(patternKey, entries, replayCountByVersionGroup) {
   const rowEnds = entries.map((entry) => entry.rowBand[1]);
   const slopes = entries.map((entry) => entry.transform.slopeMedian).filter(Number.isFinite);
   const intercepts = entries.map((entry) => entry.transform.interceptMedian).filter(Number.isFinite);
+  const transformSampleCount = entries.reduce((sum, entry) => sum + (entry.transform.sampleCount ?? 0), 0);
   const slotCounts = new Map();
   for (const entry of entries) {
     for (const slot of entry.recommendedSlots) {
@@ -220,11 +306,19 @@ function summarizeGroup(patternKey, entries, replayCountByVersionGroup) {
     .map(([slotIndex, count]) => ({ slotIndex, replayCount: count }));
 
   const exemplar = entries[0];
-  const confidence =
+  const baseConfidence =
     average(confidenceValues) *
     (0.5 + Math.min(1, entries.length / 3)) *
     (0.5 + Math.min(1, promotedReplayCount / 2)) *
     (heldOutRate == null ? 0.9 : (0.5 + heldOutRate));
+  const aliasBoost = aliasSupport
+    ? (
+      0.9 +
+      Math.min(0.3, 0.08 * aliasSupport.support.replays) +
+      (0.1 * Math.min(1, aliasSupport.support.medianCorrelation))
+    )
+    : 1;
+  const confidence = baseConfidence * aliasBoost;
 
   return {
     patternKey,
@@ -243,8 +337,17 @@ function summarizeGroup(patternKey, entries, replayCountByVersionGroup) {
     transform: {
       slopeMedian: median(slopes),
       interceptMedian: median(intercepts),
-      sampleCount: slopes.length,
+      sampleCount: transformSampleCount,
     },
+    aliasSupport: aliasSupport
+      ? {
+        aliasClusterKey: aliasSupport.aliasClusterKey,
+        versionGroup: aliasSupport.versionGroup,
+        confidence: aliasSupport.confidence,
+        recommendedRowBand: aliasSupport.recommendedRowBand,
+        support: aliasSupport.support,
+      }
+      : null,
     support: {
       replays: entries.length,
       promotedReplays: promotedReplayCount,
@@ -281,13 +384,25 @@ function summarizeGroup(patternKey, entries, replayCountByVersionGroup) {
 }
 
 function promoteGroup(group, minReplaySupport, minMedianParticipants) {
+  const aliasSupport = group.aliasSupport?.support ?? null;
+  const crossReplaySupport = Math.max(group.support.replays, aliasSupport?.replays ?? 0);
+  const participantSupport = Math.max(group.support.medianParticipants, aliasSupport?.medianParticipants ?? 0);
+  const correlationSupport = Math.max(group.support.medianCorrelation, aliasSupport?.medianCorrelation ?? 0);
+  const rmseSupport = Math.min(group.support.medianNormalizedRmse, aliasSupport?.medianNormalizedRmse ?? Number.POSITIVE_INFINITY);
+  const validatorSupport = Math.max(group.support.medianValidatorScore, aliasSupport?.medianValidatorScore ?? 0);
+  const heldOutEligible = Math.max(group.support.heldOutEligible, aliasSupport?.heldOutEligible ?? 0);
+  const heldOutRate = aliasSupport?.heldOutRate ?? group.support.heldOutRate;
+
   return (
-    group.support.replays >= minReplaySupport &&
-    group.support.medianParticipants >= minMedianParticipants &&
-    group.support.medianCorrelation >= 0.55 &&
-    group.support.medianNormalizedRmse <= 0.9 &&
-    group.support.medianValidatorScore >= 0.7 &&
-    (group.support.heldOutEligible === 0 || group.support.heldOutRate >= 0.5) &&
+    crossReplaySupport >= minReplaySupport &&
+    participantSupport >= minMedianParticipants &&
+    group.support.medianCorrelation >= 0.5 &&
+    group.support.medianNormalizedRmse <= 1.0 &&
+    group.support.medianValidatorScore >= 0.6 &&
+    correlationSupport >= 0.55 &&
+    rmseSupport <= 0.9 &&
+    validatorSupport >= 0.7 &&
+    (heldOutEligible === 0 || heldOutRate >= 0.5) &&
     group.transform.sampleCount >= 2
   );
 }
@@ -330,16 +445,48 @@ function main() {
   }
 
   const patternGroups = new Map();
+  const aliasClusterGroups = new Map();
   for (const replayArtifact of replayArtifacts) {
     for (const entry of replayArtifact.replayEntries) {
       const list = patternGroups.get(entry.patternKey) ?? [];
       list.push(entry);
       patternGroups.set(entry.patternKey, list);
+
+      const aliasClusterKey = buildAliasClusterKey(entry);
+      const aliasList = aliasClusterGroups.get(aliasClusterKey) ?? [];
+      aliasList.push(entry);
+      aliasClusterGroups.set(aliasClusterKey, aliasList);
+    }
+  }
+
+  const aliasClusterSummaries = new Map(
+    [...aliasClusterGroups.entries()].map(([aliasClusterKey, entries]) => [
+      aliasClusterKey,
+      summarizeAliasCluster(aliasClusterKey, entries, replayCountByVersionGroup),
+    ]),
+  );
+
+  const aliasSupportByEntryKey = new Map();
+  for (const replayArtifact of replayArtifacts) {
+    for (const entry of replayArtifact.replayEntries) {
+      const aliasClusterKey = buildAliasClusterKey(entry);
+      const aliasSummary = aliasClusterSummaries.get(aliasClusterKey) ?? null;
+      aliasSupportByEntryKey.set(`${entry.replayId}|${entry.sourcePatternKey}`, aliasSummary);
     }
   }
 
   const rankedPatterns = [...patternGroups.entries()]
-    .map(([patternKey, entries]) => summarizeGroup(patternKey, entries, replayCountByVersionGroup))
+    .map(([patternKey, entries]) => {
+      const aliasCandidates = entries
+        .map((entry) => aliasSupportByEntryKey.get(`${entry.replayId}|${entry.sourcePatternKey}`))
+        .filter(Boolean);
+      const aliasSupport = aliasCandidates.sort((left, right) =>
+        right.support.replays - left.support.replays ||
+        right.support.medianCorrelation - left.support.medianCorrelation ||
+        right.confidence - left.confidence,
+      )[0] ?? null;
+      return summarizeGroup(patternKey, entries, replayCountByVersionGroup, aliasSupport);
+    })
     .sort((left, right) =>
       right.confidence - left.confidence ||
       right.support.replays - left.support.replays ||
@@ -367,6 +514,14 @@ function main() {
     versionGroups: [...replayCountByVersionGroup.entries()]
       .sort((left, right) => left[0].localeCompare(right[0]))
       .map(([versionGroup, replayCount]) => ({ versionGroup, replayCount })),
+    aliasClusters: [...aliasClusterSummaries.values()]
+      .filter((cluster) => cluster.support.replays >= 2)
+      .sort((left, right) =>
+        right.support.replays - left.support.replays ||
+        right.support.medianCorrelation - left.support.medianCorrelation ||
+        right.confidence - left.confidence,
+      )
+      .slice(0, 128),
     promotedPatterns,
     rankedPatterns: rankedPatterns.slice(0, 128),
   };

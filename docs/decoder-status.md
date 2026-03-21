@@ -22,6 +22,28 @@ The practical conclusion is unchanged but now better supported:
 - player/state decoding is currently stronger than movement decoding
 - the fastest path is still state-first, then movement later
 
+## Current Replay-Only Extraction Status
+
+The decoder now has a working offline corpus pipeline:
+
+- per-replay artifact generation
+- replay-local provisional schema inference
+- version-group alias clustering across replays
+- replay-only stat extraction
+- offline validation against Riot timeline fixtures
+
+The latest full corpus run on `2026-03-21` covered 7 local replay fixtures and produced:
+
+- `133` promoted exact corpus-backed patterns from `886` ranked exact patterns
+- `40` version-group alias clusters in `artifacts/corpus-schema.json`
+- validated replay-only `level`, `xp`, `totalGold`, and `minionsKilled` timelines across multiple replays
+
+Current best validated replay-only result:
+
+- `EUW1-7779216102`: `level` for 3 participants, `totalGold` for 2, `xp` for 1, `minionsKilled` for 1
+
+Other replays now also yield real replay-derived stat timelines, but coverage is still uneven by patch/version group.
+
 ## What Is Actually Supported
 
 ### Stable findings
@@ -43,8 +65,8 @@ The practical conclusion is unchanged but now better supported:
 
 ### What is still not proven
 
-- a stable participant-to-row mapping that survives across multiple metrics and replays
-- a fully decoded scalar field map for health/gold/xp/cs/level
+- a fully stable participant-to-row mapping that survives across all important families, metrics, and replays
+- a fully decoded scalar field map for health/gold/xp/cs/level across every supported patch group
 - champion movement extraction from the replay payload itself
 - a proven ECS handle layout or row-pointer format
 
