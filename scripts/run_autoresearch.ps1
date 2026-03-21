@@ -137,8 +137,8 @@ while ($true) {
         "--full-auto"
     }
     $command = @"
-$prompt = Get-Content -Raw -LiteralPath '$promptFileLiteral'
-$prompt | & '$codexPathLiteral' exec $modeClause --json -C '$repositoryRootLiteral' -o '$messagePathLiteral' $modelClause -
+`$promptText = Get-Content -Raw -LiteralPath '$promptFileLiteral'
+`$promptText | & '$codexPathLiteral' exec $modeClause --json -C '$repositoryRootLiteral' -o '$messagePathLiteral' $modelClause -
 "@
     $argumentList += "-NoProfile"
     $argumentList += "-Command"
