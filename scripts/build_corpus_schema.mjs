@@ -405,7 +405,7 @@ function loadBundleReplayEntries(artifactDir) {
       ? {
         slopeMedian: median(participantTransforms.map((transform) => transform.slopeMedian)),
         interceptMedian: median(participantTransforms.map((transform) => transform.interceptMedian)),
-        sampleCount: participantTransforms.reduce((sum, transform) => sum + (transform.sampleCount ?? 0), 0),
+        sampleCount: median(participantTransforms.map((transform) => transform.sampleCount ?? 0)),
       }
       : (selectedPattern.transform ?? { slopeMedian: 1, interceptMedian: 0, sampleCount: 0 });
 

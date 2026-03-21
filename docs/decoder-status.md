@@ -32,6 +32,7 @@ The decoder now has a working offline corpus pipeline:
 - replay-only stat extraction
 - offline validation against Riot timeline fixtures
 - a two-pass corpus convergence loop so `corpus-schema.json` is rebuilt again after fresh extraction and validation results exist
+- the scalar corpus loop now reaches a real fixed point again after the bundle transform-sample amplification bug was removed
 
 The latest full corpus run on `2026-03-21` covered 13 local replay fixtures and produced:
 
@@ -66,7 +67,8 @@ Important caveat:
 - `movementSpeed` from the same slab is still replay-only but not schema-promoted yet
 - bundle-family promotion now only consumes the exact extracted pattern that produced a replay metric; weak sibling bundle candidates no longer inherit validation from a stronger chosen sibling
 - extraction no longer feeds weak `bundleRankedPatterns` back into selection; only bundle-promoted corpus families and replay-local bundle recommendations affect replay-only scalar extraction
-- the remaining scalar blocker is no longer “missing signal”; it is convergence drift inside promoted bundle support details and slot-variant handling inside `61894`
+- bundle-backed transform sample counts are now bounded to replay-local evidence instead of recursively re-importing corpus-level counts
+- the remaining scalar blocker is no longer corpus convergence itself; it is slot-variant handling inside `61894` and expanding `movementSpeed`/`health` beyond the current partial wins
 
 ## Current Movement Discovery Status
 

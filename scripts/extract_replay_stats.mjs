@@ -71,6 +71,22 @@ function buildSchemaFingerprint(schema) {
   });
 }
 
+function normalizeRecordTransform(transform, seriesLength) {
+  if (!transform || typeof transform !== "object") {
+    return null;
+  }
+
+  const boundedSampleCount = Number.isFinite(transform.sampleCount)
+    ? Math.max(0, Math.min(transform.sampleCount, Math.max(0, seriesLength)))
+    : 0;
+
+  return {
+    slopeMedian: Number.isFinite(transform.slopeMedian) ? transform.slopeMedian : 1,
+    interceptMedian: Number.isFinite(transform.interceptMedian) ? transform.interceptMedian : 0,
+    sampleCount: boundedSampleCount,
+  };
+}
+
 function scoreMetricValue(metricKey, expected, actual) {
   if (!Number.isFinite(expected) || !Number.isFinite(actual)) {
     return 0;
@@ -1841,7 +1857,7 @@ function main() {
       slotIndex: refinedCandidate.slotIndex,
       source: refinedCandidate.pattern.source,
       confidence: refinedCandidate.pattern.confidence,
-      transform: refinedCandidate.transform ?? null,
+      transform: normalizeRecordTransform(refinedCandidate.transform, refinedCandidate.series.length),
       transformLabel: refinedCandidate.transformLabel,
       plausibilityScore: refinedCandidate.plausibilityScore,
       siblingAnchorScore: acceptedSiblingAnchor?.compatibility?.score ?? null,

@@ -15,6 +15,7 @@
     "build:wasm": "pwsh -File ./scripts/build-wasm.ps1",
     "build:provisional-schema": "node ./scripts/build_provisional_schema.mjs",
     "build:corpus-schema": "node ./scripts/build_corpus_schema.mjs",
+    "inspect:runtime-schema-drift": "node ./scripts/inspect_runtime_schema_drift.mjs",
     "discover:scalar-metric": "node ./scripts/discover_scalar_metric_candidates.mjs",
     "discover:scalar-metric-sweep": "node ./scripts/sweep_scalar_metric_discovery.mjs",
     "inspect:scalar-metric": "node ./scripts/inspect_scalar_metric_candidate.mjs",
