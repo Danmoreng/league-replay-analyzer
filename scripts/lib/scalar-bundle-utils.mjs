@@ -23,6 +23,11 @@ export const volatileBundleMetricKeys = new Set([
   "powerMax",
 ]);
 
+const exactLocalBundleOverrideMetricKeys = new Set([
+  ...volatileBundleMetricKeys,
+  "movementSpeed",
+]);
+
 export function siblingAnchorMetric(metricKey) {
   switch (metricKey) {
     case "health":
@@ -680,7 +685,8 @@ export function buildBundleRecommendedPatterns(artifactDir, runManifest, summary
 
         const localOverrideOptions = localRankedPatterns
           .filter((pattern) => pattern.familyKey === descriptor.familyKey && pattern.metric === metricRecommendation.metric);
-        const candidateOverrideOptions = volatileBundleMetricKeys.has(metricRecommendation.metric) && localOverrideOptions.length > 0
+        const requiresExactLocalOverride = exactLocalBundleOverrideMetricKeys.has(metricRecommendation.metric);
+        const candidateOverrideOptions = requiresExactLocalOverride && localOverrideOptions.length > 0
           ? []
           : buildCandidateMatchOverrideOptions(candidateMatches, descriptor.familyKey, metricRecommendation.metric);
         const overrideOptions = [
@@ -696,17 +702,17 @@ export function buildBundleRecommendedPatterns(artifactDir, runManifest, summary
             right.overrideScore - left.overrideScore ||
             (right.pattern.confidence ?? 0) - (left.pattern.confidence ?? 0)
           )[0]?.pattern ?? null;
-        const minimumOverrideScore = volatileBundleMetricKeys.has(metricRecommendation.metric) ? 0.34 : 0.28;
+        const minimumOverrideScore = requiresExactLocalOverride ? 0.34 : 0.28;
         const acceptedLocalOverride = localOverride &&
           scoreLocalOverrideMatch(localOverride, descriptor, supportAnchor) >= minimumOverrideScore &&
           (
-            !volatileBundleMetricKeys.has(metricRecommendation.metric) ||
+            !requiresExactLocalOverride ||
             (localOverride.transform?.sampleCount ?? 0) >= 4
           )
           ? localOverride
           : null;
 
-        if (volatileBundleMetricKeys.has(metricRecommendation.metric) && !acceptedLocalOverride) {
+        if (requiresExactLocalOverride && !acceptedLocalOverride) {
           continue;
         }
 
