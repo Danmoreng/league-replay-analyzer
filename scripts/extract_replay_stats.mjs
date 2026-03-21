@@ -19,6 +19,7 @@ import {
   bundleSupportMetricKeys as bundleSupportMetricKeysFromUtils,
   evaluateSiblingAnchorCompatibility,
   isBundleSlotTrusted as isBundleSlotTrustedBySupport,
+  resolveLayoutSlotCluster,
   siblingAnchorMetric,
   volatileBundleMetricKeys,
 } from "./lib/scalar-bundle-utils.mjs";
@@ -651,6 +652,104 @@ function applyFamilyLayoutPrior(pattern, familyLayout) {
     recommendedRowBand,
     selectionScore,
   };
+}
+
+function buildResolvedClusterSlots(pattern, cluster, observedSlots) {
+  const clusterBand = Array.isArray(cluster?.slotBand) ? cluster.slotBand : null;
+  const normalizedObservedSlots = uniqueSortedNumbers(observedSlots ?? []);
+  const inBandObservedSlots = clusterBand
+    ? normalizedObservedSlots.filter((slotIndex) => slotIndex >= clusterBand[0] && slotIndex <= clusterBand[1])
+    : normalizedObservedSlots;
+  if (inBandObservedSlots.length > 0) {
+    return inBandObservedSlots.map((slotIndex) => ({ slotIndex, replayCount: 1 }));
+  }
+
+  const existingSlots = uniqueSortedNumbers(
+    (pattern.recommendedSlots ?? [])
+      .map((slot) => slot.slotIndex)
+      .filter(Number.isFinite),
+  );
+  const inBandExistingSlots = clusterBand
+    ? existingSlots.filter((slotIndex) => slotIndex >= clusterBand[0] && slotIndex <= clusterBand[1])
+    : existingSlots;
+  if (inBandExistingSlots.length > 0) {
+    return inBandExistingSlots.map((slotIndex) => ({ slotIndex, replayCount: 1 }));
+  }
+
+  const clusterSlots = uniqueSortedNumbers(cluster?.slots ?? []);
+  if (clusterSlots.length > 0) {
+    return clusterSlots.map((slotIndex) => ({ slotIndex, replayCount: 1 }));
+  }
+
+  return pattern.recommendedSlots ?? [];
+}
+
+function resolveSelectedPatternSlotClusters(selectedPatterns, participantOutputs, familyLayouts) {
+  const resolvedPatterns = selectedPatterns.map((pattern) => {
+    if (pattern.source !== "bundle-recommended" && pattern.source !== "bundle-promoted") {
+      return pattern;
+    }
+
+    const familyLayout = familyLayouts.get(pattern.familyKey);
+    if (!familyLayout) {
+      return pattern;
+    }
+
+    const participantMetricRecords = participantOutputs
+      .map((participant) => participant.metrics?.[pattern.metric] ?? null)
+      .filter((record) =>
+        record &&
+        record.patternKey === pattern.patternKey &&
+        record.familyKey === pattern.familyKey &&
+        Number.isFinite(record.slotIndex),
+      );
+
+    const slotCounts = new Map();
+    for (const record of participantMetricRecords) {
+      slotCounts.set(record.slotIndex, (slotCounts.get(record.slotIndex) ?? 0) + 1);
+    }
+    const dominantSlot = [...slotCounts.entries()]
+      .sort((left, right) => right[1] - left[1] || left[0] - right[0])[0]?.[0] ?? null;
+    const observedSlots = uniqueSortedNumbers(participantMetricRecords.map((record) => record.slotIndex));
+    const cluster = resolveLayoutSlotCluster(familyLayout, {
+      metric: pattern.metric,
+      dominantSlot,
+      recommendedSlots: observedSlots.length > 0
+        ? observedSlots
+        : (pattern.recommendedSlots ?? []).map((slot) => slot.slotIndex).filter(Number.isFinite),
+      rowBand: pattern.recommendedRowBand ?? null,
+      slotClusterKey: pattern.slotClusterKey ?? null,
+      slotClusterCenter: pattern.slotClusterCenter ?? null,
+      slotClusterBand: pattern.slotClusterBand ?? null,
+    });
+    if (!cluster) {
+      return pattern;
+    }
+
+    return {
+      ...pattern,
+      recommendedRowBand: cluster.slotBand ?? pattern.recommendedRowBand,
+      recommendedSlots: buildResolvedClusterSlots(pattern, cluster, observedSlots),
+      slotClusterKey: cluster.key,
+      slotClusterCenter: cluster.center,
+      slotClusterBand: cluster.slotBand ?? null,
+    };
+  });
+
+  const resolvedPatternByKey = new Map(resolvedPatterns.map((pattern) => [pattern.patternKey, pattern]));
+  for (const participant of participantOutputs) {
+    for (const record of Object.values(participant.metrics ?? {})) {
+      const resolvedPattern = resolvedPatternByKey.get(record?.patternKey);
+      if (!resolvedPattern) {
+        continue;
+      }
+      record.slotClusterKey = resolvedPattern.slotClusterKey ?? null;
+      record.slotClusterCenter = resolvedPattern.slotClusterCenter ?? null;
+      record.slotClusterBand = resolvedPattern.slotClusterBand ?? null;
+    }
+  }
+
+  return resolvedPatterns;
 }
 
 function normalizePattern(pattern, candidateMatches, source) {
@@ -1969,6 +2068,9 @@ function main() {
       variantAnchorScore: acceptedVariantAnchor?.score ?? null,
       familyAnchorScore: acceptedFamilyAnchor?.score ?? acceptedCrossFamilyAnchor?.score ?? null,
       finalValue: refinedCandidate.finalValue,
+      slotClusterKey: refinedCandidate.pattern.slotClusterKey ?? null,
+      slotClusterCenter: refinedCandidate.pattern.slotClusterCenter ?? null,
+      slotClusterBand: refinedCandidate.pattern.slotClusterBand ?? null,
       timeline: refinedCandidate.series.map((point) => ({
         timestamp: point.timestamp,
         value: point.value,
@@ -1979,6 +2081,8 @@ function main() {
       participantOutput.metrics[refinedCandidate.metric] = record;
     }
   }
+
+  const resolvedPatterns = resolveSelectedPatternSlotClusters(orderedPatterns, participantOutputs, familyLayouts);
 
   const extractedStats = {
     replayId: runManifest.replayId,
@@ -1995,7 +2099,7 @@ function main() {
       riotIdTagLine: entry.riotIdTagLine,
       finalMetrics: entry.finalMetrics,
     })),
-    selectedPatterns: orderedPatterns.map((pattern) => ({
+    selectedPatterns: resolvedPatterns.map((pattern) => ({
       patternKey: pattern.patternKey,
       familyKey: pattern.familyKey,
       metric: pattern.metric,
