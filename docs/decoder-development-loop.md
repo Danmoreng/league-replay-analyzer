@@ -349,6 +349,15 @@ Current 2026-03-21 baseline from the local 7-replay corpus:
 - `EUW1-7617298409` now also yields a validated replay-only `Corki` bottom path
 - newer `16.1` movement families still need stronger filtering and identity priors before they can be treated as reliable
 
+Current 2026-03-21 expanded baseline from the 13-replay corpus:
+
+- the corpus now includes a 6-replay `16.6` cohort
+- exact corpus-backed scalar patterns increased to `258`
+- movement coordinate priors now include family-aware and family-band layers, not just decode signatures
+- `EUN1-3926600040` now yields `2 / 2` passing replay-only labelled movement tracks
+- `EUW1-7678536418` now yields `1 / 4` passing replay-only labelled movement tracks, with `Belveth` jungle passing from `61733 / 0x00`
+- `EUW1-7617298409` improved from `1 / 3` to `1 / 2` passing labelled movement tracks after stronger filtering
+
 ### 4. Movement discovery runner
 
 Use the same corpus runner, `scripts/run_decoder_corpus.ps1`, for movement discovery as well. It now additionally:

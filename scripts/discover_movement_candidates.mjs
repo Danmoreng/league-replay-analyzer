@@ -7,6 +7,7 @@ import {
   fitAffine1D,
   interpolate,
   median,
+  parseVersionGroup,
   pearsonCorrelation,
   readJson,
   resolveAbsolute,
@@ -219,6 +220,22 @@ function buildCoordinateSignature(mapping, leftField, rightField) {
   return `${mapping}|${leftField.decodeLabel}|${rightField.decodeLabel}`;
 }
 
+function buildFamilyCoordinateSignature(versionGroup, familyKey, mapping, leftField, rightField) {
+  return `${versionGroup}|${familyKey}|${buildCoordinateSignature(mapping, leftField, rightField)}`;
+}
+
+function buildFamilyCoordinateMapping(versionGroup, familyKey, mapping) {
+  return `${versionGroup}|${familyKey}|${mapping}`;
+}
+
+function buildFamilyBandMapping(versionGroup, pairCandidate, mapping) {
+  const lengthBand = Math.floor((pairCandidate.familyLength ?? 0) / 1024);
+  const firstByte = Number.isFinite(pairCandidate.familyFirstByte)
+    ? pairCandidate.familyFirstByte.toString(16).toUpperCase().padStart(2, "0")
+    : "??";
+  return `${versionGroup}|0x${firstByte}|${lengthBand}k|${mapping}`;
+}
+
 function scoreTransformAxis(fittedSlope, fittedIntercept, priorAxis) {
   if (!priorAxis || !Number.isFinite(priorAxis.slopeMedian) || !Number.isFinite(priorAxis.interceptMedian)) {
     return 1;
@@ -233,27 +250,119 @@ function scoreTransformAxis(fittedSlope, fittedIntercept, priorAxis) {
   return Math.max(0, Math.min(1, Math.sqrt(slopeScore * interceptScore)));
 }
 
-function scoreCoordinateModel(mapping, pairCandidate, fitX, fitY, coordinateModel) {
-  if (!coordinateModel?.signatures) {
-    return { signatureKey: null, support: 0, score: 1 };
+function scoreSingleCoordinatePrior(fitX, fitY, prior) {
+  const xScore = scoreTransformAxis(fitX.slope, fitX.intercept, prior.transformX);
+  const yScore = scoreTransformAxis(fitY.slope, fitY.intercept, prior.transformY);
+  return Math.sqrt(xScore * yScore);
+}
+
+function scoreCoordinateModel(versionGroup, mapping, pairCandidate, fitX, fitY, coordinateModel) {
+  if (!coordinateModel) {
+    return {
+      signatureKey: null,
+      familySignatureKey: null,
+      familyMappingKey: null,
+      support: 0,
+      replaySupport: 0,
+      score: 1,
+      source: null,
+    };
   }
 
   const signatureKey = buildCoordinateSignature(mapping, pairCandidate.left, pairCandidate.right);
-  const prior = coordinateModel.signatures[signatureKey];
-  if (!prior || (prior.support ?? 0) < 1) {
-    return { signatureKey, support: 0, score: 1 };
+  const familySignatureKey = buildFamilyCoordinateSignature(
+    versionGroup,
+    pairCandidate.familyKey,
+    mapping,
+    pairCandidate.left,
+    pairCandidate.right,
+  );
+  const familyMappingKey = buildFamilyCoordinateMapping(versionGroup, pairCandidate.familyKey, mapping);
+  const familyBandKey = buildFamilyBandMapping(versionGroup, pairCandidate, mapping);
+
+  const familySignaturePrior = coordinateModel.familySignatures?.[familySignatureKey] ?? null;
+  const familyMappingPrior = coordinateModel.familyMappings?.[familyMappingKey] ?? null;
+  const familyBandPrior = coordinateModel.familyBands?.[familyBandKey] ?? null;
+  const signaturePrior = coordinateModel.signatures?.[signatureKey] ?? null;
+
+  const scoredPriors = [];
+  if ((familySignaturePrior?.replayCount ?? 0) >= 1) {
+    scoredPriors.push({
+      source: "family_signature",
+      key: familySignatureKey,
+      support: familySignaturePrior.support ?? 0,
+      replaySupport: familySignaturePrior.replayCount ?? 0,
+      score: scoreSingleCoordinatePrior(fitX, fitY, familySignaturePrior),
+      weight: 0.55,
+    });
+  }
+  if ((familyMappingPrior?.replayCount ?? 0) >= 1) {
+    scoredPriors.push({
+      source: "family_mapping",
+      key: familyMappingKey,
+      support: familyMappingPrior.support ?? 0,
+      replaySupport: familyMappingPrior.replayCount ?? 0,
+      score: scoreSingleCoordinatePrior(fitX, fitY, familyMappingPrior),
+      weight: 0.3,
+    });
+  }
+  if ((familyBandPrior?.replayCount ?? 0) >= 1) {
+    scoredPriors.push({
+      source: "family_band",
+      key: familyBandKey,
+      support: familyBandPrior.support ?? 0,
+      replaySupport: familyBandPrior.replayCount ?? 0,
+      score: scoreSingleCoordinatePrior(fitX, fitY, familyBandPrior),
+      weight: 0.2,
+    });
+  }
+  if ((signaturePrior?.replayCount ?? 0) >= 1) {
+    scoredPriors.push({
+      source: "signature",
+      key: signatureKey,
+      support: signaturePrior.support ?? 0,
+      replaySupport: signaturePrior.replayCount ?? 0,
+      score: scoreSingleCoordinatePrior(fitX, fitY, signaturePrior),
+      weight: 0.15,
+    });
   }
 
-  const xScore = scoreTransformAxis(fitX.slope, fitX.intercept, prior.transformX);
-  const yScore = scoreTransformAxis(fitY.slope, fitY.intercept, prior.transformY);
+  if (!scoredPriors.length) {
+    return {
+      signatureKey,
+      familySignatureKey,
+      familyMappingKey,
+      familyBandKey,
+      support: 0,
+      replaySupport: 0,
+      score: 1,
+      source: null,
+    };
+  }
+
+  const totalWeight = scoredPriors.reduce((sum, prior) => sum + prior.weight, 0);
+  const weightedScore = scoredPriors.reduce((sum, prior) => sum + (prior.score * prior.weight), 0) / totalWeight;
+  const strongestPrior = scoredPriors
+    .slice()
+    .sort((left, right) =>
+      right.replaySupport - left.replaySupport
+      || right.weight - left.weight
+      || right.score - left.score,
+    )[0];
+
   return {
     signatureKey,
-    support: prior.support ?? 0,
-    score: Math.sqrt(xScore * yScore),
+    familySignatureKey,
+    familyMappingKey,
+    familyBandKey,
+    support: strongestPrior.support,
+    replaySupport: strongestPrior.replaySupport,
+    score: weightedScore,
+    source: strongestPrior.source,
   };
 }
 
-function evaluateMapping(pairCandidate, targetSeries, mapping, coordinateModel) {
+function evaluateMapping(pairCandidate, targetSeries, mapping, coordinateModel, versionGroup) {
   const rawXValues = [];
   const rawYValues = [];
   const targetXValues = [];
@@ -287,7 +396,7 @@ function evaluateMapping(pairCandidate, targetSeries, mapping, coordinateModel) 
   if (!Number.isFinite(fitX.rmse) || !Number.isFinite(fitY.rmse)) {
     return null;
   }
-  const coordinateModelScore = scoreCoordinateModel(mapping, pairCandidate, fitX, fitY, coordinateModel);
+  const coordinateModelScore = scoreCoordinateModel(versionGroup, mapping, pairCandidate, fitX, fitY, coordinateModel);
 
   const predictedPoints = rawXValues.map((rawX, index) => ({
     timestamp: pairCandidate.points[index].timestamp,
@@ -342,7 +451,13 @@ function evaluateMapping(pairCandidate, targetSeries, mapping, coordinateModel) 
   if (speedRatio < 0.75) {
     validatorScore *= clamp(speedRatio / 0.75, 0, 1);
   }
-  if ((coordinateModelScore.support ?? 0) >= 2 && coordinateModelScore.score < 0.45) {
+  if (coordinateModelScore.source === "family_signature" && (coordinateModelScore.replaySupport ?? 0) >= 2 && coordinateModelScore.score < 0.5) {
+    validatorScore *= clamp(coordinateModelScore.score / 0.5, 0, 1);
+  } else if (coordinateModelScore.source === "family_mapping" && (coordinateModelScore.replaySupport ?? 0) >= 3 && coordinateModelScore.score < 0.45) {
+    validatorScore *= clamp(coordinateModelScore.score / 0.45, 0, 1);
+  } else if (coordinateModelScore.source === "family_band" && (coordinateModelScore.replaySupport ?? 0) >= 2 && coordinateModelScore.score < 0.4) {
+    validatorScore *= clamp(coordinateModelScore.score / 0.4, 0, 1);
+  } else if ((coordinateModelScore.replaySupport ?? 0) >= 2 && coordinateModelScore.score < 0.45) {
     validatorScore *= clamp(coordinateModelScore.score / 0.45, 0, 1);
   }
 
@@ -365,7 +480,12 @@ function evaluateMapping(pairCandidate, targetSeries, mapping, coordinateModel) 
     speedRatio,
     coordinateModelSignature: coordinateModelScore.signatureKey,
     coordinateModelSupport: coordinateModelScore.support,
+    coordinateModelReplaySupport: coordinateModelScore.replaySupport,
     coordinateModelScore: coordinateModelScore.score,
+    coordinateModelSource: coordinateModelScore.source,
+    coordinateModelFamilySignature: coordinateModelScore.familySignatureKey,
+    coordinateModelFamilyMapping: coordinateModelScore.familyMappingKey,
+    coordinateModelFamilyBand: coordinateModelScore.familyBandKey,
     validatorScore,
     effectiveScore,
     transformX: {
@@ -387,9 +507,9 @@ function evaluateMapping(pairCandidate, targetSeries, mapping, coordinateModel) 
   };
 }
 
-function comparePairToParticipant(pairCandidate, participant, targetSeries, coordinateModel) {
-  const normal = evaluateMapping(pairCandidate, targetSeries, "normal", coordinateModel);
-  const swapped = evaluateMapping(pairCandidate, targetSeries, "swapped", coordinateModel);
+function comparePairToParticipant(pairCandidate, participant, targetSeries, coordinateModel, versionGroup) {
+  const normal = evaluateMapping(pairCandidate, targetSeries, "normal", coordinateModel, versionGroup);
+  const swapped = evaluateMapping(pairCandidate, targetSeries, "swapped", coordinateModel, versionGroup);
   const best = [normal, swapped]
     .filter(Boolean)
     .sort((left, right) => right.effectiveScore - left.effectiveScore)[0];
@@ -422,7 +542,12 @@ function comparePairToParticipant(pairCandidate, participant, targetSeries, coor
     speedRatio: best.speedRatio,
     coordinateModelSignature: best.coordinateModelSignature,
     coordinateModelSupport: best.coordinateModelSupport,
+    coordinateModelReplaySupport: best.coordinateModelReplaySupport,
     coordinateModelScore: best.coordinateModelScore,
+    coordinateModelSource: best.coordinateModelSource,
+    coordinateModelFamilySignature: best.coordinateModelFamilySignature,
+    coordinateModelFamilyMapping: best.coordinateModelFamilyMapping,
+    coordinateModelFamilyBand: best.coordinateModelFamilyBand,
     validatorScore: best.validatorScore,
     effectiveScore: best.effectiveScore,
     transformX: best.transformX,
@@ -623,6 +748,9 @@ function main() {
 
   const runManifest = readJson(runManifestPath);
   const replayId = runManifest.replayId;
+  const summaryPath = path.join(artifactDir, "summary.json");
+  const summary = fs.existsSync(summaryPath) ? readJson(summaryPath) : null;
+  const versionGroup = parseVersionGroup(summary?.gameVersion ?? null);
   const inferredFixtureDir = path.join(repoRoot, "replays", "api", replayId.replace(/-/g, "_"));
   const fixtureDir = args.fixtureDir ? resolveAbsolute(repoRoot, args.fixtureDir) : inferredFixtureDir;
   const matchPath = path.join(fixtureDir, "match.json");
@@ -661,7 +789,7 @@ function main() {
           if (targetSeries.length < args.minOverlap) {
             continue;
           }
-          const match = comparePairToParticipant(pairCandidate, participant, buildMovementTargets(targetSeries), coordinateModel);
+          const match = comparePairToParticipant(pairCandidate, participant, buildMovementTargets(targetSeries), coordinateModel, versionGroup);
           if (match) {
             allMatches.push(match);
           }

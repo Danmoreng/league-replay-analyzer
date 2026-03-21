@@ -59,7 +59,11 @@ The current movement pipeline:
 - scores pairs by axis correlation, path correlation, map-bounds ratio, and distance error
 - promotes replay-local movement patterns only when the same pair recurs across multiple rows
 - emits anonymous replay-derived trajectories into `artifacts/<replay-id>/extracted-movement.json`
-- learns a decode-signature movement coordinate prior in `artifacts/movement-coordinate-model.json`
+- learns movement coordinate priors in `artifacts/movement-coordinate-model.json` at several levels:
+  - decode signature
+  - version-group family signature
+  - version-group family mapping
+  - version-group family band
 - learns corpus-backed movement identity priors into `artifacts/movement-identity-priors.json`
 - assigns extracted trajectories to participants replay-only into `artifacts/<replay-id>/participant-movement.json`
 - validates those participant-labelled tracks in `artifacts/<replay-id>/assigned-movement-validation-report.json`
@@ -80,24 +84,28 @@ The strongest current pattern is version-sensitive and appears to live in the ma
 Replay-only movement identity is now partially working, but still patch-fragile:
 
 - `EUW1-7596231295`: `2 / 2` participant-labelled movement assignments passed validation
-- `EUW1-7617298409`: `1 / 3` participant-labelled movement assignments passed validation
+- `EUW1-7617298409`: `1 / 2` participant-labelled movement assignments passed validation after stronger family-aware filtering
+- `EUN1-3926600040`: `2 / 2` participant-labelled movement assignments now pass validation on `16.6`
 - `EUW1-7596620123`: one near-pass (`Khazix`, normalized RMSE about `0.205`) but no passing assignments under the current threshold
-- `EUW1-7678536418` and newer replays still produce trajectories, but participant-labelled validation is currently poor
+- `EUW1-7678536418`: `1 / 4` participant-labelled movement assignments now passes on `16.1` (`Belveth` jungle, family `61733 / 0x00`)
 
 Current best replay-only movement examples:
 
 - `EUW1-7596231295`: `FiddleSticks` jungle and `Jinx` bottom from family `17068 / 0xF1`
 - `EUW1-7617298409`: `Corki` bottom from family `61737 / 0x00`
+- `EUN1-3926600040`: `Zaahen` middle from `29298 / 0x72` and `Diana` jungle from `51483 / 0xF1`
 
-The new coordinate-model audit is now in place, but it is still early:
+The coordinate-model audit is now materially more useful:
 
-- current model support is only `4` decode signatures
-- it is being used as a soft scoring prior during movement discovery
-- current support is enough to preserve good `15.22` and `15.23` fits, but not yet enough to cleanly fix weak `16.1` candidates
+- the model now includes family-aware and family-band priors in addition to plain decode signatures
+- the latest full run reduced noisy candidate counts on `15.23`, `16.1`, and `16.6` movement families
+- it improved `EUN1-3926600040` from `1 / 1` passing movement assignment to `2 / 2`
+- it also improved `EUW1-7678536418` from `0 / 5` passing movement assignments to `1 / 4`
 
 That is meaningful progress, but it is still not a final movement schema. The main remaining problems are:
 
-- newer `16.1` candidates still mix good trajectory shapes with weak participant identity
+- newer `16.6` replays still need cross-replay family support beyond a single strong replay before movement priors can become hard constraints
+- `16.1` candidates still mix good trajectory shapes with weak participant identity outside the best `61733 / 0x00` slots
 - some extracted tracks are still only partially champion-like even after outlier filtering
 - version-group movement priors are helping, but they are not yet strong enough to stabilize all role assignments
 

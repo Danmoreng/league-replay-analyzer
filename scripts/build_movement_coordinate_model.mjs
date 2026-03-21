@@ -74,11 +74,46 @@ function buildSignatureKey(pattern) {
   return `${pattern.mapping}|${pattern.xField.decode}|${pattern.yField.decode}`;
 }
 
+function buildFamilySignatureKey(versionGroup, pattern) {
+  return `${versionGroup}|${pattern.familyKey}|${buildSignatureKey(pattern)}`;
+}
+
+function buildFamilyMappingKey(versionGroup, pattern) {
+  return `${versionGroup}|${pattern.familyKey}|${pattern.mapping}`;
+}
+
+function buildFamilyBandKey(versionGroup, pattern) {
+  const lengthBand = Math.floor((pattern.familyLength ?? 0) / 1024);
+  const firstByte = Number.isFinite(pattern.familyFirstByte)
+    ? pattern.familyFirstByte.toString(16).toUpperCase().padStart(2, "0")
+    : "??";
+  return `${versionGroup}|0x${firstByte}|${lengthBand}k|${pattern.mapping}`;
+}
+
+function includeSchemaPattern(pattern) {
+  const support = pattern?.support ?? {};
+  if ((support.rows ?? 0) < 2 || (support.participants ?? 0) < 4) {
+    return false;
+  }
+  if (!Number.isFinite(support.avgAxisCorrelation) || support.avgAxisCorrelation < 0.5) {
+    return false;
+  }
+  if (!Number.isFinite(support.avgNormalizedDistanceRmse) || support.avgNormalizedDistanceRmse > 0.24) {
+    return false;
+  }
+  if (!Number.isFinite(support.avgValidatorScore) || support.avgValidatorScore < 0.7) {
+    return false;
+  }
+  return true;
+}
+
 function summarizeBucket(entries) {
   const xSlopes = entries.map((entry) => entry.transformX.slopeMedian).filter(Number.isFinite);
   const xIntercepts = entries.map((entry) => entry.transformX.interceptMedian).filter(Number.isFinite);
   const ySlopes = entries.map((entry) => entry.transformY.slopeMedian).filter(Number.isFinite);
   const yIntercepts = entries.map((entry) => entry.transformY.interceptMedian).filter(Number.isFinite);
+  const replayCount = new Set(entries.map((entry) => entry.replayId)).size;
+  const familyCount = new Set(entries.map((entry) => entry.familyKey)).size;
 
   const xSlopeMedian = median(xSlopes);
   const xInterceptMedian = median(xIntercepts);
@@ -87,8 +122,11 @@ function summarizeBucket(entries) {
 
   return {
     support: entries.length,
+    replayCount,
+    familyCount,
     passingCount: entries.filter((entry) => entry.label === "passing").length,
     nearPassingCount: entries.filter((entry) => entry.label === "near_passing").length,
+    schemaCandidateCount: entries.filter((entry) => entry.label === "schema_candidate").length,
     transformX: {
       slopeMedian: xSlopeMedian,
       slopeMad: medianAbsoluteDeviation(xSlopes, xSlopeMedian),
@@ -104,13 +142,14 @@ function summarizeBucket(entries) {
     examples: entries.slice(0, 12).map((entry) => ({
       replayId: entry.replayId,
       versionGroup: entry.versionGroup,
-      familyKey: entry.familyKey,
-      patternKey: entry.patternKey,
-      champion: entry.champion,
-      label: entry.label,
-      averageAxisCorrelation: entry.averageAxisCorrelation,
-      normalizedDistanceRmse: entry.normalizedDistanceRmse,
-      pathCorrelation: entry.pathCorrelation,
+        familyKey: entry.familyKey,
+        patternKey: entry.patternKey,
+        champion: entry.champion,
+        label: entry.label,
+        source: entry.source,
+        averageAxisCorrelation: entry.averageAxisCorrelation,
+        normalizedDistanceRmse: entry.normalizedDistanceRmse,
+        pathCorrelation: entry.pathCorrelation,
     })),
   };
 }
@@ -140,6 +179,9 @@ function main() {
     };
 
   const buckets = new Map();
+  const familySignatureBuckets = new Map();
+  const familyMappingBuckets = new Map();
+  const familyBandBuckets = new Map();
   for (const replay of manifest.processed ?? []) {
     const artifactDir = replay.artifactDir ? resolveAbsolute(repoRoot, replay.artifactDir) : path.join(artifactRoot, replay.replayId);
     const summaryPath = path.join(artifactDir, "summary.json");
@@ -179,21 +221,79 @@ function main() {
       }
 
       const signatureKey = buildSignatureKey(pattern);
-      const list = buckets.get(signatureKey) ?? [];
-      list.push({
+      const entry = {
         replayId: replay.replayId,
         versionGroup,
         familyKey: pattern.familyKey,
         patternKey: pattern.patternKey,
         champion: assignment.champion,
         label,
+        source: "assigned_validation",
         averageAxisCorrelation: validatedAssignment.validation.averageAxisCorrelation,
         normalizedDistanceRmse: validatedAssignment.validation.normalizedDistanceRmse,
         pathCorrelation: validatedAssignment.validation.pathCorrelation,
         transformX: pattern.transformX,
         transformY: pattern.transformY,
-      });
+      };
+      const list = buckets.get(signatureKey) ?? [];
+      list.push(entry);
       buckets.set(signatureKey, list);
+
+      const familySignatureKey = buildFamilySignatureKey(versionGroup, pattern);
+      const familySignatureList = familySignatureBuckets.get(familySignatureKey) ?? [];
+      familySignatureList.push(entry);
+      familySignatureBuckets.set(familySignatureKey, familySignatureList);
+
+      const familyMappingKey = buildFamilyMappingKey(versionGroup, pattern);
+      const familyMappingList = familyMappingBuckets.get(familyMappingKey) ?? [];
+      familyMappingList.push(entry);
+      familyMappingBuckets.set(familyMappingKey, familyMappingList);
+
+      const familyBandKey = buildFamilyBandKey(versionGroup, pattern);
+      const familyBandList = familyBandBuckets.get(familyBandKey) ?? [];
+      familyBandList.push(entry);
+      familyBandBuckets.set(familyBandKey, familyBandList);
+    }
+
+    for (const pattern of movementSchema.promotedPatterns ?? []) {
+      if (!includeSchemaPattern(pattern)) {
+        continue;
+      }
+
+      const entry = {
+        replayId: replay.replayId,
+        versionGroup,
+        familyKey: pattern.familyKey,
+        patternKey: pattern.patternKey,
+        champion: null,
+        label: "schema_candidate",
+        source: "movement_schema",
+        averageAxisCorrelation: pattern.support.avgAxisCorrelation,
+        normalizedDistanceRmse: pattern.support.avgNormalizedDistanceRmse,
+        pathCorrelation: pattern.support.avgPathCorrelation,
+        transformX: pattern.transformX,
+        transformY: pattern.transformY,
+      };
+
+      const signatureKey = buildSignatureKey(pattern);
+      const list = buckets.get(signatureKey) ?? [];
+      list.push(entry);
+      buckets.set(signatureKey, list);
+
+      const familySignatureKey = buildFamilySignatureKey(versionGroup, pattern);
+      const familySignatureList = familySignatureBuckets.get(familySignatureKey) ?? [];
+      familySignatureList.push(entry);
+      familySignatureBuckets.set(familySignatureKey, familySignatureList);
+
+      const familyMappingKey = buildFamilyMappingKey(versionGroup, pattern);
+      const familyMappingList = familyMappingBuckets.get(familyMappingKey) ?? [];
+      familyMappingList.push(entry);
+      familyMappingBuckets.set(familyMappingKey, familyMappingList);
+
+      const familyBandKey = buildFamilyBandKey(versionGroup, pattern);
+      const familyBandList = familyBandBuckets.get(familyBandKey) ?? [];
+      familyBandList.push(entry);
+      familyBandBuckets.set(familyBandKey, familyBandList);
     }
   }
 
@@ -202,11 +302,32 @@ function main() {
       .sort((left, right) => right[1].length - left[1].length || left[0].localeCompare(right[0]))
       .map(([key, entries]) => [key, summarizeBucket(entries)]),
   );
+  const familySignatures = Object.fromEntries(
+    [...familySignatureBuckets.entries()]
+      .sort((left, right) => right[1].length - left[1].length || left[0].localeCompare(right[0]))
+      .map(([key, entries]) => [key, summarizeBucket(entries)]),
+  );
+  const familyMappings = Object.fromEntries(
+    [...familyMappingBuckets.entries()]
+      .sort((left, right) => right[1].length - left[1].length || left[0].localeCompare(right[0]))
+      .map(([key, entries]) => [key, summarizeBucket(entries)]),
+  );
+  const familyBands = Object.fromEntries(
+    [...familyBandBuckets.entries()]
+      .sort((left, right) => right[1].length - left[1].length || left[0].localeCompare(right[0]))
+      .map(([key, entries]) => [key, summarizeBucket(entries)]),
+  );
 
   const model = {
     generatedAtUtc: new Date().toISOString(),
     signatureCount: Object.keys(signatures).length,
+    familySignatureCount: Object.keys(familySignatures).length,
+    familyMappingCount: Object.keys(familyMappings).length,
+    familyBandCount: Object.keys(familyBands).length,
     signatures,
+    familySignatures,
+    familyMappings,
+    familyBands,
   };
 
   writeJson(outputPath, model);
