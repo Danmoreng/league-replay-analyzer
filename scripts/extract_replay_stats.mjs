@@ -4,9 +4,11 @@ import path from "path";
 import {
   buildFieldIndex,
   buildSummaryRoster,
+  clamp,
   fieldSamplesToSeries,
   lastFiniteValue,
   median,
+  parseVersionGroup,
   readJson,
   resolveAbsolute,
   writeJson,
@@ -96,9 +98,40 @@ function derivePatternTransform(pattern, candidateMatches) {
   };
 }
 
+function getMetricBounds(metricKey) {
+  switch (metricKey) {
+    case "level":
+      return { min: 1, max: 18 };
+    case "currentGold":
+      return { min: 0, max: 5000 };
+    case "totalGold":
+      return { min: 0, max: 30000 };
+    case "xp":
+      return { min: 0, max: 40000 };
+    case "minionsKilled":
+      return { min: 0, max: 500 };
+    case "jungleMinionsKilled":
+      return { min: 0, max: 350 };
+    case "health":
+      return { min: 0, max: 8000 };
+    case "healthMax":
+      return { min: 200, max: 9000 };
+    case "power":
+      return { min: 0, max: 4000 };
+    case "powerMax":
+      return { min: 0, max: 5000 };
+    case "movementSpeed":
+      return { min: 120, max: 1200 };
+    default:
+      return null;
+  }
+}
+
 function computeSelectionScore(source, pattern) {
   const confidence = pattern.confidence ?? 0;
   switch (source) {
+    case "bundle-recommended":
+      return confidence + 0.18 + (0.03 * Math.min(3, pattern.bundleSupport?.strongMetricCount ?? 0));
     case "replay-promoted":
       return confidence + 0.25;
     case "corpus-promoted":
@@ -110,6 +143,314 @@ function computeSelectionScore(source, pattern) {
     default:
       return confidence;
   }
+}
+
+function parsePatternDescriptor(groupKey) {
+  const [versionGroup, familyKey, offsetText, decode] = String(groupKey ?? "").split("|");
+  const offset = Number.parseInt(offsetText, 10);
+  if (!versionGroup || !familyKey || !Number.isFinite(offset) || !decode) {
+    return null;
+  }
+
+  return {
+    versionGroup,
+    familyKey,
+    offset,
+    decode,
+  };
+}
+
+const bundleSupportMetricKeys = new Set([
+  "level",
+  "xp",
+  "totalGold",
+  "currentGold",
+  "minionsKilled",
+  "jungleMinionsKilled",
+]);
+
+function uniqueSortedNumbers(values) {
+  return [...new Set(values.filter(Number.isFinite))].sort((left, right) => left - right);
+}
+
+function collectPatternSlots(pattern) {
+  const directSlots = (pattern.rawWindowCandidates ?? [])
+    .map((candidate) => candidate.slotIndex)
+    .filter(Number.isFinite);
+  if (directSlots.length > 0) {
+    return uniqueSortedNumbers(directSlots);
+  }
+
+  const [rowStart, rowEnd] = pattern.rowBand ?? [];
+  if (Number.isFinite(rowStart) && Number.isFinite(rowEnd)) {
+    const slots = [];
+    for (let slotIndex = rowStart; slotIndex <= rowEnd; slotIndex += 1) {
+      slots.push(slotIndex);
+    }
+    return uniqueSortedNumbers(slots);
+  }
+
+  return [];
+}
+
+function buildBundleFamilySupportAnchors(localRankedPatterns, familyKey) {
+  const supportPatterns = localRankedPatterns
+    .filter((pattern) => pattern.familyKey === familyKey)
+    .filter((pattern) => bundleSupportMetricKeys.has(pattern.metric))
+    .filter((pattern) => (pattern.confidence ?? 0) >= 0.28);
+  if (supportPatterns.length === 0) {
+    return null;
+  }
+
+  const slotWeights = new Map();
+  for (const pattern of supportPatterns) {
+    const slots = collectPatternSlots(pattern);
+    if (slots.length === 0) {
+      continue;
+    }
+    const metricWeight = bundleSupportMetricKeys.has(pattern.metric) ? 1.15 : 1;
+    const patternWeight = Math.max(0.05, (pattern.confidence ?? 0) * metricWeight);
+    for (const slotIndex of slots) {
+      slotWeights.set(slotIndex, (slotWeights.get(slotIndex) ?? 0) + patternWeight);
+    }
+  }
+
+  const rankedSlots = [...slotWeights.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0] - right[0]);
+  if (rankedSlots.length === 0) {
+    return null;
+  }
+
+  const primarySlot = rankedSlots[0][0];
+  const anchorSlots = rankedSlots
+    .filter(([slotIndex, weight]) =>
+      Math.abs(slotIndex - primarySlot) <= 1 ||
+      weight >= (rankedSlots[0][1] * 0.7),
+    )
+    .map(([slotIndex]) => slotIndex);
+  const compactSlots = uniqueSortedNumbers(anchorSlots);
+  if (compactSlots.length === 0) {
+    return null;
+  }
+
+  return {
+    slots: compactSlots,
+    band: [compactSlots[0], compactSlots[compactSlots.length - 1]],
+    supportMetricCount: new Set(supportPatterns.map((pattern) => pattern.metric)).size,
+  };
+}
+
+function clampSlotsToAnchor(recommendedSlots, rowBand, supportAnchor) {
+  if (!supportAnchor) {
+    return { recommendedSlots, rowBand };
+  }
+
+  const allowedMin = supportAnchor.band[0] - 1;
+  const allowedMax = supportAnchor.band[1] + 1;
+  const clampedSlots = uniqueSortedNumbers(
+    (recommendedSlots ?? [])
+      .map((slot) => slot.slotIndex)
+      .filter((slotIndex) => slotIndex >= allowedMin && slotIndex <= allowedMax),
+  ).map((slotIndex) => ({ slotIndex, replayCount: 1 }));
+
+  const bandStart = Number.isFinite(rowBand?.[0]) ? rowBand[0] : allowedMin;
+  const bandEnd = Number.isFinite(rowBand?.[1]) ? rowBand[1] : allowedMax;
+  const clampedBand = [
+    Math.max(bandStart, allowedMin),
+    Math.min(bandEnd, allowedMax),
+  ];
+  const normalizedBand = clampedBand[0] <= clampedBand[1]
+    ? clampedBand
+    : [supportAnchor.band[0], supportAnchor.band[1]];
+
+  const normalizedSlots = clampedSlots.length > 0
+    ? clampedSlots
+    : supportAnchor.slots.map((slotIndex) => ({ slotIndex, replayCount: 1 }));
+
+  return {
+    recommendedSlots: normalizedSlots,
+    rowBand: normalizedBand,
+  };
+}
+
+function decodeCategory(decodeLabel) {
+  if (String(decodeLabel).startsWith("f")) {
+    return "float";
+  }
+  if (String(decodeLabel).startsWith("u")) {
+    return "unsigned";
+  }
+  if (String(decodeLabel).startsWith("i")) {
+    return "signed";
+  }
+  return "other";
+}
+
+function scoreLocalOverrideMatch(pattern, descriptor, supportAnchor) {
+  let score = pattern.matchScore ?? pattern.support?.avgEffectiveScore ?? pattern.confidence ?? 0;
+  score += 0.35 * (pattern.confidence ?? 0);
+  if (pattern.decode === descriptor.decode) {
+    score += 0.12;
+  } else if (decodeCategory(pattern.decode) === decodeCategory(descriptor.decode)) {
+    score += 0.05;
+  }
+
+  const offsetDistance = Math.abs((pattern.offset ?? descriptor.offset) - descriptor.offset);
+  score -= Math.min(0.1, offsetDistance * 0.015);
+
+  const patternSlots = collectPatternSlots(pattern);
+  if (supportAnchor && patternSlots.length > 0) {
+    const overlap = patternSlots.filter((slotIndex) => supportAnchor.slots.includes(slotIndex)).length;
+    const nearOverlap = patternSlots.filter((slotIndex) =>
+      supportAnchor.slots.some((supportSlot) => Math.abs(slotIndex - supportSlot) <= 1),
+    ).length;
+    if (overlap > 0) {
+      score += 0.18;
+    } else if (nearOverlap > 0) {
+      score += 0.08;
+    }
+  }
+
+  return score;
+}
+
+function buildCandidateMatchOverrideOptions(candidateMatches, familyKey, metricKey) {
+  return (candidateMatches?.topMatches ?? [])
+    .filter((match) => match.familyKey === familyKey && match.metricKey === metricKey)
+    .slice(0, 12)
+    .map((match) => ({
+      patternKey: `candidate-match|${familyKey}|${match.slotIndex}|${match.offset}|${match.decodeLabel}|${metricKey}`,
+      familyKey,
+      metric: metricKey,
+      offset: match.offset,
+      decode: match.decodeLabel,
+      confidence: clamp(0.2 + (match.effectiveScore ?? match.baseScore ?? 0), 0, 0.95),
+      matchScore: match.effectiveScore ?? match.baseScore ?? 0,
+      rowBand: [match.slotIndex, match.slotIndex],
+      rawWindowCandidates: [{
+        slotIndex: match.slotIndex,
+        replayCount: 1,
+      }],
+      transform: {
+        slopeMedian: match.slope ?? 1,
+        interceptMedian: match.intercept ?? 0,
+        sampleCount: 1,
+      },
+    }));
+}
+
+function buildBundleRecommendedPatterns(artifactDir, runManifest, summaryJson, provisionalSchema, candidateMatches) {
+  const artifactRoot = path.dirname(artifactDir);
+  const versionGroup = parseVersionGroup(runManifest.summary?.gameVersion ?? summaryJson.gameVersion ?? "unknown");
+  const familyKeys = new Set((runManifest.families ?? []).map((family) => family.familyKey));
+  const recommendedPatterns = [];
+  const localRankedPatterns = provisionalSchema?.rankedPatterns ?? [];
+
+  for (const familyKey of familyKeys) {
+    const recommendationPath = path.join(
+      artifactRoot,
+      "scalar-metric-discovery",
+      versionGroup,
+      `family-bundle-recommendations-${familyKey.replace(/[^A-Za-z0-9._-]+/g, "_")}.json`,
+    );
+    const bundleCatalogPath = path.join(
+      artifactRoot,
+      "scalar-metric-discovery",
+      versionGroup,
+      `family-bundles-${familyKey.replace(/[^A-Za-z0-9._-]+/g, "_")}.json`,
+    );
+    if (!fs.existsSync(recommendationPath)) {
+      continue;
+    }
+
+    const recommendation = readJson(recommendationPath);
+    const bundleCatalog = fs.existsSync(bundleCatalogPath) ? readJson(bundleCatalogPath) : null;
+    const bundles = (bundleCatalog?.bundles ?? [])
+      .filter((bundle) => (bundle.bundleScore ?? 0) >= 0.8)
+      .slice(0, 4);
+    if (bundles.length === 0 && !recommendation.primaryBundle) {
+      continue;
+    }
+    const supportAnchor = buildBundleFamilySupportAnchors(localRankedPatterns, familyKey);
+
+    const selectedBundles = bundles.length > 0
+      ? bundles
+      : [{
+          ...recommendation.primaryBundle,
+          metrics: recommendation.primaryBundle.recommendedMetrics ?? [],
+        }];
+
+    for (const [bundleIndex, bundle] of selectedBundles.entries()) {
+      for (const metricRecommendation of bundle.metrics ?? []) {
+        const descriptor = parsePatternDescriptor(metricRecommendation.groupKey);
+        if (!descriptor) {
+          continue;
+        }
+
+        const overrideOptions = [
+          ...localRankedPatterns
+            .filter((pattern) => pattern.familyKey === descriptor.familyKey && pattern.metric === metricRecommendation.metric),
+          ...buildCandidateMatchOverrideOptions(candidateMatches, descriptor.familyKey, metricRecommendation.metric),
+        ];
+        const localOverride = overrideOptions
+          .map((pattern) => ({
+            pattern,
+            overrideScore: scoreLocalOverrideMatch(pattern, descriptor, supportAnchor),
+          }))
+          .sort((left, right) =>
+            right.overrideScore - left.overrideScore ||
+            (right.pattern.confidence ?? 0) - (left.pattern.confidence ?? 0)
+          )[0]?.pattern ?? null;
+        const acceptedLocalOverride = localOverride && scoreLocalOverrideMatch(localOverride, descriptor, supportAnchor) >= 0.28
+          ? localOverride
+          : null;
+
+        const roundedSlot = Math.round(metricRecommendation.medianSlotIndex ?? bundle.slotBand?.[0] ?? 0);
+        const slotFloor = Math.floor(metricRecommendation.medianSlotIndex ?? roundedSlot);
+        const slotCeil = Math.ceil(metricRecommendation.medianSlotIndex ?? roundedSlot);
+        const recommendedSlots = acceptedLocalOverride?.rawWindowCandidates?.length
+          ? acceptedLocalOverride.rawWindowCandidates.map((candidate) => ({ slotIndex: candidate.slotIndex, replayCount: 1 }))
+          : [slotFloor, slotCeil, roundedSlot]
+            .filter((slotIndex, index, array) => Number.isFinite(slotIndex) && array.indexOf(slotIndex) === index)
+            .map((slotIndex) => ({ slotIndex, replayCount: metricRecommendation.replaySupport ?? 1 }));
+        const rowBand = acceptedLocalOverride?.rowBand ?? [
+          Math.min(slotFloor, Math.floor(bundle.slotBand?.[0] ?? slotFloor)),
+          Math.max(slotCeil, Math.ceil(bundle.slotBand?.[1] ?? slotCeil)),
+        ];
+        const anchoredSelection = clampSlotsToAnchor(recommendedSlots, rowBand, supportAnchor);
+        const bundleConfidence = clamp(
+          (0.45 * (bundle.bundleScore ?? 0)) +
+          (0.55 * (metricRecommendation.bundleCandidateScore ?? 0)),
+          0,
+          0.98,
+        );
+
+        recommendedPatterns.push({
+          patternKey: `bundle|${bundleIndex}|${metricRecommendation.groupKey}`,
+          familyKey: descriptor.familyKey,
+          metric: metricRecommendation.metric,
+          metricLabel: metricRecommendation.metric,
+          confidence: Math.max(bundleConfidence, acceptedLocalOverride?.confidence ?? 0),
+          recommendedRowBand: anchoredSelection.rowBand,
+          recommendedSlots: anchoredSelection.recommendedSlots,
+          offset: acceptedLocalOverride?.offset ?? descriptor.offset,
+          decode: acceptedLocalOverride?.decode ?? descriptor.decode,
+          transform: { slopeMedian: 1, interceptMedian: 0, sampleCount: 0 },
+          bundleSupport: {
+            familyKey,
+            bundleScore: bundle.bundleScore,
+            replayOverlap: bundle.replayOverlap,
+            strongMetricCount: bundle.strongMetricCount,
+            localOverridePatternKey: acceptedLocalOverride?.patternKey ?? null,
+            supportAnchor,
+            bundleIndex,
+          },
+        });
+      }
+    }
+  }
+
+  return recommendedPatterns;
 }
 
 function normalizePattern(pattern, candidateMatches, source) {
@@ -130,6 +471,7 @@ function normalizePattern(pattern, candidateMatches, source) {
     transform: pattern.transform?.sampleCount > 0 ? pattern.transform : derivePatternTransform(pattern, candidateMatches),
     selectionScore: computeSelectionScore(source, pattern),
     source,
+    bundleSupport: pattern.bundleSupport ?? null,
   };
 }
 
@@ -172,6 +514,64 @@ function evaluateSeriesPlausibility(metricKey, series) {
       maxExpected = 350;
       monotonic = true;
       break;
+    case "health": {
+      minExpected = 0;
+      maxExpected = 8000;
+      const inRangeRatio = values.filter((value) => value >= minExpected && value <= maxExpected).length / values.length;
+      const span = Math.max(...values) - Math.min(...values);
+      const spanFactor = clamp(span / Math.max(Math.max(...values), 600), 0, 1);
+      const nonNegativeFactor = values.filter((value) => value >= -1e-6).length / values.length;
+      return (0.5 * inRangeRatio) + (0.25 * nonNegativeFactor) + (0.25 * Math.max(0.35, spanFactor));
+    }
+    case "healthMax": {
+      minExpected = 200;
+      maxExpected = 9000;
+      const inRangeRatio = values.filter((value) => value >= minExpected && value <= maxExpected).length / values.length;
+      let stabilityCount = 0;
+      for (let index = 1; index < values.length; index += 1) {
+        if (Math.abs(values[index] - values[index - 1]) <= 250) {
+          stabilityCount += 1;
+        }
+      }
+      const stabilityRatio = values.length > 1 ? stabilityCount / (values.length - 1) : 1;
+      return (0.6 * inRangeRatio) + (0.4 * stabilityRatio);
+    }
+    case "power": {
+      minExpected = 0;
+      maxExpected = 4000;
+      const inRangeRatio = values.filter((value) => value >= minExpected && value <= maxExpected).length / values.length;
+      const span = Math.max(...values) - Math.min(...values);
+      const spanFactor = clamp(span / Math.max(Math.max(...values), 250), 0, 1);
+      const nonNegativeFactor = values.filter((value) => value >= -1e-6).length / values.length;
+      return (0.5 * inRangeRatio) + (0.2 * nonNegativeFactor) + (0.3 * Math.max(0.25, spanFactor));
+    }
+    case "powerMax": {
+      minExpected = 0;
+      maxExpected = 5000;
+      const inRangeRatio = values.filter((value) => value >= minExpected && value <= maxExpected).length / values.length;
+      let stabilityCount = 0;
+      for (let index = 1; index < values.length; index += 1) {
+        if (Math.abs(values[index] - values[index - 1]) <= 200) {
+          stabilityCount += 1;
+        }
+      }
+      const stabilityRatio = values.length > 1 ? stabilityCount / (values.length - 1) : 1;
+      return (0.6 * inRangeRatio) + (0.4 * stabilityRatio);
+    }
+    case "movementSpeed": {
+      minExpected = 120;
+      maxExpected = 1200;
+      const inRangeRatio = values.filter((value) => value >= minExpected && value <= maxExpected).length / values.length;
+      let moderateChanges = 0;
+      for (let index = 1; index < values.length; index += 1) {
+        const diff = Math.abs(values[index] - values[index - 1]);
+        if (diff >= 1 && diff <= 220) {
+          moderateChanges += 1;
+        }
+      }
+      const changeRatio = values.length > 1 ? moderateChanges / (values.length - 1) : 0.5;
+      return (0.62 * inRangeRatio) + (0.38 * Math.max(0.2, changeRatio));
+    }
     default:
       return 0.5;
   }
@@ -258,7 +658,7 @@ function pickBestTransform(pattern, field, roster) {
   return best;
 }
 
-function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches, runManifest, roster) {
+function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches, runManifest, roster, artifactDir, summaryJson) {
   const familyKeys = new Set((runManifest.families ?? []).map((family) => family.familyKey));
   const metricCaps = new Map([
     ["level", 3],
@@ -296,10 +696,32 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
     .slice(0, 12)
     .map((pattern) => normalizePattern(pattern, candidateMatches, "corpus-ranked"));
 
+  const bundleRecommended = buildBundleRecommendedPatterns(artifactDir, runManifest, summaryJson, provisionalSchema, candidateMatches)
+    .filter((pattern) => familyKeys.has(pattern.familyKey))
+    .map((pattern) => normalizePattern(pattern, candidateMatches, "bundle-recommended"));
+  const preferredBundleFamilyKeys = new Set(bundleRecommended.map((pattern) => pattern.familyKey));
+
   const selected = [];
   const selectedKeys = new Set();
   const selectedMetricCounts = new Map();
-  const candidates = [...corpusPromoted, ...localPromoted, ...localRanked, ...rankedCorpus]
+  const candidates = [...bundleRecommended, ...corpusPromoted, ...localPromoted, ...localRanked, ...rankedCorpus]
+    .map((pattern) => {
+      let bonus = 0;
+      if (
+        pattern.source !== "bundle-recommended" &&
+        preferredBundleFamilyKeys.has(pattern.familyKey) &&
+        isMetricAssignable(pattern.metric, roster)
+      ) {
+        bonus += 0.12;
+        if (["level", "currentGold", "xp", "totalGold", "minionsKilled", "jungleMinionsKilled"].includes(pattern.metric)) {
+          bonus += 0.08;
+        }
+      }
+      return {
+        ...pattern,
+        selectionScore: pattern.selectionScore + bonus,
+      };
+    })
     .sort((left, right) =>
       right.selectionScore - left.selectionScore ||
       right.confidence - left.confidence ||
@@ -311,7 +733,13 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
       continue;
     }
     const metricCount = selectedMetricCounts.get(pattern.metric) ?? 0;
-    const metricCap = metricCaps.get(pattern.metric) ?? 1;
+    const metricCap = (metricCaps.get(pattern.metric) ?? 1) + (
+      pattern.source !== "bundle-recommended" &&
+      preferredBundleFamilyKeys.has(pattern.familyKey) &&
+      isMetricAssignable(pattern.metric, roster)
+        ? 1
+        : 0
+    );
     if (metricCount >= metricCap) {
       continue;
     }
@@ -349,7 +777,15 @@ function buildCandidateRows(pattern, familyFieldIndex, roster) {
     if (!transformed) {
       continue;
     }
-    if (transformed.plausibilityScore < 0.55) {
+    const plausibilityFloor = pattern.source === "bundle-recommended" ? 0.45 : 0.55;
+    if (transformed.plausibilityScore < plausibilityFloor) {
+      continue;
+    }
+    const metricBounds = getMetricBounds(pattern.metric);
+    if (
+      metricBounds &&
+      (!Number.isFinite(transformed.finalValue) || transformed.finalValue < metricBounds.min || transformed.finalValue > metricBounds.max)
+    ) {
       continue;
     }
 
@@ -420,6 +856,53 @@ function addFamilyAssignmentEvidence(familyAssignmentEvidence, edge, patternConf
   slotMap.set(edge.rosterIndex, (slotMap.get(edge.rosterIndex) ?? 0) + (edge.score * patternConfidence));
   familyMap.set(edge.slotIndex, slotMap);
   familyAssignmentEvidence.set(edge.familyKey, familyMap);
+}
+
+function addFamilySupportTrust(familySupportTrust, edge, patternConfidence) {
+  const familyMap = familySupportTrust.get(edge.familyKey) ?? new Map();
+  const slotTrust = familyMap.get(edge.slotIndex) ?? {
+    weightedScore: 0,
+    metricKeys: new Set(),
+    metricScores: new Map(),
+  };
+  const weighted = edge.score * patternConfidence;
+  slotTrust.weightedScore += weighted;
+  slotTrust.metricKeys.add(edge.metric);
+  slotTrust.metricScores.set(edge.metric, (slotTrust.metricScores.get(edge.metric) ?? 0) + weighted);
+  familyMap.set(edge.slotIndex, slotTrust);
+  familySupportTrust.set(edge.familyKey, familyMap);
+}
+
+function getFamilySupportTrust(familySupportTrust, familyKey, slotIndex) {
+  const slotTrust = familySupportTrust.get(familyKey)?.get(slotIndex);
+  if (!slotTrust) {
+    return { weightedScore: 0, metricCount: 0 };
+  }
+  return {
+    weightedScore: slotTrust.weightedScore,
+    metricCount: slotTrust.metricKeys.size,
+    metricScores: slotTrust.metricScores,
+  };
+}
+
+function isBundleSlotTrusted(familySupportTrust, candidate) {
+  const trust = getFamilySupportTrust(familySupportTrust, candidate.familyKey, candidate.slotIndex);
+  const strongAnchorScore = Math.max(
+    trust.metricScores?.get("xp") ?? 0,
+    trust.metricScores?.get("totalGold") ?? 0,
+    trust.metricScores?.get("minionsKilled") ?? 0,
+    trust.metricScores?.get("jungleMinionsKilled") ?? 0,
+  );
+  if (strongAnchorScore >= 0.24) {
+    return true;
+  }
+  if (trust.metricCount >= 2 && trust.weightedScore >= 0.45) {
+    return true;
+  }
+  if (trust.metricCount >= 1 && trust.weightedScore >= 0.95) {
+    return true;
+  }
+  return false;
 }
 
 function solveFamilyAssignments(familyMap) {
@@ -531,7 +1014,7 @@ function main() {
   const provisionalSchema = fs.existsSync(provisionalSchemaPath) ? readJson(provisionalSchemaPath) : { promotedPatterns: [], rankedPatterns: [] };
   const candidateMatches = fs.existsSync(candidateMatchesPath) ? readJson(candidateMatchesPath) : { topMatches: [] };
   const roster = buildSummaryRoster(summaryJson);
-  const selectedPatterns = chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches, runManifest, roster);
+  const selectedPatterns = chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches, runManifest, roster, artifactDir, summaryJson);
 
   const familyFieldIndex = new Map();
   for (const family of runManifest.families ?? []) {
@@ -543,6 +1026,7 @@ function main() {
   }
 
   const familyAssignmentEvidence = new Map();
+  const familySupportTrust = new Map();
   const directAssignments = new Map();
   const candidateRows = [];
 
@@ -563,6 +1047,9 @@ function main() {
     const metricAssignments = assignPatternCandidates(patternEdges);
     for (const assignment of metricAssignments) {
       directAssignments.set(`${assignment.familyKey}|${assignment.slotIndex}|${assignment.metric}`, assignment.rosterIndex);
+      if (bundleSupportMetricKeys.has(assignment.metric)) {
+        addFamilySupportTrust(familySupportTrust, assignment, pattern.confidence);
+      }
     }
   }
 
@@ -589,6 +1076,18 @@ function main() {
 
   const unresolvedCandidates = [];
   for (const candidate of candidateRows) {
+    if (candidate.pattern.source === "bundle-recommended" && !isBundleSlotTrusted(familySupportTrust, candidate)) {
+      unresolvedCandidates.push({
+        familyKey: candidate.familyKey,
+        slotIndex: candidate.slotIndex,
+        metric: candidate.metric,
+        finalValue: candidate.finalValue,
+        patternConfidence: candidate.pattern.confidence,
+        reason: "bundle-slot-untrusted",
+      });
+      continue;
+    }
+
     const slotKey = `${candidate.familyKey}|${candidate.slotIndex}`;
     const directKey = `${candidate.familyKey}|${candidate.slotIndex}|${candidate.metric}`;
     const rosterIndex =
