@@ -168,6 +168,66 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (first_arg == "--analyze-artifact-bundle-json" && argc > 2) {
+        try {
+            std::string path = argv[2];
+            std::size_t minimum_length = 4096;
+            std::size_t minimum_records = 4;
+            std::size_t top_families = 8;
+            std::size_t top_entity_slots = 24;
+            std::size_t top_scalar_slots = 18;
+            std::size_t dynamic_slot_count = 8;
+            std::size_t mixed_slot_count = 2;
+            std::size_t handle_slot_count = 0;
+            std::size_t top_windows = 16;
+            std::size_t top_fields = 16;
+            bool skip_scalar = false;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view arg = argv[i];
+                if (arg == "--min-length" && i + 1 < argc) {
+                    minimum_length = std::stoull(argv[++i]);
+                } else if (arg == "--min-records" && i + 1 < argc) {
+                    minimum_records = std::stoull(argv[++i]);
+                } else if (arg == "--top-families" && i + 1 < argc) {
+                    top_families = std::stoull(argv[++i]);
+                } else if (arg == "--top-entity-slots" && i + 1 < argc) {
+                    top_entity_slots = std::stoull(argv[++i]);
+                } else if (arg == "--top-scalar-slots" && i + 1 < argc) {
+                    top_scalar_slots = std::stoull(argv[++i]);
+                } else if (arg == "--dynamic-slot-count" && i + 1 < argc) {
+                    dynamic_slot_count = std::stoull(argv[++i]);
+                } else if (arg == "--mixed-slot-count" && i + 1 < argc) {
+                    mixed_slot_count = std::stoull(argv[++i]);
+                } else if (arg == "--handle-slot-count" && i + 1 < argc) {
+                    handle_slot_count = std::stoull(argv[++i]);
+                } else if (arg == "--top-windows" && i + 1 < argc) {
+                    top_windows = std::stoull(argv[++i]);
+                } else if (arg == "--top-fields" && i + 1 < argc) {
+                    top_fields = std::stoull(argv[++i]);
+                } else if (arg == "--skip-scalar") {
+                    skip_scalar = true;
+                }
+            }
+            std::cout << rofl::core::analyze_artifact_bundle_file_json(
+                path,
+                minimum_length,
+                minimum_records,
+                top_families,
+                top_entity_slots,
+                top_scalar_slots,
+                dynamic_slot_count,
+                mixed_slot_count,
+                handle_slot_count,
+                top_windows,
+                top_fields,
+                skip_scalar);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
     if (first_arg == "--analyze-scalar-family-json" && argc > 2) {
         try {
             std::string path = argv[2];
@@ -851,6 +911,7 @@ int main(int argc, char** argv) {
     std::cout << "Use --guess-stride <path-to-rofl> --length <len> --first-byte <byte> [--header-size <len>] to detect repeating patterns.\n";
     std::cout << "Use --analyze-sparse-family <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-elements <n>] to profile 16-byte sparse records.\n";
     std::cout << "Use --scan-families-json <path-to-rofl> [--min-length <n>] [--min-records <n>] [--top-families <n>] to emit recurring family scan results as JSON.\n";
+    std::cout << "Use --analyze-artifact-bundle-json <path-to-rofl> [--min-length <n>] [--min-records <n>] [--top-families <n>] [--top-entity-slots <n>] [--top-scalar-slots <n>] [--dynamic-slot-count <n>] [--mixed-slot-count <n>] [--handle-slot-count <n>] [--top-windows <n>] [--top-fields <n>] [--skip-scalar] to emit the full decoder artifact bundle as JSON in one process.\n";
     std::cout << "Use --analyze-scalar-family-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] to emit scalar lane candidates as JSON.\n";
     std::cout << "Use --analyze-entity-slab-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] to classify a sparse family into handle-like vs dynamic-state-like rows.\n";
     std::cout << "Use --analyze-row-offsets-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-fields <n>] to rank raw byte-offset fields inside selected sparse rows.\n";

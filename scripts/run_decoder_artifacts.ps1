@@ -211,150 +211,259 @@ if (-not (Test-Path $replayArtifactDir)) {
 
 $resolvedAnalyzerExe = Resolve-AnalyzerExecutable -ExplicitPath $AnalyzerExe -RepoRoot $repoRoot -BuildDir $BuildDir -Configuration $Configuration
 
-Write-Host "Scanning replay families for $replayId" -ForegroundColor Cyan
-$summaryResult = Invoke-DecoderJson -Executable $resolvedAnalyzerExe -Arguments @(
-    "--summary",
-    $resolvedReplayPath
-)
-Write-Utf8File -Path (Join-Path $replayArtifactDir "summary.json") -Content $summaryResult.Raw
+$usedNativeBatch = $false
 
-$familyScanResult = Invoke-DecoderJson -Executable $resolvedAnalyzerExe -Arguments @(
-    "--scan-families-json",
-    $resolvedReplayPath,
-    "--min-length", "$MinLength",
-    "--min-records", "$MinRecords",
-    "--top-families", "$TopFamilies"
-)
-
-Write-Utf8File -Path (Join-Path $replayArtifactDir "family-scan.json") -Content $familyScanResult.Raw
-
-$familyList = @($familyScanResult.Json.families)
-if ($familyList.Count -eq 0) {
-    throw "Family scan returned no families."
-}
-
-$familyManifests = @()
-
-foreach ($family in $familyList) {
-    $length = [int]$family.length
-    $firstByte = [int]$family.firstByte
-    $headerSize = Get-HeaderSize -Family $family
-    $stride = if ($family.ContainsKey("recommendedStride")) { [int]$family.recommendedStride } else { 16 }
-    $familyKey = Get-FamilyKey -Family $family
-    $familyDir = Join-Path (Join-Path $replayArtifactDir "families") $familyKey
-    New-Item -ItemType Directory -Path $familyDir -Force | Out-Null
-
-    Write-Host "Analyzing family $familyKey" -ForegroundColor Cyan
-
-    $entityResult = Invoke-DecoderJson -Executable $resolvedAnalyzerExe -Arguments @(
-        "--analyze-entity-slab-json",
+try {
+    Write-Host "Generating native decoder artifact bundle for $replayId" -ForegroundColor Cyan
+    $batchArguments = @(
+        "--analyze-artifact-bundle-json",
         $resolvedReplayPath,
-        "--length", "$length",
-        "--first-byte", ("0x{0:X2}" -f $firstByte),
-        "--header-size", "$headerSize",
-        "--stride", "$stride",
-        "--top-slots", "$TopEntitySlots"
+        "--min-length", "$MinLength",
+        "--min-records", "$MinRecords",
+        "--top-families", "$TopFamilies",
+        "--top-entity-slots", "$TopEntitySlots",
+        "--top-scalar-slots", "$TopScalarSlots",
+        "--dynamic-slot-count", "$DynamicSlotCount",
+        "--mixed-slot-count", "$MixedSlotCount",
+        "--handle-slot-count", "$HandleSlotCount",
+        "--top-windows", "$TopWindows",
+        "--top-fields", "$TopFields"
     )
-    Write-Utf8File -Path (Join-Path $familyDir "entity-slab.json") -Content $entityResult.Raw
-
-    if (-not $SkipScalar) {
-        $scalarResult = Invoke-DecoderJson -Executable $resolvedAnalyzerExe -Arguments @(
-            "--analyze-scalar-family-json",
-            $resolvedReplayPath,
-            "--length", "$length",
-            "--first-byte", ("0x{0:X2}" -f $firstByte),
-            "--header-size", "$headerSize",
-            "--stride", "$stride",
-            "--top-slots", "$TopScalarSlots"
-        )
-        Write-Utf8File -Path (Join-Path $familyDir "scalar.json") -Content $scalarResult.Raw
+    if ($SkipScalar) {
+        $batchArguments += "--skip-scalar"
     }
 
-    $slotSelection = Select-CandidateSlots -EntitySlab $entityResult.Json -DynamicSlotCount $DynamicSlotCount -MixedSlotCount $MixedSlotCount -HandleSlotCount $HandleSlotCount
-    $selectedSlots = @($slotSelection.SelectedSlots)
+    $batchResult = Invoke-DecoderJson -Executable $resolvedAnalyzerExe -Arguments $batchArguments
+    $batchJson = $batchResult.Json
+    if (-not $batchJson.ContainsKey("summary") -or -not $batchJson.ContainsKey("familyScan") -or -not $batchJson.ContainsKey("families")) {
+        throw "Native artifact bundle output is missing required fields."
+    }
 
-    $familyManifest = [ordered]@{
-        familyKey = $familyKey
-        length = $length
-        firstByte = $firstByte
-        headerSize = $headerSize
-        stride = $stride
-        recordCount = if ($family.ContainsKey("recordCount")) { [int]$family.recordCount } else { $null }
-        chunkCount = if ($family.ContainsKey("chunkCount")) { [int]$family.chunkCount } else { $null }
-        selectedSlots = $selectedSlots
-        dynamicSlots = @($slotSelection.DynamicSlots)
-        mixedSlots = @($slotSelection.MixedSlots)
-        handleSlots = @($slotSelection.HandleSlots)
-        files = [ordered]@{
-            entitySlab = "entity-slab.json"
-            scalar = if ($SkipScalar) { $null } else { "scalar.json" }
-            schema = if ($selectedSlots.Count -gt 0) { "schema.json" } else { $null }
-            cleaned = if ($selectedSlots.Count -gt 0) { "cleaned.json" } else { $null }
+    Write-Utf8File -Path (Join-Path $replayArtifactDir "summary.json") -Content (($batchJson.summary | ConvertTo-Json -Depth 100))
+    Write-Utf8File -Path (Join-Path $replayArtifactDir "family-scan.json") -Content (($batchJson.familyScan | ConvertTo-Json -Depth 100))
+
+    $familyManifests = @()
+    foreach ($family in @($batchJson.families)) {
+        $familyKey = [string]$family.familyKey
+        $familyDir = Join-Path (Join-Path $replayArtifactDir "families") $familyKey
+        New-Item -ItemType Directory -Path $familyDir -Force | Out-Null
+
+        Write-Utf8File -Path (Join-Path $familyDir "entity-slab.json") -Content (($family.entitySlab | ConvertTo-Json -Depth 100))
+        if (-not $SkipScalar -and $null -ne $family.scalar) {
+            Write-Utf8File -Path (Join-Path $familyDir "scalar.json") -Content (($family.scalar | ConvertTo-Json -Depth 100))
         }
+        if ($null -ne $family.schema) {
+            Write-Utf8File -Path (Join-Path $familyDir "schema.json") -Content (($family.schema | ConvertTo-Json -Depth 100))
+        }
+        if ($null -ne $family.cleaned) {
+            Write-Utf8File -Path (Join-Path $familyDir "cleaned.json") -Content (($family.cleaned | ConvertTo-Json -Depth 100))
+        }
+
+        $selectedSlots = @($family.selectedSlots | ForEach-Object { [int]$_ })
+        $familyManifest = [ordered]@{
+            familyKey = $familyKey
+            length = [int]$family.length
+            firstByte = [int]$family.firstByte
+            headerSize = [int]$family.headerSize
+            stride = [int]$family.stride
+            recordCount = [int]$family.recordCount
+            chunkCount = [int]$family.chunkCount
+            selectedSlots = $selectedSlots
+            dynamicSlots = @($family.dynamicSlots | ForEach-Object { [int]$_ })
+            mixedSlots = @($family.mixedSlots | ForEach-Object { [int]$_ })
+            handleSlots = @($family.handleSlots | ForEach-Object { [int]$_ })
+            files = [ordered]@{
+                entitySlab = "entity-slab.json"
+                scalar = if ($SkipScalar -or $null -eq $family.scalar) { $null } else { "scalar.json" }
+                schema = if ($null -eq $family.schema) { $null } else { "schema.json" }
+                cleaned = if ($null -eq $family.cleaned) { $null } else { "cleaned.json" }
+            }
+        }
+
+        Write-Utf8File -Path (Join-Path $familyDir "analysis-plan.json") -Content ($familyManifest | ConvertTo-Json -Depth 8)
+        $familyManifests += $familyManifest
     }
 
-    if ($selectedSlots.Count -gt 0) {
-        $slotList = ($selectedSlots -join ",")
+    $runManifest = [ordered]@{
+        replayId = $replayId
+        replayPath = $resolvedReplayPath
+        analyzerExe = $resolvedAnalyzerExe
+        generatedAtUtc = (Get-Date).ToUniversalTime().ToString("o")
+        summary = [ordered]@{
+            gameVersion = $batchJson.summary.gameVersion
+            gameLengthMillis = $batchJson.summary.gameLengthMillis
+            playerCount = $batchJson.summary.playerCount
+        }
+        parameters = [ordered]@{
+            configuration = $Configuration
+            minLength = $MinLength
+            minRecords = $MinRecords
+            topFamilies = $TopFamilies
+            topEntitySlots = $TopEntitySlots
+            topScalarSlots = $TopScalarSlots
+            dynamicSlotCount = $DynamicSlotCount
+            mixedSlotCount = $MixedSlotCount
+            handleSlotCount = $HandleSlotCount
+            topWindows = $TopWindows
+            topFields = $TopFields
+            skipScalar = [bool]$SkipScalar
+        }
+        families = $familyManifests
+    }
 
-        $schemaResult = Invoke-DecoderJson -Executable $resolvedAnalyzerExe -Arguments @(
-            "--analyze-bitfield-schema-json",
+    Write-Utf8File -Path (Join-Path $replayArtifactDir "run-manifest.json") -Content ($runManifest | ConvertTo-Json -Depth 8)
+    Write-Host "Wrote decoder artifacts to $replayArtifactDir using native batch mode" -ForegroundColor Green
+    $usedNativeBatch = $true
+} catch {
+    Write-Host "Native batch artifact analysis unavailable, falling back to legacy per-command mode: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
+if (-not $usedNativeBatch) {
+    Write-Host "Scanning replay families for $replayId" -ForegroundColor Cyan
+    $summaryResult = Invoke-DecoderJson -Executable $resolvedAnalyzerExe -Arguments @(
+        "--summary",
+        $resolvedReplayPath
+    )
+    Write-Utf8File -Path (Join-Path $replayArtifactDir "summary.json") -Content $summaryResult.Raw
+
+    $familyScanResult = Invoke-DecoderJson -Executable $resolvedAnalyzerExe -Arguments @(
+        "--scan-families-json",
+        $resolvedReplayPath,
+        "--min-length", "$MinLength",
+        "--min-records", "$MinRecords",
+        "--top-families", "$TopFamilies"
+    )
+
+    Write-Utf8File -Path (Join-Path $replayArtifactDir "family-scan.json") -Content $familyScanResult.Raw
+
+    $familyList = @($familyScanResult.Json.families)
+    if ($familyList.Count -eq 0) {
+        throw "Family scan returned no families."
+    }
+
+    $familyManifests = @()
+
+    foreach ($family in $familyList) {
+        $length = [int]$family.length
+        $firstByte = [int]$family.firstByte
+        $headerSize = Get-HeaderSize -Family $family
+        $stride = if ($family.ContainsKey("recommendedStride")) { [int]$family.recommendedStride } else { 16 }
+        $familyKey = Get-FamilyKey -Family $family
+        $familyDir = Join-Path (Join-Path $replayArtifactDir "families") $familyKey
+        New-Item -ItemType Directory -Path $familyDir -Force | Out-Null
+
+        Write-Host "Analyzing family $familyKey" -ForegroundColor Cyan
+
+        $entityResult = Invoke-DecoderJson -Executable $resolvedAnalyzerExe -Arguments @(
+            "--analyze-entity-slab-json",
             $resolvedReplayPath,
             "--length", "$length",
             "--first-byte", ("0x{0:X2}" -f $firstByte),
             "--header-size", "$headerSize",
             "--stride", "$stride",
-            "--slots", $slotList,
-            "--top-windows", "$TopWindows"
+            "--top-slots", "$TopEntitySlots"
         )
-        Write-Utf8File -Path (Join-Path $familyDir "schema.json") -Content $schemaResult.Raw
+        Write-Utf8File -Path (Join-Path $familyDir "entity-slab.json") -Content $entityResult.Raw
 
-        $cleanResult = Invoke-DecoderJson -Executable $resolvedAnalyzerExe -Arguments @(
-            "--analyze-clean-row-offsets-json",
-            $resolvedReplayPath,
-            "--length", "$length",
-            "--first-byte", ("0x{0:X2}" -f $firstByte),
-            "--header-size", "$headerSize",
-            "--stride", "$stride",
-            "--slots", $slotList,
-            "--top-fields", "$TopFields"
-        )
-        Write-Utf8File -Path (Join-Path $familyDir "cleaned.json") -Content $cleanResult.Raw
-    } else {
-        Write-Host "Skipping schema/cleaned analysis for $familyKey because no candidate slots were selected." -ForegroundColor Yellow
+        if (-not $SkipScalar) {
+            $scalarResult = Invoke-DecoderJson -Executable $resolvedAnalyzerExe -Arguments @(
+                "--analyze-scalar-family-json",
+                $resolvedReplayPath,
+                "--length", "$length",
+                "--first-byte", ("0x{0:X2}" -f $firstByte),
+                "--header-size", "$headerSize",
+                "--stride", "$stride",
+                "--top-slots", "$TopScalarSlots"
+            )
+            Write-Utf8File -Path (Join-Path $familyDir "scalar.json") -Content $scalarResult.Raw
+        }
+
+        $slotSelection = Select-CandidateSlots -EntitySlab $entityResult.Json -DynamicSlotCount $DynamicSlotCount -MixedSlotCount $MixedSlotCount -HandleSlotCount $HandleSlotCount
+        $selectedSlots = @($slotSelection.SelectedSlots)
+
+        $familyManifest = [ordered]@{
+            familyKey = $familyKey
+            length = $length
+            firstByte = $firstByte
+            headerSize = $headerSize
+            stride = $stride
+            recordCount = if ($family.ContainsKey("recordCount")) { [int]$family.recordCount } else { $null }
+            chunkCount = if ($family.ContainsKey("chunkCount")) { [int]$family.chunkCount } else { $null }
+            selectedSlots = $selectedSlots
+            dynamicSlots = @($slotSelection.DynamicSlots)
+            mixedSlots = @($slotSelection.MixedSlots)
+            handleSlots = @($slotSelection.HandleSlots)
+            files = [ordered]@{
+                entitySlab = "entity-slab.json"
+                scalar = if ($SkipScalar) { $null } else { "scalar.json" }
+                schema = if ($selectedSlots.Count -gt 0) { "schema.json" } else { $null }
+                cleaned = if ($selectedSlots.Count -gt 0) { "cleaned.json" } else { $null }
+            }
+        }
+
+        if ($selectedSlots.Count -gt 0) {
+            $slotList = ($selectedSlots -join ",")
+
+            $schemaResult = Invoke-DecoderJson -Executable $resolvedAnalyzerExe -Arguments @(
+                "--analyze-bitfield-schema-json",
+                $resolvedReplayPath,
+                "--length", "$length",
+                "--first-byte", ("0x{0:X2}" -f $firstByte),
+                "--header-size", "$headerSize",
+                "--stride", "$stride",
+                "--slots", $slotList,
+                "--top-windows", "$TopWindows"
+            )
+            Write-Utf8File -Path (Join-Path $familyDir "schema.json") -Content $schemaResult.Raw
+
+            $cleanResult = Invoke-DecoderJson -Executable $resolvedAnalyzerExe -Arguments @(
+                "--analyze-clean-row-offsets-json",
+                $resolvedReplayPath,
+                "--length", "$length",
+                "--first-byte", ("0x{0:X2}" -f $firstByte),
+                "--header-size", "$headerSize",
+                "--stride", "$stride",
+                "--slots", $slotList,
+                "--top-fields", "$TopFields"
+            )
+            Write-Utf8File -Path (Join-Path $familyDir "cleaned.json") -Content $cleanResult.Raw
+        } else {
+            Write-Host "Skipping schema/cleaned analysis for $familyKey because no candidate slots were selected." -ForegroundColor Yellow
+        }
+
+        $familyManifestPath = Join-Path $familyDir "analysis-plan.json"
+        Write-Utf8File -Path $familyManifestPath -Content ($familyManifest | ConvertTo-Json -Depth 8)
+        $familyManifests += $familyManifest
     }
 
-    $familyManifestPath = Join-Path $familyDir "analysis-plan.json"
-    Write-Utf8File -Path $familyManifestPath -Content ($familyManifest | ConvertTo-Json -Depth 8)
-    $familyManifests += $familyManifest
+    $runManifest = [ordered]@{
+        replayId = $replayId
+        replayPath = $resolvedReplayPath
+        analyzerExe = $resolvedAnalyzerExe
+        generatedAtUtc = (Get-Date).ToUniversalTime().ToString("o")
+        summary = [ordered]@{
+            gameVersion = $summaryResult.Json.gameVersion
+            gameLengthMillis = $summaryResult.Json.gameLengthMillis
+            playerCount = $summaryResult.Json.playerCount
+        }
+        parameters = [ordered]@{
+            configuration = $Configuration
+            minLength = $MinLength
+            minRecords = $MinRecords
+            topFamilies = $TopFamilies
+            topEntitySlots = $TopEntitySlots
+            topScalarSlots = $TopScalarSlots
+            dynamicSlotCount = $DynamicSlotCount
+            mixedSlotCount = $MixedSlotCount
+            handleSlotCount = $HandleSlotCount
+            topWindows = $TopWindows
+            topFields = $TopFields
+            skipScalar = [bool]$SkipScalar
+        }
+        families = $familyManifests
+    }
+
+    Write-Utf8File -Path (Join-Path $replayArtifactDir "run-manifest.json") -Content ($runManifest | ConvertTo-Json -Depth 8)
+
+    Write-Host "Wrote decoder artifacts to $replayArtifactDir" -ForegroundColor Green
 }
-
-$runManifest = [ordered]@{
-    replayId = $replayId
-    replayPath = $resolvedReplayPath
-    analyzerExe = $resolvedAnalyzerExe
-    generatedAtUtc = (Get-Date).ToUniversalTime().ToString("o")
-    summary = [ordered]@{
-        gameVersion = $summaryResult.Json.gameVersion
-        gameLengthMillis = $summaryResult.Json.gameLengthMillis
-        playerCount = $summaryResult.Json.playerCount
-    }
-    parameters = [ordered]@{
-        configuration = $Configuration
-        minLength = $MinLength
-        minRecords = $MinRecords
-        topFamilies = $TopFamilies
-        topEntitySlots = $TopEntitySlots
-        topScalarSlots = $TopScalarSlots
-        dynamicSlotCount = $DynamicSlotCount
-        mixedSlotCount = $MixedSlotCount
-        handleSlotCount = $HandleSlotCount
-        topWindows = $TopWindows
-        topFields = $TopFields
-        skipScalar = [bool]$SkipScalar
-    }
-    families = $familyManifests
-}
-
-Write-Utf8File -Path (Join-Path $replayArtifactDir "run-manifest.json") -Content ($runManifest | ConvertTo-Json -Depth 8)
-
-Write-Host "Wrote decoder artifacts to $replayArtifactDir" -ForegroundColor Green

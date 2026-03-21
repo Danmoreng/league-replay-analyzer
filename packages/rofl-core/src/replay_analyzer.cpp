@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <future>
 #include <functional>
 #include <iomanip>
 #include <map>
@@ -102,6 +103,132 @@ struct FooterZstdRecord {
     }
 
     return escaped;
+}
+
+struct ArtifactSelectedSlots {
+    std::vector<std::size_t> selected_slots;
+    std::vector<std::size_t> dynamic_slots;
+    std::vector<std::size_t> mixed_slots;
+    std::vector<std::size_t> handle_slots;
+};
+
+[[nodiscard]] std::string_view trim_json_whitespace(std::string_view input) {
+    while (!input.empty() && std::isspace(static_cast<unsigned char>(input.front())) != 0) {
+        input.remove_prefix(1);
+    }
+    while (!input.empty() && std::isspace(static_cast<unsigned char>(input.back())) != 0) {
+        input.remove_suffix(1);
+    }
+    return input;
+}
+
+[[nodiscard]] std::vector<std::size_t> extract_named_slot_indices(std::string_view json, std::string_view field_name) {
+    const std::string needle = "\"" + std::string(field_name) + "\":[";
+    const std::size_t field_pos = json.find(needle);
+    if (field_pos == std::string_view::npos) {
+        return {};
+    }
+
+    const std::size_t array_start = json.find('[', field_pos + needle.size() - 1);
+    if (array_start == std::string_view::npos) {
+        return {};
+    }
+
+    std::size_t depth = 0;
+    std::size_t array_end = std::string_view::npos;
+    for (std::size_t index = array_start; index < json.size(); ++index) {
+        if (json[index] == '[') {
+            depth += 1;
+        } else if (json[index] == ']') {
+            depth -= 1;
+            if (depth == 0) {
+                array_end = index;
+                break;
+            }
+        }
+    }
+
+    if (array_end == std::string_view::npos || array_end <= array_start) {
+        return {};
+    }
+
+    const std::string_view array_json = json.substr(array_start, (array_end - array_start) + 1);
+    const std::string slot_needle = "\"slotIndex\":";
+    std::vector<std::size_t> slots;
+    std::size_t scan = 0;
+    while (scan < array_json.size()) {
+        const std::size_t slot_pos = array_json.find(slot_needle, scan);
+        if (slot_pos == std::string_view::npos) {
+            break;
+        }
+        std::size_t value_pos = slot_pos + slot_needle.size();
+        while (value_pos < array_json.size() && std::isspace(static_cast<unsigned char>(array_json[value_pos])) != 0) {
+            value_pos += 1;
+        }
+        std::size_t value_end = value_pos;
+        while (value_end < array_json.size() && std::isdigit(static_cast<unsigned char>(array_json[value_end])) != 0) {
+            value_end += 1;
+        }
+        if (value_end > value_pos) {
+            slots.push_back(static_cast<std::size_t>(std::stoull(std::string(array_json.substr(value_pos, value_end - value_pos)))));
+        }
+        scan = value_end;
+    }
+    return slots;
+}
+
+[[nodiscard]] std::vector<std::size_t> take_top_slot_indices(std::vector<std::size_t> slots, std::size_t count, bool sort_by_slot_index) {
+    if (count == 0 || slots.empty()) {
+        return {};
+    }
+    if (sort_by_slot_index) {
+        std::sort(slots.begin(), slots.end());
+    }
+    if (slots.size() > count) {
+        slots.resize(count);
+    }
+    return slots;
+}
+
+[[nodiscard]] ArtifactSelectedSlots select_candidate_slots_from_entity_slab_json(
+    std::string_view entity_slab_json,
+    std::size_t dynamic_slot_count,
+    std::size_t mixed_slot_count,
+    std::size_t handle_slot_count
+) {
+    ArtifactSelectedSlots result;
+    result.dynamic_slots = take_top_slot_indices(
+        extract_named_slot_indices(entity_slab_json, "topDynamicSlots"),
+        dynamic_slot_count,
+        true);
+    result.mixed_slots = take_top_slot_indices(
+        extract_named_slot_indices(entity_slab_json, "topMixedSlots"),
+        mixed_slot_count,
+        false);
+    result.handle_slots = take_top_slot_indices(
+        extract_named_slot_indices(entity_slab_json, "topHandleSlots"),
+        handle_slot_count,
+        false);
+
+    std::set<std::size_t> selected(
+        result.dynamic_slots.begin(),
+        result.dynamic_slots.end());
+    selected.insert(result.mixed_slots.begin(), result.mixed_slots.end());
+    selected.insert(result.handle_slots.begin(), result.handle_slots.end());
+    result.selected_slots.assign(selected.begin(), selected.end());
+    return result;
+}
+
+template <typename Number>
+void write_number_array(std::ostringstream& output, const std::vector<Number>& values) {
+    output << '[';
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index > 0) {
+            output << ',';
+        }
+        output << values[index];
+    }
+    output << ']';
 }
 
 [[nodiscard]] std::size_t find_subsequence(const std::vector<std::uint8_t>& bytes, std::string_view needle) {
@@ -9022,6 +9149,206 @@ std::string analyze_bitfield_schema_file_json(
 ) {
     const auto bytes = read_file_bytes(path);
     return analyze_bitfield_schema_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_windows);
+}
+
+std::string analyze_artifact_bundle_file_json(
+    const std::string& path,
+    std::size_t minimum_length,
+    std::size_t minimum_records,
+    std::size_t top_families,
+    std::size_t top_entity_slots,
+    std::size_t top_scalar_slots,
+    std::size_t dynamic_slot_count,
+    std::size_t mixed_slot_count,
+    std::size_t handle_slot_count,
+    std::size_t top_windows,
+    std::size_t top_fields,
+    bool skip_scalar
+) {
+    struct RankedFamilyDescriptor {
+        std::size_t length = 0;
+        std::uint8_t first_byte = 0;
+        std::size_t record_count = 0;
+        std::size_t chunk_count = 0;
+        std::size_t header_size = 0;
+        std::size_t stride = 16;
+    };
+
+    struct FamilyArtifactResult {
+        RankedFamilyDescriptor family;
+        std::string family_key;
+        ArtifactSelectedSlots slot_selection;
+        std::string entity_slab_json;
+        std::string scalar_json;
+        std::string schema_json;
+        std::string cleaned_json;
+    };
+
+    const auto bytes = read_file_bytes(path);
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const auto family_scan = collect_ranked_chunk_families(bytes, minimum_length, minimum_records);
+
+    const std::size_t shown = std::min<std::size_t>(top_families == 0 ? 20 : top_families, family_scan.ranked_families.size());
+    std::vector<RankedFamilyDescriptor> ranked_families;
+    ranked_families.reserve(shown);
+    for (std::size_t index = 0; index < shown; ++index) {
+        const auto& family = family_scan.ranked_families[index];
+        std::size_t recommended_header_size = 0;
+        for (std::size_t header_size = 0; header_size <= 16; ++header_size) {
+            if (family.length <= header_size || ((family.length - header_size) % 16) != 0) {
+                continue;
+            }
+            recommended_header_size = header_size;
+            break;
+        }
+
+        ranked_families.push_back({
+            family.length,
+            family.first_byte,
+            family.record_count,
+            family.chunk_ids.size(),
+            recommended_header_size,
+            16,
+        });
+    }
+
+    std::vector<std::future<FamilyArtifactResult>> futures;
+    futures.reserve(ranked_families.size());
+    for (const auto& family : ranked_families) {
+        futures.push_back(std::async(std::launch::async, [&bytes, family, top_entity_slots, top_scalar_slots, dynamic_slot_count, mixed_slot_count, handle_slot_count, top_windows, top_fields, skip_scalar]() {
+            FamilyArtifactResult result;
+            result.family = family;
+
+            std::ostringstream key_builder;
+            key_builder << family.length << "-0x"
+                        << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+                        << static_cast<int>(family.first_byte)
+                        << std::dec << std::setfill(' ')
+                        << "-h" << family.header_size;
+            result.family_key = key_builder.str();
+
+            result.entity_slab_json = analyze_entity_slab_json(
+                bytes,
+                family.length,
+                family.first_byte,
+                family.header_size,
+                family.stride,
+                top_entity_slots);
+            result.slot_selection = select_candidate_slots_from_entity_slab_json(
+                trim_json_whitespace(result.entity_slab_json),
+                dynamic_slot_count,
+                mixed_slot_count,
+                handle_slot_count);
+
+            if (!skip_scalar) {
+                result.scalar_json = analyze_scalar_family_json(
+                    bytes,
+                    family.length,
+                    family.first_byte,
+                    family.header_size,
+                    family.stride,
+                    top_scalar_slots);
+            }
+
+            if (!result.slot_selection.selected_slots.empty()) {
+                result.schema_json = analyze_bitfield_schema_json(
+                    bytes,
+                    family.length,
+                    family.first_byte,
+                    family.header_size,
+                    family.stride,
+                    result.slot_selection.selected_slots,
+                    top_windows);
+                result.cleaned_json = analyze_clean_row_offsets_json(
+                    bytes,
+                    family.length,
+                    family.first_byte,
+                    family.header_size,
+                    family.stride,
+                    result.slot_selection.selected_slots,
+                    top_fields);
+            }
+
+            return result;
+        }));
+    }
+
+    std::vector<FamilyArtifactResult> family_results;
+    family_results.reserve(futures.size());
+    for (auto& future : futures) {
+        family_results.push_back(future.get());
+    }
+    std::sort(family_results.begin(), family_results.end(), [](const FamilyArtifactResult& left, const FamilyArtifactResult& right) {
+        if (left.family.chunk_count != right.family.chunk_count) {
+            return left.family.chunk_count > right.family.chunk_count;
+        }
+        if (left.family.record_count != right.family.record_count) {
+            return left.family.record_count > right.family.record_count;
+        }
+        if (left.family.length != right.family.length) {
+            return left.family.length > right.family.length;
+        }
+        return left.family.first_byte < right.family.first_byte;
+    });
+
+    const std::string summary_json = replay_summary_to_json(summary);
+    const std::string family_scan_json = scan_replay_families_json(bytes, minimum_length, minimum_records, top_families);
+
+    std::ostringstream output;
+    output << '{';
+    output << "\"summary\":" << trim_json_whitespace(summary_json) << ',';
+    output << "\"familyScan\":" << trim_json_whitespace(family_scan_json) << ',';
+    output << "\"families\":[";
+    for (std::size_t index = 0; index < family_results.size(); ++index) {
+        const auto& family = family_results[index];
+        if (index > 0) {
+            output << ',';
+        }
+        output << '{';
+        output << "\"familyKey\":\"" << json_escape(family.family_key) << "\",";
+        output << "\"length\":" << family.family.length << ',';
+        output << "\"firstByte\":" << static_cast<int>(family.family.first_byte) << ',';
+        output << "\"headerSize\":" << family.family.header_size << ',';
+        output << "\"stride\":" << family.family.stride << ',';
+        output << "\"recordCount\":" << family.family.record_count << ',';
+        output << "\"chunkCount\":" << family.family.chunk_count << ',';
+        output << "\"selectedSlots\":";
+        write_number_array(output, family.slot_selection.selected_slots);
+        output << ',';
+        output << "\"dynamicSlots\":";
+        write_number_array(output, family.slot_selection.dynamic_slots);
+        output << ',';
+        output << "\"mixedSlots\":";
+        write_number_array(output, family.slot_selection.mixed_slots);
+        output << ',';
+        output << "\"handleSlots\":";
+        write_number_array(output, family.slot_selection.handle_slots);
+        output << ',';
+        output << "\"entitySlab\":" << trim_json_whitespace(family.entity_slab_json) << ',';
+        output << "\"scalar\":";
+        if (skip_scalar || family.scalar_json.empty()) {
+            output << "null";
+        } else {
+            output << trim_json_whitespace(family.scalar_json);
+        }
+        output << ',';
+        output << "\"schema\":";
+        if (family.schema_json.empty()) {
+            output << "null";
+        } else {
+            output << trim_json_whitespace(family.schema_json);
+        }
+        output << ',';
+        output << "\"cleaned\":";
+        if (family.cleaned_json.empty()) {
+            output << "null";
+        } else {
+            output << trim_json_whitespace(family.cleaned_json);
+        }
+        output << '}';
+    }
+    output << "]}";
+    return output.str();
 }
 
 std::string match_event_window(
