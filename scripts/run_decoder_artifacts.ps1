@@ -12,8 +12,8 @@ param (
     [int]$TopFamilies = 8,
     [int]$TopEntitySlots = 24,
     [int]$TopScalarSlots = 18,
-    [int]$DynamicSlotCount = 4,
-    [int]$MixedSlotCount = 3,
+    [int]$DynamicSlotCount = 8,
+    [int]$MixedSlotCount = 2,
     [int]$HandleSlotCount = 0,
     [int]$TopWindows = 16,
     [int]$TopFields = 16,
@@ -142,15 +142,21 @@ function Get-FamilyKey {
 function Get-TopSlotIndices {
     param(
         [object[]]$Slots,
-        [int]$Count
+        [int]$Count,
+        [switch]$SortBySlotIndex
     )
 
     if ($Count -le 0 -or -not $Slots) {
         return @()
     }
 
+    $selectedSlots = @($Slots)
+    if ($SortBySlotIndex) {
+        $selectedSlots = @($selectedSlots | Sort-Object { [int]$_.slotIndex })
+    }
+
     return @(
-        $Slots |
+        $selectedSlots |
             Select-Object -First $Count |
             ForEach-Object { [int]$_.slotIndex }
     )
@@ -164,7 +170,9 @@ function Select-CandidateSlots {
         [int]$HandleSlotCount
     )
 
-    $dynamicSlots = Get-TopSlotIndices -Slots @($EntitySlab.topDynamicSlots) -Count $DynamicSlotCount
+    # Prefer the low-index dynamic band because current decoder work is strongest in
+    # these early dynamic rows for the main mixed slabs.
+    $dynamicSlots = Get-TopSlotIndices -Slots @($EntitySlab.topDynamicSlots) -Count $DynamicSlotCount -SortBySlotIndex
     $mixedSlots = Get-TopSlotIndices -Slots @($EntitySlab.topMixedSlots) -Count $MixedSlotCount
     $handleSlots = Get-TopSlotIndices -Slots @($EntitySlab.topHandleSlots) -Count $HandleSlotCount
 

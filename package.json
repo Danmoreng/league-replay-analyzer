@@ -13,6 +13,7 @@
     "typecheck:web": "npm --workspace @lra/web run typecheck",
     "build:native": "pwsh -File ./scripts/build-native.ps1 -UseNinja",
     "build:wasm": "pwsh -File ./scripts/build-wasm.ps1",
+    "build:provisional-schema": "node ./scripts/build_provisional_schema.mjs",
     "test:native": "pwsh -File ./scripts/test-native.ps1 -UseNinja",
     "fetch:riot": "node ./scripts/fetch-riot-match-data.mjs",
     "publish:riot-fixtures": "node ./scripts/publish-riot-fixtures.mjs",

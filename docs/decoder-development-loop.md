@@ -270,7 +270,7 @@ Current file:
 
 ### 2. Artifact summarizer
 
-Add a script or TypeScript module that:
+Use `scripts/build_provisional_schema.mjs` to:
 
 - loads the generated artifacts
 - deduplicates raw-window aliases
@@ -278,10 +278,9 @@ Add a script or TypeScript module that:
 - builds likely field maps
 - writes a provisional schema JSON
 
-Suggested future files:
+Current file:
 
 - `scripts/build_provisional_schema.mjs`
-- or a native/TS equivalent under `apps/web/src` if we want to share logic later
 
 ### 3. Extraction runner
 
