@@ -122,10 +122,20 @@ export function buildBundleFamilySupportAnchors(localRankedPatterns, familyKey) 
     return null;
   }
 
+  const championHints = [...new Set(
+    supportPatterns.flatMap((pattern) =>
+      (pattern.participantHits ?? [])
+        .filter((hit) => compactSlots.includes(hit.slotIndex ?? compactSlots[0]))
+        .slice(0, 4)
+        .map((hit) => hit.champion),
+    ).filter(Boolean),
+  )];
+
   return {
     slots: compactSlots,
     band: [compactSlots[0], compactSlots[compactSlots.length - 1]],
     supportMetricCount: new Set(supportPatterns.map((pattern) => pattern.metric)).size,
+    championHints,
   };
 }
 
@@ -200,6 +210,17 @@ export function scoreLocalOverrideMatch(pattern, descriptor, supportAnchor) {
     }
   }
 
+  const candidateChampions = [
+    ...(pattern.participantHits ?? []).map((hit) => hit.champion),
+    ...(pattern.champions ?? []),
+  ].filter(Boolean);
+  if (supportAnchor?.championHints?.length && candidateChampions.length) {
+    const championOverlap = candidateChampions.filter((champion) => supportAnchor.championHints.includes(champion)).length;
+    if (championOverlap > 0) {
+      score += Math.min(0.16, 0.06 * championOverlap);
+    }
+  }
+
   return score;
 }
 
@@ -220,6 +241,12 @@ export function buildCandidateMatchOverrideOptions(candidateMatches, familyKey, 
         slotIndex: match.slotIndex,
         replayCount: 1,
       }],
+      participantHits: match.champion
+        ? [{
+          slotIndex: match.slotIndex,
+          champion: match.champion,
+        }]
+        : [],
       transform: {
         slopeMedian: match.slope ?? 1,
         interceptMedian: match.intercept ?? 0,
