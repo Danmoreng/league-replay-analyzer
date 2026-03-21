@@ -314,6 +314,10 @@ Current outputs:
 - `artifacts/corpus-schema.json`
 - `artifacts/<replay-id>/extracted-stats.json`
 - `artifacts/<replay-id>/validation-report.json`
+- `artifacts/<replay-id>/movement-candidate-matches.json`
+- `artifacts/<replay-id>/movement-provisional-schema.json`
+- `artifacts/<replay-id>/extracted-movement.json`
+- `artifacts/<replay-id>/movement-validation-report.json`
 
 Current 2026-03-21 baseline from the local 7-replay corpus:
 
@@ -321,8 +325,25 @@ Current 2026-03-21 baseline from the local 7-replay corpus:
 - latest full run promoted `133` exact corpus-backed patterns from `886` ranked exact patterns
 - validated replay-only extraction is now producing usable `level`, `xp`, `totalGold`, and `minionsKilled` timelines on multiple replays
 - the best current replay is still `EUW1-7779216102`, where replay-only extraction validates `level` for 3 participants, `totalGold` for 2, `xp` for 1, and `minionsKilled` for 1
+- movement discovery now exists as a separate pipeline and is already promoting replay-local movement patterns on `EUW1-7596620123`, `EUW1-7617298409`, and `EUW1-7678536418`
+- replay-only movement extraction currently emits anonymous trajectories, not stable participant-labelled champion paths
 
-### 4. Only then improve the UI
+### 4. Movement discovery runner
+
+Use the same corpus runner, `scripts/run_decoder_corpus.ps1`, for movement discovery as well. It now additionally:
+
+- builds `movement-candidate-matches.json`
+- builds `movement-provisional-schema.json`
+- extracts anonymous replay-derived movement tracks into `extracted-movement.json`
+- writes `movement-validation-report.json`
+
+Current movement files:
+
+- `scripts/discover_movement_candidates.mjs`
+- `scripts/extract_replay_movement.mjs`
+- `scripts/validate_movement_candidates.mjs`
+
+### 5. Only then improve the UI
 
 Once the CLI/script loop is producing believable schemas and extracted fields, the UI should consume those results and visualize them.
 
@@ -349,6 +370,7 @@ The next concrete task should be:
 
 1. tighten corpus promotion so exact promoted patterns are less noisy while still inheriting version-group alias support
 2. improve replay-only row assignment on `level`, `xp`, `totalGold`, and `cs`, especially for the weaker `15.22` and `15.23` replays
-3. use the validated extraction output as the UI input contract
+3. convert anonymous movement trajectories into stable participant-labelled paths using scalar identity and early-path role heuristics
+4. use the validated extraction output as the UI input contract
 
 That is the shortest path from investigation tooling to an actual decoder.

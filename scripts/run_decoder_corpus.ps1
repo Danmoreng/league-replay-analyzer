@@ -14,7 +14,8 @@ param (
     [switch]$SkipSchema,
     [switch]$SkipCorpusSchema,
     [switch]$SkipExtraction,
-    [switch]$SkipValidation
+    [switch]$SkipValidation,
+    [switch]$SkipMovement
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,6 +44,9 @@ $schemaScript = Join-Path $PSScriptRoot "build_provisional_schema.mjs"
 $corpusSchemaScript = Join-Path $PSScriptRoot "build_corpus_schema.mjs"
 $extractScript = Join-Path $PSScriptRoot "extract_replay_stats.mjs"
 $validateScript = Join-Path $PSScriptRoot "validate_extracted_stats.mjs"
+$discoverMovementScript = Join-Path $PSScriptRoot "discover_movement_candidates.mjs"
+$extractMovementScript = Join-Path $PSScriptRoot "extract_replay_movement.mjs"
+$validateMovementScript = Join-Path $PSScriptRoot "validate_movement_candidates.mjs"
 
 $replayFiles = Get-ChildItem -Path $resolvedReplayRoot -Filter "*.rofl" -File | Sort-Object Name
 if ($replayFiles.Count -eq 0) {
@@ -143,6 +147,38 @@ if (-not $SkipValidation) {
             throw "Validation failed for $($entry.replayName)"
         }
         $entry["validationReportPath"] = $validationPath
+    }
+}
+
+if (-not $SkipMovement) {
+    foreach ($entry in $processed) {
+        $movementCandidatePath = Join-Path $entry.artifactDir "movement-candidate-matches.json"
+        $movementSchemaPath = Join-Path $entry.artifactDir "movement-provisional-schema.json"
+        $movementExtractedPath = Join-Path $entry.artifactDir "extracted-movement.json"
+        $movementValidationPath = Join-Path $entry.artifactDir "movement-validation-report.json"
+
+        Write-Host "Discovering movement candidates for $($entry.replayName)" -ForegroundColor Cyan
+        node $discoverMovementScript --artifact-dir $entry.artifactDir --fixture-dir $entry.fixtureDir
+        if ($LASTEXITCODE -ne 0) {
+            throw "Movement discovery failed for $($entry.replayName)"
+        }
+
+        Write-Host "Extracting movement tracks for $($entry.replayName)" -ForegroundColor Cyan
+        node $extractMovementScript --artifact-dir $entry.artifactDir --schema-path $movementSchemaPath --output-path $movementExtractedPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Movement extraction failed for $($entry.replayName)"
+        }
+
+        Write-Host "Validating movement candidates for $($entry.replayName)" -ForegroundColor Cyan
+        node $validateMovementScript --candidate-matches-path $movementCandidatePath --provisional-schema-path $movementSchemaPath --output-path $movementValidationPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Movement validation failed for $($entry.replayName)"
+        }
+
+        $entry["movementCandidatePath"] = $movementCandidatePath
+        $entry["movementSchemaPath"] = $movementSchemaPath
+        $entry["movementExtractedPath"] = $movementExtractedPath
+        $entry["movementValidationPath"] = $movementValidationPath
     }
 }
 

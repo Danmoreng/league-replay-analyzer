@@ -44,6 +44,37 @@ Current best validated replay-only result:
 
 Other replays now also yield real replay-derived stat timelines, but coverage is still uneven by patch/version group.
 
+## Current Movement Discovery Status
+
+Movement is no longer purely speculative. The decoder now has a dedicated movement-discovery path:
+
+- `scripts/discover_movement_candidates.mjs`
+- `scripts/extract_replay_movement.mjs`
+- `scripts/validate_movement_candidates.mjs`
+
+The current movement pipeline:
+
+- scans cleaned replay fields as candidate `x/y` pairs per slot
+- fits affine transforms against Riot participant `position.x/y`
+- scores pairs by axis correlation, path correlation, map-bounds ratio, and distance error
+- promotes replay-local movement patterns only when the same pair recurs across multiple rows
+- emits anonymous replay-derived trajectories into `artifacts/<replay-id>/extracted-movement.json`
+
+Current corpus-level result from the same 7 local replays:
+
+- `EUW1-7596620123`: `2` promoted movement patterns, `4` extracted trajectories
+- `EUW1-7617298409`: `3` promoted movement patterns, `5` extracted trajectories
+- `EUW1-7678536418`: `8` promoted movement patterns, `11` extracted trajectories
+- other replays currently show participant-level movement matches but not enough repeated-row support for promotion
+
+The strongest current pattern is version-sensitive and appears to live in the main `0x00` state family for several patch groups:
+
+- `15.22`: `61894 / 0x00`
+- `15.23`: `61737 / 0x00`
+- `16.1`: `61733 / 0x00`
+
+That is promising, but it is not yet a final movement schema. The missing piece is stable replay-only identity assignment for those movement rows.
+
 ## What Is Actually Supported
 
 ### Stable findings
@@ -67,7 +98,7 @@ Other replays now also yield real replay-derived stat timelines, but coverage is
 
 - a fully stable participant-to-row mapping that survives across all important families, metrics, and replays
 - a fully decoded scalar field map for health/gold/xp/cs/level across every supported patch group
-- champion movement extraction from the replay payload itself
+- replay-only champion movement extraction with stable participant identity across patch groups
 - a proven ECS handle layout or row-pointer format
 
 ## Current Working Model

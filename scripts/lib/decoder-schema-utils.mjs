@@ -119,6 +119,13 @@ export const metricDefinitions = [
 ];
 
 export const metricDefinitionByKey = new Map(metricDefinitions.map((metric) => [metric.key, metric]));
+export const summonersRiftBounds = {
+  minX: 0,
+  maxX: 16000,
+  minY: 0,
+  maxY: 16000,
+  diagonal: Math.sqrt((16000 * 16000) + (16000 * 16000)),
+};
 
 export function resolveAbsolute(root, targetPath) {
   return path.isAbsolute(targetPath) ? targetPath : path.resolve(root, targetPath);
@@ -448,6 +455,49 @@ export function buildMetricSeries(matchJson, timelineJson, requestedMetricKeys =
     participants,
     participantById: new Map(participants.map((participant) => [participant.participantId, participant])),
     metricSeriesByParticipant,
+  };
+}
+
+export function buildPositionSeries(matchJson, timelineJson) {
+  const participants = matchJson.info.participants.map((participant) => ({
+    participantId: participant.participantId,
+    champion: participant.championName,
+    teamId: participant.teamId,
+    teamPosition: normalizeTeamPosition(participant.teamPosition ?? participant.individualPosition),
+  }));
+
+  const positionSeriesByParticipant = new Map();
+  for (const participant of participants) {
+    positionSeriesByParticipant.set(participant.participantId, []);
+  }
+
+  for (const frame of timelineJson.info.frames ?? []) {
+    const participantFrames = frame.participantFrames ?? {};
+    for (const [rawParticipantId, participantFrame] of Object.entries(participantFrames)) {
+      const participantId = Number.parseInt(rawParticipantId, 10);
+      const position = participantFrame.position;
+      if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) {
+        continue;
+      }
+
+      const list = positionSeriesByParticipant.get(participantId);
+      if (!list) {
+        continue;
+      }
+
+      list.push({
+        timestamp: frame.timestamp,
+        x: position.x,
+        y: position.y,
+        movementSpeed: safeNumber(participantFrame.championStats?.movementSpeed),
+      });
+    }
+  }
+
+  return {
+    participants,
+    participantById: new Map(participants.map((participant) => [participant.participantId, participant])),
+    positionSeriesByParticipant,
   };
 }
 
