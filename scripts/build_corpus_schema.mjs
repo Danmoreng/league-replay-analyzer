@@ -727,6 +727,17 @@ function promoteBundleGroup(group) {
     return false;
   }
 
+  if (
+    group.familyKey === "61894-0x00-h6" &&
+    group.metric === "healthMax" &&
+    (
+      (bundleSupport.passCount ?? 0) < 2 ||
+      (group.support.medianValidatorScore ?? 0) < 0.75
+    )
+  ) {
+    return false;
+  }
+
   if (group.metric === "movementSpeed" && (bundleSupport.passCount ?? 0) < 2) {
     return false;
   }

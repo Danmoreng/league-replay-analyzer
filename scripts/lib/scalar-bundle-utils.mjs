@@ -302,6 +302,55 @@ export function clampSlotsToAnchor(recommendedSlots, rowBand, supportAnchor) {
   };
 }
 
+function shouldPreserveStrongPowerLocalOverride(familyKey, metricKey, localOverride, supportAnchor) {
+  if (metricKey !== "power" || !localOverride || !supportAnchor) {
+    return false;
+  }
+
+  const overrideSlots = collectPatternSlots(localOverride);
+  if (overrideSlots.length === 0) {
+    return false;
+  }
+
+  const allowedMin = supportAnchor.band[0] - 1;
+  const allowedMax = supportAnchor.band[1] + 1;
+  const outsideSlots = overrideSlots.filter((slotIndex) => slotIndex < allowedMin || slotIndex > allowedMax);
+  if (outsideSlots.length === 0) {
+    return false;
+  }
+
+  const nearestDistance = Math.min(
+    ...outsideSlots.map((slotIndex) =>
+      Math.min(
+        Math.abs(slotIndex - supportAnchor.band[0]),
+        Math.abs(slotIndex - supportAnchor.band[1]),
+      ),
+    ),
+  );
+  if (familyKey === "6912-0xC6-h0") {
+    if (nearestDistance > 4) {
+      return false;
+    }
+    return (localOverride.confidence ?? 0) >= 0.44;
+  }
+
+  if (familyKey === "61894-0x00-h6") {
+    const lateOutsideSlots = outsideSlots.filter((slotIndex) => slotIndex > allowedMax);
+    if (lateOutsideSlots.length === 0 || lateOutsideSlots.length !== outsideSlots.length) {
+      return false;
+    }
+    if (nearestDistance > 3) {
+      return false;
+    }
+    return (
+      (localOverride.matchScore ?? localOverride.support?.avgEffectiveScore ?? 0) >= 0.29 &&
+      (localOverride.confidence ?? 0) >= 0.52
+    );
+  }
+
+  return false;
+}
+
 export function selectBundleSupportCluster(metricRecommendation, supportClusters, acceptedLocalOverride = null) {
   if (!Array.isArray(supportClusters) || supportClusters.length === 0) {
     return null;
@@ -386,6 +435,15 @@ export function scoreLocalOverrideMatch(pattern, descriptor, supportAnchor) {
     } else if (nearOverlap > 0) {
       score += 0.08;
     }
+
+    if (
+      descriptor.familyKey === "61894-0x00-h6" &&
+      pattern.metric === "power" &&
+      shouldPreserveStrongPowerLocalOverride(descriptor.familyKey, pattern.metric, pattern, supportAnchor)
+    ) {
+      score += 0.28;
+    }
+
   }
 
   const candidateChampions = [
@@ -734,7 +792,14 @@ export function buildBundleRecommendedPatterns(artifactDir, runManifest, summary
           Math.min(slotFloor, Math.floor(bundle.slotBand?.[0] ?? slotFloor)),
           Math.max(slotCeil, Math.ceil(bundle.slotBand?.[1] ?? slotCeil)),
         ];
-        const anchoredSelection = clampSlotsToAnchor(recommendedSlots, rowBand, selectedSupportCluster);
+        const anchoredSelection = shouldPreserveStrongPowerLocalOverride(
+          descriptor.familyKey,
+          metricRecommendation.metric,
+          acceptedLocalOverride,
+          selectedSupportCluster,
+        )
+          ? { recommendedSlots, rowBand }
+          : clampSlotsToAnchor(recommendedSlots, rowBand, selectedSupportCluster);
         const bundleConfidence = clamp(
           (0.45 * (bundle.bundleScore ?? 0)) +
           (0.55 * (metricRecommendation.bundleCandidateScore ?? 0)),

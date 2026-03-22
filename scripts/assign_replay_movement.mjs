@@ -257,6 +257,46 @@ function resolveEntityProjection(entity, participant) {
   };
 }
 
+function supportHypothesisKey(hypothesis) {
+  return [
+    hypothesis?.participantId ?? "",
+    hypothesis?.champion ?? "",
+    hypothesis?.teamId ?? "",
+    hypothesis?.teamPosition ?? "",
+    hypothesis?.mapping ?? "",
+  ].join("|");
+}
+
+function mergeSupportHypotheses(group) {
+  const merged = new Map();
+  for (const entity of group) {
+    for (const hypothesis of entity.supportHypotheses ?? []) {
+      const key = supportHypothesisKey(hypothesis);
+      const existing = merged.get(key);
+      if (
+        !existing ||
+        Number(hypothesis.passesValidation) > Number(existing.passesValidation) ||
+        (Number(hypothesis.passesValidation) === Number(existing.passesValidation) &&
+          (hypothesis.effectiveScore ?? 0) > (existing.effectiveScore ?? 0)) ||
+        (
+          Number(hypothesis.passesValidation) === Number(existing.passesValidation) &&
+          (hypothesis.effectiveScore ?? 0) === (existing.effectiveScore ?? 0) &&
+          (hypothesis.validatorScore ?? 0) > (existing.validatorScore ?? 0)
+        )
+      ) {
+        merged.set(key, hypothesis);
+      }
+    }
+  }
+
+  return [...merged.values()].sort((left, right) =>
+    Number(right.passesValidation) - Number(left.passesValidation) ||
+    (right.effectiveScore ?? 0) - (left.effectiveScore ?? 0) ||
+    (right.validatorScore ?? 0) - (left.validatorScore ?? 0) ||
+    (left.normalizedDistanceRmse ?? Number.POSITIVE_INFINITY) - (right.normalizedDistanceRmse ?? Number.POSITIVE_INFINITY)
+  );
+}
+
 function canonicalizeEntities(entities) {
   const groups = new Map();
   for (const entity of entities) {
@@ -284,7 +324,10 @@ function canonicalizeEntities(entities) {
       || (right.sourceMetrics?.avgValidatorScore ?? 0) - (left.sourceMetrics?.avgValidatorScore ?? 0)
       || (right.trajectoryStats?.movementQuality ?? 0) - (left.trajectoryStats?.movementQuality ?? 0),
     );
-    const primary = ranked[0];
+    const primary = {
+      ...ranked[0],
+      supportHypotheses: mergeSupportHypotheses(ranked),
+    };
     primary.aliasEntityKeys = ranked.map((entity) => entity.entityKey);
     primary.entityGroupKey = groupKey;
     keptEntities.push(primary);

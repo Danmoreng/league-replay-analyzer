@@ -304,6 +304,73 @@ function selectBestBundleClusterPattern(localPattern, candidates) {
     )[0] ?? null;
 }
 
+function collectPatternRecommendedSlots(pattern) {
+  const recommendedSlots = uniqueSortedNumbers(
+    (pattern?.recommendedSlots ?? [])
+      .map((slot) => slot.slotIndex)
+      .filter(Number.isFinite),
+  );
+  if (recommendedSlots.length > 0) {
+    return recommendedSlots;
+  }
+
+  const slotClusterBand = Array.isArray(pattern?.slotClusterBand) ? pattern.slotClusterBand : null;
+  if (slotClusterBand && Number.isFinite(slotClusterBand[0]) && Number.isFinite(slotClusterBand[1])) {
+    const slots = [];
+    for (let slotIndex = slotClusterBand[0]; slotIndex <= slotClusterBand[1]; slotIndex += 1) {
+      slots.push(slotIndex);
+    }
+    return uniqueSortedNumbers(slots);
+  }
+
+  const [rowStart, rowEnd] = pattern?.recommendedRowBand ?? pattern?.rowBand ?? [];
+  if (Number.isFinite(rowStart) && Number.isFinite(rowEnd)) {
+    const slots = [];
+    for (let slotIndex = rowStart; slotIndex <= rowEnd; slotIndex += 1) {
+      slots.push(slotIndex);
+    }
+    return uniqueSortedNumbers(slots);
+  }
+
+  return [];
+}
+
+function patternSlotDistance(leftPattern, rightPattern) {
+  const leftSlots = collectPatternRecommendedSlots(leftPattern);
+  const rightSlots = collectPatternRecommendedSlots(rightPattern);
+  if (leftSlots.length === 0 || rightSlots.length === 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const leftSlot of leftSlots) {
+    for (const rightSlot of rightSlots) {
+      bestDistance = Math.min(bestDistance, Math.abs(leftSlot - rightSlot));
+    }
+  }
+  return bestDistance;
+}
+
+function isStrongExactMovementSpeedCandidate(pattern) {
+  return (
+    pattern?.source === "candidate-ranked" &&
+    pattern.metric === "movementSpeed" &&
+    (pattern.matchScore ?? 0) >= 0.32 &&
+    (pattern.confidence ?? 0) >= 0.5
+  );
+}
+
+function shouldSuppressBundleMovementSpeedPattern(bundlePattern, exactCandidates) {
+  if (bundlePattern.metric !== "movementSpeed") {
+    return false;
+  }
+
+  return exactCandidates.some((candidate) =>
+    candidate.familyKey === bundlePattern.familyKey &&
+    patternSlotDistance(bundlePattern, candidate) <= 1,
+  );
+}
+
 function buildBundleFamilySupportAnchors(localRankedPatterns, familyKey) {
   const supportPatterns = localRankedPatterns
     .filter((pattern) => pattern.familyKey === familyKey)
@@ -384,6 +451,55 @@ function clampSlotsToAnchor(recommendedSlots, rowBand, supportAnchor) {
   };
 }
 
+function shouldPreserveStrongPowerLocalOverride(familyKey, metricKey, localOverride, supportAnchor) {
+  if (metricKey !== "power" || !localOverride || !supportAnchor) {
+    return false;
+  }
+
+  const overrideSlots = collectPatternSlots(localOverride);
+  if (overrideSlots.length === 0) {
+    return false;
+  }
+
+  const allowedMin = supportAnchor.band[0] - 1;
+  const allowedMax = supportAnchor.band[1] + 1;
+  const outsideSlots = overrideSlots.filter((slotIndex) => slotIndex < allowedMin || slotIndex > allowedMax);
+  if (outsideSlots.length === 0) {
+    return false;
+  }
+
+  const nearestDistance = Math.min(
+    ...outsideSlots.map((slotIndex) =>
+      Math.min(
+        Math.abs(slotIndex - supportAnchor.band[0]),
+        Math.abs(slotIndex - supportAnchor.band[1]),
+      ),
+    ),
+  );
+  if (familyKey === "6912-0xC6-h0") {
+    if (nearestDistance > 4) {
+      return false;
+    }
+    return (localOverride.confidence ?? 0) >= 0.44;
+  }
+
+  if (familyKey === "61894-0x00-h6") {
+    const lateOutsideSlots = outsideSlots.filter((slotIndex) => slotIndex > allowedMax);
+    if (lateOutsideSlots.length === 0 || lateOutsideSlots.length !== outsideSlots.length) {
+      return false;
+    }
+    if (nearestDistance > 3) {
+      return false;
+    }
+    return (
+      (localOverride.matchScore ?? 0) >= 0.45 &&
+      (localOverride.confidence ?? 0) >= 0.58
+    );
+  }
+
+  return false;
+}
+
 function decodeCategory(decodeLabel) {
   if (String(decodeLabel).startsWith("f")) {
     return "float";
@@ -420,6 +536,20 @@ function scoreLocalOverrideMatch(pattern, descriptor, supportAnchor) {
     } else if (nearOverlap > 0) {
       score += 0.08;
     }
+
+    if (descriptor.familyKey === "61894-0x00-h6" && pattern.metric === "power") {
+      const lateOutsideSlots = patternSlots.filter((slotIndex) => slotIndex > (supportAnchor.band[1] + 1));
+      const earlyOutsideSlots = patternSlots.filter((slotIndex) => slotIndex < (supportAnchor.band[0] - 1));
+      if (
+        lateOutsideSlots.length > 0 &&
+        earlyOutsideSlots.length === 0 &&
+        (pattern.matchScore ?? 0) >= 0.45 &&
+        (pattern.confidence ?? 0) >= 0.58
+      ) {
+        score += 0.28;
+      }
+    }
+
   }
 
   return score;
@@ -528,7 +658,14 @@ function buildBundleRecommendedPatterns(artifactDir, runManifest, summaryJson, p
           Math.min(slotFloor, Math.floor(bundle.slotBand?.[0] ?? slotFloor)),
           Math.max(slotCeil, Math.ceil(bundle.slotBand?.[1] ?? slotCeil)),
         ];
-        const anchoredSelection = clampSlotsToAnchor(recommendedSlots, rowBand, supportAnchor);
+        const anchoredSelection = shouldPreserveStrongPowerLocalOverride(
+          descriptor.familyKey,
+          metricRecommendation.metric,
+          acceptedLocalOverride,
+          supportAnchor,
+        )
+          ? { recommendedSlots, rowBand }
+          : clampSlotsToAnchor(recommendedSlots, rowBand, supportAnchor);
         const bundleConfidence = clamp(
           (0.45 * (bundle.bundleScore ?? 0)) +
           (0.55 * (metricRecommendation.bundleCandidateScore ?? 0)),
@@ -773,6 +910,7 @@ function normalizePattern(pattern, candidateMatches, source) {
     slotClusterKey: pattern.slotClusterKey ?? null,
     slotClusterCenter: pattern.slotClusterCenter ?? null,
     slotClusterBand: pattern.slotClusterBand ?? null,
+    matchScore: pattern.matchScore ?? null,
     bundleSupport: pattern.bundleSupport ?? null,
   };
 }
@@ -1056,6 +1194,11 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
     .slice(0, 12)
     .map((pattern) => normalizePattern(pattern, candidateMatches, "corpus-ranked"));
 
+  const bundlePromotedByFamilyMetric = new Map();
+  for (const pattern of (corpusSchema.bundlePromotedPatterns ?? []).filter((entry) => familyKeys.has(entry.familyKey))) {
+    appendMapList(bundlePromotedByFamilyMetric, `${pattern.familyKey}|${pattern.metric}`, pattern);
+  }
+
   const weakCandidateMetricKeys = new Set([
     "health",
     "healthMax",
@@ -1066,7 +1209,8 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
   const candidateLocal = [];
   for (const familyKey of familyKeys) {
     for (const metricKey of weakCandidateMetricKeys) {
-      if (!isMetricAssignable(metricKey, roster)) {
+      const allowCandidateWithoutRosterAnchor = metricKey === "movementSpeed";
+      if (!allowCandidateWithoutRosterAnchor && !isMetricAssignable(metricKey, roster)) {
         continue;
       }
       candidateLocal.push(
@@ -1076,11 +1220,7 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
       );
     }
   }
-
-  const bundlePromotedByFamilyMetric = new Map();
-  for (const pattern of (corpusSchema.bundlePromotedPatterns ?? []).filter((entry) => familyKeys.has(entry.familyKey))) {
-    appendMapList(bundlePromotedByFamilyMetric, `${pattern.familyKey}|${pattern.metric}`, pattern);
-  }
+  const strongExactMovementSpeedCandidates = candidateLocal.filter(isStrongExactMovementSpeedCandidate);
 
   const bundleRecommended = buildBundleRecommendedPatternsFromUtils(artifactDir, runManifest, summaryJson, provisionalSchema, candidateMatches)
     .filter((pattern) => familyKeys.has(pattern.familyKey))
@@ -1088,6 +1228,12 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
       const promoted = selectBestBundleClusterPattern(
         pattern,
         bundlePromotedByFamilyMetric.get(`${pattern.familyKey}|${pattern.metric}`) ?? [],
+      );
+      const preserveLocalBundleSlots = shouldPreserveStrongPowerLocalOverride(
+        pattern.familyKey,
+        pattern.metric,
+        pattern,
+        pattern.bundleSupport?.supportAnchor ?? null,
       );
       const allowPromotedTransformOverride =
         pattern.metric === "powerMax" ||
@@ -1103,11 +1249,21 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
           ...pattern,
           confidence: Math.max(pattern.confidence ?? 0, promoted.confidence ?? 0),
           transform: promotedTransform ?? pattern.transform,
-          recommendedRowBand: promoted.recommendedRowBand ?? pattern.recommendedRowBand,
-          recommendedSlots: promoted.recommendedSlots ?? pattern.recommendedSlots,
-          slotClusterKey: promoted.slotClusterKey ?? null,
-          slotClusterCenter: promoted.slotClusterCenter ?? pattern.slotClusterCenter ?? null,
-          slotClusterBand: promoted.slotClusterBand ?? pattern.slotClusterBand ?? null,
+          recommendedRowBand: preserveLocalBundleSlots
+            ? pattern.recommendedRowBand
+            : (promoted.recommendedRowBand ?? pattern.recommendedRowBand),
+          recommendedSlots: preserveLocalBundleSlots
+            ? pattern.recommendedSlots
+            : (promoted.recommendedSlots ?? pattern.recommendedSlots),
+          slotClusterKey: preserveLocalBundleSlots
+            ? (pattern.slotClusterKey ?? null)
+            : (promoted.slotClusterKey ?? null),
+          slotClusterCenter: preserveLocalBundleSlots
+            ? (pattern.slotClusterCenter ?? null)
+            : (promoted.slotClusterCenter ?? pattern.slotClusterCenter ?? null),
+          slotClusterBand: preserveLocalBundleSlots
+            ? (pattern.slotClusterBand ?? null)
+            : (promoted.slotClusterBand ?? pattern.slotClusterBand ?? null),
           bundleSupport: {
             ...(pattern.bundleSupport ?? {}),
             ...(promoted.bundleSupport ?? {}),
@@ -1124,7 +1280,8 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
         : pattern;
       const normalized = normalizePattern(mergedPattern, candidateMatches, promoted ? "bundle-promoted" : "bundle-recommended");
       return applyFamilyLayoutPrior(normalized, familyLayouts.get(normalized.familyKey));
-    });
+    })
+    .filter((pattern) => !shouldSuppressBundleMovementSpeedPattern(pattern, strongExactMovementSpeedCandidates));
   const preferredBundleFamilyKeys = new Set(bundleRecommended.map((pattern) => pattern.familyKey));
 
   const selected = [];
@@ -1145,8 +1302,8 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
           bonus += 0.08;
         }
       }
-        const layoutPattern = applyFamilyLayoutPrior(pattern, familyLayouts.get(pattern.familyKey));
-        return {
+      const layoutPattern = applyFamilyLayoutPrior(pattern, familyLayouts.get(pattern.familyKey));
+      return {
           ...layoutPattern,
           selectionScore: layoutPattern.selectionScore + bonus,
         };
