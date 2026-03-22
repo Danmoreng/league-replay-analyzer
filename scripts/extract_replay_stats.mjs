@@ -759,9 +759,22 @@ function applyFamilyLayoutPrior(pattern, familyLayout) {
     return pattern;
   }
 
+  const constrainLayoutToSlotClusterBand = shouldSplitAmbiguousExactPattern(pattern);
+  const slotClusterBand = constrainLayoutToSlotClusterBand && Array.isArray(pattern.slotClusterBand) &&
+    Number.isFinite(pattern.slotClusterBand[0]) &&
+    Number.isFinite(pattern.slotClusterBand[1])
+    ? pattern.slotClusterBand
+    : null;
+  const effectiveLayoutSlots = slotClusterBand
+    ? layoutSlots.filter((slotIndex) => slotIndex >= slotClusterBand[0] && slotIndex <= slotClusterBand[1])
+    : layoutSlots;
+  if (effectiveLayoutSlots.length === 0 && slotClusterBand) {
+    return pattern;
+  }
+
   const recommendedSlots = [
     ...(pattern.recommendedSlots ?? []).map((slot) => slot.slotIndex),
-    ...layoutSlots,
+    ...(effectiveLayoutSlots.length > 0 ? effectiveLayoutSlots : layoutSlots),
   ]
     .filter((slotIndex, index, array) => array.indexOf(slotIndex) === index)
     .sort((left, right) => left - right)
@@ -769,7 +782,7 @@ function applyFamilyLayoutPrior(pattern, familyLayout) {
 
   const rowBandValues = [
     ...(pattern.recommendedRowBand ?? []),
-    ...layoutSlots,
+    ...(effectiveLayoutSlots.length > 0 ? effectiveLayoutSlots : layoutSlots),
   ].filter(Number.isFinite);
   const recommendedRowBand = rowBandValues.length > 0
     ? [Math.min(...rowBandValues), Math.max(...rowBandValues)]
@@ -789,6 +802,120 @@ function applyFamilyLayoutPrior(pattern, familyLayout) {
     recommendedRowBand,
     selectionScore,
   };
+}
+
+function buildSplitPatternKey(pattern, suffix) {
+  return `${pattern.patternKey}|${suffix}`;
+}
+
+function shouldSplitAmbiguousExactPattern(pattern) {
+  if (!pattern) {
+    return false;
+  }
+  if (pattern.source === "bundle-recommended" || pattern.source === "bundle-promoted") {
+    return false;
+  }
+  if (pattern.familyKey !== "61894-0x00-h6") {
+    return false;
+  }
+  if (!["candidate-ranked", "replay-ranked", "corpus-ranked"].includes(pattern.source)) {
+    return false;
+  }
+  if (pattern.metric !== "movementSpeed") {
+    return false;
+  }
+  return true;
+}
+
+function splitExactPatternByLayoutClusters(pattern, familyLayout) {
+  if (!familyLayout) {
+    return [pattern];
+  }
+  if (!shouldSplitAmbiguousExactPattern(pattern)) {
+    return [pattern];
+  }
+
+  const recommendedSlots = collectPatternRecommendedSlots(pattern);
+  if (recommendedSlots.length === 0) {
+    return [pattern];
+  }
+
+  const slotGroups = new Map();
+  for (const slotIndex of recommendedSlots) {
+    const resolvedCluster = resolveLayoutSlotCluster(familyLayout, {
+      metric: pattern.metric,
+      dominantSlot: slotIndex,
+      recommendedSlots: [slotIndex],
+      rowBand: [slotIndex, slotIndex],
+      slotClusterKey: pattern.slotClusterKey ?? null,
+      slotClusterCenter: pattern.slotClusterCenter ?? null,
+      slotClusterBand: pattern.slotClusterBand ?? null,
+    });
+    const clusterBand = Array.isArray(resolvedCluster?.slotBand) &&
+      Number.isFinite(resolvedCluster.slotBand[0]) &&
+      Number.isFinite(resolvedCluster.slotBand[1])
+      ? resolvedCluster.slotBand
+      : null;
+    const cluster = clusterBand && slotIndex >= clusterBand[0] && slotIndex <= clusterBand[1]
+      ? resolvedCluster
+      : null;
+    const groupKey = cluster?.key ?? `slot:${slotIndex}`;
+    const existing = slotGroups.get(groupKey) ?? {
+      cluster,
+      slots: [],
+    };
+    existing.slots.push(slotIndex);
+    if (!existing.cluster && cluster) {
+      existing.cluster = cluster;
+    }
+    slotGroups.set(groupKey, existing);
+  }
+
+  if (slotGroups.size <= 1) {
+    const onlyGroup = [...slotGroups.values()][0] ?? null;
+    if (!onlyGroup?.cluster) {
+      return [pattern];
+    }
+    return [{
+      ...pattern,
+      slotClusterKey: onlyGroup.cluster.key,
+      slotClusterCenter: onlyGroup.cluster.center,
+      slotClusterBand: onlyGroup.cluster.slotBand ?? null,
+    }];
+  }
+
+  return [...slotGroups.entries()]
+    .sort((left, right) => {
+      const leftMin = Math.min(...left[1].slots);
+      const rightMin = Math.min(...right[1].slots);
+      return leftMin - rightMin || left[0].localeCompare(right[0]);
+    })
+    .map(([groupKey, group]) => {
+      const slots = uniqueSortedNumbers(group.slots);
+      const clusterBand = Array.isArray(group.cluster?.slotBand) &&
+        Number.isFinite(group.cluster.slotBand[0]) &&
+        Number.isFinite(group.cluster.slotBand[1])
+        ? group.cluster.slotBand
+        : [slots[0], slots[slots.length - 1]];
+      const narrowedSlots = slots
+        .filter((slotIndex) => slotIndex >= clusterBand[0] && slotIndex <= clusterBand[1]);
+      const effectiveSlots = narrowedSlots.length > 0 ? narrowedSlots : slots;
+      return {
+        ...pattern,
+        patternKey: buildSplitPatternKey(pattern, groupKey),
+        recommendedSlots: effectiveSlots.map((slotIndex) => ({ slotIndex, replayCount: 1 })),
+        recommendedRowBand: [effectiveSlots[0], effectiveSlots[effectiveSlots.length - 1]],
+        slotClusterKey: group.cluster?.key ?? null,
+        slotClusterCenter: group.cluster?.center ?? null,
+        slotClusterBand: group.cluster?.slotBand ?? clusterBand,
+      };
+    });
+}
+
+function splitPatternsByLayoutClusters(patterns, familyLayouts) {
+  return patterns.flatMap((pattern) =>
+    splitExactPatternByLayoutClusters(pattern, familyLayouts.get(pattern.familyKey)),
+  );
 }
 
 function buildResolvedClusterSlots(pattern, cluster, observedSlots) {
@@ -1179,20 +1306,20 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
     .sort((left, right) => right.confidence - left.confidence)
     .map((pattern) => normalizePattern(pattern, candidateMatches, "replay-promoted"));
 
-  const localRanked = (provisionalSchema.rankedPatterns ?? [])
+  const localRanked = splitPatternsByLayoutClusters((provisionalSchema.rankedPatterns ?? [])
     .filter((pattern) => familyKeys.has(pattern.familyKey))
     .filter((pattern) => isMetricAssignable(pattern.metric, roster))
     .sort((left, right) => right.confidence - left.confidence)
     .slice(0, 16)
-    .map((pattern) => normalizePattern(pattern, candidateMatches, "replay-ranked"));
+    .map((pattern) => normalizePattern(pattern, candidateMatches, "replay-ranked")), familyLayouts);
 
-  const rankedCorpus = (corpusSchema.rankedPatterns ?? [])
+  const rankedCorpus = splitPatternsByLayoutClusters((corpusSchema.rankedPatterns ?? [])
     .filter((pattern) => familyKeys.has(pattern.familyKey))
     .filter((pattern) => isMetricAssignable(pattern.metric, roster))
     .filter((pattern) => (pattern.support?.replays ?? 0) >= 2)
     .sort((left, right) => right.confidence - left.confidence)
     .slice(0, 12)
-    .map((pattern) => normalizePattern(pattern, candidateMatches, "corpus-ranked"));
+    .map((pattern) => normalizePattern(pattern, candidateMatches, "corpus-ranked")), familyLayouts);
 
   const bundlePromotedByFamilyMetric = new Map();
   for (const pattern of (corpusSchema.bundlePromotedPatterns ?? []).filter((entry) => familyKeys.has(entry.familyKey))) {
@@ -1220,7 +1347,8 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
       );
     }
   }
-  const strongExactMovementSpeedCandidates = candidateLocal.filter(isStrongExactMovementSpeedCandidate);
+  const splitCandidateLocal = splitPatternsByLayoutClusters(candidateLocal, familyLayouts);
+  const strongExactMovementSpeedCandidates = splitCandidateLocal.filter(isStrongExactMovementSpeedCandidate);
 
   const bundleRecommended = buildBundleRecommendedPatternsFromUtils(artifactDir, runManifest, summaryJson, provisionalSchema, candidateMatches)
     .filter((pattern) => familyKeys.has(pattern.familyKey))
@@ -1289,7 +1417,7 @@ function chooseSchemaPatterns(corpusSchema, provisionalSchema, candidateMatches,
   const selectedBundleKeys = new Set();
   const selectedMetricCounts = new Map();
   const selectedMetricFamilies = new Map();
-  const candidates = [...bundleRecommended, ...candidateLocal, ...corpusPromoted, ...localPromoted, ...localRanked, ...rankedCorpus]
+  const candidates = [...bundleRecommended, ...splitCandidateLocal, ...corpusPromoted, ...localPromoted, ...localRanked, ...rankedCorpus]
       .map((pattern) => {
         let bonus = 0;
       if (
