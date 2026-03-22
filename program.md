@@ -37,6 +37,11 @@ To stop the loop cleanly:
 
 - `pwsh -File .\scripts\stop_autoresearch.ps1 -Tag <tag>`
 
+Stopping nuance:
+
+- the stop script prevents new iterations by writing a `STOP` file
+- it does not forcibly kill a `codex exec` child that is already running
+
 ## Allowed work
 
 Primary scope:
@@ -95,8 +100,21 @@ This project should still bias toward state decoding first. Scalar validation wi
 
 ## Current priority order
 
-1. stabilize `16.6 | 6912-0xC6-h0 | power` around `s14`
-2. split ambiguous exact `16.6 | 61894-0x00-h6 | movementSpeed` patterns before participant assignment
+Current stable reference score:
+
+- `scalarPasses = 40`
+- `movementPasses = 64`
+- `promotedPatterns = 349`
+- `promotedBundlePatterns = 3`
+
+Known caveat:
+
+- one overnight run reached `40 / 68 / 349 / 3`, but that movement-side result has not yet been reproduced deterministically from a clean rerun
+
+Current priority order:
+
+1. split ambiguous exact `16.6 | 61894-0x00-h6` patterns before participant assignment and extraction tie-breaking
+2. stabilize `16.6 | 6912-0xC6-h0 | power` around `s14`
 3. improve latest-patch movement rejection without regressing validated scalar extraction
 
 ## Crash policy

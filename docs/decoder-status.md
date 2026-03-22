@@ -1,6 +1,6 @@
 # Replay Decoder Status
 
-Updated: 2026-03-21
+Updated: 2026-03-22
 
 This is the canonical status document for the current replay reverse-engineering work. Use this file first when continuing decoder work.
 
@@ -34,23 +34,25 @@ The decoder now has a working offline corpus pipeline:
 - a two-pass corpus convergence loop so `corpus-schema.json` is rebuilt again after fresh extraction and validation results exist
 - the scalar corpus loop now reaches a real fixed point again after the bundle transform-sample amplification bug was removed
 
-The latest full corpus run on `2026-03-21` covered 18 local replay fixtures and produced:
+The latest recovered corpus state on `2026-03-22` still covers 18 local replay fixtures and currently produces:
 
 - `349` promoted exact corpus-backed patterns in the final `artifacts/corpus-schema.json`
 - `128` remaining ranked exact patterns in that same final schema
-- `1` promoted bundle-backed pattern and `14` remaining ranked bundle-backed patterns
+- `3` promoted bundle-backed patterns and `9` remaining ranked bundle-backed patterns
 - a larger latest-patch cohort with `11` local `16.6` replays
 - validated replay-only `xp`, `totalGold`, `level`, `power`, `powerMax`, `healthMax`, `minionsKilled`, `jungleMinionsKilled`, and `movementSpeed` timelines across at least some replays
+- a current scorecard of `40` scalar passes, `64` labelled movement passes, `349` promoted exact patterns, and `3` promoted bundle-backed patterns
+- one higher overnight movement result of `40 / 68 / 349 / 3` that has not yet been reproduced deterministically from a clean rerun, so `40 / 64 / 349 / 3` is the current stable branch reference point
 
 Current validated replay-only scalar coverage:
 
 - `xp`: `11 / 13` participant passes
 - `totalGold`: `13 / 16`
 - `level`: `2 / 2`
-- `power`: `5 / 8`
+- `power`: `6 / 9`
 - `powerMax`: `1 / 1`
 - `healthMax`: `1 / 2`
-- `movementSpeed`: `1 / 8`
+- `movementSpeed`: `4 / 9`
 - `minionsKilled`: `1 / 1`
 - `jungleMinionsKilled`: `1 / 1`
 - `health`: `0 / 1`
@@ -67,17 +69,19 @@ Current strongest stable latest-patch bundle-backed scalar is now:
 
 Important caveat:
 
-- the final schema now promotes only one bundle-backed pattern:
+- the final schema now promotes three bundle-backed patterns:
+  - `bundle-family|16.6|61894-0x00-h6|power|s17`
+  - `bundle-family|16.6|61894-0x00-h6|power|s19`
   - `bundle-family|16.6|6912-0xC6-h0|powerMax|s14`
-- `6912 / 0xC6 / h0 | power` has useful replay-local validation, but it is still not stable enough to survive final bundle promotion
+- `6912 / 0xC6 / h0 | power` still has useful replay-local validation, but it is not yet stably promoted as its own final bundle-backed pattern
 - `61894 / 0x00 / h6 | movementSpeed` is still replay-only and not schema-promoted
 - bundle-family promotion now only consumes the exact extracted pattern that produced a replay metric; weak sibling bundle candidates no longer inherit validation from a stronger chosen sibling
 - extraction no longer feeds weak `bundleRankedPatterns` back into selection; only bundle-promoted corpus families and replay-local bundle recommendations affect replay-only scalar extraction
 - bundle-backed transform sample counts are now bounded to replay-local evidence instead of recursively re-importing corpus-level counts
 - slot-cluster-aware bundle resolution for `16.6 | 61894 / 0x00 / h6` is now implemented and uses `artifacts/scalar-family-layout/16.6/61894-0x00-h6.json` as the canonical layout prior
 - replay extraction now deduplicates bundle-backed selections by family, metric, and slot cluster, so a promoted cluster like `6912 / 0xC6 / h0 | powerMax | s14` does not materialize duplicate decodes in one replay
-- the latest full corpus rerun confirmed that `61894` ranked bundle evidence now separates the late `s17`/`s18` region more cleanly, but `movementSpeed` is still not promoted into `corpus-schema.json`
-- the remaining scalar blocker is no longer family-wide slot flattening; it is ambiguous multi-slot exact evidence in a few replays plus insufficiently stable `power` promotion around `6912`
+- the recovered autoresearch win improved latest-patch `61894` `power` promotion and current replay-only `movementSpeed` validation, but the movement-side gain is not fully deterministic yet
+- the remaining scalar blocker is no longer family-wide slot flattening; it is ambiguous multi-slot exact evidence in a few replays plus insufficiently stable `6912` `power` promotion around `s14`
 
 Latest replay intake that changed the corpus most:
 
@@ -118,19 +122,13 @@ The current movement pipeline:
 
 Current corpus-level result from the same 18 local replays:
 
-- the latest full rerun now assigns replay-only labelled movement in every local replay, but assignment quality is still patch-sensitive and uneven
-- strongest current validation examples:
-  - `EUW1-7689604967`: `4 / 4` passing assignments
-  - `EUW1-7617298409`: `3 / 3` passing assignments
-  - `EUW1-7648140653`: `6 / 7` passing assignments
-  - `EUW1-7779216102`: `6 / 8` passing assignments
-  - `EUN1-3927110403`: `6 / 9` passing assignments
-- weaker latest-patch cases still exist:
-  - `EUN1-3927135846`: `4 / 6` passing assignments
-  - `EUN1-3927615048`: `4 / 6` passing assignments
-  - `EUN1-3927636043`: `4 / 6` passing assignments
-  - `EUN1-3927084741`: `3 / 7` passing assignments
-  - `EUN1-3927556233`: `0 / 4` passing assignments
+- the current stable branch score is `64 / 109` passing replay-only labelled assignments
+- one overnight autoresearch run reached `68 / 111`, but that movement result has not yet been reproduced deterministically from a clean rerun
+- strongest current rerun examples include:
+  - `EUW1-7648140653`: `7 / 8` passing assignments
+  - `EUN1-3927615048`: `6 / 8`
+  - `EUN1-3927110403`: `6 / 9`
+  - `EUW1-7779216102`: `5 / 6`
 - promotion is still sparse; most useful movement output is currently coming from replay-local ranked fallback plus identity assignment rather than broad corpus-promoted movement schemas
 
 The strongest current pattern is version-sensitive and appears to live in the main `0x00` state family for several patch groups:
@@ -139,26 +137,7 @@ The strongest current pattern is version-sensitive and appears to live in the ma
 - `15.23`: `61737 / 0x00`
 - `16.1`: `61733 / 0x00`
 
-Replay-only movement identity is now materially better than the earlier median-based path, but it is still patch-fragile:
-
-- `EUN1-3926581873`: `3 / 7` passing assignments
-- `EUN1-3926600040`: `5 / 8` passing assignments
-- `EUN1-3926619035`: `2 / 3` passing assignments
-- `EUN1-3927084741`: `3 / 7` passing assignments
-- `EUN1-3927110403`: `6 / 9` passing assignments
-- `EUN1-3927135846`: `4 / 6` passing assignments
-- `EUN1-3927556233`: `0 / 4` passing assignments
-- `EUN1-3927581495`: `2 / 4` passing assignments
-- `EUN1-3927615048`: `4 / 6` passing assignments
-- `EUN1-3927636043`: `4 / 6` passing assignments
-- `EUN1-3927662924`: `2 / 6` passing assignments
-- `EUW1-7596231295`: `5 / 7` passing assignments
-- `EUW1-7596620123`: `2 / 4` passing assignments
-- `EUW1-7617298409`: `3 / 3` passing assignments
-- `EUW1-7648140653`: `6 / 7` passing assignments
-- `EUW1-7678536418`: `1 / 2` passing assignments
-- `EUW1-7689604967`: `4 / 4` passing assignments
-- `EUW1-7779216102`: `6 / 8` passing assignments
+Replay-only movement identity is now materially better than the earlier median-based path, but it is still patch-fragile and not yet fully deterministic across repeated full reruns. Treat the current `64` passing assignments as the stable branch reference, not the unreproduced overnight `68`.
 
 Current best replay-only movement examples:
 
@@ -314,7 +293,7 @@ The next session should begin with more replay intake:
 - collect matching Riot `match.json` and `timeline.json` fixtures for each replay when possible
 - rerun the full corpus pipeline before changing thresholds again
 
-The highest-value next implementation is now to stabilize `16.6 | 6912 / 0xC6 / h0 | power` around the same `s14` cluster that already supports `powerMax`, then revisit `61894` `movementSpeed` only after ambiguous multi-slot exact patterns are split cleanly.
+The highest-value next implementation is now to split ambiguous multi-slot exact `16.6 | 61894 / 0x00 / h6` patterns before assignment and extraction tie-breaking, then return to stabilizing `16.6 | 6912 / 0xC6 / h0 | power` around the same `s14` cluster that already supports `powerMax`.
 
 ## Related Docs
 

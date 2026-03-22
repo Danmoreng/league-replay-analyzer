@@ -80,6 +80,11 @@ Useful options:
 - `-Model <name>` to pin a model
 - `-DangerouslyBypassApprovalsAndSandbox` only in an isolated throwaway clone or VM
 
+Important runtime note:
+
+- `stop_autoresearch.ps1` creates a `STOP` file for the supervisor loop, but it does not forcibly kill a `codex exec` child that is already running
+- if the supervisor process dies unexpectedly, the current child iteration may still finish on its own, but no later iterations should start without the supervisor
+
 ## Ground rules
 
 - Do not commit generated replay movement fixtures.
@@ -183,9 +188,20 @@ Status should be one of:
 
 Current high-value targets:
 
-1. stabilize `16.6 | 6912-0xC6-h0 | power` around `s14`
-2. split ambiguous replay-local exact `16.6 | 61894-0x00-h6 | movementSpeed` patterns before participant assignment
+1. split ambiguous replay-local exact `16.6 | 61894-0x00-h6` patterns before participant assignment and extraction tie-breaking
+2. stabilize `16.6 | 6912-0xC6-h0 | power` around `s14`
 3. strengthen rejection of weak latest-patch movement candidates without hurting validated scalar extraction
+
+Current stable reference score after the recovered 2026-03-22 branch win:
+
+- `scalarPasses = 40`
+- `movementPasses = 64`
+- `promotedPatterns = 349`
+- `promotedBundlePatterns = 3`
+
+Known caveat:
+
+- one overnight run reached `40 / 68 / 349 / 3`, but that movement-side result has not yet been reproduced deterministically from a clean rerun
 
 Current poor overnight targets:
 

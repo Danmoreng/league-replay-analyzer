@@ -1,6 +1,6 @@
 # Decoder Development Loop
 
-Updated: 2026-03-21
+Updated: 2026-03-22
 
 This document defines the preferred non-UI development loop for replay decoder work until we have a more confident data schema.
 
@@ -342,36 +342,42 @@ Current outputs:
 - `artifacts/<replay-id>/participant-movement.json`
 - `artifacts/<replay-id>/assigned-movement-validation-report.json`
 
-Current 2026-03-21 expanded baseline from the 18-replay corpus:
+Current 2026-03-22 recovered baseline from the 18-replay corpus:
 
 - the corpus now includes an 11-replay `16.6` cohort
 - the final schema now contains `349` promoted exact corpus-backed scalar patterns and `128` remaining ranked exact patterns
-- the final schema now contains `1` promoted bundle-backed pattern and `14` remaining ranked bundle-backed patterns
+- the final schema now contains `3` promoted bundle-backed patterns and `9` remaining ranked bundle-backed patterns
 - replay-only scalar validation currently yields:
   - `xp`: `11 / 13`
   - `totalGold`: `13 / 16`
   - `level`: `2 / 2`
-  - `power`: `5 / 8`
+  - `power`: `6 / 9`
   - `powerMax`: `1 / 1`
   - `healthMax`: `1 / 2`
-  - `movementSpeed`: `1 / 8`
+  - `movementSpeed`: `4 / 9`
   - `minionsKilled`: `1 / 1`
   - `jungleMinionsKilled`: `1 / 1`
   - `health`: `0 / 1`
+- the current stable scorecard is `40 / 64 / 349 / 3`
+- one overnight autoresearch run reached `40 / 68 / 349 / 3`, but that movement-side improvement has not yet been reproduced deterministically from a clean rerun
 - the strongest stable latest-patch bundle-backed scalar is now `16.6 | 6912-0xC6-h0 | powerMax | s14`
 - `16.6 | 61894-0x00-h6` remains an important exploratory slab because it still carries replay-local evidence for `power`, `healthMax`, and `movementSpeed`
-- the only final bundle-promoted pattern is `bundle-family|16.6|6912-0xC6-h0|powerMax|s14`
-- `16.6 | 6912-0xC6-h0 | power` now has useful replay-local validation, but it still does not survive final bundle promotion
+- the current final bundle-promoted patterns are:
+  - `bundle-family|16.6|61894-0x00-h6|power|s17`
+  - `bundle-family|16.6|61894-0x00-h6|power|s19`
+  - `bundle-family|16.6|6912-0xC6-h0|powerMax|s14`
+- `16.6 | 6912-0xC6-h0 | power` now has useful replay-local validation, but it still does not survive final bundle promotion as its own stable pattern
 - bundle-family promotion now only consumes validation from the exact extracted bundle pattern that produced a replay metric
 - weak `bundleRankedPatterns` are now diagnostics only; they no longer feed back into replay-only extraction
 - the scalar corpus loop now converges again after bounding bundle-backed transform sample counts to replay-local evidence
 - slot-cluster-aware bundle resolution for `16.6 | 61894-0x00-h6` is now implemented in the corpus builder and uses the discovered family layout artifact as its cluster prior
 - replay extraction now deduplicates bundle-backed selections by family, metric, and slot cluster, which prevents duplicate `6912-0xC6-h0 | powerMax | s14` decodes in one replay
-- the latest corpus rerun still leaves `61894` `movementSpeed` ranked-only rather than promoted, which means the remaining problem is ambiguous multi-slot exact evidence rather than family-wide clustering
+- the recovered autoresearch win now promotes `61894` `power` at `s17` and `s19`, while `61894` `movementSpeed` still remains ranked-only rather than promoted
+- the remaining movement blocker is no longer median smearing; it is ambiguous multi-slot exact evidence plus nondeterministic assignment/tie-breaking in some replays
 - movement coordinate priors now include family-aware and family-band layers, not just decode signatures
 - movement extraction/assignment now carries exact replay-local transform hypotheses through to participant labelling rather than rebuilding tracks from pattern medians
 - the best new replay intake is `EUN1-3927636043`, which contributes passing replay-only `totalGold`, `minionsKilled`, `powerMax`, and `power`
-- the best new latest-patch movement replays are `EUN1-3927615048` and `EUN1-3927636043`, both currently at `4 / 6` passing replay-only labelled movement tracks
+- the best current latest-patch movement replay in the stable rerun is `EUN1-3927615048` at `6 / 8` passing replay-only labelled movement tracks
 
 ### 4. Scalar family layout analysis
 
@@ -439,10 +445,11 @@ The next concrete task should be:
 1. keep bundle-family promotion strict: only the exact extracted bundle pattern may contribute validation back into corpus promotion
 2. use the new runtime drift inspector when promotion changes are made:
    `node ./scripts/inspect_runtime_schema_drift.mjs --before <old-schema> --after <new-schema>`
-3. push `16.6 | 6912-0xC6-h0 | power` toward the same stable `s14` cluster that already supports `powerMax`, instead of spending another round on `61894` threshold tuning first
-4. split ambiguous replay-local exact `16.6 | 61894-0x00-h6 | movementSpeed` patterns before participant assignment so one exact pattern cannot straddle both the correct late slot and a bad neighboring slot
-5. improve `16.1` movement extraction and identity assignment, especially around `61733 / 0x00`, so bad tracks stay filtered instead of being weakly labelled
-6. use the validated extraction output as the UI input contract
+3. split ambiguous replay-local exact `16.6 | 61894-0x00-h6` patterns before participant assignment so one exact pattern cannot straddle both the correct late slot and a bad neighboring slot
+4. make movement/entity selection deterministic by hardening sort and tie-break rules anywhere near-equal candidates currently reorder across reruns
+5. push `16.6 | 6912-0xC6-h0 | power` toward the same stable `s14` cluster that already supports `powerMax`
+6. improve `16.1` movement extraction and identity assignment, especially around `61733 / 0x00`, so bad tracks stay filtered instead of being weakly labelled
+7. use the validated extraction output as the UI input contract
 
 That is the shortest path from investigation tooling to an actual decoder.
 
@@ -503,8 +510,9 @@ The main need is more examples per version group so replay-local winners can bec
 
 Once new replays are available, the next implementation priority should be:
 
-1. rerun the full corpus and check whether new `16.6` evidence strengthens `6912-0xC6-h0` `power` around `s14`
-2. split ambiguous `61894-0x00-h6` `movementSpeed` winners before assignment and measure whether the bad `s12/13` versus late-slot collisions disappear
-3. only then spend more time on movement coordinate prior tuning for noisy `0x00` families
+1. split ambiguous `61894-0x00-h6` exact winners before assignment and measure whether the bad `s12/13` versus late-slot collisions disappear
+2. rerun the full corpus more than once and check whether movement totals stay stable, or whether tie-break drift still exists
+3. once the reruns are deterministic enough, revisit whether new `16.6` evidence strengthens `6912-0xC6-h0` `power` around `s14`
+4. only then spend more time on movement coordinate prior tuning for noisy `0x00` families
 
 Do not port more of this logic into C++ until the larger corpus makes the movement and scalar patterns more stable.
