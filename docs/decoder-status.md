@@ -1,8 +1,31 @@
 # Replay Decoder Status
 
-Updated: 2026-03-22
+Updated: 2026-04-08
 
 This is the canonical status document for the current replay reverse-engineering work. Use this file first when continuing decoder work.
+
+## Session Update: 2026-04-08
+
+This session added new diagnostics and extraction tooling for both movement and static/item discovery on latest-patch `16.7` replays.
+
+New scripts added:
+
+- `scripts/diagnose_movement_alignment.mjs`
+- `scripts/build_movement_16_7_model.mjs`
+- `scripts/extract_calibrated_movement.mjs`
+- `scripts/extract_api_static_state.mjs`
+- `scripts/diagnose_static_metric_alignment.mjs`
+- `scripts/discover_item_event_candidates.mjs`
+
+Session-level outcome:
+
+- movement calibration harness now exists and runs end-to-end, but did not yet outperform current baseline assignment pass-rate on `16.7`
+- API static-state and item-event extraction now exists as a stable reference target for analysis
+- replay-vs-API static-metric diagnostics and replay item-event candidate discovery now exist for targeted reverse-engineering
+
+Full details, commands, and corpus-level session outcomes are recorded in:
+
+- `docs/archive/session-wrapup-2026-04-08.md`
 
 ## Current Position
 

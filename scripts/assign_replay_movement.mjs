@@ -19,7 +19,8 @@ const blueRoleAnchors = {
   UTILITY: { x: 10500, y: 3200 },
   UNKNOWN: { x: 7200, y: 7200 },
 };
-const minimumAssignmentScore = 0.38;
+// Keep assignment precision above raw coverage: weaker tracks stay unassigned.
+const minimumAssignmentScore = 0.5;
 
 function parseArgs(argv) {
   const args = {
@@ -208,23 +209,82 @@ function computeEntityQuality(entity) {
 function findSupportHypothesis(entity, participant) {
   let best = null;
   for (const hypothesis of entity.supportHypotheses ?? []) {
-    let score = 0;
+    let labelScore = 0;
     if (participant.champion && hypothesis.champion && participant.champion === hypothesis.champion) {
-      score += 4;
+      labelScore += 4;
     }
     if (participant.team != null && hypothesis.teamId != null && Number(participant.team) === Number(hypothesis.teamId)) {
-      score += 2;
+      labelScore += 2;
     }
     if (participant.teamPosition && hypothesis.teamPosition && participant.teamPosition === hypothesis.teamPosition) {
-      score += 2;
+      labelScore += 2;
     }
 
-    if (!best || score > best.score || (score === best.score && (hypothesis.effectiveScore ?? 0) > (best.hypothesis.effectiveScore ?? 0))) {
-      best = { hypothesis, score };
+    const normalizedDistanceRmse = Number.isFinite(hypothesis.normalizedDistanceRmse)
+      ? hypothesis.normalizedDistanceRmse
+      : Number.POSITIVE_INFINITY;
+
+    const candidate = {
+      hypothesis,
+      labelScore,
+      passesValidation: Number(Boolean(hypothesis.passesValidation)),
+      validatorScore: hypothesis.validatorScore ?? 0,
+      effectiveScore: hypothesis.effectiveScore ?? 0,
+      minAxisCorrelation: hypothesis.minAxisCorrelation ?? 0,
+      pathCorrelation: hypothesis.pathCorrelation ?? 0,
+      rangeRatio: hypothesis.rangeRatio ?? 0,
+      normalizedDistanceRmse,
+    };
+
+    if (
+      !best
+      || candidate.labelScore > best.labelScore
+      || (
+        candidate.labelScore === best.labelScore
+        && (
+          candidate.passesValidation > best.passesValidation
+          || (
+            candidate.passesValidation === best.passesValidation
+            && (
+              candidate.validatorScore > best.validatorScore
+              || (
+                candidate.validatorScore === best.validatorScore
+                && (
+                  candidate.effectiveScore > best.effectiveScore
+                  || (
+                    candidate.effectiveScore === best.effectiveScore
+                    && (
+                      candidate.minAxisCorrelation > best.minAxisCorrelation
+                      || (
+                        candidate.minAxisCorrelation === best.minAxisCorrelation
+                        && (
+                          candidate.pathCorrelation > best.pathCorrelation
+                          || (
+                            candidate.pathCorrelation === best.pathCorrelation
+                            && (
+                              candidate.rangeRatio > best.rangeRatio
+                              || (
+                                candidate.rangeRatio === best.rangeRatio
+                                && candidate.normalizedDistanceRmse < best.normalizedDistanceRmse
+                              )
+                            )
+                          )
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    ) {
+      best = candidate;
     }
   }
 
-  if (!best || best.score < 6) {
+  if (!best || best.labelScore < 6) {
     return null;
   }
   return best.hypothesis;
@@ -393,6 +453,7 @@ function scoreEntityForParticipant(entity, participant, scalarSlotsByFamily, pri
   });
   const minAxisScore = clamp(sourceMetrics?.avgMinAxisCorrelation ?? 0, 0, 1);
   const rangeScore = clamp(sourceMetrics?.avgRangeRatio ?? 0, 0, 1);
+  const sourcePathCorrelation = clamp(sourceMetrics?.avgPathCorrelation ?? 0, -1, 1);
   const directSupportScore = clamp((projection.directSupport?.effectiveScore ?? 0) / 0.35, 0, 1);
   const directValidatorScore = clamp(projection.directSupport?.validatorScore ?? 0, 0, 1);
   const { exactPriorScore, familyPriorScore } = lookupPriorScore(priors, versionGroup, entity, participant);
@@ -447,11 +508,16 @@ function scoreEntityForParticipant(entity, participant, scalarSlotsByFamily, pri
   if (entityQuality < 0.55) {
     evidenceGate *= clamp(entityQuality / 0.55, 0, 1);
   }
-  if (minAxisScore < 0.18) {
-    evidenceGate *= clamp(minAxisScore / 0.18, 0, 1);
+  if (minAxisScore < 0.25) {
+    evidenceGate *= clamp(minAxisScore / 0.25, 0, 1);
   }
-  if (rangeScore < 0.3) {
-    evidenceGate *= clamp(rangeScore / 0.3, 0, 1);
+  if (rangeScore < 0.4) {
+    evidenceGate *= clamp(rangeScore / 0.4, 0, 1);
+  }
+  if (sourcePathCorrelation < 0) {
+    evidenceGate *= 0.2;
+  } else if (sourcePathCorrelation < 0.1) {
+    evidenceGate *= clamp(sourcePathCorrelation / 0.1, 0.35, 1);
   }
   if ((trajectoryStats.movementQuality ?? 0) < 0.2) {
     evidenceGate *= clamp((trajectoryStats.movementQuality ?? 0) / 0.2, 0, 1);
@@ -465,6 +531,7 @@ function scoreEntityForParticipant(entity, participant, scalarSlotsByFamily, pri
       entityQuality,
       minAxisScore,
       rangeScore,
+      sourcePathCorrelation,
       directSupportScore,
       directValidatorScore,
       evidenceGate,
