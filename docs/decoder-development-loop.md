@@ -133,6 +133,17 @@ The batch runner now exists as `scripts/run_decoder_artifacts.ps1` and writes th
 It accepts `-RecordType chunk|keyframe|startup|all`, which forwards the same record-kind filter
 to both native batch mode and the legacy per-command fallback.
 
+For keyframe/API parity work, generate a separate keyframe artifact root and then run:
+
+```powershell
+node ./scripts/discover_keyframe_api_parity.mjs --artifact-root artifacts-keyframes --replay-id <replay-id>
+```
+
+This writes `keyframe-api-parity.json` and scores cleaned keyframe fields directly against
+Riot timeline `participantFrames` by `apiFrameIndex`, not by interpolated timestamps. Treat the
+report as a supervised discovery harness; it is not a replay-only extractor yet. See
+`docs/keyframe-api-parity.md` for the current implementation path.
+
 ### Phase 2: Candidate normalization
 
 Load the artifacts and normalize the cleaned fields into canonical candidates.

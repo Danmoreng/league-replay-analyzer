@@ -1,6 +1,6 @@
 # Reverse Engineering Docs Index
 
-Updated: 2026-03-21
+Updated: 2026-04-27
 
 This file consolidates the replay reverse-engineering documentation into a smaller set of active references.
 
@@ -12,13 +12,16 @@ This file consolidates the replay reverse-engineering documentation into a small
    Container-level findings, stable format notes, and version-sensitive observations.
 3. `docs/riot-api-fixtures.md`
    How Riot fixtures are used as supervision and where the local test data comes from.
-4. `docs/architecture.md`
+4. `docs/keyframe-api-parity.md`
+   Current implementation path for keyframe-only artifacts and API-frame parity scoring.
+5. `docs/architecture.md`
    High-level project structure.
 
 ## Active Working References
 
 - `docs/decoder-development-loop.md`
 - `docs/decoder-status.md`
+- `docs/keyframe-api-parity.md`
 - `docs/replay-format-notes.md`
 - `docs/riot-api-fixtures.md`
 - `docs/test-fixtures.md`

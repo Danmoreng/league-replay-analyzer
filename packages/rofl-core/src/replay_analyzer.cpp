@@ -2078,6 +2078,34 @@ struct ExtractedSubrecord {
     return results;
 }
 
+[[nodiscard]] int subrecord_api_frame_index(const ExtractedSubrecord& record) {
+    if (record.segment_type == "keyframe" && record.segment_id > 0) {
+        return record.segment_id - 1;
+    }
+    return -1;
+}
+
+[[nodiscard]] int subrecord_sample_timestamp_millis(
+    const ExtractedSubrecord& record,
+    const ReplaySummary& summary,
+    std::size_t record_index,
+    std::size_t max_record_index
+) {
+    const int api_frame_index = subrecord_api_frame_index(record);
+    if (api_frame_index >= 0) {
+        return api_frame_index * 60000;
+    }
+
+    if (summary.game_length_millis > 0) {
+        return static_cast<int>(std::llround(
+            (static_cast<double>(summary.game_length_millis) * static_cast<double>(record_index)) /
+            static_cast<double>(max_record_index)
+        ));
+    }
+
+    return static_cast<int>(record_index * 1000);
+}
+
 std::string dump_chunk_subrecords(const std::string& path, int chunk_id) {
     std::ostringstream output;
     const std::vector<std::uint8_t> bytes = read_file_bytes(path);
@@ -5798,8 +5826,11 @@ std::string analyze_scalar_family_json(
     };
 
     struct LaneSample {
+        int segment_id = 0;
+        std::string segment_type;
         int chunk_id = 0;
         std::size_t record_index = 0;
+        int api_frame_index = -1;
         int timestamp = 0;
         std::uint32_t raw_u32 = 0;
         std::uint8_t first_byte = 0;
@@ -5973,9 +6004,7 @@ std::string analyze_scalar_family_json(
                 continue;
             }
 
-            const int timestamp = summary.game_length_millis > 0
-                ? static_cast<int>(std::llround((static_cast<double>(summary.game_length_millis) * static_cast<double>(record_index)) / static_cast<double>(max_record_index)))
-                : static_cast<int>(record_index * 1000);
+            const int timestamp = subrecord_sample_timestamp_millis(rec, summary, record_index, max_record_index);
 
             std::uint8_t mask = 0;
             std::array<std::uint32_t, 4> lane_values = {0, 0, 0, 0};
@@ -5995,8 +6024,11 @@ std::string analyze_scalar_family_json(
                 }
 
                 lane_samples[lane_index].push_back({
+                    rec.segment_id,
+                    rec.segment_type,
                     rec.chunk_id,
                     record_index,
+                    subrecord_api_frame_index(rec),
                     timestamp,
                     value,
                     rec.payload[start],
@@ -6064,8 +6096,11 @@ std::string analyze_scalar_family_json(
                     output << ',';
                 }
                 output << '{';
+                output << "\"segmentId\":" << sample.segment_id << ',';
+                output << "\"segmentType\":\"" << json_escape(sample.segment_type) << "\",";
                 output << "\"chunkId\":" << sample.chunk_id << ',';
                 output << "\"recordIndex\":" << sample.record_index << ',';
+                output << "\"apiFrameIndex\":" << sample.api_frame_index << ',';
                 output << "\"timestamp\":" << sample.timestamp << ',';
                 output << "\"rawU32\":" << sample.raw_u32 << ',';
                 output << "\"firstByte\":" << static_cast<int>(sample.first_byte) << ',';
@@ -6898,8 +6933,11 @@ std::string analyze_clean_row_offsets_json(
     std::string_view segment_type
 ) {
     struct FieldSample {
+        int segment_id = 0;
+        std::string segment_type;
         int chunk_id = 0;
         std::size_t record_index = 0;
+        int api_frame_index = -1;
         int timestamp = 0;
         std::uint64_t raw_value = 0;
         double decoded_value = 0.0;
@@ -7110,10 +7148,19 @@ std::string analyze_clean_row_offsets_json(
                signature_byte_count >= 2 ||
                (signature_byte_count >= 1 && zero_byte_count >= 1 && unique_byte_count <= 3);
     };
-    auto update_profile = [](FieldProfile& profile, int chunk_id, std::size_t record_index, int timestamp, std::uint64_t raw_value, double decoded_value) {
+    auto update_profile = [](FieldProfile& profile, const ExtractedSubrecord& record, std::size_t record_index, int timestamp, std::uint64_t raw_value, double decoded_value) {
         profile.active_samples++;
         profile.value_freq[raw_value]++;
-        profile.samples.push_back({chunk_id, record_index, timestamp, raw_value, decoded_value});
+        profile.samples.push_back({
+            record.segment_id,
+            record.segment_type,
+            record.chunk_id,
+            record_index,
+            subrecord_api_frame_index(record),
+            timestamp,
+            raw_value,
+            decoded_value,
+        });
         if (raw_value != 0) {
             profile.non_zero_samples++;
         }
@@ -7388,23 +7435,21 @@ std::string analyze_clean_row_offsets_json(
                     continue;
                 }
 
-                const int timestamp = summary.game_length_millis > 0
-                    ? static_cast<int>(std::llround((static_cast<double>(summary.game_length_millis) * static_cast<double>(record_index)) / static_cast<double>(max_record_index)))
-                    : static_cast<int>(record_index * 1000);
+                const int timestamp = subrecord_sample_timestamp_millis(rec, summary, record_index, max_record_index);
 
                 for (auto& profile : profiles) {
                     const std::size_t field_offset = start + profile.offset;
                     if (profile.width == 1) {
                         const std::uint8_t raw = rec.payload[field_offset];
-                        update_profile(profile, rec.chunk_id, record_index, timestamp, raw, static_cast<double>(raw));
+                        update_profile(profile, rec, record_index, timestamp, raw, static_cast<double>(raw));
                     } else if (profile.width == 2) {
                         const std::uint16_t raw = static_cast<std::uint16_t>(rec.payload[field_offset]) |
                                                   (static_cast<std::uint16_t>(rec.payload[field_offset + 1]) << 8U);
                         if (profile.decode_label == "u16") {
-                            update_profile(profile, rec.chunk_id, record_index, timestamp, raw, static_cast<double>(raw));
+                            update_profile(profile, rec, record_index, timestamp, raw, static_cast<double>(raw));
                         } else {
                             const std::int16_t signed_value = static_cast<std::int16_t>(raw);
-                            update_profile(profile, rec.chunk_id, record_index, timestamp, raw, static_cast<double>(signed_value));
+                            update_profile(profile, rec, record_index, timestamp, raw, static_cast<double>(signed_value));
                         }
                     } else {
                         std::uint32_t raw = 0;
@@ -7412,16 +7457,16 @@ std::string analyze_clean_row_offsets_json(
                             continue;
                         }
                         if (profile.decode_label == "u32") {
-                            update_profile(profile, rec.chunk_id, record_index, timestamp, raw, static_cast<double>(raw));
+                            update_profile(profile, rec, record_index, timestamp, raw, static_cast<double>(raw));
                         } else if (profile.decode_label == "i32") {
                             const std::int32_t signed_value = static_cast<std::int32_t>(raw);
-                            update_profile(profile, rec.chunk_id, record_index, timestamp, raw, static_cast<double>(signed_value));
+                            update_profile(profile, rec, record_index, timestamp, raw, static_cast<double>(signed_value));
                         } else {
                             const float as_float = std::bit_cast<float>(raw);
                             if (!std::isfinite(as_float)) {
                                 continue;
                             }
-                            update_profile(profile, rec.chunk_id, record_index, timestamp, raw, static_cast<double>(as_float));
+                            update_profile(profile, rec, record_index, timestamp, raw, static_cast<double>(as_float));
                         }
                     }
                 }
@@ -7580,8 +7625,11 @@ std::string analyze_clean_row_offsets_json(
                     output << ',';
                 }
                 output << '{';
+                output << "\"segmentId\":" << sample.segment_id << ',';
+                output << "\"segmentType\":\"" << json_escape(sample.segment_type) << "\",";
                 output << "\"chunkId\":" << sample.chunk_id << ',';
                 output << "\"recordIndex\":" << sample.record_index << ',';
+                output << "\"apiFrameIndex\":" << sample.api_frame_index << ',';
                 output << "\"timestamp\":" << sample.timestamp << ',';
                 output << "\"raw\":" << sample.raw_value << ',';
                 output << "\"rawHex\":\"" << value_hex(sample.raw_value, profile.width) << "\",";
