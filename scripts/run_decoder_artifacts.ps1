@@ -17,6 +17,8 @@ param (
     [int]$HandleSlotCount = 0,
     [int]$TopWindows = 16,
     [int]$TopFields = 16,
+    [ValidateSet("chunk", "keyframe", "startup", "all")]
+    [string]$RecordType = "chunk",
     [switch]$SkipScalar,
     [switch]$Clean,
     [switch]$Force
@@ -340,6 +342,7 @@ $parameterManifest = [ordered]@{
     handleSlotCount = $HandleSlotCount
     topWindows = $TopWindows
     topFields = $TopFields
+    recordType = $RecordType
     skipScalar = [bool]$SkipScalar
 }
 $inputManifest = [ordered]@{
@@ -377,7 +380,8 @@ try {
         "--mixed-slot-count", "$MixedSlotCount",
         "--handle-slot-count", "$HandleSlotCount",
         "--top-windows", "$TopWindows",
-        "--top-fields", "$TopFields"
+        "--top-fields", "$TopFields",
+        "--record-type", $RecordType
     )
     if ($SkipScalar) {
         $batchArguments += "--skip-scalar"
@@ -417,6 +421,7 @@ try {
             headerSize = [int]$family.headerSize
             stride = [int]$family.stride
             recordCount = [int]$family.recordCount
+            segmentCount = if ($null -ne $family.segmentCount) { [int]$family.segmentCount } else { $null }
             chunkCount = [int]$family.chunkCount
             selectedSlots = $selectedSlots
             dynamicSlots = @($family.dynamicSlots | ForEach-Object { [int]$_ })
@@ -469,7 +474,8 @@ if (-not $usedNativeBatch) {
         $resolvedReplayPath,
         "--min-length", "$MinLength",
         "--min-records", "$MinRecords",
-        "--top-families", "$TopFamilies"
+        "--top-families", "$TopFamilies",
+        "--record-type", $RecordType
     )
 
     Write-Utf8File -Path (Join-Path $replayArtifactDir "family-scan.json") -Content $familyScanResult.Raw
@@ -499,7 +505,8 @@ if (-not $usedNativeBatch) {
             "--first-byte", ("0x{0:X2}" -f $firstByte),
             "--header-size", "$headerSize",
             "--stride", "$stride",
-            "--top-slots", "$TopEntitySlots"
+            "--top-slots", "$TopEntitySlots",
+            "--record-type", $RecordType
         )
         Write-Utf8File -Path (Join-Path $familyDir "entity-slab.json") -Content $entityResult.Raw
 
@@ -511,7 +518,8 @@ if (-not $usedNativeBatch) {
                 "--first-byte", ("0x{0:X2}" -f $firstByte),
                 "--header-size", "$headerSize",
                 "--stride", "$stride",
-                "--top-slots", "$TopScalarSlots"
+                "--top-slots", "$TopScalarSlots",
+                "--record-type", $RecordType
             )
             Write-Utf8File -Path (Join-Path $familyDir "scalar.json") -Content $scalarResult.Raw
         }
@@ -526,6 +534,7 @@ if (-not $usedNativeBatch) {
             headerSize = $headerSize
             stride = $stride
             recordCount = if ($family.ContainsKey("recordCount")) { [int]$family.recordCount } else { $null }
+            segmentCount = if ($family.ContainsKey("segmentCount")) { [int]$family.segmentCount } else { $null }
             chunkCount = if ($family.ContainsKey("chunkCount")) { [int]$family.chunkCount } else { $null }
             selectedSlots = $selectedSlots
             dynamicSlots = @($slotSelection.DynamicSlots)
@@ -550,7 +559,8 @@ if (-not $usedNativeBatch) {
                 "--header-size", "$headerSize",
                 "--stride", "$stride",
                 "--slots", $slotList,
-                "--top-windows", "$TopWindows"
+                "--top-windows", "$TopWindows",
+                "--record-type", $RecordType
             )
             Write-Utf8File -Path (Join-Path $familyDir "schema.json") -Content $schemaResult.Raw
 
@@ -562,7 +572,8 @@ if (-not $usedNativeBatch) {
                 "--header-size", "$headerSize",
                 "--stride", "$stride",
                 "--slots", $slotList,
-                "--top-fields", "$TopFields"
+                "--top-fields", "$TopFields",
+                "--record-type", $RecordType
             )
             Write-Utf8File -Path (Join-Path $familyDir "cleaned.json") -Content $cleanResult.Raw
         } else {

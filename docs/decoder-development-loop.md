@@ -1,6 +1,6 @@
 # Decoder Development Loop
 
-Updated: 2026-03-22
+Updated: 2026-04-27
 
 This document defines the preferred non-UI development loop for replay decoder work until we have a more confident data schema.
 
@@ -38,12 +38,17 @@ We already have the important building blocks:
 
 Available now in `rofl_core_cli`:
 
-- `--scan-replay-families-json`
+- `--scan-families-json`
 - `--analyze-sparse-family-json`
 - `--analyze-scalar-family-json`
 - `--analyze-entity-slab-json`
 - `--analyze-bitfield-schema-json`
 - `--analyze-clean-row-offsets-json`
+
+The JSON family and artifact analyzers now accept `--record-type chunk|keyframe|startup|all`.
+The default remains `chunk` for backward compatibility. Use `keyframe` runs as a separate
+artifact pass when investigating minute-aligned state snapshots, and write them to a separate
+artifact root if the chunk artifacts must be preserved.
 
 ### Existing supervision
 
@@ -125,6 +130,8 @@ Store them under a replay-specific artifact directory, for example:
 - `artifacts/<replay-id>/families/<family-key>/cleaned.json`
 
 The batch runner now exists as `scripts/run_decoder_artifacts.ps1` and writes this layout by default.
+It accepts `-RecordType chunk|keyframe|startup|all`, which forwards the same record-kind filter
+to both native batch mode and the legacy per-command fallback.
 
 ### Phase 2: Candidate normalization
 

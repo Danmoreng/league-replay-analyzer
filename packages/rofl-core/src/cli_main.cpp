@@ -150,6 +150,7 @@ int main(int argc, char** argv) {
             std::size_t minimum_length = 256;
             std::size_t minimum_records = 4;
             std::size_t top_families = 20;
+            std::string record_type = "chunk";
             for (int i = 3; i < argc; ++i) {
                 std::string_view arg = argv[i];
                 if (arg == "--min-length" && i + 1 < argc) {
@@ -158,9 +159,11 @@ int main(int argc, char** argv) {
                     minimum_records = std::stoull(argv[++i]);
                 } else if (arg == "--top-families" && i + 1 < argc) {
                     top_families = std::stoull(argv[++i]);
+                } else if (arg == "--record-type" && i + 1 < argc) {
+                    record_type = argv[++i];
                 }
             }
-            std::cout << rofl::core::scan_replay_families_file_json(path, minimum_length, minimum_records, top_families);
+            std::cout << rofl::core::scan_replay_families_file_json(path, minimum_length, minimum_records, top_families, record_type);
             return 0;
         } catch (const std::exception& exception) {
             std::cerr << exception.what() << '\n';
@@ -182,6 +185,7 @@ int main(int argc, char** argv) {
             std::size_t top_windows = 16;
             std::size_t top_fields = 16;
             bool skip_scalar = false;
+            std::string record_type = "chunk";
             for (int i = 3; i < argc; ++i) {
                 std::string_view arg = argv[i];
                 if (arg == "--min-length" && i + 1 < argc) {
@@ -206,6 +210,8 @@ int main(int argc, char** argv) {
                     top_fields = std::stoull(argv[++i]);
                 } else if (arg == "--skip-scalar") {
                     skip_scalar = true;
+                } else if (arg == "--record-type" && i + 1 < argc) {
+                    record_type = argv[++i];
                 }
             }
             std::cout << rofl::core::analyze_artifact_bundle_file_json(
@@ -220,7 +226,8 @@ int main(int argc, char** argv) {
                 handle_slot_count,
                 top_windows,
                 top_fields,
-                skip_scalar);
+                skip_scalar,
+                record_type);
             return 0;
         } catch (const std::exception& exception) {
             std::cerr << exception.what() << '\n';
@@ -236,6 +243,7 @@ int main(int argc, char** argv) {
             std::size_t header_size = 0;
             std::size_t stride = 16;
             std::size_t top_slots = 24;
+            std::string record_type = "chunk";
             for (int i = 3; i < argc; ++i) {
                 std::string_view arg = argv[i];
                 if (arg == "--length" && i + 1 < argc) {
@@ -248,9 +256,11 @@ int main(int argc, char** argv) {
                     stride = std::stoull(argv[++i]);
                 } else if (arg == "--top-slots" && i + 1 < argc) {
                     top_slots = std::stoull(argv[++i]);
+                } else if (arg == "--record-type" && i + 1 < argc) {
+                    record_type = argv[++i];
                 }
             }
-            std::cout << rofl::core::analyze_scalar_family_file_json(path, length, first_byte, header_size, stride, top_slots);
+            std::cout << rofl::core::analyze_scalar_family_file_json(path, length, first_byte, header_size, stride, top_slots, record_type);
             return 0;
         } catch (const std::exception& exception) {
             std::cerr << exception.what() << '\n';
@@ -266,6 +276,7 @@ int main(int argc, char** argv) {
             std::size_t header_size = 0;
             std::size_t stride = 16;
             std::size_t top_fields = 24;
+            std::string record_type = "chunk";
             std::vector<std::size_t> slot_indices;
             for (int i = 3; i < argc; ++i) {
                 std::string_view arg = argv[i];
@@ -279,6 +290,8 @@ int main(int argc, char** argv) {
                     stride = std::stoull(argv[++i]);
                 } else if (arg == "--top-fields" && i + 1 < argc) {
                     top_fields = std::stoull(argv[++i]);
+                } else if (arg == "--record-type" && i + 1 < argc) {
+                    record_type = argv[++i];
                 } else if (arg == "--slots" && i + 1 < argc) {
                     std::stringstream slot_stream(argv[++i]);
                     std::string token;
@@ -289,7 +302,7 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            std::cout << rofl::core::analyze_row_offsets_file_json(path, length, first_byte, header_size, stride, slot_indices, top_fields);
+            std::cout << rofl::core::analyze_row_offsets_file_json(path, length, first_byte, header_size, stride, slot_indices, top_fields, record_type);
             return 0;
         } catch (const std::exception& exception) {
             std::cerr << exception.what() << '\n';
@@ -305,6 +318,7 @@ int main(int argc, char** argv) {
             std::size_t header_size = 0;
             std::size_t stride = 16;
             std::size_t top_fields = 24;
+            std::string record_type = "chunk";
             std::vector<std::size_t> slot_indices;
             for (int i = 3; i < argc; ++i) {
                 std::string_view arg = argv[i];
@@ -318,6 +332,8 @@ int main(int argc, char** argv) {
                     stride = std::stoull(argv[++i]);
                 } else if (arg == "--top-fields" && i + 1 < argc) {
                     top_fields = std::stoull(argv[++i]);
+                } else if (arg == "--record-type" && i + 1 < argc) {
+                    record_type = argv[++i];
                 } else if (arg == "--slots" && i + 1 < argc) {
                     std::stringstream slot_stream(argv[++i]);
                     std::string token;
@@ -328,7 +344,7 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            std::cout << rofl::core::analyze_clean_row_offsets_file_json(path, length, first_byte, header_size, stride, slot_indices, top_fields);
+            std::cout << rofl::core::analyze_clean_row_offsets_file_json(path, length, first_byte, header_size, stride, slot_indices, top_fields, record_type);
             return 0;
         } catch (const std::exception& exception) {
             std::cerr << exception.what() << '\n';
@@ -345,6 +361,7 @@ int main(int argc, char** argv) {
             std::size_t stride = 16;
             std::size_t top_links = 24;
             std::size_t top_families = 16;
+            std::string record_type = "chunk";
             std::vector<std::size_t> slot_indices;
             for (int i = 3; i < argc; ++i) {
                 std::string_view arg = argv[i];
@@ -360,6 +377,8 @@ int main(int argc, char** argv) {
                     top_links = std::stoull(argv[++i]);
                 } else if (arg == "--top-families" && i + 1 < argc) {
                     top_families = std::stoull(argv[++i]);
+                } else if (arg == "--record-type" && i + 1 < argc) {
+                    record_type = argv[++i];
                 } else if (arg == "--slots" && i + 1 < argc) {
                     std::stringstream slot_stream(argv[++i]);
                     std::string token;
@@ -370,7 +389,7 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            std::cout << rofl::core::analyze_handle_links_file_json(path, length, first_byte, header_size, stride, slot_indices, top_links, top_families);
+            std::cout << rofl::core::analyze_handle_links_file_json(path, length, first_byte, header_size, stride, slot_indices, top_links, top_families, record_type);
             return 0;
         } catch (const std::exception& exception) {
             std::cerr << exception.what() << '\n';
@@ -387,6 +406,7 @@ int main(int argc, char** argv) {
             std::size_t stride = 16;
             std::size_t top_slices = 24;
             std::size_t top_families = 16;
+            std::string record_type = "chunk";
             std::vector<std::size_t> slot_indices;
             for (int i = 3; i < argc; ++i) {
                 std::string_view arg = argv[i];
@@ -402,6 +422,8 @@ int main(int argc, char** argv) {
                     top_slices = std::stoull(argv[++i]);
                 } else if (arg == "--top-families" && i + 1 < argc) {
                     top_families = std::stoull(argv[++i]);
+                } else if (arg == "--record-type" && i + 1 < argc) {
+                    record_type = argv[++i];
                 } else if (arg == "--slots" && i + 1 < argc) {
                     std::stringstream slot_stream(argv[++i]);
                     std::string token;
@@ -412,7 +434,7 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            std::cout << rofl::core::analyze_token_bitfields_file_json(path, length, first_byte, header_size, stride, slot_indices, top_slices, top_families);
+            std::cout << rofl::core::analyze_token_bitfields_file_json(path, length, first_byte, header_size, stride, slot_indices, top_slices, top_families, record_type);
             return 0;
         } catch (const std::exception& exception) {
             std::cerr << exception.what() << '\n';
@@ -428,6 +450,7 @@ int main(int argc, char** argv) {
             std::size_t header_size = 0;
             std::size_t stride = 16;
             std::size_t top_matches = 32;
+            std::string record_type = "chunk";
             std::vector<std::size_t> slot_indices;
             for (int i = 3; i < argc; ++i) {
                 std::string_view arg = argv[i];
@@ -441,6 +464,8 @@ int main(int argc, char** argv) {
                     stride = std::stoull(argv[++i]);
                 } else if (arg == "--top-matches" && i + 1 < argc) {
                     top_matches = std::stoull(argv[++i]);
+                } else if (arg == "--record-type" && i + 1 < argc) {
+                    record_type = argv[++i];
                 } else if (arg == "--slots" && i + 1 < argc) {
                     std::stringstream slot_stream(argv[++i]);
                     std::string token;
@@ -451,7 +476,7 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            std::cout << rofl::core::analyze_table_descriptors_file_json(path, length, first_byte, header_size, stride, slot_indices, top_matches);
+            std::cout << rofl::core::analyze_table_descriptors_file_json(path, length, first_byte, header_size, stride, slot_indices, top_matches, record_type);
             return 0;
         } catch (const std::exception& exception) {
             std::cerr << exception.what() << '\n';
@@ -467,6 +492,7 @@ int main(int argc, char** argv) {
             std::size_t header_size = 0;
             std::size_t stride = 16;
             std::size_t top_windows = 32;
+            std::string record_type = "chunk";
             std::vector<std::size_t> slot_indices;
             for (int i = 3; i < argc; ++i) {
                 std::string_view arg = argv[i];
@@ -480,6 +506,8 @@ int main(int argc, char** argv) {
                     stride = std::stoull(argv[++i]);
                 } else if (arg == "--top-windows" && i + 1 < argc) {
                     top_windows = std::stoull(argv[++i]);
+                } else if (arg == "--record-type" && i + 1 < argc) {
+                    record_type = argv[++i];
                 } else if (arg == "--slots" && i + 1 < argc) {
                     std::stringstream slot_stream(argv[++i]);
                     std::string token;
@@ -490,7 +518,7 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            std::cout << rofl::core::analyze_bitfield_schema_file_json(path, length, first_byte, header_size, stride, slot_indices, top_windows);
+            std::cout << rofl::core::analyze_bitfield_schema_file_json(path, length, first_byte, header_size, stride, slot_indices, top_windows, record_type);
             return 0;
         } catch (const std::exception& exception) {
             std::cerr << exception.what() << '\n';
@@ -506,6 +534,7 @@ int main(int argc, char** argv) {
             std::size_t header_size = 0;
             std::size_t stride = 16;
             std::size_t top_slots = 24;
+            std::string record_type = "chunk";
             for (int i = 3; i < argc; ++i) {
                 std::string_view arg = argv[i];
                 if (arg == "--length" && i + 1 < argc) {
@@ -518,9 +547,11 @@ int main(int argc, char** argv) {
                     stride = std::stoull(argv[++i]);
                 } else if (arg == "--top-slots" && i + 1 < argc) {
                     top_slots = std::stoull(argv[++i]);
+                } else if (arg == "--record-type" && i + 1 < argc) {
+                    record_type = argv[++i];
                 }
             }
-            std::cout << rofl::core::analyze_entity_slab_file_json(path, length, first_byte, header_size, stride, top_slots);
+            std::cout << rofl::core::analyze_entity_slab_file_json(path, length, first_byte, header_size, stride, top_slots, record_type);
             return 0;
         } catch (const std::exception& exception) {
             std::cerr << exception.what() << '\n';
@@ -910,16 +941,16 @@ int main(int argc, char** argv) {
     std::cout << "Use --compare-subrecord-family <path-to-rofl> --length <len> --first-byte <byte> [--prefix-bytes <len>] to analyze stable fields.\n";
     std::cout << "Use --guess-stride <path-to-rofl> --length <len> --first-byte <byte> [--header-size <len>] to detect repeating patterns.\n";
     std::cout << "Use --analyze-sparse-family <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-elements <n>] to profile 16-byte sparse records.\n";
-    std::cout << "Use --scan-families-json <path-to-rofl> [--min-length <n>] [--min-records <n>] [--top-families <n>] to emit recurring family scan results as JSON.\n";
-    std::cout << "Use --analyze-artifact-bundle-json <path-to-rofl> [--min-length <n>] [--min-records <n>] [--top-families <n>] [--top-entity-slots <n>] [--top-scalar-slots <n>] [--dynamic-slot-count <n>] [--mixed-slot-count <n>] [--handle-slot-count <n>] [--top-windows <n>] [--top-fields <n>] [--skip-scalar] to emit the full decoder artifact bundle as JSON in one process.\n";
-    std::cout << "Use --analyze-scalar-family-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] to emit scalar lane candidates as JSON.\n";
-    std::cout << "Use --analyze-entity-slab-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] to classify a sparse family into handle-like vs dynamic-state-like rows.\n";
-    std::cout << "Use --analyze-row-offsets-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-fields <n>] to rank raw byte-offset fields inside selected sparse rows.\n";
-    std::cout << "Use --analyze-clean-row-offsets-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-fields <n>] to mask descriptor/signature windows and rank cleaner offset candidates inside selected rows.\n";
-    std::cout << "Use --analyze-handle-links-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-links <n>] [--top-families <n>] to test whether packed row tokens point into other recurring families.\n";
-    std::cout << "Use --analyze-token-bitfields-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-slices <n>] [--top-families <n>] to search packed token bit slices for family-sized index fields.\n";
-    std::cout << "Use --analyze-table-descriptors-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-matches <n>] to find exact 12-bit matches against known family element counts.\n";
-    std::cout << "Use --analyze-bitfield-schema-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-windows <n>] to classify 32-bit token windows as descriptor-like via overlapping 12-bit family-count hits.\n";
+    std::cout << "Use --scan-families-json <path-to-rofl> [--min-length <n>] [--min-records <n>] [--top-families <n>] [--record-type chunk|keyframe|startup|all] to emit recurring family scan results as JSON.\n";
+    std::cout << "Use --analyze-artifact-bundle-json <path-to-rofl> [--min-length <n>] [--min-records <n>] [--top-families <n>] [--top-entity-slots <n>] [--top-scalar-slots <n>] [--dynamic-slot-count <n>] [--mixed-slot-count <n>] [--handle-slot-count <n>] [--top-windows <n>] [--top-fields <n>] [--skip-scalar] [--record-type chunk|keyframe|startup|all] to emit the full decoder artifact bundle as JSON in one process.\n";
+    std::cout << "Use --analyze-scalar-family-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--record-type chunk|keyframe|startup|all] to emit scalar lane candidates as JSON.\n";
+    std::cout << "Use --analyze-entity-slab-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--record-type chunk|keyframe|startup|all] to classify a sparse family into handle-like vs dynamic-state-like rows.\n";
+    std::cout << "Use --analyze-row-offsets-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-fields <n>] [--record-type chunk|keyframe|startup|all] to rank raw byte-offset fields inside selected sparse rows.\n";
+    std::cout << "Use --analyze-clean-row-offsets-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-fields <n>] [--record-type chunk|keyframe|startup|all] to mask descriptor/signature windows and rank cleaner offset candidates inside selected rows.\n";
+    std::cout << "Use --analyze-handle-links-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-links <n>] [--top-families <n>] [--record-type chunk|keyframe|startup|all] to test whether packed row tokens point into other recurring families.\n";
+    std::cout << "Use --analyze-token-bitfields-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-slices <n>] [--top-families <n>] [--record-type chunk|keyframe|startup|all] to search packed token bit slices for family-sized index fields.\n";
+    std::cout << "Use --analyze-table-descriptors-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-matches <n>] [--record-type chunk|keyframe|startup|all] to find exact 12-bit matches against known family element counts.\n";
+    std::cout << "Use --analyze-bitfield-schema-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-windows <n>] [--record-type chunk|keyframe|startup|all] to classify 32-bit token windows as descriptor-like via overlapping 12-bit family-count hits.\n";
     std::cout << "Use --trace-sparse-slot <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slot-index <n> [--stride <len>] [--max-records <n>] to trace one sparse slot over time.\n";
     std::cout << "Use --profile-position-slots <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--move-epsilon <f>] [--smooth-threshold <f>] to rank position-like sparse slots.\n";
     std::cout << "Use --compare-position-classes <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--top-classes <n>] [--move-epsilon <f>] [--smooth-threshold <f>] to compare discovered slot classes against entity archetypes.\n";

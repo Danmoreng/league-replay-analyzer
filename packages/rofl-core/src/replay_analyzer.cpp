@@ -29,6 +29,53 @@ constexpr std::size_t kKnownSegmentHeaderLength = 17;
 constexpr std::size_t kFooterLengthFieldSize = 4;
 constexpr std::size_t kFooterRecordHeaderLength = 17;
 
+[[nodiscard]] std::string normalize_segment_type_filter(std::string_view value) {
+    std::string normalized;
+    normalized.reserve(value.size());
+    for (const char ch : value) {
+        if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
+            continue;
+        }
+        normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    }
+
+    if (normalized.empty()) {
+        return "chunk";
+    }
+    if (normalized == "chunks") {
+        return "chunk";
+    }
+    if (normalized == "keyframes") {
+        return "keyframe";
+    }
+    return normalized;
+}
+
+[[nodiscard]] bool segment_type_matches_filter(std::string_view segment_type, std::string_view filter) {
+    const std::string normalized_filter = normalize_segment_type_filter(filter);
+    if (normalized_filter == "all" || normalized_filter == "any") {
+        return true;
+    }
+
+    std::size_t start = 0;
+    while (start <= normalized_filter.size()) {
+        const std::size_t end = normalized_filter.find(',', start);
+        const std::string_view token(
+            normalized_filter.data() + start,
+            (end == std::string::npos ? normalized_filter.size() : end) - start
+        );
+        if (token == segment_type) {
+            return true;
+        }
+        if (end == std::string::npos) {
+            break;
+        }
+        start = end + 1;
+    }
+
+    return false;
+}
+
 struct KnownBinaryHeader {
     std::uint16_t header_length = 0;
     std::uint32_t metadata_offset = 0;
@@ -1991,9 +2038,10 @@ struct ExtractedSubrecord {
     std::string_view target_segment_type = "chunk"
 ) {
     std::vector<ExtractedSubrecord> results;
+    const std::string segment_filter = normalize_segment_type_filter(target_segment_type);
 
     for (const ReplaySegmentSummary& segment : summary.container.segments) {
-        if (segment.codec != "zstd" || segment.type != "chunk") continue;
+        if (segment.codec != "zstd" || !segment_type_matches_filter(segment.type, segment_filter)) continue;
 
         std::vector<std::uint8_t> decompressed;
         std::string error;
@@ -5115,9 +5163,12 @@ struct JsonFamilyAggregate {
     std::uint8_t first_byte = 0;
     std::size_t record_count = 0;
     std::set<int> chunk_ids;
+    std::set<int> segment_ids;
 };
 
 struct JsonFamilyScanResult {
+    std::string segment_type = "chunk";
+    std::size_t scanned_segment_count = 0;
     std::size_t scanned_chunk_count = 0;
     std::vector<JsonFamilyAggregate> ranked_families;
 };
@@ -5125,14 +5176,17 @@ struct JsonFamilyScanResult {
 [[nodiscard]] JsonFamilyScanResult collect_ranked_chunk_families(
     const std::vector<std::uint8_t>& bytes,
     std::size_t minimum_length,
-    std::size_t minimum_records
+    std::size_t minimum_records,
+    std::string_view segment_type = "chunk"
 ) {
     const ReplaySummary summary = parse_replay_bytes(bytes);
+    const std::string segment_filter = normalize_segment_type_filter(segment_type);
     std::map<std::pair<std::size_t, std::uint8_t>, JsonFamilyAggregate> families;
+    std::size_t scanned_segment_count = 0;
     std::size_t scanned_chunk_count = 0;
 
     for (const ReplaySegmentSummary& segment : summary.container.segments) {
-        if (segment.codec != "zstd" || segment.type != "chunk") {
+        if (segment.codec != "zstd" || !segment_type_matches_filter(segment.type, segment_filter)) {
             continue;
         }
 
@@ -5160,7 +5214,10 @@ struct JsonFamilyScanResult {
             continue;
         }
 
-        scanned_chunk_count += 1;
+        scanned_segment_count += 1;
+        if (segment.type == "chunk") {
+            scanned_chunk_count += 1;
+        }
         for (const FramedSubrecord& record : records) {
             if (record.length < minimum_length || record.payload_offset >= decompressed.size()) {
                 continue;
@@ -5172,6 +5229,7 @@ struct JsonFamilyScanResult {
             aggregate.first_byte = decompressed[record.payload_offset];
             aggregate.record_count += 1;
             aggregate.chunk_ids.insert(segment.chunk_id);
+            aggregate.segment_ids.insert(segment.id);
         }
     }
 
@@ -5184,8 +5242,8 @@ struct JsonFamilyScanResult {
     }
 
     std::sort(ranked.begin(), ranked.end(), [](const JsonFamilyAggregate& left, const JsonFamilyAggregate& right) {
-        if (left.chunk_ids.size() != right.chunk_ids.size()) {
-            return left.chunk_ids.size() > right.chunk_ids.size();
+        if (left.segment_ids.size() != right.segment_ids.size()) {
+            return left.segment_ids.size() > right.segment_ids.size();
         }
         if (left.record_count != right.record_count) {
             return left.record_count > right.record_count;
@@ -5196,7 +5254,7 @@ struct JsonFamilyScanResult {
         return left.first_byte < right.first_byte;
     });
 
-    return {scanned_chunk_count, ranked};
+    return {segment_filter, scanned_segment_count, scanned_chunk_count, ranked};
 }
 
 [[nodiscard]] std::string u32_hex(std::uint32_t value) {
@@ -5209,9 +5267,10 @@ std::string scan_replay_families_json(
     const std::vector<std::uint8_t>& bytes,
     std::size_t minimum_length,
     std::size_t minimum_records,
-    std::size_t top_families
+    std::size_t top_families,
+    std::string_view segment_type
 ) {
-    const auto scan = collect_ranked_chunk_families(bytes, minimum_length, minimum_records);
+    const auto scan = collect_ranked_chunk_families(bytes, minimum_length, minimum_records, segment_type);
 
     if (top_families == 0) {
         top_families = 20;
@@ -5220,6 +5279,8 @@ std::string scan_replay_families_json(
 
     std::ostringstream output;
     output << '{';
+    output << "\"segmentType\":\"" << json_escape(scan.segment_type) << "\",";
+    output << "\"scannedSegmentCount\":" << scan.scanned_segment_count << ',';
     output << "\"scannedChunkCount\":" << scan.scanned_chunk_count << ',';
     output << "\"minimumLength\":" << minimum_length << ',';
     output << "\"minimumRecords\":" << minimum_records << ',';
@@ -5234,7 +5295,10 @@ std::string scan_replay_families_json(
         output << "\"firstByte\":" << static_cast<int>(family.first_byte) << ',';
         output << "\"paddingByte\":" << static_cast<int>(family.length & 0xFFu) << ',';
         output << "\"recordCount\":" << family.record_count << ',';
+        output << "\"segmentCount\":" << family.segment_ids.size() << ',';
         output << "\"chunkCount\":" << family.chunk_ids.size() << ',';
+        output << "\"segmentSpanStart\":" << (family.segment_ids.empty() ? 0 : *family.segment_ids.begin()) << ',';
+        output << "\"segmentSpanEnd\":" << (family.segment_ids.empty() ? 0 : *family.segment_ids.rbegin()) << ',';
         output << "\"chunkSpanStart\":" << (family.chunk_ids.empty() ? 0 : *family.chunk_ids.begin()) << ',';
         output << "\"chunkSpanEnd\":" << (family.chunk_ids.empty() ? 0 : *family.chunk_ids.rbegin()) << ',';
         output << "\"recommendedStride\":16,";
@@ -5269,10 +5333,11 @@ std::string scan_replay_families_file_json(
     const std::string& path,
     std::size_t minimum_length,
     std::size_t minimum_records,
-    std::size_t top_families
+    std::size_t top_families,
+    std::string_view segment_type
 ) {
     const auto bytes = read_file_bytes(path);
-    return scan_replay_families_json(bytes, minimum_length, minimum_records, top_families);
+    return scan_replay_families_json(bytes, minimum_length, minimum_records, top_families, segment_type);
 }
 
 std::string analyze_sparse_family_json(
@@ -5283,7 +5348,8 @@ std::string analyze_sparse_family_json(
     std::size_t stride,
     std::size_t top_slots,
     float move_epsilon,
-    float smooth_threshold
+    float smooth_threshold,
+    std::string_view segment_type
 ) {
     struct PairDefinition {
         std::size_t left_lane = 0;
@@ -5346,10 +5412,12 @@ std::string analyze_sparse_family_json(
     };
 
     const ReplaySummary summary = parse_replay_bytes(bytes);
-    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    const std::string segment_filter = normalize_segment_type_filter(segment_type);
+    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte, segment_filter);
     std::ostringstream output;
 
     output << '{';
+    output << "\"segmentType\":\"" << json_escape(segment_filter) << "\",";
     output << "\"length\":" << target_length << ',';
     output << "\"firstByte\":" << static_cast<int>(target_first_byte) << ',';
     output << "\"recordCount\":" << records.size() << ',';
@@ -5710,7 +5778,8 @@ std::string analyze_scalar_family_json(
     std::uint8_t target_first_byte,
     std::size_t header_size,
     std::size_t stride,
-    std::size_t top_slots
+    std::size_t top_slots,
+    std::string_view segment_type
 ) {
     struct SlotSummary {
         std::size_t slot_index = 0;
@@ -5738,10 +5807,12 @@ std::string analyze_scalar_family_json(
     };
 
     const ReplaySummary summary = parse_replay_bytes(bytes);
-    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    const std::string segment_filter = normalize_segment_type_filter(segment_type);
+    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte, segment_filter);
     std::ostringstream output;
 
     output << '{';
+    output << "\"segmentType\":\"" << json_escape(segment_filter) << "\",";
     output << "\"length\":" << target_length << ',';
     output << "\"firstByte\":" << static_cast<int>(target_first_byte) << ',';
     output << "\"recordCount\":" << records.size() << ',';
@@ -6016,10 +6087,11 @@ std::string analyze_scalar_family_file_json(
     std::uint8_t target_first_byte,
     std::size_t header_size,
     std::size_t stride,
-    std::size_t top_slots
+    std::size_t top_slots,
+    std::string_view segment_type
 ) {
     const auto bytes = read_file_bytes(path);
-    return analyze_scalar_family_json(bytes, target_length, target_first_byte, header_size, stride, top_slots);
+    return analyze_scalar_family_json(bytes, target_length, target_first_byte, header_size, stride, top_slots, segment_type);
 }
 
 
@@ -6029,7 +6101,8 @@ std::string analyze_entity_slab_json(
     std::uint8_t target_first_byte,
     std::size_t header_size,
     std::size_t stride,
-    std::size_t top_slots
+    std::size_t top_slots,
+    std::string_view segment_type
 ) {
     struct LaneAggregate {
         std::size_t active_samples = 0;
@@ -6062,10 +6135,12 @@ std::string analyze_entity_slab_json(
     };
 
     const ReplaySummary summary = parse_replay_bytes(bytes);
-    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    const std::string segment_filter = normalize_segment_type_filter(segment_type);
+    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte, segment_filter);
     std::ostringstream output;
 
     output << '{';
+    output << "\"segmentType\":\"" << json_escape(segment_filter) << "\",";
     output << "\"length\":" << target_length << ',';
     output << "\"firstByte\":" << static_cast<int>(target_first_byte) << ',';
     output << "\"recordCount\":" << records.size() << ',';
@@ -6110,7 +6185,7 @@ std::string analyze_entity_slab_json(
         return output.str();
     }
 
-    const auto family_scan = collect_ranked_chunk_families(bytes, 256, 2);
+    const auto family_scan = collect_ranked_chunk_families(bytes, 256, 2, segment_filter);
     std::set<std::uint8_t> known_first_bytes;
     for (const auto& family : family_scan.ranked_families) {
         known_first_bytes.insert(family.first_byte);
@@ -6137,6 +6212,7 @@ std::string analyze_entity_slab_json(
         output << "\"length\":" << family.length << ',';
         output << "\"firstByte\":" << static_cast<int>(family.first_byte) << ',';
         output << "\"recordCount\":" << family.record_count << ',';
+        output << "\"segmentCount\":" << family.segment_ids.size() << ',';
         output << "\"chunkCount\":" << family.chunk_ids.size();
         output << '}';
     }
@@ -6458,10 +6534,11 @@ std::string analyze_entity_slab_file_json(
     std::uint8_t target_first_byte,
     std::size_t header_size,
     std::size_t stride,
-    std::size_t top_slots
+    std::size_t top_slots,
+    std::string_view segment_type
 ) {
     const auto bytes = read_file_bytes(path);
-    return analyze_entity_slab_json(bytes, target_length, target_first_byte, header_size, stride, top_slots);
+    return analyze_entity_slab_json(bytes, target_length, target_first_byte, header_size, stride, top_slots, segment_type);
 }
 
 std::string analyze_row_offsets_json(
@@ -6471,7 +6548,8 @@ std::string analyze_row_offsets_json(
     std::size_t header_size,
     std::size_t stride,
     const std::vector<std::size_t>& slot_indices,
-    std::size_t top_fields
+    std::size_t top_fields,
+    std::string_view segment_type
 ) {
     struct FieldProfile {
         std::size_t offset = 0;
@@ -6494,10 +6572,12 @@ std::string analyze_row_offsets_json(
     };
 
     const ReplaySummary summary = parse_replay_bytes(bytes);
-    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    const std::string segment_filter = normalize_segment_type_filter(segment_type);
+    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte, segment_filter);
     std::ostringstream output;
 
     output << '{';
+    output << "\"segmentType\":\"" << json_escape(segment_filter) << "\",";
     output << "\"length\":" << target_length << ',';
     output << "\"firstByte\":" << static_cast<int>(target_first_byte) << ',';
     output << "\"recordCount\":" << records.size() << ',';
@@ -6799,10 +6879,11 @@ std::string analyze_row_offsets_file_json(
     std::size_t header_size,
     std::size_t stride,
     const std::vector<std::size_t>& slot_indices,
-    std::size_t top_fields
+    std::size_t top_fields,
+    std::string_view segment_type
 ) {
     const auto bytes = read_file_bytes(path);
-    return analyze_row_offsets_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_fields);
+    return analyze_row_offsets_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_fields, segment_type);
 }
 
 
@@ -6813,7 +6894,8 @@ std::string analyze_clean_row_offsets_json(
     std::size_t header_size,
     std::size_t stride,
     const std::vector<std::size_t>& slot_indices,
-    std::size_t top_fields
+    std::size_t top_fields,
+    std::string_view segment_type
 ) {
     struct FieldSample {
         int chunk_id = 0;
@@ -6864,10 +6946,12 @@ std::string analyze_clean_row_offsets_json(
     };
 
     const ReplaySummary summary = parse_replay_bytes(bytes);
-    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    const std::string segment_filter = normalize_segment_type_filter(segment_type);
+    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte, segment_filter);
     std::ostringstream output;
 
     output << '{';
+    output << "\"segmentType\":\"" << json_escape(segment_filter) << "\",";
     output << "\"length\":" << target_length << ',';
     output << "\"firstByte\":" << static_cast<int>(target_first_byte) << ',';
     output << "\"recordCount\":" << records.size() << ',';
@@ -6910,11 +6994,11 @@ std::string analyze_clean_row_offsets_json(
     const std::size_t element_count = usable_bytes / stride;
     output << "\"elementCount\":" << element_count << ',';
 
-    const auto family_scan = collect_ranked_chunk_families(bytes, 256, 2);
+    const auto family_scan = collect_ranked_chunk_families(bytes, 256, 2, segment_filter);
     std::map<std::size_t, std::vector<std::string>> target_map;
     std::set<std::uint8_t> signature_bytes;
     for (const auto& family : family_scan.ranked_families) {
-        if (family.record_count < 4 || family.chunk_ids.size() < 4 || family.length < 16000) {
+        if (family.record_count < 4 || family.segment_ids.size() < 4 || family.length < 16000) {
             continue;
         }
         if (family.first_byte != 0) {
@@ -7552,10 +7636,11 @@ std::string analyze_clean_row_offsets_file_json(
     std::size_t header_size,
     std::size_t stride,
     const std::vector<std::size_t>& slot_indices,
-    std::size_t top_fields
+    std::size_t top_fields,
+    std::string_view segment_type
 ) {
     const auto bytes = read_file_bytes(path);
-    return analyze_clean_row_offsets_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_fields);
+    return analyze_clean_row_offsets_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_fields, segment_type);
 }
 
 std::string analyze_handle_links_json(
@@ -7566,7 +7651,8 @@ std::string analyze_handle_links_json(
     std::size_t stride,
     const std::vector<std::size_t>& slot_indices,
     std::size_t top_links,
-    std::size_t top_families
+    std::size_t top_families,
+    std::string_view segment_type
 ) {
     struct FamilyDescriptor {
         std::size_t length = 0;
@@ -7599,10 +7685,12 @@ std::string analyze_handle_links_json(
     };
 
     const ReplaySummary summary = parse_replay_bytes(bytes);
-    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    const std::string segment_filter = normalize_segment_type_filter(segment_type);
+    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte, segment_filter);
     std::ostringstream output;
 
     output << '{';
+    output << "\"segmentType\":\"" << json_escape(segment_filter) << "\",";
     output << "\"length\":" << target_length << ',';
     output << "\"firstByte\":" << static_cast<int>(target_first_byte) << ',';
     output << "\"recordCount\":" << records.size() << ',';
@@ -7638,7 +7726,7 @@ std::string analyze_handle_links_json(
     const std::size_t element_count = usable_bytes / stride;
     output << "\"elementCount\":" << element_count << ',';
 
-    const auto family_scan = collect_ranked_chunk_families(bytes, 256, 2);
+    const auto family_scan = collect_ranked_chunk_families(bytes, 256, 2, segment_filter);
     if (top_families == 0) {
         top_families = 16;
     }
@@ -7999,10 +8087,11 @@ std::string analyze_handle_links_file_json(
     std::size_t stride,
     const std::vector<std::size_t>& slot_indices,
     std::size_t top_links,
-    std::size_t top_families
+    std::size_t top_families,
+    std::string_view segment_type
 ) {
     const auto bytes = read_file_bytes(path);
-    return analyze_handle_links_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_links, top_families);
+    return analyze_handle_links_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_links, top_families, segment_type);
 }
 
 std::string analyze_token_bitfields_json(
@@ -8013,7 +8102,8 @@ std::string analyze_token_bitfields_json(
     std::size_t stride,
     const std::vector<std::size_t>& slot_indices,
     std::size_t top_slices,
-    std::size_t top_families
+    std::size_t top_families,
+    std::string_view segment_type
 ) {
     struct FamilyDescriptor {
         std::size_t length = 0;
@@ -8043,10 +8133,12 @@ std::string analyze_token_bitfields_json(
     };
 
     const ReplaySummary summary = parse_replay_bytes(bytes);
-    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    const std::string segment_filter = normalize_segment_type_filter(segment_type);
+    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte, segment_filter);
     std::ostringstream output;
 
     output << '{';
+    output << "\"segmentType\":\"" << json_escape(segment_filter) << "\",";
     output << "\"length\":" << target_length << ',';
     output << "\"firstByte\":" << static_cast<int>(target_first_byte) << ',';
     output << "\"recordCount\":" << records.size() << ',';
@@ -8082,7 +8174,7 @@ std::string analyze_token_bitfields_json(
     const std::size_t element_count = usable_bytes / stride;
     output << "\"elementCount\":" << element_count << ',';
 
-    const auto family_scan = collect_ranked_chunk_families(bytes, 256, 2);
+    const auto family_scan = collect_ranked_chunk_families(bytes, 256, 2, segment_filter);
     if (top_families == 0) {
         top_families = 16;
     }
@@ -8414,10 +8506,11 @@ std::string analyze_token_bitfields_file_json(
     std::size_t stride,
     const std::vector<std::size_t>& slot_indices,
     std::size_t top_slices,
-    std::size_t top_families
+    std::size_t top_families,
+    std::string_view segment_type
 ) {
     const auto bytes = read_file_bytes(path);
-    return analyze_token_bitfields_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_slices, top_families);
+    return analyze_token_bitfields_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_slices, top_families, segment_type);
 }
 
 std::string analyze_table_descriptors_json(
@@ -8427,7 +8520,8 @@ std::string analyze_table_descriptors_json(
     std::size_t header_size,
     std::size_t stride,
     const std::vector<std::size_t>& slot_indices,
-    std::size_t top_matches
+    std::size_t top_matches,
+    std::string_view segment_type
 ) {
     struct DescriptorTarget {
         std::string family_label;
@@ -8445,10 +8539,12 @@ std::string analyze_table_descriptors_json(
     };
 
     const ReplaySummary summary = parse_replay_bytes(bytes);
-    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    const std::string segment_filter = normalize_segment_type_filter(segment_type);
+    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte, segment_filter);
     std::ostringstream output;
 
     output << '{';
+    output << "\"segmentType\":\"" << json_escape(segment_filter) << "\",";
     output << "\"length\":" << target_length << ',';
     output << "\"firstByte\":" << static_cast<int>(target_first_byte) << ',';
     output << "\"recordCount\":" << records.size() << ',';
@@ -8480,7 +8576,7 @@ std::string analyze_table_descriptors_json(
     const std::size_t element_count = usable_bytes / stride;
     output << "\"elementCount\":" << element_count << ',';
 
-    const auto family_scan = collect_ranked_chunk_families(bytes, 256, 2);
+    const auto family_scan = collect_ranked_chunk_families(bytes, 256, 2, segment_filter);
     std::vector<DescriptorTarget> targets;
     for (const auto& family : family_scan.ranked_families) {
         for (std::size_t candidate_header = 0; candidate_header <= 16; ++candidate_header) {
@@ -8683,10 +8779,11 @@ std::string analyze_table_descriptors_file_json(
     std::size_t header_size,
     std::size_t stride,
     const std::vector<std::size_t>& slot_indices,
-    std::size_t top_matches
+    std::size_t top_matches,
+    std::string_view segment_type
 ) {
     const auto bytes = read_file_bytes(path);
-    return analyze_table_descriptors_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_matches);
+    return analyze_table_descriptors_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_matches, segment_type);
 }
 
 
@@ -8697,7 +8794,8 @@ std::string analyze_bitfield_schema_json(
     std::size_t header_size,
     std::size_t stride,
     const std::vector<std::size_t>& slot_indices,
-    std::size_t top_windows
+    std::size_t top_windows,
+    std::string_view segment_type
 ) {
     struct TargetCount {
         std::size_t element_count = 0;
@@ -8723,10 +8821,12 @@ std::string analyze_bitfield_schema_json(
     };
 
     const ReplaySummary summary = parse_replay_bytes(bytes);
-    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte);
+    const std::string segment_filter = normalize_segment_type_filter(segment_type);
+    const auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte, segment_filter);
     std::ostringstream output;
 
     output << '{';
+    output << "\"segmentType\":\"" << json_escape(segment_filter) << "\",";
     output << "\"length\":" << target_length << ',';
     output << "\"firstByte\":" << static_cast<int>(target_first_byte) << ',';
     output << "\"recordCount\":" << records.size() << ',';
@@ -8762,10 +8862,10 @@ std::string analyze_bitfield_schema_json(
     const std::size_t element_count = usable_bytes / stride;
     output << "\"elementCount\":" << element_count << ',';
 
-    const auto family_scan = collect_ranked_chunk_families(bytes, 256, 2);
+    const auto family_scan = collect_ranked_chunk_families(bytes, 256, 2, segment_filter);
     std::map<std::size_t, std::vector<std::string>> target_map;
     for (const auto& family : family_scan.ranked_families) {
-        if (family.record_count < 4 || family.chunk_ids.size() < 4 || family.length < 16000) {
+        if (family.record_count < 4 || family.segment_ids.size() < 4 || family.length < 16000) {
             continue;
         }
         for (std::size_t candidate_header = 0; candidate_header <= 16; ++candidate_header) {
@@ -9145,10 +9245,11 @@ std::string analyze_bitfield_schema_file_json(
     std::size_t header_size,
     std::size_t stride,
     const std::vector<std::size_t>& slot_indices,
-    std::size_t top_windows
+    std::size_t top_windows,
+    std::string_view segment_type
 ) {
     const auto bytes = read_file_bytes(path);
-    return analyze_bitfield_schema_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_windows);
+    return analyze_bitfield_schema_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_windows, segment_type);
 }
 
 std::string analyze_artifact_bundle_file_json(
@@ -9163,12 +9264,14 @@ std::string analyze_artifact_bundle_file_json(
     std::size_t handle_slot_count,
     std::size_t top_windows,
     std::size_t top_fields,
-    bool skip_scalar
+    bool skip_scalar,
+    std::string_view segment_type
 ) {
     struct RankedFamilyDescriptor {
         std::size_t length = 0;
         std::uint8_t first_byte = 0;
         std::size_t record_count = 0;
+        std::size_t segment_count = 0;
         std::size_t chunk_count = 0;
         std::size_t header_size = 0;
         std::size_t stride = 16;
@@ -9186,7 +9289,8 @@ std::string analyze_artifact_bundle_file_json(
 
     const auto bytes = read_file_bytes(path);
     const ReplaySummary summary = parse_replay_bytes(bytes);
-    const auto family_scan = collect_ranked_chunk_families(bytes, minimum_length, minimum_records);
+    const std::string segment_filter = normalize_segment_type_filter(segment_type);
+    const auto family_scan = collect_ranked_chunk_families(bytes, minimum_length, minimum_records, segment_filter);
 
     const std::size_t shown = std::min<std::size_t>(top_families == 0 ? 20 : top_families, family_scan.ranked_families.size());
     std::vector<RankedFamilyDescriptor> ranked_families;
@@ -9206,6 +9310,7 @@ std::string analyze_artifact_bundle_file_json(
             family.length,
             family.first_byte,
             family.record_count,
+            family.segment_ids.size(),
             family.chunk_ids.size(),
             recommended_header_size,
             16,
@@ -9215,7 +9320,7 @@ std::string analyze_artifact_bundle_file_json(
     std::vector<std::future<FamilyArtifactResult>> futures;
     futures.reserve(ranked_families.size());
     for (const auto& family : ranked_families) {
-        futures.push_back(std::async(std::launch::async, [&bytes, family, top_entity_slots, top_scalar_slots, dynamic_slot_count, mixed_slot_count, handle_slot_count, top_windows, top_fields, skip_scalar]() {
+        futures.push_back(std::async(std::launch::async, [&bytes, family, top_entity_slots, top_scalar_slots, dynamic_slot_count, mixed_slot_count, handle_slot_count, top_windows, top_fields, skip_scalar, segment_filter]() {
             FamilyArtifactResult result;
             result.family = family;
 
@@ -9233,7 +9338,8 @@ std::string analyze_artifact_bundle_file_json(
                 family.first_byte,
                 family.header_size,
                 family.stride,
-                top_entity_slots);
+                top_entity_slots,
+                segment_filter);
             result.slot_selection = select_candidate_slots_from_entity_slab_json(
                 trim_json_whitespace(result.entity_slab_json),
                 dynamic_slot_count,
@@ -9247,7 +9353,8 @@ std::string analyze_artifact_bundle_file_json(
                     family.first_byte,
                     family.header_size,
                     family.stride,
-                    top_scalar_slots);
+                    top_scalar_slots,
+                    segment_filter);
             }
 
             if (!result.slot_selection.selected_slots.empty()) {
@@ -9258,7 +9365,8 @@ std::string analyze_artifact_bundle_file_json(
                     family.header_size,
                     family.stride,
                     result.slot_selection.selected_slots,
-                    top_windows);
+                    top_windows,
+                    segment_filter);
                 result.cleaned_json = analyze_clean_row_offsets_json(
                     bytes,
                     family.length,
@@ -9266,7 +9374,8 @@ std::string analyze_artifact_bundle_file_json(
                     family.header_size,
                     family.stride,
                     result.slot_selection.selected_slots,
-                    top_fields);
+                    top_fields,
+                    segment_filter);
             }
 
             return result;
@@ -9292,10 +9401,11 @@ std::string analyze_artifact_bundle_file_json(
     });
 
     const std::string summary_json = replay_summary_to_json(summary);
-    const std::string family_scan_json = scan_replay_families_json(bytes, minimum_length, minimum_records, top_families);
+    const std::string family_scan_json = scan_replay_families_json(bytes, minimum_length, minimum_records, top_families, segment_filter);
 
     std::ostringstream output;
     output << '{';
+    output << "\"segmentType\":\"" << json_escape(segment_filter) << "\",";
     output << "\"summary\":" << trim_json_whitespace(summary_json) << ',';
     output << "\"familyScan\":" << trim_json_whitespace(family_scan_json) << ',';
     output << "\"families\":[";
@@ -9311,6 +9421,7 @@ std::string analyze_artifact_bundle_file_json(
         output << "\"headerSize\":" << family.family.header_size << ',';
         output << "\"stride\":" << family.family.stride << ',';
         output << "\"recordCount\":" << family.family.record_count << ',';
+        output << "\"segmentCount\":" << family.family.segment_count << ',';
         output << "\"chunkCount\":" << family.family.chunk_count << ',';
         output << "\"selectedSlots\":";
         write_number_array(output, family.slot_selection.selected_slots);
