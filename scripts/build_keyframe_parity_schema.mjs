@@ -8,6 +8,7 @@ import {
   resolveAbsolute,
   writeJson,
 } from "./lib/decoder-schema-utils.mjs";
+import { enrichParticipantSlotEvidence } from "./lib/keyframe-slot-scoring.mjs";
 
 function parseArgs(argv) {
   const args = {
@@ -57,24 +58,6 @@ function printHelp() {
   console.log("Usage: node ./scripts/build_keyframe_parity_schema.mjs [--artifact-root <path>] [--parity-report <path>] [--output-path <path>]");
 }
 
-const METRIC_IDENTITY_WEIGHTS = new Map([
-  ["health", 1.4],
-  ["power", 1.4],
-  ["currentGold", 1.35],
-  ["movementSpeed", 1.25],
-  ["minionsKilled", 1.0],
-  ["jungleMinionsKilled", 1.0],
-  ["totalGold", 0.75],
-  ["xp", 0.75],
-  ["level", 0.6],
-  ["healthMax", 0.55],
-  ["powerMax", 0.55],
-]);
-
-function metricIdentityWeight(metric) {
-  return METRIC_IDENTITY_WEIGHTS.get(metric) ?? 0.5;
-}
-
 function finiteValues(values) {
   return values.filter((value) => typeof value === "number" && Number.isFinite(value));
 }
@@ -96,24 +79,6 @@ function groupByReplay(entries) {
     byReplay.set(entry.replayId, list);
   }
   return byReplay;
-}
-
-function enrichParticipantSlotEvidence(entry) {
-  const metrics = [...new Set(entry.metrics ?? [])];
-  const identityWeight = metrics.reduce((sum, metric) => sum + metricIdentityWeight(metric), 0);
-  const identityMetricCount = metrics.filter((metric) => metricIdentityWeight(metric) >= 1).length;
-  const genericMetricCount = metrics.length - identityMetricCount;
-  const weightedSupportScore = (entry.support ?? []).reduce((sum, support) => {
-    const score = typeof support.score === "number" && Number.isFinite(support.score) ? support.score : 0;
-    return sum + metricIdentityWeight(support.metric) * score;
-  }, 0);
-  return {
-    ...entry,
-    identityWeight,
-    identityMetricCount,
-    genericMetricCount,
-    weightedSupportScore,
-  };
 }
 
 function bestMetricMatchPerReplay(matches) {
@@ -202,6 +167,7 @@ function summarizeMetricGroup(key, matches, thresholds) {
   const scores = finiteValues(unambiguousWinners.map((match) => match.score));
   const overlaps = finiteValues(unambiguousWinners.map((match) => match.overlap));
   const slopes = finiteValues(unambiguousWinners.map((match) => match.slope));
+  const intercepts = finiteValues(unambiguousWinners.map((match) => match.intercept));
 
   const avgCorrelation = average(correlations);
   const avgNormalizedRmse = average(normalizedRmses);
@@ -240,7 +206,10 @@ function summarizeMetricGroup(key, matches, thresholds) {
     medianNormalizedRmse: median(normalizedRmses),
     avgScore,
     medianScore: median(scores),
+    avgSlope: average(slopes),
     medianSlope: median(slopes),
+    avgIntercept: average(intercepts),
+    medianIntercept: median(intercepts),
     examples: winners
       .sort((left, right) =>
         right.score - left.score ||
@@ -257,6 +226,8 @@ function summarizeMetricGroup(key, matches, thresholds) {
         correlation: match.correlation,
         normalizedRmse: match.normalizedRmse,
         score: match.score,
+        slope: match.slope,
+        intercept: match.intercept,
         replayParticipantConflictCount: match.replayParticipantConflictCount,
         scoreGap: Number.isFinite(match.scoreGap) ? match.scoreGap : null,
         unambiguous: match.unambiguous,

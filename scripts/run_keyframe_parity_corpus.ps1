@@ -19,7 +19,11 @@ param (
     [switch]$CleanReplayArtifacts,
     [switch]$SkipArtifacts,
     [switch]$SkipParity,
-    [switch]$SkipSchema
+    [switch]$SkipSchema,
+    [switch]$SkipDiagnostics,
+    [switch]$SkipAssignments,
+    [switch]$SkipIdentityOrderAnalysis,
+    [switch]$SkipRoflStatsAssignments
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,6 +50,10 @@ $resolvedArtifactRoot = Resolve-AbsolutePath -Path $ArtifactRoot -BasePath $repo
 $artifactScript = Join-Path $PSScriptRoot "run_decoder_artifacts.ps1"
 $parityScript = Join-Path $PSScriptRoot "discover_keyframe_api_parity.mjs"
 $schemaScript = Join-Path $PSScriptRoot "build_keyframe_parity_schema.mjs"
+$diagnosticsScript = Join-Path $PSScriptRoot "diagnose_keyframe_slot_conflicts.mjs"
+$assignmentScript = Join-Path $PSScriptRoot "assign_keyframe_participant_slots.mjs"
+$identityOrderScript = Join-Path $PSScriptRoot "analyze_keyframe_identity_order.mjs"
+$roflStatsAssignmentScript = Join-Path $PSScriptRoot "assign_keyframe_slots_from_rofl_stats.mjs"
 
 if (-not (Test-Path $resolvedArtifactRoot)) {
     New-Item -ItemType Directory -Path $resolvedArtifactRoot -Force | Out-Null
@@ -133,6 +141,61 @@ if (-not $SkipSchema) {
         throw "Keyframe parity schema generation failed."
     }
     $manifest["keyframeParitySchemaPath"] = $schemaPath
+}
+
+$diagnosticsPath = Join-Path $resolvedArtifactRoot "keyframe-slot-conflicts.json"
+if (-not $SkipDiagnostics) {
+    if (-not (Test-Path $schemaPath)) {
+        throw "Cannot diagnose keyframe slot conflicts because schema is missing at $schemaPath"
+    }
+    Write-Host "Diagnosing keyframe slot conflicts" -ForegroundColor Cyan
+    node $diagnosticsScript --artifact-root $resolvedArtifactRoot --schema-path $schemaPath --output-path $diagnosticsPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Keyframe slot conflict diagnostics failed."
+    }
+    $manifest["keyframeSlotConflictsPath"] = $diagnosticsPath
+}
+
+$assignmentsPath = Join-Path $resolvedArtifactRoot "keyframe-slot-assignments.json"
+if (-not $SkipAssignments) {
+    if (-not (Test-Path $parityReportPath)) {
+        throw "Cannot assign keyframe participant slots because parity report is missing at $parityReportPath"
+    }
+    if (-not (Test-Path $schemaPath)) {
+        throw "Cannot assign keyframe participant slots because schema is missing at $schemaPath"
+    }
+    Write-Host "Assigning replay-local keyframe participant slots" -ForegroundColor Cyan
+    node $assignmentScript --artifact-root $resolvedArtifactRoot --parity-report $parityReportPath --schema-path $schemaPath --output-path $assignmentsPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Keyframe participant slot assignment failed."
+    }
+    $manifest["keyframeSlotAssignmentsPath"] = $assignmentsPath
+}
+
+$identityOrderPath = Join-Path $resolvedArtifactRoot "keyframe-identity-order-analysis.json"
+if (-not $SkipIdentityOrderAnalysis) {
+    if (-not (Test-Path $assignmentsPath)) {
+        throw "Cannot analyze keyframe identity order because assignments are missing at $assignmentsPath"
+    }
+    Write-Host "Analyzing keyframe identity order" -ForegroundColor Cyan
+    node $identityOrderScript --artifact-root $resolvedArtifactRoot --assignments-path $assignmentsPath --output-path $identityOrderPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Keyframe identity order analysis failed."
+    }
+    $manifest["keyframeIdentityOrderAnalysisPath"] = $identityOrderPath
+}
+
+$roflStatsAssignmentsPath = Join-Path $resolvedArtifactRoot "keyframe-rofl-stat-slot-assignments.json"
+if (-not $SkipRoflStatsAssignments) {
+    if (-not (Test-Path $schemaPath)) {
+        throw "Cannot assign keyframe slots from ROFL stats because schema is missing at $schemaPath"
+    }
+    Write-Host "Assigning keyframe slots from ROFL final stats" -ForegroundColor Cyan
+    node $roflStatsAssignmentScript --artifact-root $resolvedArtifactRoot --schema-path $schemaPath --output-path $roflStatsAssignmentsPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Keyframe ROFL final-stat slot assignment failed."
+    }
+    $manifest["keyframeRoflStatSlotAssignmentsPath"] = $roflStatsAssignmentsPath
 }
 
 $manifest.generatedAtUtc = (Get-Date).ToUniversalTime().ToString("o")

@@ -197,6 +197,81 @@ Current interpretation:
 - `15` of the `16` state-promoted slots still have at least one ambiguous replay
 - movement extraction should use state-slot promotion as a search prior, but should not yet trust slot identity without a replay-local assignment pass
 
+## Replay-Local Slot Assignment
+
+The next bridge script solves replay-local slot-to-participant assignment from the promoted state slots:
+
+```powershell
+npm run assign:keyframe-participant-slots -- --artifact-root .\artifacts-keyframes
+```
+
+Output:
+
+- `artifacts-keyframes/keyframe-slot-assignments.json`
+
+The assignment pass uses the promoted state slots from `keyframe-parity-schema.json`, then scores replay-local participant evidence with the same metric identity weights used by schema promotion. It solves a one-to-one assignment per replay and family, and marks assignments as `stable` only when the selected participant is the top local candidate with enough score gap over the runner-up.
+
+Current corpus result:
+
+- `20 / 27` replays analyzed
+- `44` slot-to-participant assignments
+- `23` stable assignments
+- `16.6`: `37` assignments, `20` stable
+- `16.7`: `7` assignments, `3` stable
+
+The seven skipped replays are older or unsupported version groups that do not yet have promoted keyframe state slots.
+
+This is still API-supervised tooling, not replay-only decoding. Its purpose is to produce a cleaner per-replay assignment target that movement extraction can use as a prior while we search for replay-native identity fields.
+
+## Identity Order Findings
+
+The current identity-order analysis is:
+
+```powershell
+npm run analyze:keyframe-identity-order -- --artifact-root .\artifacts-keyframes
+```
+
+Output:
+
+- `artifacts-keyframes/keyframe-identity-order-analysis.json`
+
+Current result from stable assignments:
+
+- `23` stable assignment rows
+- API `participantId` equals `.rofl` metadata roster order for `23 / 23` rows
+- keyframe slot index does not sort like participant id, roster order, or lane-role order; aggregate ordered-pair rate is about `0.55`
+
+Interpretation:
+
+- the `.rofl` metadata roster is enough to name API participant ids: `participantId = rosterIndex + 1`
+- the keyframe state slot index is not itself the participant order
+- we still need either a replay-local stat/value assignment pass or a native keyframe/startup identity field to map state slots to roster rows
+
+## Replay-Only Final-Stats Experiment
+
+The first replay-only experiment tries to assign keyframe state slots to `.rofl` metadata roster rows using only promoted/ranked keyframe metric fields and final `statsJson` values:
+
+```powershell
+npm run assign:keyframe-rofl-stats -- --artifact-root .\artifacts-keyframes
+```
+
+Output:
+
+- `artifacts-keyframes/keyframe-rofl-stat-slot-assignments.json`
+
+Current result:
+
+- `20 / 27` replays analyzed
+- `0` assignments
+- `0` usable edges
+
+This negative result is useful. The promoted metric evidence is currently dominated by `movementSpeed`, `health`, `power`, and `currentGold`, while the `.rofl` final stats block mostly exposes final monotonic totals such as `level`, `xp`, total gold, and CS. The fields that align with final-only metrics are not yet stable enough in the schema artifacts to support replay-only slot assignment.
+
+Next implication:
+
+- do not expect final `statsJson` alone to identify keyframe rows yet
+- the better path is to search startup/keyframe records for roster-order identifiers, champion ids, summoner ids, team ids, or stable per-player handles, then use the confirmed `participantId = rosterIndex + 1` rule to label decoded rows
+
 ## Interpretation Rules
 
 Treat a single passing field as weak evidence. A usable participant row needs multiple independent metrics agreeing on the same:
@@ -224,6 +299,10 @@ It writes:
 - `artifacts-keyframes/keyframe-corpus-manifest.json`
 - `artifacts-keyframes/keyframe-api-parity.json`
 - `artifacts-keyframes/keyframe-parity-schema.json`
+- `artifacts-keyframes/keyframe-slot-conflicts.json`
+- `artifacts-keyframes/keyframe-slot-assignments.json`
+- `artifacts-keyframes/keyframe-identity-order-analysis.json`
+- `artifacts-keyframes/keyframe-rofl-stat-slot-assignments.json`
 
 The schema promotion stage reads `keyframe-api-parity.json` across the corpus and promotes only participant/slot groups with:
 
