@@ -1092,6 +1092,39 @@ struct SubrecordGroup {
     return best;
 }
 
+[[nodiscard]] LengthPrefixCandidate choose_best_le_length_prefix(const std::vector<std::uint8_t>& bytes) {
+    LengthPrefixCandidate best = analyze_le_length_prefix(bytes, 2);
+
+    if (bytes.size() > 1) {
+        LengthPrefixCandidate shifted_u16 = analyze_le_length_prefix(
+            std::vector<std::uint8_t>(bytes.begin() + 1, bytes.end()),
+            2
+        );
+        if (shifted_u16.record_count > 0) {
+            shifted_u16.start_offset += 1;
+            shifted_u16.consumed += 1;
+        }
+        const bool better_shifted =
+            shifted_u16.consumed > best.consumed ||
+            (shifted_u16.consumed == best.consumed && shifted_u16.record_count > best.record_count) ||
+            (shifted_u16.record_count == best.record_count && shifted_u16.consumed == best.consumed && shifted_u16.largest_record > best.largest_record);
+        if (better_shifted) {
+            best = shifted_u16;
+        }
+    }
+
+    const LengthPrefixCandidate best_u32 = analyze_le_length_prefix(bytes, 4);
+    const bool better_u32 =
+        best_u32.consumed > best.consumed ||
+        (best_u32.consumed == best.consumed && best_u32.record_count > best.record_count) ||
+        (best_u32.record_count == best.record_count && best_u32.consumed == best.consumed && best_u32.largest_record > best.largest_record);
+    if (better_u32) {
+        best = best_u32;
+    }
+
+    return best;
+}
+
 [[nodiscard]] std::string describe_length_prefix_candidate(const LengthPrefixCandidate& candidate, std::size_t total_size) {
     if (candidate.record_count < 2) {
         return "none";
@@ -2030,6 +2063,8 @@ struct ExtractedSubrecord {
     std::vector<std::uint8_t> payload;
 };
 
+[[nodiscard]] std::string bytes_to_hex(const std::vector<std::uint8_t>& bytes);
+
 [[nodiscard]] std::vector<ExtractedSubrecord> extract_subrecord_family(
     const std::vector<std::uint8_t>& bytes,
     const ReplaySummary& summary,
@@ -2046,17 +2081,9 @@ struct ExtractedSubrecord {
         std::vector<std::uint8_t> decompressed;
         std::string error;
         if (try_decompress_zstd_segment(bytes, segment, decompressed, error)) {
-            const auto best_u16 = analyze_le_length_prefix(decompressed, 2);
-            if (best_u16.record_count >= 2) {
-                // Check framing at offset 0 and offset 1 (as seen in chunk 6)
-                const auto best_u16_offset_1 = analyze_le_length_prefix(std::vector<std::uint8_t>(decompressed.begin() + 1, decompressed.end()), 2);
-                
-                std::size_t start_offset = best_u16.start_offset;
-                if (best_u16_offset_1.record_count > best_u16.record_count) {
-                    start_offset = best_u16_offset_1.start_offset + 1;
-                }
-
-                auto records = extract_le_framed_subrecords(decompressed, 2, start_offset, 1000000);
+            const auto framing = choose_best_le_length_prefix(decompressed);
+            if (framing.record_count >= 2) {
+                auto records = extract_le_framed_subrecords(decompressed, framing.width, framing.start_offset, 1000000);
                 for (const auto& rec : records) {
                     if (rec.length == target_length && decompressed[rec.payload_offset] == target_first_byte) {
                         ExtractedSubrecord extracted;
@@ -2182,20 +2209,12 @@ std::string summarize_subrecord_families(
             continue;
         }
 
-        const auto best_u16 = analyze_le_length_prefix(decompressed, 2);
-        if (best_u16.record_count < 2) {
+        const auto framing = choose_best_le_length_prefix(decompressed);
+        if (framing.record_count < 2) {
             continue;
         }
 
-        std::size_t start_offset = best_u16.start_offset;
-        if (decompressed.size() > 1) {
-            const auto best_u16_offset_1 = analyze_le_length_prefix(std::vector<std::uint8_t>(decompressed.begin() + 1, decompressed.end()), 2);
-            if (best_u16_offset_1.record_count > best_u16.record_count) {
-                start_offset = best_u16_offset_1.start_offset + 1;
-            }
-        }
-
-        const auto records = extract_le_framed_subrecords(decompressed, 2, start_offset, 1000000);
+        const auto records = extract_le_framed_subrecords(decompressed, framing.width, framing.start_offset, 1000000);
         if (records.empty()) {
             continue;
         }
@@ -2304,6 +2323,46 @@ std::string dump_subrecord_family(const std::string& path, std::size_t target_le
         output << "  Ascii: \"" << format_ascii_preview(records[i].payload, 64) << "\"\n\n";
     }
 
+    return output.str();
+}
+
+std::string dump_subrecord_family_json(
+    const std::string& path,
+    std::size_t target_length,
+    std::uint8_t target_first_byte,
+    std::string_view segment_type,
+    std::size_t max_records
+) {
+    std::ostringstream output;
+    const std::vector<std::uint8_t> bytes = read_file_bytes(path);
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+
+    auto records = extract_subrecord_family(bytes, summary, target_length, target_first_byte, segment_type);
+    if (max_records > 0 && records.size() > max_records) {
+        records.resize(max_records);
+    }
+
+    output << '{';
+    output << "\"segmentType\":\"" << json_escape(std::string(segment_type)) << "\",";
+    output << "\"length\":" << target_length << ',';
+    output << "\"firstByte\":" << static_cast<int>(target_first_byte) << ',';
+    output << "\"recordCount\":" << records.size() << ',';
+    output << "\"records\":[";
+    for (std::size_t index = 0; index < records.size(); ++index) {
+        if (index > 0) {
+            output << ',';
+        }
+        const auto& record = records[index];
+        output << '{';
+        output << "\"segmentId\":" << record.segment_id << ',';
+        output << "\"segmentType\":\"" << json_escape(record.segment_type) << "\",";
+        output << "\"chunkId\":" << record.chunk_id << ',';
+        output << "\"offset\":" << record.chunk_offset << ',';
+        output << "\"length\":" << record.payload.size() << ',';
+        output << "\"hex\":\"" << bytes_to_hex(record.payload) << "\"";
+        output << '}';
+    }
+    output << "]}";
     return output.str();
 }
 
@@ -5224,20 +5283,12 @@ struct JsonFamilyScanResult {
             continue;
         }
 
-        const auto best_u16 = analyze_le_length_prefix(decompressed, 2);
-        if (best_u16.record_count < 2) {
+        const auto framing = choose_best_le_length_prefix(decompressed);
+        if (framing.record_count < 2) {
             continue;
         }
 
-        std::size_t start_offset = best_u16.start_offset;
-        if (decompressed.size() > 1) {
-            const auto best_u16_offset_1 = analyze_le_length_prefix(std::vector<std::uint8_t>(decompressed.begin() + 1, decompressed.end()), 2);
-            if (best_u16_offset_1.record_count > best_u16.record_count) {
-                start_offset = best_u16_offset_1.start_offset + 1;
-            }
-        }
-
-        const auto records = extract_le_framed_subrecords(decompressed, 2, start_offset, 1000000);
+        const auto records = extract_le_framed_subrecords(decompressed, framing.width, framing.start_offset, 1000000);
         if (records.empty()) {
             continue;
         }
@@ -5288,6 +5339,15 @@ struct JsonFamilyScanResult {
 [[nodiscard]] std::string u32_hex(std::uint32_t value) {
     std::ostringstream output;
     output << "0x" << std::hex << std::uppercase << std::setw(8) << std::setfill('0') << value;
+    return output.str();
+}
+
+[[nodiscard]] std::string bytes_to_hex(const std::vector<std::uint8_t>& bytes) {
+    std::ostringstream output;
+    output << std::hex << std::uppercase << std::setfill('0');
+    for (const std::uint8_t value : bytes) {
+        output << std::setw(2) << static_cast<int>(value);
+    }
     return output.str();
 }
 

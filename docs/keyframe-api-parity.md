@@ -272,6 +272,74 @@ Next implication:
 - do not expect final `statsJson` alone to identify keyframe rows yet
 - the better path is to search startup/keyframe records for roster-order identifiers, champion ids, summoner ids, team ids, or stable per-player handles, then use the confirmed `participantId = rosterIndex + 1` rule to label decoded rows
 
+## Startup Identifier Search
+
+Startup inspection showed the startup segment is not u16-framed like normal chunk/keyframe subrecords. It is u32-framed:
+
+- small leading startup record
+- large startup record around `13k` bytes, first byte `0x8A` in the current 16.6 sample
+
+The native family scanner now supports both u16 and u32 length-prefixed subrecords, which makes startup families visible to the artifact tooling.
+
+The raw startup-token scanner is:
+
+```powershell
+npm run scan:startup-roster-tokens -- --artifact-root .\artifacts-keyframes --replay-root .\replays --api-root .\replays\api
+```
+
+Output:
+
+- `artifacts-keyframes/startup-roster-token-scan.json`
+
+Current result:
+
+- `27` replay startup payloads scanned
+- no plain ASCII champion names, Riot names, or PUUIDs found
+- no repeated exact `summonerIdLow32` candidates found
+- many low-cardinality numeric coincidences exist for `participantId`, `teamId`, and one-byte champion ids, but they are not row-specific enough to promote
+
+Interpretation:
+
+- startup payload access is now working
+- obvious plain roster identifiers are not directly present in startup payload bytes
+- next startup work should search for encoded/indirect handles rather than direct ids, especially repeated 32-bit tokens that correlate with roster order after grouping, not exact known ids
+
+## End-of-Day Checkpoint: 2026-04-28
+
+Committed progress today established three useful facts:
+
+- keyframes contain minute-boundary participant-state-like rows, but keyframe slot index is not participant order
+- `.rofl` metadata roster order maps to Riot API participant ids as `participantId = rosterIndex + 1` for all currently stable keyframe assignments
+- startup payloads are accessible now, but obvious direct identifiers are not stored plainly in the decoded startup bytes
+
+Current tooling:
+
+- `npm run build:keyframe-parity-schema -- --artifact-root .\artifacts-keyframes`
+- `npm run diagnose:keyframe-slot-conflicts -- --artifact-root .\artifacts-keyframes`
+- `npm run assign:keyframe-participant-slots -- --artifact-root .\artifacts-keyframes`
+- `npm run analyze:keyframe-identity-order -- --artifact-root .\artifacts-keyframes`
+- `npm run assign:keyframe-rofl-stats -- --artifact-root .\artifacts-keyframes`
+- `npm run scan:keyframe-identifiers -- --artifact-root .\artifacts-keyframes --api-root .\replays\api`
+- `npm run scan:startup-roster-tokens -- --artifact-root .\artifacts-keyframes --replay-root .\replays --api-root .\replays\api`
+
+Current corpus scorecard:
+
+- promoted keyframe metric candidates: `28`
+- promoted participant state slots: `16`
+- promoted participant identity slots: `8`
+- replay-local slot assignments: `44`
+- stable replay-local slot assignments: `23`
+- stable assignments where API participant id equals `.rofl` roster order: `23 / 23`
+- direct replay-only final-stat assignments: `0`
+- direct startup roster-token candidates suitable for promotion: `0`
+
+Recommended next session:
+
+1. Build an encoded-handle scanner over startup and keyframe payloads instead of exact known-id matching.
+2. Search for 10-row/token groups whose cardinality and ordering match `.rofl` roster rows, even if token values do not equal champion/team/summoner ids.
+3. Try linking those startup token groups to keyframe participant-state slots through repeated 32-bit tokens, bit slices, or row-neighbor structure.
+4. Only after a candidate handle link exists, feed it into movement assignment as a replay-native identity prior.
+
 ## Interpretation Rules
 
 Treat a single passing field as weak evidence. A usable participant row needs multiple independent metrics agreeing on the same:

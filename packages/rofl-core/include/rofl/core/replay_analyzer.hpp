@@ -117,6 +117,7 @@ struct ReplaySummary {
 [[nodiscard]] std::string dump_chunk_subrecords(const std::string& path, int chunk_id);
 [[nodiscard]] std::string summarize_subrecord_families(const std::string& path, std::size_t minimum_length, std::size_t minimum_records, std::size_t top_families);
 [[nodiscard]] std::string dump_subrecord_family(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte);
+[[nodiscard]] std::string dump_subrecord_family_json(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::string_view segment_type = "chunk", std::size_t max_records = 16);
 [[nodiscard]] std::string compare_subrecord_family(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t prefix_bytes);
 [[nodiscard]] std::string guess_stride(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size);
 [[nodiscard]] std::string analyze_sparse_family(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_elements);
