@@ -132,7 +132,7 @@ Parity discovery produced:
 The conflict-aware schema builder then produced:
 
 - `28` promoted metric candidates
-- `1` promoted participant-slot candidate
+- `1` promoted participant-slot candidate before identity weighting
 
 Promoted metric evidence is currently concentrated in:
 
@@ -147,6 +147,55 @@ Practical interpretation:
 - participant-slot promotion must remain conflict-aware
 - single-field matches should not be treated as decoded schema
 - the next useful schema work is reducing same-slot/multi-participant ambiguity, not loosening thresholds
+
+## Weighted Slot Diagnostics
+
+On 2026-04-28, the schema builder was updated to separate two concepts that were previously conflated:
+
+- participant state slots: a family/slot contains API-like participant state, even if the participant assignment is still contested
+- participant identity slots: a family/slot has enough unambiguous, weighted evidence to assign a participant in at least two replays
+
+The participant evidence score now weights metrics by identity value:
+
+- high value: `health`, `power`, `currentGold`, `movementSpeed`
+- medium value: `minionsKilled`, `jungleMinionsKilled`
+- lower value: `totalGold`, `xp`, `level`, `healthMax`, `powerMax`
+
+This keeps generic monotonic stats from dominating identity promotion while still letting them support a broader state-slot finding.
+
+With the existing `artifacts-keyframes` corpus, the regenerated schema produced:
+
+- `28` promoted metric candidates
+- `16` promoted participant state slots
+- `8` promoted participant identity slots
+- `83` conflicted participant slots
+
+Version/family concentration:
+
+- `16.6 | 58339-0xE3-h3`: `13` promoted participant state slots
+- `16.7 | 7710-0x1E-h14`: `3` promoted participant state slots
+
+Metric promotions remain concentrated in the same families:
+
+- `16.6 | 58339-0xE3-h3`: `25` metric candidates, mostly `movementSpeed`
+- `16.7 | 7710-0x1E-h14`: `3` metric candidates, `health` and `currentGold`
+
+The diagnostic script writes the conflict report:
+
+```powershell
+npm run diagnose:keyframe-slot-conflicts -- --artifact-root .\artifacts-keyframes
+```
+
+Output:
+
+- `artifacts-keyframes/keyframe-slot-conflicts.json`
+
+Current interpretation:
+
+- the keyframe stream has reliable state-like rows for the main `16.6` and `16.7` families
+- identity assignment is improved but not solved
+- `15` of the `16` state-promoted slots still have at least one ambiguous replay
+- movement extraction should use state-slot promotion as a search prior, but should not yet trust slot identity without a replay-local assignment pass
 
 ## Interpretation Rules
 

@@ -19,6 +19,7 @@ function parseArgs(argv) {
     maxAvgNormalizedRmse: 0.58,
     minAvgScore: 0.62,
     minParticipantMetricCount: 2,
+    minParticipantIdentityWeight: 2.4,
   };
 
   for (let index = 2; index < argv.length; index += 1) {
@@ -39,6 +40,8 @@ function parseArgs(argv) {
       args.minAvgScore = Number.parseFloat(argv[++index]);
     } else if (arg === "--min-participant-metric-count" && index + 1 < argv.length) {
       args.minParticipantMetricCount = Number.parseInt(argv[++index], 10);
+    } else if (arg === "--min-participant-identity-weight" && index + 1 < argv.length) {
+      args.minParticipantIdentityWeight = Number.parseFloat(argv[++index]);
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -52,6 +55,24 @@ function parseArgs(argv) {
 
 function printHelp() {
   console.log("Usage: node ./scripts/build_keyframe_parity_schema.mjs [--artifact-root <path>] [--parity-report <path>] [--output-path <path>]");
+}
+
+const METRIC_IDENTITY_WEIGHTS = new Map([
+  ["health", 1.4],
+  ["power", 1.4],
+  ["currentGold", 1.35],
+  ["movementSpeed", 1.25],
+  ["minionsKilled", 1.0],
+  ["jungleMinionsKilled", 1.0],
+  ["totalGold", 0.75],
+  ["xp", 0.75],
+  ["level", 0.6],
+  ["healthMax", 0.55],
+  ["powerMax", 0.55],
+]);
+
+function metricIdentityWeight(metric) {
+  return METRIC_IDENTITY_WEIGHTS.get(metric) ?? 0.5;
 }
 
 function finiteValues(values) {
@@ -75,6 +96,24 @@ function groupByReplay(entries) {
     byReplay.set(entry.replayId, list);
   }
   return byReplay;
+}
+
+function enrichParticipantSlotEvidence(entry) {
+  const metrics = [...new Set(entry.metrics ?? [])];
+  const identityWeight = metrics.reduce((sum, metric) => sum + metricIdentityWeight(metric), 0);
+  const identityMetricCount = metrics.filter((metric) => metricIdentityWeight(metric) >= 1).length;
+  const genericMetricCount = metrics.length - identityMetricCount;
+  const weightedSupportScore = (entry.support ?? []).reduce((sum, support) => {
+    const score = typeof support.score === "number" && Number.isFinite(support.score) ? support.score : 0;
+    return sum + metricIdentityWeight(support.metric) * score;
+  }, 0);
+  return {
+    ...entry,
+    identityWeight,
+    identityMetricCount,
+    genericMetricCount,
+    weightedSupportScore,
+  };
 }
 
 function bestMetricMatchPerReplay(matches) {
@@ -109,7 +148,9 @@ function bestParticipantSlotEvidencePerReplay(entries) {
   const winners = [];
   const ambiguousReplays = [];
   for (const [replayId, replayEntries] of groupByReplay(entries)) {
-    const ranked = [...replayEntries].sort((left, right) =>
+    const ranked = replayEntries.map(enrichParticipantSlotEvidence).sort((left, right) =>
+      right.identityWeight - left.identityWeight ||
+      right.weightedSupportScore - left.weightedSupportScore ||
       right.metricCount - left.metricCount ||
       right.bestScore - left.bestScore ||
       right.avgCorrelation - left.avgCorrelation ||
@@ -119,14 +160,24 @@ function bestParticipantSlotEvidencePerReplay(entries) {
     const winner = ranked[0];
     const runnerUp = ranked.find((entry) => entry.participantId !== winner.participantId) ?? null;
     const metricCountGap = runnerUp ? winner.metricCount - runnerUp.metricCount : Number.POSITIVE_INFINITY;
+    const identityWeightGap = runnerUp ? winner.identityWeight - runnerUp.identityWeight : Number.POSITIVE_INFINITY;
+    const weightedSupportScoreGap = runnerUp ? winner.weightedSupportScore - runnerUp.weightedSupportScore : Number.POSITIVE_INFINITY;
     const scoreGap = runnerUp ? winner.bestScore - runnerUp.bestScore : Number.POSITIVE_INFINITY;
-    const unambiguous = !runnerUp || metricCountGap >= 2 || (metricCountGap >= 1 && scoreGap >= 0.08) || scoreGap >= 0.16;
+    const unambiguous = !runnerUp ||
+      identityWeightGap >= 1.4 ||
+      (identityWeightGap >= 0.8 && metricCountGap >= 1) ||
+      (metricCountGap >= 2 && scoreGap >= 0.08) ||
+      scoreGap >= 0.16;
     winners.push({
       ...winner,
       replayParticipantConflictCount: new Set(replayEntries.map((entry) => entry.participantId)).size,
       runnerUpMetricCount: runnerUp?.metricCount ?? null,
+      runnerUpIdentityWeight: runnerUp?.identityWeight ?? null,
+      runnerUpWeightedSupportScore: runnerUp?.weightedSupportScore ?? null,
       runnerUpScore: runnerUp?.bestScore ?? null,
       metricCountGap,
+      identityWeightGap,
+      weightedSupportScoreGap,
       scoreGap,
       unambiguous,
     });
@@ -222,10 +273,20 @@ function summarizeParticipantSlotGroup(key, entries, thresholds) {
   const supportReplays = uniqueSorted(winners.map((entry) => entry.replayId));
   const unambiguousSupportReplays = uniqueSorted(unambiguousWinners.map((entry) => entry.replayId));
   const metricCounts = finiteValues(unambiguousWinners.map((entry) => entry.metricCount));
+  const identityWeights = finiteValues(unambiguousWinners.map((entry) => entry.identityWeight));
+  const identityMetricCounts = finiteValues(unambiguousWinners.map((entry) => entry.identityMetricCount));
+  const genericMetricCounts = finiteValues(unambiguousWinners.map((entry) => entry.genericMetricCount));
+  const weightedSupportScores = finiteValues(unambiguousWinners.map((entry) => entry.weightedSupportScore));
   const correlations = finiteValues(unambiguousWinners.map((entry) => entry.avgCorrelation));
   const normalizedRmses = finiteValues(unambiguousWinners.map((entry) => entry.avgNormalizedRmse));
   const scores = finiteValues(unambiguousWinners.map((entry) => entry.bestScore));
   const metricSet = new Set();
+  const stateMetricSet = new Set();
+  for (const entry of winners) {
+    for (const metric of entry.metrics ?? []) {
+      stateMetricSet.add(metric);
+    }
+  }
   for (const entry of unambiguousWinners) {
     for (const metric of entry.metrics ?? []) {
       metricSet.add(metric);
@@ -233,9 +294,23 @@ function summarizeParticipantSlotGroup(key, entries, thresholds) {
   }
 
   const strongEntries = unambiguousWinners.filter((entry) => (entry.metricCount ?? 0) >= thresholds.minParticipantMetricCount);
-  const promoted =
+  const identityStrongEntries = strongEntries.filter((entry) => (entry.identityWeight ?? 0) >= thresholds.minParticipantIdentityWeight);
+  const stateStrongEntries = winners.filter((entry) => (entry.metricCount ?? 0) >= thresholds.minParticipantMetricCount);
+  const stateMetricCounts = finiteValues(winners.map((entry) => entry.metricCount));
+  const stateIdentityWeights = finiteValues(winners.map((entry) => entry.identityWeight));
+  const stateIdentityMetricCounts = finiteValues(winners.map((entry) => entry.identityMetricCount));
+  const stateGenericMetricCounts = finiteValues(winners.map((entry) => entry.genericMetricCount));
+  const stateWeightedSupportScores = finiteValues(winners.map((entry) => entry.weightedSupportScore));
+  const allCorrelations = finiteValues(winners.map((entry) => entry.avgCorrelation));
+  const allNormalizedRmses = finiteValues(winners.map((entry) => entry.avgNormalizedRmse));
+  const statePromoted =
+    supportReplays.length >= thresholds.minSupportReplays &&
+    uniqueSorted(stateStrongEntries.map((entry) => entry.replayId)).length >= thresholds.minSupportReplays &&
+    average(allCorrelations) >= thresholds.minAvgCorrelation &&
+    average(allNormalizedRmses) <= thresholds.maxAvgNormalizedRmse;
+  const identityPromoted =
     unambiguousSupportReplays.length >= thresholds.minSupportReplays &&
-    strongEntries.length >= thresholds.minSupportReplays &&
+    uniqueSorted(identityStrongEntries.map((entry) => entry.replayId)).length >= thresholds.minSupportReplays &&
     average(correlations) >= thresholds.minAvgCorrelation &&
     average(normalizedRmses) <= thresholds.maxAvgNormalizedRmse;
 
@@ -244,16 +319,36 @@ function summarizeParticipantSlotGroup(key, entries, thresholds) {
     versionGroup,
     familyKey,
     slotIndex: Number.parseInt(slotIndexText, 10),
-    promoted,
+    promoted: identityPromoted,
+    statePromoted,
+    identityPromoted,
     supportReplayCount: supportReplays.length,
     unambiguousSupportReplayCount: unambiguousSupportReplays.length,
     strongReplayCount: uniqueSorted(strongEntries.map((entry) => entry.replayId)).length,
+    stateStrongReplayCount: uniqueSorted(stateStrongEntries.map((entry) => entry.replayId)).length,
+    identityStrongReplayCount: uniqueSorted(identityStrongEntries.map((entry) => entry.replayId)).length,
+    ambiguousReplayCount: uniqueSorted(ambiguousReplays).length,
     supportReplays,
     unambiguousSupportReplays,
     ambiguousReplays,
     metrics: [...metricSet].sort(),
+    stateMetrics: [...stateMetricSet].sort(),
+    stateAvgMetricCount: average(stateMetricCounts),
+    stateMedianMetricCount: median(stateMetricCounts),
+    stateAvgIdentityWeight: average(stateIdentityWeights),
+    stateMedianIdentityWeight: median(stateIdentityWeights),
+    stateAvgIdentityMetricCount: average(stateIdentityMetricCounts),
+    stateAvgGenericMetricCount: average(stateGenericMetricCounts),
+    stateAvgWeightedSupportScore: average(stateWeightedSupportScores),
+    stateAvgCorrelation: average(allCorrelations),
+    stateAvgNormalizedRmse: average(allNormalizedRmses),
     avgMetricCount: average(metricCounts),
     medianMetricCount: median(metricCounts),
+    avgIdentityWeight: average(identityWeights),
+    medianIdentityWeight: median(identityWeights),
+    avgIdentityMetricCount: average(identityMetricCounts),
+    avgGenericMetricCount: average(genericMetricCounts),
+    avgWeightedSupportScore: average(weightedSupportScores),
     avgCorrelation: average(correlations),
     avgNormalizedRmse: average(normalizedRmses),
     bestScore: Math.max(0, ...scores),
@@ -272,17 +367,62 @@ function summarizeParticipantSlotGroup(key, entries, thresholds) {
         champion: entry.champion,
         teamPosition: entry.teamPosition,
         metricCount: entry.metricCount,
+        identityWeight: entry.identityWeight,
+        identityMetricCount: entry.identityMetricCount,
+        genericMetricCount: entry.genericMetricCount,
+        weightedSupportScore: entry.weightedSupportScore,
         metrics: entry.metrics,
         avgCorrelation: entry.avgCorrelation,
         avgNormalizedRmse: entry.avgNormalizedRmse,
         bestScore: entry.bestScore,
         replayParticipantConflictCount: entry.replayParticipantConflictCount,
         runnerUpMetricCount: entry.runnerUpMetricCount,
+        runnerUpIdentityWeight: entry.runnerUpIdentityWeight,
+        runnerUpWeightedSupportScore: entry.runnerUpWeightedSupportScore,
         runnerUpScore: entry.runnerUpScore,
         metricCountGap: Number.isFinite(entry.metricCountGap) ? entry.metricCountGap : null,
+        identityWeightGap: Number.isFinite(entry.identityWeightGap) ? entry.identityWeightGap : null,
+        weightedSupportScoreGap: Number.isFinite(entry.weightedSupportScoreGap) ? entry.weightedSupportScoreGap : null,
         scoreGap: Number.isFinite(entry.scoreGap) ? entry.scoreGap : null,
         unambiguous: entry.unambiguous,
       })),
+  };
+}
+
+function buildSlotConflictReport(participantSlotCandidates) {
+  const conflicted = participantSlotCandidates
+    .filter((candidate) => candidate.ambiguousReplayCount > 0)
+    .map((candidate) => ({
+      key: candidate.key,
+      versionGroup: candidate.versionGroup,
+      familyKey: candidate.familyKey,
+      slotIndex: candidate.slotIndex,
+      statePromoted: candidate.statePromoted,
+      identityPromoted: candidate.identityPromoted,
+      supportReplayCount: candidate.supportReplayCount,
+      unambiguousSupportReplayCount: candidate.unambiguousSupportReplayCount,
+      ambiguousReplayCount: candidate.ambiguousReplayCount,
+      stateAvgIdentityWeight: candidate.stateAvgIdentityWeight,
+      stateAvgMetricCount: candidate.stateAvgMetricCount,
+      stateAvgCorrelation: candidate.stateAvgCorrelation,
+      stateAvgNormalizedRmse: candidate.stateAvgNormalizedRmse,
+      identityAvgIdentityWeight: candidate.avgIdentityWeight,
+      identityAvgMetricCount: candidate.avgMetricCount,
+      identityAvgCorrelation: candidate.avgCorrelation,
+      identityAvgNormalizedRmse: candidate.avgNormalizedRmse,
+      ambiguousReplays: candidate.ambiguousReplays.slice(0, 16),
+      examples: candidate.examples.filter((example) => !example.unambiguous).slice(0, 6),
+    }))
+    .sort((left, right) =>
+      right.ambiguousReplayCount - left.ambiguousReplayCount ||
+      right.supportReplayCount - left.supportReplayCount ||
+      right.stateAvgIdentityWeight - left.stateAvgIdentityWeight ||
+      left.key.localeCompare(right.key),
+    );
+
+  return {
+    conflictedSlotCount: conflicted.length,
+    topConflicts: conflicted.slice(0, 128),
   };
 }
 
@@ -354,9 +494,14 @@ function buildSchema(report, thresholds) {
     .map(([key, entries]) => summarizeParticipantSlotGroup(key, entries, thresholds))
     .sort((left, right) =>
       Number(right.promoted) - Number(left.promoted) ||
+      Number(right.statePromoted) - Number(left.statePromoted) ||
+      right.identityStrongReplayCount - left.identityStrongReplayCount ||
       right.strongReplayCount - left.strongReplayCount ||
+      right.stateStrongReplayCount - left.stateStrongReplayCount ||
       right.unambiguousSupportReplayCount - left.unambiguousSupportReplayCount ||
       right.supportReplayCount - left.supportReplayCount ||
+      right.avgIdentityWeight - left.avgIdentityWeight ||
+      right.stateAvgIdentityWeight - left.stateAvgIdentityWeight ||
       right.bestScore - left.bestScore ||
       right.avgCorrelation - left.avgCorrelation ||
       left.avgNormalizedRmse - right.avgNormalizedRmse ||
@@ -373,7 +518,11 @@ function buildSchema(report, thresholds) {
     promotedMetricCandidates: metricCandidates.filter((entry) => entry.promoted),
     rankedMetricCandidates: metricCandidates.filter((entry) => !entry.promoted).slice(0, 256),
     promotedParticipantSlotCandidates: participantSlotCandidates.filter((entry) => entry.promoted),
+    rankedParticipantIdentityCandidates: participantSlotCandidates.filter((entry) => !entry.promoted).slice(0, 256),
+    promotedParticipantStateSlotCandidates: participantSlotCandidates.filter((entry) => entry.statePromoted),
+    rankedParticipantStateSlotCandidates: participantSlotCandidates.filter((entry) => !entry.statePromoted).slice(0, 256),
     rankedParticipantSlotCandidates: participantSlotCandidates.filter((entry) => !entry.promoted).slice(0, 256),
+    slotConflictReport: buildSlotConflictReport(participantSlotCandidates),
   };
 }
 
@@ -399,13 +548,16 @@ function main() {
     maxAvgNormalizedRmse: args.maxAvgNormalizedRmse,
     minAvgScore: args.minAvgScore,
     minParticipantMetricCount: args.minParticipantMetricCount,
+    minParticipantIdentityWeight: args.minParticipantIdentityWeight,
   };
   const schema = buildSchema(report, thresholds);
   writeJson(outputPath, schema);
 
   console.log(`Wrote keyframe parity schema to ${outputPath}`);
   console.log(`promoted metrics: ${schema.promotedMetricCandidates.length}`);
-  console.log(`promoted participant slots: ${schema.promotedParticipantSlotCandidates.length}`);
+  console.log(`promoted participant identity slots: ${schema.promotedParticipantSlotCandidates.length}`);
+  console.log(`promoted participant state slots: ${schema.promotedParticipantStateSlotCandidates.length}`);
+  console.log(`conflicted participant slots: ${schema.slotConflictReport.conflictedSlotCount}`);
 }
 
 main();

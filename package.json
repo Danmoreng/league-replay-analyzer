@@ -25,6 +25,7 @@
     "summarize:scalar-hotspots": "node ./scripts/summarize_scalar_family_hotspots.mjs",
     "discover:keyframe-parity": "node ./scripts/discover_keyframe_api_parity.mjs",
     "build:keyframe-parity-schema": "node ./scripts/build_keyframe_parity_schema.mjs",
+    "diagnose:keyframe-slot-conflicts": "node ./scripts/diagnose_keyframe_slot_conflicts.mjs",
     "extract:replay-stats": "node ./scripts/extract_replay_stats.mjs",
     "validate:replay-stats": "node ./scripts/validate_extracted_stats.mjs",
     "discover:movement": "node ./scripts/discover_movement_candidates.mjs",
