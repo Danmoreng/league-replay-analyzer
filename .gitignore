@@ -3,6 +3,7 @@ dist/
 build/
 build-wasm/
 artifacts/
+artifacts-keyframes/
 .vite/
 .cache/
 .vs/

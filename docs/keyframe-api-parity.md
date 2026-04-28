@@ -110,6 +110,44 @@ This proves the end-to-end path works:
 3. exact API-frame comparison
 4. participant/slot evidence grouping
 
+## First Corpus Result
+
+On 2026-04-28, `scripts/run_keyframe_parity_corpus.ps1` was run across the local replay/API corpus with:
+
+- `27` replay/API fixture pairs
+- `-TopFamilies 8`
+- `-TopEntitySlots 24`
+- `-DynamicSlotCount 10`
+- `-MixedSlotCount 3`
+- `-TopWindows 16`
+- `-TopFields 16`
+
+Parity discovery produced:
+
+- `5,300` keyframe field candidates
+- `528,000` field/participant/metric comparisons
+- `10,674` strict passing field/metric matches
+- `1,093` participant-slot evidence groups
+
+The conflict-aware schema builder then produced:
+
+- `28` promoted metric candidates
+- `1` promoted participant-slot candidate
+
+Promoted metric evidence is currently concentrated in:
+
+- `16.6 | 58339-0xE3-h3`
+- `16.7 | 7710-0x1E-h14`
+
+The strongest metric class is `movementSpeed`, followed by smaller `currentGold`, `health`, and `jungleMinionsKilled` evidence. This means the keyframe path has real frame-aligned signal, but participant-slot identity is still the bottleneck: most apparent participant-slot groups become ambiguous once same-replay participant conflicts are considered.
+
+Practical interpretation:
+
+- metric-level parity is viable enough to keep developing
+- participant-slot promotion must remain conflict-aware
+- single-field matches should not be treated as decoded schema
+- the next useful schema work is reducing same-slot/multi-participant ambiguity, not loosening thresholds
+
 ## Interpretation Rules
 
 Treat a single passing field as weak evidence. A usable participant row needs multiple independent metrics agreeing on the same:
@@ -126,10 +164,28 @@ The final API frame is expected to be unpaired in pure keyframe mode because API
 
 ## Next Implementation Step
 
-Add a keyframe schema promotion stage that reads `keyframe-api-parity.json` across the corpus and promotes only participant/slot groups with:
+The keyframe corpus runner now automates the artifact, parity, and schema steps:
+
+```powershell
+.\scripts\run_keyframe_parity_corpus.ps1 -ArtifactRoot .\artifacts-keyframes -Force
+```
+
+It writes:
+
+- `artifacts-keyframes/keyframe-corpus-manifest.json`
+- `artifacts-keyframes/keyframe-api-parity.json`
+- `artifacts-keyframes/keyframe-parity-schema.json`
+
+The schema promotion stage reads `keyframe-api-parity.json` across the corpus and promotes only participant/slot groups with:
 
 - at least two strong metrics in one replay
 - stable family/slot behavior across replays in the same version group
 - no stronger conflicting participant assignment for the same slot
 
 After that, movement extraction should use promoted participant/slot identity as a prior and search only plausible rows for position-like fields.
+
+The promotion script can also be run directly:
+
+```powershell
+npm run build:keyframe-parity-schema -- --artifact-root .\artifacts-keyframes
+```
