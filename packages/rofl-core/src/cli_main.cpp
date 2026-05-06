@@ -750,6 +750,16 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (first_arg == "--export-keyframe-state-candidates-json" && argc > 2) {
+        try {
+            std::string path = argv[2];
+            std::cout << rofl::core::export_keyframe_state_candidates_json(path);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
 
     if (first_arg == "--match-event-window" && argc > 2) {
         try {
@@ -983,6 +993,7 @@ int main(int argc, char** argv) {
     std::cout << "Use --profile-position-slots <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--move-epsilon <f>] [--smooth-threshold <f>] to rank position-like sparse slots.\n";
     std::cout << "Use --compare-position-classes <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--top-classes <n>] [--move-epsilon <f>] [--smooth-threshold <f>] to compare discovered slot classes against entity archetypes.\n";
     std::cout << "Use --export-positions-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] to export sparse slot positions as JSON.\n";
+    std::cout << "Use --export-keyframe-state-candidates-json <path-to-rofl> to export promoted keyframe state candidate fields as JSON. Participant identity is intentionally unassigned.\n";
     std::cout << "Use --compare-positions-with-api <path-to-rofl> <path-to-api-positions-json> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--move-epsilon <f>] [--smooth-threshold <f>] [--chunk-time-ms <ms>] [--chunk-base-id <id>] [--max-time-offsets <n>] to rank sparse slot tracks against Riot API positions.\n";
     std::cout << "Use --compare-raw-positions-with-api <path-to-rofl> <path-to-api-positions-json> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--move-epsilon <f>] [--smooth-threshold <f>] [--chunk-time-ms <ms>] [--chunk-base-id <id>] [--max-time-offsets <n>] to rank raw per-record sparse samples against Riot API positions.\n";
     std::cout << "Use --match-event-window <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --event-x <x> --event-y <y> --timestamp-ms <ms> [--stride <len>] [--chunk-time-ms <ms>] [--chunk-base-id <id>] [--chunk-radius <n>] [--top-slots <n>] [--move-epsilon <f>] [--smooth-threshold <f>] to rank sparse slot samples near one known event location.\n";

@@ -4148,6 +4148,202 @@ std::string export_positions_json(
 
     return output.str();
 }
+
+std::string export_keyframe_state_candidates_json(const std::string& path) {
+    struct MetricFieldCandidate {
+        const char* version_group = "";
+        std::size_t length = 0;
+        std::uint8_t first_byte = 0;
+        std::size_t header_size = 0;
+        std::size_t stride = 16;
+        std::size_t slot_index = 0;
+        const char* metric = "";
+        std::size_t offset = 0;
+        std::size_t width = 0;
+        const char* decode_label = "";
+        double avg_score = 0.0;
+        std::size_t support_replay_count = 0;
+    };
+
+    const std::vector<std::uint8_t> bytes = read_file_bytes(path);
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const auto keyframe_schema_version_group = [](std::string_view version) {
+        std::size_t first_dot = version.find('.');
+        if (first_dot == std::string_view::npos) {
+            return version.empty() ? std::string("unknown") : std::string(version);
+        }
+        std::size_t second_dot = version.find('.', first_dot + 1);
+        if (second_dot == std::string_view::npos) {
+            return std::string(version);
+        }
+        return std::string(version.substr(0, second_dot));
+    };
+    const std::string version_group = keyframe_schema_version_group(summary.game_version);
+
+    const std::vector<MetricFieldCandidate> schema = {
+        {"16.9", 24672, 0x60, 0, 16, 87, "movementSpeed", 1, 4, "f32", 0.789, 4},
+        {"16.9", 24672, 0x60, 0, 16, 91, "movementSpeed", 11, 4, "f32", 0.813, 3},
+        {"16.9", 24672, 0x60, 0, 16, 92, "movementSpeed", 0, 4, "f32", 0.836, 2},
+        {"16.9", 24672, 0x60, 0, 16, 92, "movementSpeed", 4, 4, "f32", 0.830, 2},
+        {"16.9", 24672, 0x60, 0, 16, 95, "minionsKilled", 11, 4, "f32", 0.826, 2},
+        {"16.9", 24672, 0x60, 0, 16, 85, "movementSpeed", 1, 4, "f32", 0.826, 2},
+        {"16.9", 24672, 0x60, 0, 16, 85, "movementSpeed", 4, 4, "f32", 0.817, 2},
+        {"16.9", 24672, 0x60, 0, 16, 99, "movementSpeed", 3, 4, "f32", 0.812, 2},
+        {"16.9", 24672, 0x60, 0, 16, 103, "movementSpeed", 1, 4, "f32", 0.810, 2},
+        {"16.9", 24672, 0x60, 0, 16, 84, "movementSpeed", 1, 4, "f32", 0.809, 2},
+        {"16.9", 24672, 0x60, 0, 16, 84, "movementSpeed", 9, 4, "f32", 0.806, 2},
+        {"16.9", 24672, 0x60, 0, 16, 94, "movementSpeed", 6, 4, "f32", 0.805, 2},
+        {"16.9", 24672, 0x60, 0, 16, 491, "movementSpeed", 7, 4, "f32", 0.801, 2},
+        {"16.9", 24672, 0x60, 0, 16, 91, "movementSpeed", 5, 4, "f32", 0.785, 2},
+        {"16.9", 24672, 0x60, 0, 16, 90, "currentGold", 4, 4, "u32", 0.783, 2},
+        {"16.9", 24672, 0x60, 0, 16, 91, "currentGold", 7, 4, "i32", 0.772, 2},
+        {"16.9", 24672, 0x60, 0, 16, 87, "movementSpeed", 5, 4, "f32", 0.770, 2},
+        {"16.9", 24672, 0x60, 0, 16, 97, "health", 12, 2, "u16", 0.753, 2},
+        {"16.9", 24672, 0x60, 0, 16, 97, "health", 10, 4, "u32", 0.753, 2},
+        {"16.9", 24672, 0x60, 0, 16, 85, "currentGold", 14, 2, "u16", 0.729, 2},
+        {"16.9", 24672, 0x60, 0, 16, 85, "currentGold", 12, 4, "u32", 0.729, 2},
+        {"16.9", 24672, 0x60, 0, 16, 85, "currentGold", 10, 4, "f32", 0.718, 2},
+    };
+
+    std::vector<MetricFieldCandidate> candidates;
+    for (const auto& candidate : schema) {
+        if (version_group == candidate.version_group) {
+            candidates.push_back(candidate);
+        }
+    }
+
+    std::ostringstream output;
+    output << '{';
+    output << "\"schema\":\"keyframe-state-candidates.v1\",";
+    output << "\"replayPath\":\"" << json_escape(path) << "\",";
+    output << "\"gameVersion\":\"" << json_escape(summary.game_version) << "\",";
+    output << "\"versionGroup\":\"" << json_escape(version_group) << "\",";
+    output << "\"supervisedSchema\":true,";
+    output << "\"participantIdentity\":\"unassigned\",";
+    output << "\"note\":\"Metric fields are promoted from API-supervised parity evidence. Values are raw field decodes from ROFL keyframes and are not yet participant-labeled or affine-calibrated.\",";
+
+    if (candidates.empty()) {
+        output << "\"supported\":false,\"candidateCount\":0,\"records\":[],\"series\":[]}";
+        return output.str();
+    }
+
+    const auto family = candidates.front();
+    const auto records = extract_subrecord_family(bytes, summary, family.length, family.first_byte, "keyframe");
+    output << "\"supported\":true,";
+    output << "\"family\":{";
+    output << "\"length\":" << family.length << ',';
+    output << "\"firstByte\":" << static_cast<int>(family.first_byte) << ',';
+    output << "\"headerSize\":" << family.header_size << ',';
+    output << "\"stride\":" << family.stride << ',';
+    output << "\"recordCount\":" << records.size();
+    output << "},";
+
+    const auto read_candidate_value = [](const std::vector<std::uint8_t>& payload, std::size_t offset, std::size_t width, std::string_view decode_label, std::uint64_t& raw_value, double& decoded_value) -> bool {
+        if (offset + width > payload.size()) {
+            return false;
+        }
+        if (width == 2) {
+            const std::uint16_t raw = static_cast<std::uint16_t>(payload[offset]) |
+                                      (static_cast<std::uint16_t>(payload[offset + 1]) << 8U);
+            raw_value = raw;
+            decoded_value = static_cast<double>(raw);
+            return true;
+        }
+        if (width != 4) {
+            return false;
+        }
+        std::uint32_t raw = 0;
+        if (!read_u32_le(payload, offset, raw)) {
+            return false;
+        }
+        raw_value = raw;
+        if (decode_label == "u32") {
+            decoded_value = static_cast<double>(raw);
+            return true;
+        }
+        if (decode_label == "i32") {
+            decoded_value = static_cast<double>(static_cast<std::int32_t>(raw));
+            return true;
+        }
+        if (decode_label == "f32") {
+            const float value = std::bit_cast<float>(raw);
+            if (!std::isfinite(value)) {
+                return false;
+            }
+            decoded_value = static_cast<double>(value);
+            return true;
+        }
+        return false;
+    };
+
+    const auto raw_hex = [](std::uint64_t value, std::size_t width) {
+        std::ostringstream stream;
+        stream << "0x" << std::hex << std::uppercase << std::setw(static_cast<int>(width * 2)) << std::setfill('0') << value;
+        return stream.str();
+    };
+
+    output << "\"records\":[";
+    for (std::size_t index = 0; index < records.size(); ++index) {
+        if (index > 0) {
+            output << ',';
+        }
+        const auto& record = records[index];
+        output << '{';
+        output << "\"recordIndex\":" << index << ',';
+        output << "\"segmentId\":" << record.segment_id << ',';
+        output << "\"chunkId\":" << record.chunk_id << ',';
+        output << "\"apiFrameIndex\":" << subrecord_api_frame_index(record) << ',';
+        output << "\"timestamp\":" << subrecord_sample_timestamp_millis(record, summary, index, records.size() > 1 ? records.size() - 1 : 1);
+        output << '}';
+    }
+    output << "],";
+
+    output << "\"series\":[";
+    for (std::size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
+        if (candidate_index > 0) {
+            output << ',';
+        }
+        const auto& candidate = candidates[candidate_index];
+        output << '{';
+        output << "\"slotIndex\":" << candidate.slot_index << ',';
+        output << "\"participantId\":null,";
+        output << "\"metric\":\"" << json_escape(candidate.metric) << "\",";
+        output << "\"offset\":" << candidate.offset << ',';
+        output << "\"width\":" << candidate.width << ',';
+        output << "\"decodeLabel\":\"" << json_escape(candidate.decode_label) << "\",";
+        output << "\"avgScore\":" << candidate.avg_score << ',';
+        output << "\"supportReplayCount\":" << candidate.support_replay_count << ',';
+        output << "\"points\":[";
+        bool first_point = true;
+        for (std::size_t record_index = 0; record_index < records.size(); ++record_index) {
+            const auto& record = records[record_index];
+            const std::size_t field_offset = candidate.header_size + (candidate.slot_index * candidate.stride) + candidate.offset;
+            std::uint64_t raw_value = 0;
+            double decoded_value = 0.0;
+            if (!read_candidate_value(record.payload, field_offset, candidate.width, candidate.decode_label, raw_value, decoded_value)) {
+                continue;
+            }
+            if (!first_point) {
+                output << ',';
+            }
+            first_point = false;
+            output << '{';
+            output << "\"recordIndex\":" << record_index << ',';
+            output << "\"segmentId\":" << record.segment_id << ',';
+            output << "\"chunkId\":" << record.chunk_id << ',';
+            output << "\"apiFrameIndex\":" << subrecord_api_frame_index(record) << ',';
+            output << "\"timestamp\":" << subrecord_sample_timestamp_millis(record, summary, record_index, records.size() > 1 ? records.size() - 1 : 1) << ',';
+            output << "\"raw\":" << raw_value << ',';
+            output << "\"rawHex\":\"" << raw_hex(raw_value, candidate.width) << "\",";
+            output << "\"value\":" << decoded_value;
+            output << '}';
+        }
+        output << "]}";
+    }
+    output << "]}";
+    return output.str();
+}
+
 std::string compare_positions_with_api(
     const std::string& replay_path,
     const std::string& api_positions_path,
