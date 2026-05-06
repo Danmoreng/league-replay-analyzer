@@ -446,11 +446,38 @@ Initial corpus result:
 - `u16le@0 == length` in all `20`
 - broad u16 row-reference-looking patterns exist across all lanes, but are currently too noisy to treat as owner handles
 
+Focused h16 scan added:
+
+```powershell
+.\build\packages\rofl-core\rofl_core_cli.exe --scan-keyframe-handle-graph-json .\replays\EUW1-7842589492.rofl --top-families 32 --max-records 0 --focus-family 24672-0x60-h16 --focus-slots 79,82,83,84,85,86,87,88,90,91,93,94,95,96,97,99,100,479,488,491,494 --focus-neighbor-radius 2
+```
+
+The corpus wrapper now uses the same focus defaults for `16.9`.
+
+Focused corpus result:
+
+- scanned replays: `20`
+- focus family: `24672-0x60-h16`
+- focus source rows: `21`
+- expanded source rows with radius `2`: `42`
+- strongest recurring signals are still u16-width values from h16 state rows
+- repeated values such as `0xF1`, `0x700`, `0x400`, and `0x300` appear across offsets and target families
+- these values are stable enough to investigate as replay-native tokens, but not strong enough to assign participant owners directly
+
+Supervised assignment comparison:
+
+- the focused corpus report maps existing `24672-0x60-h0` supervised assignments to `24672-0x60-h16` by subtracting one row
+- mapped supervised h16 assignments currently cover `12` of the `20` patch `16.9` replays
+- recurring focused patterns do intersect assigned source rows, but the same offsets also touch many neighboring/unassigned rows
+- this argues against treating a single u16 lane as the participant owner link
+- owner inference should require per-row agreement across multiple metrics and stable replay-local assignment evidence
+
 Next implication:
 
 - filter handle-graph work around known promoted state slots and neighbor rows instead of ranking every row in every family
 - search for replay-native owner links near corrected h16 state rows
 - do not promote generic u16 row-index-looking lanes without stronger owner/identity evidence
+- next decoder step should score focused row-reference candidates by entropy, temporal stability, and agreement with promoted API participant assignments, instead of sorting mainly by total count
 
 ## Interpretation Rules
 

@@ -4390,7 +4390,10 @@ std::string scan_keyframe_handle_graph_json(
     const std::string& path,
     std::size_t minimum_length,
     std::size_t top_families,
-    std::size_t max_records_per_family
+    std::size_t max_records_per_family,
+    std::string_view focus_family_key,
+    const std::vector<std::size_t>& focus_slots,
+    std::size_t focus_neighbor_radius
 ) {
     struct HandleFamily {
         std::size_t length = 0;
@@ -4563,6 +4566,17 @@ std::string scan_keyframe_handle_graph_json(
     }
 
     std::map<RowReferenceKey, RowReferenceAggregate> row_references;
+    std::set<std::size_t> expanded_focus_slots;
+    for (const std::size_t slot : focus_slots) {
+        const std::size_t first = slot > focus_neighbor_radius ? slot - focus_neighbor_radius : 0;
+        const std::size_t last = slot + focus_neighbor_radius;
+        for (std::size_t expanded = first; expanded <= last; ++expanded) {
+            expanded_focus_slots.insert(expanded);
+            if (expanded == std::numeric_limits<std::size_t>::max()) {
+                break;
+            }
+        }
+    }
     auto read_value = [](const std::vector<std::uint8_t>& payload, std::size_t offset, std::uint8_t width, std::uint64_t& value) {
         if (width == 2) {
             std::uint16_t raw = 0;
@@ -4593,8 +4607,18 @@ std::string scan_keyframe_handle_graph_json(
 
     for (std::size_t source_family_index = 0; source_family_index < families.size(); ++source_family_index) {
         const auto& source_family = families[source_family_index];
+        const bool use_focus =
+            !expanded_focus_slots.empty() &&
+            !focus_family_key.empty() &&
+            source_family.key == focus_family_key;
+        if (!expanded_focus_slots.empty() && !use_focus) {
+            continue;
+        }
         for (const auto& record : source_family.records) {
             for (std::size_t row = 0; row < source_family.row_count; ++row) {
+                if (use_focus && expanded_focus_slots.find(row) == expanded_focus_slots.end()) {
+                    continue;
+                }
                 const std::size_t row_offset = source_family.header_size + (row * source_family.stride);
                 if (row_offset + source_family.stride > record.payload.size()) {
                     continue;
@@ -4664,6 +4688,15 @@ std::string scan_keyframe_handle_graph_json(
     output << "\"minimumLength\":" << minimum_length << ',';
     output << "\"topFamilies\":" << family_limit << ',';
     output << "\"maxRecordsPerFamily\":" << max_records_per_family << ',';
+    output << "\"focusFamilyKey\":\"" << json_escape(std::string(focus_family_key)) << "\",";
+    output << "\"focusNeighborRadius\":" << focus_neighbor_radius << ',';
+    output << "\"focusSlots\":";
+    write_number_array(output, focus_slots);
+    output << ',';
+    output << "\"expandedFocusSlots\":";
+    std::vector<std::size_t> expanded_focus_slot_values(expanded_focus_slots.begin(), expanded_focus_slots.end());
+    write_number_array(output, expanded_focus_slot_values);
+    output << ',';
     output << "\"families\":[";
     for (std::size_t index = 0; index < families.size(); ++index) {
         if (index > 0) {
@@ -4714,6 +4747,14 @@ std::string scan_keyframe_handle_graph_json(
         output << "\"segmentCount\":" << aggregate.segment_ids.size() << ',';
         output << "\"sourceRowCount\":" << aggregate.source_rows.size() << ',';
         output << "\"targetRowCountObserved\":" << aggregate.target_rows.size() << ',';
+        output << "\"sourceRows\":";
+        std::vector<std::size_t> source_rows(aggregate.source_rows.begin(), aggregate.source_rows.end());
+        write_number_array(output, source_rows);
+        output << ',';
+        output << "\"targetRowsObserved\":";
+        std::vector<std::size_t> target_rows(aggregate.target_rows.begin(), aggregate.target_rows.end());
+        write_number_array(output, target_rows);
+        output << ',';
         output << "\"examples\":[";
         for (std::size_t example_index = 0; example_index < aggregate.examples.size(); ++example_index) {
             if (example_index > 0) {
