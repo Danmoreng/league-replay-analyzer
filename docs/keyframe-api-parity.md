@@ -405,6 +405,53 @@ Interpretation:
 - The next engineering step is moving the stable subset from this prototype into the native C++ core as a normalized `KeyframeStateTimeline` surface, while keeping the assignment confidence explicit.
 - The remaining blocker for replay-only participant labeling is a native identity/handle link between startup/keyframe rows and metadata roster rows.
 
+## Handle-Graph Checkpoint: 2026-05-06
+
+Follow-up handle-graph work confirmed a structural correction for the main `16.9` state family:
+
+- previous exploration key: `16.9 | 24672-0x60-h0`
+- corrected structural hypothesis: `16.9 | 24672-0x60-h16`
+- evidence: the first 16 bytes are `0x60` padding/header bytes in all 20 current-patch replays
+- `u16le@0 == 24672` in `20 / 20` current-patch replays
+- effective row count is therefore `1541`, not `1542`
+
+The existing promoted h0 slot numbers still point at the same byte offsets if converted by:
+
+```text
+h16SlotIndex = h0SlotIndex - 1
+```
+
+The native C++ candidate export now reports the corrected `24672-0x60-h16` family and shifted row indices. Existing JS artifacts generated with `h0` should be treated as discovery artifacts until regenerated with the corrected header hypothesis.
+
+The native handle-graph scanner is:
+
+```powershell
+.\build\packages\rofl-core\rofl_core_cli.exe --scan-keyframe-handle-graph-json .\replays\EUW1-7842589492.rofl --top-families 32 --max-records 0
+```
+
+The corpus wrapper is:
+
+```powershell
+npm run scan:keyframe-handle-graph-corpus -- --version-group 16.9 --top-families 32 --max-records 0
+```
+
+Output:
+
+- `artifacts-keyframes/keyframe-handle-graph-corpus.json`
+
+Initial corpus result:
+
+- scanned replays: `20`
+- `24672-0x60-h16` present in all `20`
+- `u16le@0 == length` in all `20`
+- broad u16 row-reference-looking patterns exist across all lanes, but are currently too noisy to treat as owner handles
+
+Next implication:
+
+- filter handle-graph work around known promoted state slots and neighbor rows instead of ranking every row in every family
+- search for replay-native owner links near corrected h16 state rows
+- do not promote generic u16 row-index-looking lanes without stronger owner/identity evidence
+
 ## Interpretation Rules
 
 Treat a single passing field as weak evidence. A usable participant row needs multiple independent metrics agreeing on the same:

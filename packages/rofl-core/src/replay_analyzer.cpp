@@ -2065,6 +2065,76 @@ struct ExtractedSubrecord {
 
 [[nodiscard]] std::string bytes_to_hex(const std::vector<std::uint8_t>& bytes);
 
+struct KeyframeStateFieldSchema {
+    std::string_view version_group;
+    std::string_view family_key;
+    std::size_t length = 0;
+    std::uint8_t first_byte = 0;
+    std::size_t header_size = 0;
+    std::size_t stride = 16;
+    std::size_t slot_index = 0;
+    std::string_view metric;
+    std::size_t offset = 0;
+    std::size_t width = 0;
+    std::string_view decode_label;
+    double avg_score = 0.0;
+    std::size_t support_replay_count = 0;
+    double slope = 0.0;
+    double intercept = 0.0;
+    bool has_calibration = false;
+};
+
+struct KeyframeStateSchemaVersion {
+    std::string_view schema_id;
+    std::string_view generated_from;
+    std::string_view note;
+    std::vector<KeyframeStateFieldSchema> fields;
+};
+
+[[nodiscard]] std::string keyframe_schema_version_group(std::string_view version) {
+    std::size_t first_dot = version.find('.');
+    if (first_dot == std::string_view::npos) {
+        return version.empty() ? std::string("unknown") : std::string(version);
+    }
+    std::size_t second_dot = version.find('.', first_dot + 1);
+    if (second_dot == std::string_view::npos) {
+        return std::string(version);
+    }
+    return std::string(version.substr(0, second_dot));
+}
+
+[[nodiscard]] KeyframeStateSchemaVersion keyframe_state_schema_v1() {
+    return {
+        "keyframe-state-schema.v1",
+        "artifacts-keyframes/keyframe-parity-schema.json generated from the 47-replay corpus on 2026-05-06",
+        "Promoted metric fields are API-supervised parity candidates. Participant identity and calibration are not solved in core yet.",
+        {
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 86, "movementSpeed", 1, 4, "f32", 0.789, 4},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 90, "movementSpeed", 11, 4, "f32", 0.813, 3},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 91, "movementSpeed", 0, 4, "f32", 0.836, 2},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 91, "movementSpeed", 4, 4, "f32", 0.830, 2},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 94, "minionsKilled", 11, 4, "f32", 0.826, 2},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 84, "movementSpeed", 1, 4, "f32", 0.826, 2},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 84, "movementSpeed", 4, 4, "f32", 0.817, 2},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 98, "movementSpeed", 3, 4, "f32", 0.812, 2},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 102, "movementSpeed", 1, 4, "f32", 0.810, 2},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 83, "movementSpeed", 1, 4, "f32", 0.809, 2},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 83, "movementSpeed", 9, 4, "f32", 0.806, 2},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 93, "movementSpeed", 6, 4, "f32", 0.805, 2},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 490, "movementSpeed", 7, 4, "f32", 0.801, 2},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 90, "movementSpeed", 5, 4, "f32", 0.785, 2},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 89, "currentGold", 4, 4, "u32", 0.783, 2},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 90, "currentGold", 7, 4, "i32", 0.772, 2},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 86, "movementSpeed", 5, 4, "f32", 0.770, 2},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 96, "health", 12, 2, "u16", 0.753, 2},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 96, "health", 10, 4, "u32", 0.753, 2},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 84, "currentGold", 14, 2, "u16", 0.729, 2},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 84, "currentGold", 12, 4, "u32", 0.729, 2},
+            {"16.9", "24672-0x60-h16", 24672, 0x60, 16, 16, 84, "currentGold", 10, 4, "f32", 0.718, 2},
+        },
+    };
+}
+
 [[nodiscard]] std::vector<ExtractedSubrecord> extract_subrecord_family(
     const std::vector<std::uint8_t>& bytes,
     const ReplaySummary& summary,
@@ -4150,63 +4220,13 @@ std::string export_positions_json(
 }
 
 std::string export_keyframe_state_candidates_json(const std::string& path) {
-    struct MetricFieldCandidate {
-        const char* version_group = "";
-        std::size_t length = 0;
-        std::uint8_t first_byte = 0;
-        std::size_t header_size = 0;
-        std::size_t stride = 16;
-        std::size_t slot_index = 0;
-        const char* metric = "";
-        std::size_t offset = 0;
-        std::size_t width = 0;
-        const char* decode_label = "";
-        double avg_score = 0.0;
-        std::size_t support_replay_count = 0;
-    };
-
     const std::vector<std::uint8_t> bytes = read_file_bytes(path);
     const ReplaySummary summary = parse_replay_bytes(bytes);
-    const auto keyframe_schema_version_group = [](std::string_view version) {
-        std::size_t first_dot = version.find('.');
-        if (first_dot == std::string_view::npos) {
-            return version.empty() ? std::string("unknown") : std::string(version);
-        }
-        std::size_t second_dot = version.find('.', first_dot + 1);
-        if (second_dot == std::string_view::npos) {
-            return std::string(version);
-        }
-        return std::string(version.substr(0, second_dot));
-    };
     const std::string version_group = keyframe_schema_version_group(summary.game_version);
+    const KeyframeStateSchemaVersion schema = keyframe_state_schema_v1();
 
-    const std::vector<MetricFieldCandidate> schema = {
-        {"16.9", 24672, 0x60, 0, 16, 87, "movementSpeed", 1, 4, "f32", 0.789, 4},
-        {"16.9", 24672, 0x60, 0, 16, 91, "movementSpeed", 11, 4, "f32", 0.813, 3},
-        {"16.9", 24672, 0x60, 0, 16, 92, "movementSpeed", 0, 4, "f32", 0.836, 2},
-        {"16.9", 24672, 0x60, 0, 16, 92, "movementSpeed", 4, 4, "f32", 0.830, 2},
-        {"16.9", 24672, 0x60, 0, 16, 95, "minionsKilled", 11, 4, "f32", 0.826, 2},
-        {"16.9", 24672, 0x60, 0, 16, 85, "movementSpeed", 1, 4, "f32", 0.826, 2},
-        {"16.9", 24672, 0x60, 0, 16, 85, "movementSpeed", 4, 4, "f32", 0.817, 2},
-        {"16.9", 24672, 0x60, 0, 16, 99, "movementSpeed", 3, 4, "f32", 0.812, 2},
-        {"16.9", 24672, 0x60, 0, 16, 103, "movementSpeed", 1, 4, "f32", 0.810, 2},
-        {"16.9", 24672, 0x60, 0, 16, 84, "movementSpeed", 1, 4, "f32", 0.809, 2},
-        {"16.9", 24672, 0x60, 0, 16, 84, "movementSpeed", 9, 4, "f32", 0.806, 2},
-        {"16.9", 24672, 0x60, 0, 16, 94, "movementSpeed", 6, 4, "f32", 0.805, 2},
-        {"16.9", 24672, 0x60, 0, 16, 491, "movementSpeed", 7, 4, "f32", 0.801, 2},
-        {"16.9", 24672, 0x60, 0, 16, 91, "movementSpeed", 5, 4, "f32", 0.785, 2},
-        {"16.9", 24672, 0x60, 0, 16, 90, "currentGold", 4, 4, "u32", 0.783, 2},
-        {"16.9", 24672, 0x60, 0, 16, 91, "currentGold", 7, 4, "i32", 0.772, 2},
-        {"16.9", 24672, 0x60, 0, 16, 87, "movementSpeed", 5, 4, "f32", 0.770, 2},
-        {"16.9", 24672, 0x60, 0, 16, 97, "health", 12, 2, "u16", 0.753, 2},
-        {"16.9", 24672, 0x60, 0, 16, 97, "health", 10, 4, "u32", 0.753, 2},
-        {"16.9", 24672, 0x60, 0, 16, 85, "currentGold", 14, 2, "u16", 0.729, 2},
-        {"16.9", 24672, 0x60, 0, 16, 85, "currentGold", 12, 4, "u32", 0.729, 2},
-        {"16.9", 24672, 0x60, 0, 16, 85, "currentGold", 10, 4, "f32", 0.718, 2},
-    };
-
-    std::vector<MetricFieldCandidate> candidates;
-    for (const auto& candidate : schema) {
+    std::vector<KeyframeStateFieldSchema> candidates;
+    for (const auto& candidate : schema.fields) {
         if (version_group == candidate.version_group) {
             candidates.push_back(candidate);
         }
@@ -4214,16 +4234,19 @@ std::string export_keyframe_state_candidates_json(const std::string& path) {
 
     std::ostringstream output;
     output << '{';
-    output << "\"schema\":\"keyframe-state-candidates.v1\",";
+    output << "\"schema\":\"keyframe-state-timeline.v1\",";
+    output << "\"schemaId\":\"" << json_escape(schema.schema_id) << "\",";
+    output << "\"schemaSource\":\"" << json_escape(schema.generated_from) << "\",";
     output << "\"replayPath\":\"" << json_escape(path) << "\",";
     output << "\"gameVersion\":\"" << json_escape(summary.game_version) << "\",";
     output << "\"versionGroup\":\"" << json_escape(version_group) << "\",";
     output << "\"supervisedSchema\":true,";
     output << "\"participantIdentity\":\"unassigned\",";
-    output << "\"note\":\"Metric fields are promoted from API-supervised parity evidence. Values are raw field decodes from ROFL keyframes and are not yet participant-labeled or affine-calibrated.\",";
+    output << "\"calibration\":\"none\",";
+    output << "\"note\":\"" << json_escape(schema.note) << "\",";
 
     if (candidates.empty()) {
-        output << "\"supported\":false,\"candidateCount\":0,\"records\":[],\"series\":[]}";
+        output << "\"supported\":false,\"candidateCount\":0,\"records\":[],\"participants\":[],\"series\":[]}";
         return output.str();
     }
 
@@ -4308,11 +4331,25 @@ std::string export_keyframe_state_candidates_json(const std::string& path) {
         output << "\"slotIndex\":" << candidate.slot_index << ',';
         output << "\"participantId\":null,";
         output << "\"metric\":\"" << json_escape(candidate.metric) << "\",";
+        output << "\"familyKey\":\"" << json_escape(candidate.family_key) << "\",";
         output << "\"offset\":" << candidate.offset << ',';
         output << "\"width\":" << candidate.width << ',';
         output << "\"decodeLabel\":\"" << json_escape(candidate.decode_label) << "\",";
         output << "\"avgScore\":" << candidate.avg_score << ',';
         output << "\"supportReplayCount\":" << candidate.support_replay_count << ',';
+        output << "\"confidence\":{";
+        output << "\"kind\":\"promotedMetricCandidate\",";
+        output << "\"stableParticipantAssignment\":false,";
+        output << "\"avgScore\":" << candidate.avg_score << ',';
+        output << "\"supportReplayCount\":" << candidate.support_replay_count;
+        output << "},";
+        output << "\"calibration\":";
+        if (candidate.has_calibration) {
+            output << "{\"slope\":" << candidate.slope << ",\"intercept\":" << candidate.intercept << '}';
+        } else {
+            output << "null";
+        }
+        output << ',';
         output << "\"points\":[";
         bool first_point = true;
         for (std::size_t record_index = 0; record_index < records.size(); ++record_index) {
@@ -4333,10 +4370,356 @@ std::string export_keyframe_state_candidates_json(const std::string& path) {
             output << "\"chunkId\":" << record.chunk_id << ',';
             output << "\"apiFrameIndex\":" << subrecord_api_frame_index(record) << ',';
             output << "\"timestamp\":" << subrecord_sample_timestamp_millis(record, summary, record_index, records.size() > 1 ? records.size() - 1 : 1) << ',';
-            output << "\"raw\":" << raw_value << ',';
+            output << "\"rawValue\":" << raw_value << ',';
             output << "\"rawHex\":\"" << raw_hex(raw_value, candidate.width) << "\",";
-            output << "\"value\":" << decoded_value;
+            output << "\"decodedValue\":" << decoded_value << ',';
+            if (candidate.has_calibration) {
+                output << "\"calibratedValue\":" << ((candidate.slope * decoded_value) + candidate.intercept);
+            } else {
+                output << "\"calibratedValue\":null";
+            }
             output << '}';
+        }
+        output << "]}";
+    }
+    output << "]}";
+    return output.str();
+}
+
+std::string scan_keyframe_handle_graph_json(
+    const std::string& path,
+    std::size_t minimum_length,
+    std::size_t top_families,
+    std::size_t max_records_per_family
+) {
+    struct HandleFamily {
+        std::size_t length = 0;
+        std::uint8_t first_byte = 0;
+        std::size_t header_size = 0;
+        std::size_t stride = 16;
+        std::size_t row_count = 0;
+        std::string key;
+        std::vector<ExtractedSubrecord> records;
+    };
+    struct HeaderFinding {
+        std::string family_key;
+        std::size_t length = 0;
+        std::uint8_t first_byte = 0;
+        std::size_t header_size = 0;
+        std::size_t stride = 16;
+        std::size_t record_count = 0;
+        std::string first16_hex;
+        std::uint16_t u16le0 = 0;
+        std::uint32_t u32le0 = 0;
+        bool u16le0_equals_length = false;
+        bool u32le0_equals_length = false;
+        bool first_two_bytes_same_as_first_byte = false;
+        std::size_t h0_element_count = 0;
+        std::size_t h16_element_count = 0;
+    };
+    struct RowReferenceKey {
+        std::size_t source_family = 0;
+        std::size_t source_offset = 0;
+        std::size_t target_family = 0;
+        std::uint8_t width = 0;
+
+        bool operator<(const RowReferenceKey& other) const {
+            return std::tie(source_family, source_offset, target_family, width) <
+                   std::tie(other.source_family, other.source_offset, other.target_family, other.width);
+        }
+    };
+    struct RowReferenceAggregate {
+        std::size_t count = 0;
+        std::set<int> segment_ids;
+        std::set<std::size_t> source_rows;
+        std::set<std::size_t> target_rows;
+        std::vector<std::string> examples;
+    };
+    struct LocalFamilyAggregate {
+        std::size_t length = 0;
+        std::uint8_t first_byte = 0;
+        std::size_t record_count = 0;
+        std::set<int> segment_ids;
+    };
+
+    const std::vector<std::uint8_t> bytes = read_file_bytes(path);
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+
+    std::map<std::pair<std::size_t, std::uint8_t>, LocalFamilyAggregate> family_map;
+    for (const ReplaySegmentSummary& segment : summary.container.segments) {
+        if (segment.codec != "zstd" || segment.type != "keyframe") {
+            continue;
+        }
+        std::vector<std::uint8_t> decompressed;
+        std::string error;
+        if (!try_decompress_zstd_segment(bytes, segment, decompressed, error)) {
+            continue;
+        }
+        const auto framing = choose_best_le_length_prefix(decompressed);
+        if (framing.record_count < 2) {
+            continue;
+        }
+        const auto records = extract_le_framed_subrecords(decompressed, framing.width, framing.start_offset, 1000000);
+        for (const FramedSubrecord& record : records) {
+            if (record.length < minimum_length || record.payload_offset >= decompressed.size()) {
+                continue;
+            }
+            const auto key = std::make_pair(record.length, decompressed[record.payload_offset]);
+            auto& aggregate = family_map[key];
+            aggregate.length = record.length;
+            aggregate.first_byte = decompressed[record.payload_offset];
+            aggregate.record_count += 1;
+            aggregate.segment_ids.insert(segment.id);
+        }
+    }
+    std::vector<LocalFamilyAggregate> ranked_families;
+    for (const auto& [_, aggregate] : family_map) {
+        if (aggregate.record_count >= 2) {
+            ranked_families.push_back(aggregate);
+        }
+    }
+    std::sort(ranked_families.begin(), ranked_families.end(), [](const LocalFamilyAggregate& left, const LocalFamilyAggregate& right) {
+        if (left.segment_ids.size() != right.segment_ids.size()) {
+            return left.segment_ids.size() > right.segment_ids.size();
+        }
+        if (left.record_count != right.record_count) {
+            return left.record_count > right.record_count;
+        }
+        if (left.length != right.length) {
+            return left.length > right.length;
+        }
+        return left.first_byte < right.first_byte;
+    });
+
+    auto family_key = [](std::size_t length, std::uint8_t first_byte, std::size_t header_size) {
+        std::ostringstream key;
+        key << length << "-0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+            << static_cast<int>(first_byte) << std::dec << "-h" << header_size;
+        return key.str();
+    };
+    auto recommended_header_size = [](std::size_t length) -> std::size_t {
+        if (length > 16 && ((length - 16) % 16) == 0) {
+            return 16;
+        }
+        for (std::size_t header_size = 0; header_size <= 15; ++header_size) {
+            if (length > header_size && ((length - header_size) % 16) == 0) {
+                return header_size;
+            }
+        }
+        return 0;
+    };
+    auto hex_prefix = [](const std::vector<std::uint8_t>& payload, std::size_t byte_count) {
+        std::ostringstream stream;
+        const std::size_t count = std::min(byte_count, payload.size());
+        for (std::size_t index = 0; index < count; ++index) {
+            stream << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+                   << static_cast<int>(payload[index]);
+        }
+        return stream.str();
+    };
+
+    std::vector<HandleFamily> families;
+    std::vector<HeaderFinding> header_findings;
+    const std::size_t family_limit = top_families == 0 ? ranked_families.size() : std::min(top_families, ranked_families.size());
+    for (std::size_t index = 0; index < family_limit; ++index) {
+        const auto& ranked = ranked_families[index];
+        HandleFamily family;
+        family.length = ranked.length;
+        family.first_byte = ranked.first_byte;
+        family.header_size = recommended_header_size(family.length);
+        family.stride = 16;
+        family.key = family_key(family.length, family.first_byte, family.header_size);
+        if (family.length > family.header_size) {
+            family.row_count = (family.length - family.header_size) / family.stride;
+        }
+        family.records = extract_subrecord_family(bytes, summary, family.length, family.first_byte, "keyframe");
+        if (max_records_per_family > 0 && family.records.size() > max_records_per_family) {
+            family.records.resize(max_records_per_family);
+        }
+        if (family.records.empty()) {
+            continue;
+        }
+
+        HeaderFinding finding;
+        finding.family_key = family.key;
+        finding.length = family.length;
+        finding.first_byte = family.first_byte;
+        finding.header_size = family.header_size;
+        finding.stride = family.stride;
+        finding.record_count = family.records.size();
+        finding.first16_hex = hex_prefix(family.records.front().payload, 16);
+        (void)read_u16_le(family.records.front().payload, 0, finding.u16le0);
+        (void)read_u32_le(family.records.front().payload, 0, finding.u32le0);
+        finding.u16le0_equals_length = finding.u16le0 == family.length;
+        finding.u32le0_equals_length = finding.u32le0 == family.length;
+        finding.first_two_bytes_same_as_first_byte =
+            family.records.front().payload.size() >= 2 &&
+            family.records.front().payload[0] == family.first_byte &&
+            family.records.front().payload[1] == family.first_byte;
+        finding.h0_element_count = (family.length % 16) == 0 ? family.length / 16 : 0;
+        finding.h16_element_count = family.length > 16 && ((family.length - 16) % 16) == 0 ? (family.length - 16) / 16 : 0;
+        header_findings.push_back(finding);
+        families.push_back(std::move(family));
+    }
+
+    std::map<RowReferenceKey, RowReferenceAggregate> row_references;
+    auto read_value = [](const std::vector<std::uint8_t>& payload, std::size_t offset, std::uint8_t width, std::uint64_t& value) {
+        if (width == 2) {
+            std::uint16_t raw = 0;
+            if (!read_u16_le(payload, offset, raw)) {
+                return false;
+            }
+            value = raw;
+            return true;
+        }
+        if (width == 4) {
+            std::uint32_t raw = 0;
+            if (!read_u32_le(payload, offset, raw)) {
+                return false;
+            }
+            value = raw;
+            return true;
+        }
+        if (width == 8) {
+            std::uint64_t raw = 0;
+            if (!read_u64_le(payload, offset, raw)) {
+                return false;
+            }
+            value = raw;
+            return true;
+        }
+        return false;
+    };
+
+    for (std::size_t source_family_index = 0; source_family_index < families.size(); ++source_family_index) {
+        const auto& source_family = families[source_family_index];
+        for (const auto& record : source_family.records) {
+            for (std::size_t row = 0; row < source_family.row_count; ++row) {
+                const std::size_t row_offset = source_family.header_size + (row * source_family.stride);
+                if (row_offset + source_family.stride > record.payload.size()) {
+                    continue;
+                }
+                for (const std::uint8_t width : {std::uint8_t{2}, std::uint8_t{4}, std::uint8_t{8}}) {
+                    for (std::size_t offset = 0; offset + width <= source_family.stride; offset += width) {
+                        std::uint64_t value = 0;
+                        if (!read_value(record.payload, row_offset + offset, width, value)) {
+                            continue;
+                        }
+                        if (value <= 10 || value > 4096) {
+                            continue;
+                        }
+                        for (std::size_t target_family_index = 0; target_family_index < families.size(); ++target_family_index) {
+                            const auto& target_family = families[target_family_index];
+                            if (value >= target_family.row_count) {
+                                continue;
+                            }
+                            RowReferenceKey key{source_family_index, offset, target_family_index, width};
+                            auto& aggregate = row_references[key];
+                            aggregate.count += 1;
+                            aggregate.segment_ids.insert(record.segment_id);
+                            if (aggregate.source_rows.size() < 4096) {
+                                aggregate.source_rows.insert(row);
+                            }
+                            if (aggregate.target_rows.size() < 4096) {
+                                aggregate.target_rows.insert(static_cast<std::size_t>(value));
+                            }
+                            if (aggregate.examples.size() < 6) {
+                                std::ostringstream example;
+                                example << "{\"segmentId\":" << record.segment_id
+                                        << ",\"chunkId\":" << record.chunk_id
+                                        << ",\"sourceRowIndex\":" << row
+                                        << ",\"targetRowIndex\":" << value
+                                        << ",\"rawHex\":\"0x" << std::hex << std::uppercase << value << std::dec << "\"}";
+                                aggregate.examples.push_back(example.str());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    std::vector<std::pair<RowReferenceKey, RowReferenceAggregate>> ranked_refs(row_references.begin(), row_references.end());
+    std::sort(ranked_refs.begin(), ranked_refs.end(), [](const auto& left, const auto& right) {
+        const auto& a = left.second;
+        const auto& b = right.second;
+        if (a.segment_ids.size() != b.segment_ids.size()) {
+            return a.segment_ids.size() > b.segment_ids.size();
+        }
+        if (a.source_rows.size() != b.source_rows.size()) {
+            return a.source_rows.size() > b.source_rows.size();
+        }
+        if (a.target_rows.size() != b.target_rows.size()) {
+            return a.target_rows.size() > b.target_rows.size();
+        }
+        return a.count > b.count;
+    });
+
+    std::ostringstream output;
+    output << '{';
+    output << "\"schema\":\"keyframe-handle-graph-scan.v1\",";
+    output << "\"replayPath\":\"" << json_escape(path) << "\",";
+    output << "\"gameVersion\":\"" << json_escape(summary.game_version) << "\",";
+    output << "\"versionGroup\":\"" << json_escape(keyframe_schema_version_group(summary.game_version)) << "\",";
+    output << "\"minimumLength\":" << minimum_length << ',';
+    output << "\"topFamilies\":" << family_limit << ',';
+    output << "\"maxRecordsPerFamily\":" << max_records_per_family << ',';
+    output << "\"families\":[";
+    for (std::size_t index = 0; index < families.size(); ++index) {
+        if (index > 0) {
+            output << ',';
+        }
+        const auto& family = families[index];
+        output << "{\"familyKey\":\"" << json_escape(family.key) << "\",";
+        output << "\"length\":" << family.length << ',';
+        output << "\"firstByte\":" << static_cast<int>(family.first_byte) << ',';
+        output << "\"headerSize\":" << family.header_size << ',';
+        output << "\"stride\":" << family.stride << ',';
+        output << "\"rowCount\":" << family.row_count << ',';
+        output << "\"recordCount\":" << family.records.size() << '}';
+    }
+    output << "],\"headerFindings\":[";
+    for (std::size_t index = 0; index < header_findings.size(); ++index) {
+        if (index > 0) {
+            output << ',';
+        }
+        const auto& finding = header_findings[index];
+        output << "{\"familyKey\":\"" << json_escape(finding.family_key) << "\",";
+        output << "\"length\":" << finding.length << ',';
+        output << "\"firstByte\":" << static_cast<int>(finding.first_byte) << ',';
+        output << "\"headerSize\":" << finding.header_size << ',';
+        output << "\"recordCount\":" << finding.record_count << ',';
+        output << "\"first16Hex\":\"" << finding.first16_hex << "\",";
+        output << "\"u16le0\":" << finding.u16le0 << ',';
+        output << "\"u32le0\":" << finding.u32le0 << ',';
+        output << "\"u16le0EqualsLength\":" << bool_to_json(finding.u16le0_equals_length) << ',';
+        output << "\"u32le0EqualsLength\":" << bool_to_json(finding.u32le0_equals_length) << ',';
+        output << "\"firstTwoBytesSameAsFirstByte\":" << bool_to_json(finding.first_two_bytes_same_as_first_byte) << ',';
+        output << "\"h0ElementCount\":" << finding.h0_element_count << ',';
+        output << "\"h16ElementCount\":" << finding.h16_element_count << '}';
+    }
+    output << "],\"rowReferencePatterns\":[";
+    const std::size_t shown = std::min<std::size_t>(200, ranked_refs.size());
+    for (std::size_t index = 0; index < shown; ++index) {
+        if (index > 0) {
+            output << ',';
+        }
+        const auto& [key, aggregate] = ranked_refs[index];
+        output << "{\"sourceFamilyKey\":\"" << json_escape(families[key.source_family].key) << "\",";
+        output << "\"sourceOffset\":" << key.source_offset << ',';
+        output << "\"width\":" << static_cast<int>(key.width) << ',';
+        output << "\"targetFamilyKey\":\"" << json_escape(families[key.target_family].key) << "\",";
+        output << "\"targetRowCount\":" << families[key.target_family].row_count << ',';
+        output << "\"count\":" << aggregate.count << ',';
+        output << "\"segmentCount\":" << aggregate.segment_ids.size() << ',';
+        output << "\"sourceRowCount\":" << aggregate.source_rows.size() << ',';
+        output << "\"targetRowCountObserved\":" << aggregate.target_rows.size() << ',';
+        output << "\"examples\":[";
+        for (std::size_t example_index = 0; example_index < aggregate.examples.size(); ++example_index) {
+            if (example_index > 0) {
+                output << ',';
+            }
+            output << aggregate.examples[example_index];
         }
         output << "]}";
     }

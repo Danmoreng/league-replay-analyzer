@@ -761,6 +761,30 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (first_arg == "--scan-keyframe-handle-graph-json" && argc > 2) {
+        try {
+            std::string path = argv[2];
+            std::size_t minimum_length = 4096;
+            std::size_t top_families = 32;
+            std::size_t max_records = 0;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view arg = argv[i];
+                if (arg == "--min-length" && i + 1 < argc) {
+                    minimum_length = std::stoull(argv[++i]);
+                } else if (arg == "--top-families" && i + 1 < argc) {
+                    top_families = std::stoull(argv[++i]);
+                } else if (arg == "--max-records" && i + 1 < argc) {
+                    max_records = std::stoull(argv[++i]);
+                }
+            }
+            std::cout << rofl::core::scan_keyframe_handle_graph_json(path, minimum_length, top_families, max_records);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
     if (first_arg == "--match-event-window" && argc > 2) {
         try {
             std::string replay_path = argv[2];
@@ -994,6 +1018,7 @@ int main(int argc, char** argv) {
     std::cout << "Use --compare-position-classes <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--top-classes <n>] [--move-epsilon <f>] [--smooth-threshold <f>] to compare discovered slot classes against entity archetypes.\n";
     std::cout << "Use --export-positions-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] to export sparse slot positions as JSON.\n";
     std::cout << "Use --export-keyframe-state-candidates-json <path-to-rofl> to export promoted keyframe state candidate fields as JSON. Participant identity is intentionally unassigned.\n";
+    std::cout << "Use --scan-keyframe-handle-graph-json <path-to-rofl> [--min-length <n>] [--top-families <n>] [--max-records <n>] to scan keyframe family headers and row-reference patterns.\n";
     std::cout << "Use --compare-positions-with-api <path-to-rofl> <path-to-api-positions-json> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--move-epsilon <f>] [--smooth-threshold <f>] [--chunk-time-ms <ms>] [--chunk-base-id <id>] [--max-time-offsets <n>] to rank sparse slot tracks against Riot API positions.\n";
     std::cout << "Use --compare-raw-positions-with-api <path-to-rofl> <path-to-api-positions-json> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--move-epsilon <f>] [--smooth-threshold <f>] [--chunk-time-ms <ms>] [--chunk-base-id <id>] [--max-time-offsets <n>] to rank raw per-record sparse samples against Riot API positions.\n";
     std::cout << "Use --match-event-window <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --event-x <x> --event-y <y> --timestamp-ms <ms> [--stride <len>] [--chunk-time-ms <ms>] [--chunk-base-id <id>] [--chunk-radius <n>] [--top-slots <n>] [--move-epsilon <f>] [--smooth-threshold <f>] to rank sparse slot samples near one known event location.\n";

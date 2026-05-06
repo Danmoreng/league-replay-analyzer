@@ -343,9 +343,11 @@ bool test_keyframe_state_candidates_unsupported_fixture() {
 
     const std::string json = rofl::core::export_keyframe_state_candidates_json(path);
     std::remove(path.c_str());
-    return json.find("\"schema\":\"keyframe-state-candidates.v1\"") != std::string::npos &&
+    return json.find("\"schema\":\"keyframe-state-timeline.v1\"") != std::string::npos &&
+           json.find("\"schemaId\":\"keyframe-state-schema.v1\"") != std::string::npos &&
            json.find("\"versionGroup\":\"16.5\"") != std::string::npos &&
            json.find("\"supported\":false") != std::string::npos &&
+           json.find("\"calibration\":\"none\"") != std::string::npos &&
            json.find("\"participantIdentity\":\"unassigned\"") != std::string::npos;
 }
 
