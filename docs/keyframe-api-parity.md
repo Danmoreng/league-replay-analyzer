@@ -340,6 +340,71 @@ Recommended next session:
 3. Try linking those startup token groups to keyframe participant-state slots through repeated 32-bit tokens, bit slices, or row-neighbor structure.
 4. Only after a candidate handle link exists, feed it into movement assignment as a replay-native identity prior.
 
+## Corpus Checkpoint: 2026-05-06
+
+After adding the current-patch replay/API fixtures, `scripts/run_keyframe_parity_corpus.ps1` was rerun across the local corpus:
+
+- replay/API fixture pairs: `47`
+- version groups: `15.22`, `15.23`, `15.24`, `16.1`, `16.5`, `16.6`, `16.7`, `16.9`
+- promoted metric candidates: `84`
+- promoted participant state slots: `69`
+- promoted participant identity slots: `31`
+- conflicted participant slots: `180`
+- replay-local assignments: `197`
+- stable replay-local assignments: `99`
+- stable assignments where API `participantId` equals metadata roster order: `99 / 99`
+- direct replay-only final-stat assignments: `0`
+
+The new `16.9` corpus materially improves current-patch evidence. The strongest current-patch state signal is concentrated in:
+
+- `16.9 | 24672-0x60-h0`
+
+Promoted `16.9` metrics currently include:
+
+- `movementSpeed`
+- `currentGold`
+- `health`
+- `minionsKilled`
+
+Additional replay-local assignment evidence also finds broader metric support for `power`, `level`, `xp`, `totalGold`, `healthMax`, `powerMax`, and jungle CS, but these remain API-supervised field/slot assignments rather than replay-native labels.
+
+The keyframe state export prototype is:
+
+```powershell
+npm run export:keyframe-state
+```
+
+Output:
+
+- `artifacts-keyframes/keyframe-state-prototype.json`
+
+Stable-assignment export result on the 47-replay corpus:
+
+- exported replays: `34 / 47`
+- participant series: `99`
+- metric series: `565`
+- keyframe points: `4,522`
+
+With unstable assignments included:
+
+```powershell
+npm run export:keyframe-state -- --include-unstable --output-path artifacts-keyframes\keyframe-state-prototype-all-assignments.json
+```
+
+Result:
+
+- exported replays: `35 / 47`
+- participant series: `197`
+- metric series: `1,094`
+- keyframe points: `8,574`
+
+Interpretation:
+
+- We can now export structured, participant-labeled keyframe state for stable assignments.
+- This export is still supervised by API parity artifacts and local affine fits; it is not yet a final replay-only decoder.
+- The next engineering step is moving the stable subset from this prototype into the native C++ core as a normalized `KeyframeStateTimeline` surface, while keeping the assignment confidence explicit.
+- The remaining blocker for replay-only participant labeling is a native identity/handle link between startup/keyframe rows and metadata roster rows.
+
 ## Interpretation Rules
 
 Treat a single passing field as weak evidence. A usable participant row needs multiple independent metrics agreeing on the same:

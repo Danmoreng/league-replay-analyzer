@@ -31,6 +31,7 @@
     "assign:keyframe-rofl-stats": "node ./scripts/assign_keyframe_slots_from_rofl_stats.mjs",
     "scan:keyframe-identifiers": "node ./scripts/scan_keyframe_identifier_tokens.mjs",
     "scan:startup-roster-tokens": "node ./scripts/scan_startup_roster_tokens.mjs",
+    "export:keyframe-state": "node ./scripts/export_keyframe_state_prototype.mjs",
     "extract:replay-stats": "node ./scripts/extract_replay_stats.mjs",
     "validate:replay-stats": "node ./scripts/validate_extracted_stats.mjs",
     "discover:movement": "node ./scripts/discover_movement_candidates.mjs",
