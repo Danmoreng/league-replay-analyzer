@@ -13,6 +13,7 @@ function parseArgs(argv) {
     artifactRoot: "artifacts-keyframes",
     assignmentsPath: null,
     outputPath: null,
+    versionGroup: null,
     stableOnly: true,
     minAssignmentsPerReplay: 2,
   };
@@ -25,6 +26,8 @@ function parseArgs(argv) {
       args.assignmentsPath = argv[++index];
     } else if (arg === "--output-path" && index + 1 < argv.length) {
       args.outputPath = argv[++index];
+    } else if (arg === "--version-group" && index + 1 < argv.length) {
+      args.versionGroup = argv[++index];
     } else if (arg === "--all-assignments") {
       args.stableOnly = false;
     } else if (arg === "--min-assignments-per-replay" && index + 1 < argv.length) {
@@ -41,7 +44,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log("Usage: node ./scripts/analyze_keyframe_identity_order.mjs [--artifact-root <path>] [--assignments-path <path>] [--output-path <path>] [--all-assignments]");
+  console.log("Usage: node ./scripts/analyze_keyframe_identity_order.mjs [--artifact-root <path>] [--assignments-path <path>] [--version-group <group>] [--output-path <path>] [--all-assignments]");
 }
 
 function normalizeChampion(value) {
@@ -163,10 +166,13 @@ function readReplayRows(artifactRoot, replay, stableOnly) {
   return rows;
 }
 
-function analyze(assignments, artifactRoot, stableOnly, minAssignmentsPerReplay) {
+function analyze(assignments, artifactRoot, stableOnly, minAssignmentsPerReplay, versionGroup) {
   const rows = [];
   for (const replay of assignments.replays ?? []) {
     if (replay.skipped) {
+      continue;
+    }
+    if (versionGroup && replay.versionGroup !== versionGroup) {
       continue;
     }
     rows.push(...readReplayRows(artifactRoot, replay, stableOnly));
@@ -217,6 +223,7 @@ function analyze(assignments, artifactRoot, stableOnly, minAssignmentsPerReplay)
   return {
     generatedAtUtc: new Date().toISOString(),
     sourceAssignmentsGeneratedAtUtc: assignments.generatedAtUtc ?? null,
+    versionGroup,
     stableOnly,
     minAssignmentsPerReplay,
     assignmentRowCount: rows.length,
@@ -251,7 +258,7 @@ function main() {
   }
 
   const assignments = readJson(assignmentsPath);
-  const analysis = analyze(assignments, artifactRoot, args.stableOnly, args.minAssignmentsPerReplay);
+  const analysis = analyze(assignments, artifactRoot, args.stableOnly, args.minAssignmentsPerReplay, args.versionGroup);
   writeJson(outputPath, analysis);
 
   console.log(`Wrote keyframe identity order analysis to ${outputPath}`);

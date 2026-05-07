@@ -1,0 +1,126 @@
+{
+  "replayId": "EUN1-3926619035",
+  "generatedAtUtc": "2026-03-21T18:38:53.261Z",
+  "participantMovementPath": "C:\\Development\\league-replay-analyzer\\artifacts\\EUN1-3926619035\\participant-movement.json",
+  "fixtureDir": "C:\\Development\\league-replay-analyzer\\replays\\api\\EUN1_3926619035",
+  "summary": {
+    "assignmentCount": 5,
+    "matchedAssignmentCount": 5,
+    "passingAssignmentCount": 2,
+    "averageAxisCorrelation": 0.3396133326720684,
+    "averagePathCorrelation": 0.43018271424317744,
+    "averageNormalizedDistanceRmse": 0.20420483606139328
+  },
+  "assignments": [
+    {
+      "rosterIndex": 2,
+      "champion": "Kassadin",
+      "team": 100,
+      "teamPosition": "MIDDLE",
+      "entityKey": "6912-0xC6-h0|14|11|13|normal",
+      "entityGroupKey": "6912-0xC6-h0|14",
+      "matchedParticipantId": 3,
+      "score": 0.38427642297126496,
+      "entityQuality": 0.6410110726196477,
+      "status": "matched",
+      "validation": {
+        "overlap": 17,
+        "xCorrelation": 0.3341023776229077,
+        "yCorrelation": 0.3844517202192561,
+        "averageAxisCorrelation": 0.3592770489210819,
+        "pathCorrelation": 0.05552682360559965,
+        "distanceRmse": 4267.267662195664,
+        "normalizedDistanceRmse": 0.18858836881728874,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 4,
+      "champion": "Bard",
+      "team": 100,
+      "teamPosition": "UTILITY",
+      "entityKey": "29298-0x72-h2|14|10|12|normal",
+      "entityGroupKey": "29298-0x72-h2|14",
+      "matchedParticipantId": 5,
+      "score": 0.621972077257318,
+      "entityQuality": 0.7368807390245325,
+      "status": "matched",
+      "validation": {
+        "overlap": 19,
+        "xCorrelation": 0.6091004166671259,
+        "yCorrelation": 0.6477190645674653,
+        "averageAxisCorrelation": 0.6284097406172956,
+        "pathCorrelation": 0.3977585882185603,
+        "distanceRmse": 3908.0011712359806,
+        "normalizedDistanceRmse": 0.17271088306662075,
+        "passes": true
+      }
+    },
+    {
+      "rosterIndex": 5,
+      "champion": "Vayne",
+      "team": 200,
+      "teamPosition": "TOP",
+      "entityKey": "6912-0xC6-h0|16|11|13|normal",
+      "entityGroupKey": "6912-0xC6-h0|16",
+      "matchedParticipantId": 6,
+      "score": 0.5588644769662051,
+      "entityQuality": 0.6398346020314125,
+      "status": "matched",
+      "validation": {
+        "overlap": 17,
+        "xCorrelation": 0.1999647118292748,
+        "yCorrelation": 0.24035700381182196,
+        "averageAxisCorrelation": 0.2201608578205484,
+        "pathCorrelation": 0.22495190266886467,
+        "distanceRmse": 6295.800309299425,
+        "normalizedDistanceRmse": 0.27823769323137415,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 6,
+      "champion": "Ekko",
+      "team": 200,
+      "teamPosition": "JUNGLE",
+      "entityKey": "58082-0xE2-h2|26|3|4|normal",
+      "entityGroupKey": "58082-0xE2-h2|26",
+      "matchedParticipantId": 7,
+      "score": 0.6497941861695616,
+      "entityQuality": 0.7773717699856355,
+      "status": "matched",
+      "validation": {
+        "overlap": 11,
+        "xCorrelation": 0.7407594109286845,
+        "yCorrelation": 0.7255779177536723,
+        "averageAxisCorrelation": 0.7331686643411783,
+        "pathCorrelation": 0.8486721321893311,
+        "distanceRmse": 3296.2852080807106,
+        "normalizedDistanceRmse": 0.14567660145992375,
+        "passes": true
+      }
+    },
+    {
+      "rosterIndex": 9,
+      "champion": "Nautilus",
+      "team": 200,
+      "teamPosition": "UTILITY",
+      "entityKey": "61894-0x00-h6|16|9|10|normal",
+      "entityGroupKey": "61894-0x00-h6|16",
+      "matchedParticipantId": 10,
+      "score": 0.5813737644478887,
+      "entityQuality": 0.7054301022250548,
+      "status": "matched",
+      "validation": {
+        "overlap": 14,
+        "xCorrelation": -0.4110545943729603,
+        "yCorrelation": -0.07484470230656462,
+        "averageAxisCorrelation": -0.24294964833976246,
+        "pathCorrelation": 0.6240041245335315,
+        "distanceRmse": 5335.785542003969,
+        "normalizedDistanceRmse": 0.235810633731759,
+        "passes": false
+      }
+    }
+  ]
+}

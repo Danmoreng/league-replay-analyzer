@@ -68,6 +68,52 @@ function stateCandidateIndex(schema) {
   return byVersion;
 }
 
+function buildReplayLocalStateCandidates(replay, existingCandidates, thresholds) {
+  const existingKeys = new Set(existingCandidates.map((candidate) => `${candidate.familyKey}|${candidate.slotIndex}`));
+  const bySlot = new Map();
+  for (const entry of replay.participantSlotEvidence ?? []) {
+    const enriched = enrichParticipantSlotEvidence(entry);
+    if ((enriched.metricCount ?? 0) < thresholds.minMetricCount) {
+      continue;
+    }
+    if ((enriched.identityWeight ?? 0) < thresholds.minEdgeIdentityWeight) {
+      continue;
+    }
+    if ((enriched.weightedSupportScore ?? 0) < thresholds.minEdgeWeightedScore) {
+      continue;
+    }
+
+    const key = `${entry.familyKey}|${entry.slotIndex}`;
+    if (existingKeys.has(key)) {
+      continue;
+    }
+
+    const current = bySlot.get(key) ?? {
+      key: `replay-local|${replay.replayId}|${entry.familyKey}|${entry.slotIndex}`,
+      versionGroup: replay.versionGroup,
+      familyKey: entry.familyKey,
+      slotIndex: entry.slotIndex,
+      supportReplayCount: 1,
+      unambiguousSupportReplayCount: 0,
+      replayLocal: true,
+      bestIdentityWeight: 0,
+      bestWeightedSupportScore: 0,
+    };
+    current.bestIdentityWeight = Math.max(current.bestIdentityWeight, enriched.identityWeight ?? 0);
+    current.bestWeightedSupportScore = Math.max(current.bestWeightedSupportScore, enriched.weightedSupportScore ?? 0);
+    bySlot.set(key, current);
+  }
+
+  return [...bySlot.values()]
+    .sort((left, right) =>
+      right.bestWeightedSupportScore - left.bestWeightedSupportScore ||
+      right.bestIdentityWeight - left.bestIdentityWeight ||
+      left.familyKey.localeCompare(right.familyKey) ||
+      left.slotIndex - right.slotIndex
+    )
+    .slice(0, 16);
+}
+
 function buildReplayEdges(replay, stateCandidates, thresholds) {
   const allowedKeys = new Set(stateCandidates.map((candidate) => `${candidate.familyKey}|${candidate.slotIndex}`));
   return (replay.participantSlotEvidence ?? [])
@@ -198,6 +244,7 @@ function assignFamily(replay, familyKey, stateCandidates, edges, thresholds) {
     schemaKey: candidate.key,
     familyKey: candidate.familyKey,
     slotIndex: candidate.slotIndex,
+    replayLocal: Boolean(candidate.replayLocal),
     stateSupportReplayCount: candidate.supportReplayCount,
     identitySupportReplayCount: candidate.unambiguousSupportReplayCount,
   }));
@@ -219,6 +266,7 @@ function assignFamily(replay, familyKey, stateCandidates, edges, thresholds) {
         schemaKey: slot.schemaKey,
         familyKey: slot.familyKey,
         slotIndex: slot.slotIndex,
+        replayLocal: slot.replayLocal,
         participantId: edge.participantId,
         champion: edge.champion,
         teamId: edge.teamId,
@@ -287,16 +335,24 @@ function assignFamily(replay, familyKey, stateCandidates, edges, thresholds) {
 }
 
 function assignReplay(replay, stateCandidates, thresholds) {
-  const edges = buildReplayEdges(replay, stateCandidates, thresholds);
-  const familyKeys = uniqueSorted(stateCandidates.map((candidate) => candidate.familyKey));
-  const families = familyKeys.map((familyKey) => assignFamily(replay, familyKey, stateCandidates, edges, thresholds));
+  let effectiveStateCandidates = stateCandidates;
+  let edges = buildReplayEdges(replay, effectiveStateCandidates, thresholds);
+  const replayLocalStateCandidates = buildReplayLocalStateCandidates(replay, stateCandidates, thresholds);
+  if (replayLocalStateCandidates.length > 0) {
+    effectiveStateCandidates = [...stateCandidates, ...replayLocalStateCandidates];
+    edges = buildReplayEdges(replay, effectiveStateCandidates, thresholds);
+  }
+  const familyKeys = uniqueSorted(effectiveStateCandidates.map((candidate) => candidate.familyKey));
+  const families = familyKeys.map((familyKey) => assignFamily(replay, familyKey, effectiveStateCandidates, edges, thresholds));
   const assignmentCount = families.reduce((sum, family) => sum + family.assignmentCount, 0);
   const stableAssignmentCount = families.reduce((sum, family) => sum + family.stableAssignmentCount, 0);
   return {
     replayId: replay.replayId,
     versionGroup: replay.versionGroup,
     gameVersion: replay.gameVersion,
-    candidateStateSlotCount: stateCandidates.length,
+    candidateStateSlotCount: effectiveStateCandidates.length,
+    promotedCandidateStateSlotCount: stateCandidates.length,
+    replayLocalCandidateStateSlotCount: replayLocalStateCandidates.length,
     edgeCount: edges.length,
     gatedEdgeCount: edges.filter((edge) => edge.passesEdgeGate).length,
     assignmentCount,

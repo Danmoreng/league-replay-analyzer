@@ -15,7 +15,13 @@ function parseArgs(argv) {
   const args = {
     artifactRoot: "artifacts-keyframes",
     apiRoot: "replays/api",
+    assignmentsPath: null,
+    parityReportPath: null,
+    cleanedOverridePath: null,
+    cleanedOverrideReplayId: null,
+    cleanedOverrideFamilyKey: null,
     replayId: null,
+    versionGroup: null,
     outputPath: null,
     includeUnstable: false,
     metrics: null,
@@ -27,8 +33,20 @@ function parseArgs(argv) {
       args.artifactRoot = argv[++index];
     } else if (arg === "--api-root" && index + 1 < argv.length) {
       args.apiRoot = argv[++index];
+    } else if (arg === "--assignments-path" && index + 1 < argv.length) {
+      args.assignmentsPath = argv[++index];
+    } else if (arg === "--parity-report" && index + 1 < argv.length) {
+      args.parityReportPath = argv[++index];
+    } else if (arg === "--cleaned-override" && index + 1 < argv.length) {
+      args.cleanedOverridePath = argv[++index];
+    } else if (arg === "--cleaned-override-replay-id" && index + 1 < argv.length) {
+      args.cleanedOverrideReplayId = argv[++index];
+    } else if (arg === "--cleaned-override-family-key" && index + 1 < argv.length) {
+      args.cleanedOverrideFamilyKey = argv[++index];
     } else if (arg === "--replay-id" && index + 1 < argv.length) {
       args.replayId = argv[++index];
+    } else if (arg === "--version-group" && index + 1 < argv.length) {
+      args.versionGroup = argv[++index];
     } else if (arg === "--output-path" && index + 1 < argv.length) {
       args.outputPath = argv[++index];
     } else if (arg === "--metrics" && index + 1 < argv.length) {
@@ -47,7 +65,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log("Usage: node ./scripts/export_keyframe_state_prototype.mjs [--artifact-root <path>] [--api-root <path>] [--replay-id <id>] [--metrics currentGold,health] [--include-unstable] [--output-path <path>]");
+  console.log("Usage: node ./scripts/export_keyframe_state_prototype.mjs [--artifact-root <path>] [--api-root <path>] [--assignments-path <path>] [--parity-report <path>] [--cleaned-override <path> --cleaned-override-replay-id <id> --cleaned-override-family-key <key>] [--replay-id <id>] [--version-group <group>] [--metrics currentGold,health] [--include-unstable] [--output-path <path>]");
 }
 
 function normalizeFixtureReplayId(replayId) {
@@ -61,6 +79,26 @@ function finiteNumber(value) {
 
 function keyFor(parts) {
   return parts.join("|");
+}
+
+function normalizeExportSlot(versionGroup, familyKey, slotIndex) {
+  if (versionGroup === "16.9" && familyKey === "24672-0x60-h0" && Number.isFinite(slotIndex)) {
+    return {
+      familyKey: "24672-0x60-h16",
+      slotIndex: slotIndex - 1,
+      sourceFamilyKey: familyKey,
+      sourceSlotIndex: slotIndex,
+      correction: "h0-discovery-to-h16-structural-family",
+    };
+  }
+
+  return {
+    familyKey,
+    slotIndex,
+    sourceFamilyKey: familyKey,
+    sourceSlotIndex: slotIndex,
+    correction: null,
+  };
 }
 
 function readApiParticipants(apiRoot, replayId) {
@@ -219,13 +257,21 @@ function main() {
   const root = process.cwd();
   const artifactRoot = resolveAbsolute(root, args.artifactRoot);
   const apiRoot = resolveAbsolute(root, args.apiRoot);
-  const assignments = readJson(path.join(artifactRoot, "keyframe-slot-assignments.json"));
-  const parityReport = readJson(path.join(artifactRoot, "keyframe-api-parity.json"));
+  const assignmentsPath = resolveAbsolute(root, args.assignmentsPath ?? path.join(artifactRoot, "keyframe-slot-assignments.json"));
+  const assignments = readJson(assignmentsPath);
+  const parityReportPath = resolveAbsolute(root, args.parityReportPath ?? path.join(artifactRoot, "keyframe-api-parity.json"));
+  const parityReport = readJson(parityReportPath);
   const matchIndex = buildMatchIndex(parityReport);
+  const cleanedOverride = args.cleanedOverridePath ? {
+    replayId: args.cleanedOverrideReplayId,
+    familyKey: args.cleanedOverrideFamilyKey,
+    path: resolveAbsolute(root, args.cleanedOverridePath),
+  } : null;
   const metricAllowList = args.metrics ? new Set(args.metrics) : null;
 
   const replayRows = (assignments.replays ?? [])
-    .filter((replay) => !args.replayId || replay.replayId === args.replayId);
+    .filter((replay) => !args.replayId || replay.replayId === args.replayId)
+    .filter((replay) => !args.versionGroup || replay.versionGroup === args.versionGroup);
 
   const exportedReplays = [];
   const totals = {
@@ -244,7 +290,12 @@ function main() {
     const exportedParticipants = [];
 
     for (const family of replay.families ?? []) {
-      const cleanedPath = path.join(artifactRoot, replay.replayId, "families", family.familyKey, "cleaned.json");
+      const usesOverride = cleanedOverride &&
+        cleanedOverride.replayId === replay.replayId &&
+        cleanedOverride.familyKey === family.familyKey;
+      const cleanedPath = usesOverride
+        ? cleanedOverride.path
+        : path.join(artifactRoot, replay.replayId, "families", family.familyKey, "cleaned.json");
       let cleaned = null;
       try {
         cleaned = readJson(cleanedPath);
@@ -329,6 +380,7 @@ function main() {
           continue;
         }
 
+        const normalizedSlot = normalizeExportSlot(replay.versionGroup, family.familyKey, assignment.slotIndex);
         exportedParticipants.push({
           participant: apiParticipants.get(assignment.participantId) ?? {
             participantId: assignment.participantId,
@@ -336,9 +388,13 @@ function main() {
             teamId: assignment.teamId,
             teamPosition: assignment.teamPosition,
           },
-          familyKey: family.familyKey,
-          slotIndex: assignment.slotIndex,
+          familyKey: normalizedSlot.familyKey,
+          slotIndex: normalizedSlot.slotIndex,
+          sourceFamilyKey: normalizedSlot.sourceFamilyKey,
+          sourceSlotIndex: normalizedSlot.sourceSlotIndex,
+          structuralCorrection: normalizedSlot.correction,
           stable: assignment.stable,
+          replayLocalAssignment: Boolean(assignment.replayLocal),
           assignmentScore: assignment.score,
           winnerGap: assignment.winnerGap,
           metrics: metricSummaries,
@@ -363,10 +419,13 @@ function main() {
     generatedAtUtc: new Date().toISOString(),
     artifactRoot,
     apiRoot,
+    assignmentsPath,
+    parityReportPath,
     supervised: true,
     note: "Prototype export uses API-supervised keyframe slot assignments and per-field affine parity fits. It is not replay-only decoding yet.",
     filters: {
       replayId: args.replayId,
+      versionGroup: args.versionGroup,
       includeUnstable: args.includeUnstable,
       metrics: args.metrics,
     },
@@ -377,7 +436,9 @@ function main() {
   const outputPath = resolveAbsolute(root, args.outputPath ?? (
     args.replayId
       ? path.join(artifactRoot, args.replayId, "keyframe-state-prototype.json")
-      : path.join(artifactRoot, "keyframe-state-prototype.json")
+      : (args.versionGroup
+          ? path.join(artifactRoot, `keyframe-state-prototype-${args.versionGroup}.json`)
+          : path.join(artifactRoot, "keyframe-state-prototype.json"))
   ));
   writeJson(outputPath, output);
   console.log(`Wrote keyframe state prototype to ${outputPath}`);

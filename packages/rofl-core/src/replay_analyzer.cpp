@@ -7264,7 +7264,8 @@ std::string analyze_row_offsets_json(
     std::size_t stride,
     const std::vector<std::size_t>& slot_indices,
     std::size_t top_fields,
-    std::string_view segment_type
+    std::string_view segment_type,
+    std::size_t min_active_samples
 ) {
     struct FieldProfile {
         std::size_t offset = 0;
@@ -7298,6 +7299,7 @@ std::string analyze_row_offsets_json(
     output << "\"recordCount\":" << records.size() << ',';
     output << "\"headerSize\":" << header_size << ',';
     output << "\"stride\":" << stride << ',';
+    output << "\"minActiveSamples\":" << min_active_samples << ',';
     output << "\"gameLengthMillis\":" << summary.game_length_millis << ',';
     output << "\"chunkBaseId\":" << (summary.container.game_start_chunk_id > 0 ? summary.container.game_start_chunk_id : 0) << ',';
     output << "\"selectedSlots\":[";
@@ -7473,7 +7475,7 @@ std::string analyze_row_offsets_json(
         }
 
         for (auto& profile : profiles) {
-            if (profile.active_samples < 4) {
+            if (profile.active_samples < min_active_samples) {
                 profile.score = 0.0;
                 continue;
             }
@@ -7519,7 +7521,7 @@ std::string analyze_row_offsets_json(
             if (emitted >= top_fields) {
                 break;
             }
-            if (profile.active_samples < 4 || profile.score <= 0.0) {
+            if (profile.active_samples < min_active_samples || profile.score <= 0.0) {
                 continue;
             }
             if (emitted++ > 0) {
@@ -7595,10 +7597,11 @@ std::string analyze_row_offsets_file_json(
     std::size_t stride,
     const std::vector<std::size_t>& slot_indices,
     std::size_t top_fields,
-    std::string_view segment_type
+    std::string_view segment_type,
+    std::size_t min_active_samples
 ) {
     const auto bytes = read_file_bytes(path);
-    return analyze_row_offsets_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_fields, segment_type);
+    return analyze_row_offsets_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_fields, segment_type, min_active_samples);
 }
 
 
@@ -7610,7 +7613,8 @@ std::string analyze_clean_row_offsets_json(
     std::size_t stride,
     const std::vector<std::size_t>& slot_indices,
     std::size_t top_fields,
-    std::string_view segment_type
+    std::string_view segment_type,
+    std::size_t min_active_samples
 ) {
     struct FieldSample {
         int segment_id = 0;
@@ -7675,6 +7679,7 @@ std::string analyze_clean_row_offsets_json(
     output << "\"recordCount\":" << records.size() << ',';
     output << "\"headerSize\":" << header_size << ',';
     output << "\"stride\":" << stride << ',';
+    output << "\"minActiveSamples\":" << min_active_samples << ',';
     output << "\"gameLengthMillis\":" << summary.game_length_millis << ',';
     output << "\"chunkBaseId\":" << (summary.container.game_start_chunk_id > 0 ? summary.container.game_start_chunk_id : 0) << ',';
     output << "\"selectedSlots\":[";
@@ -8153,7 +8158,7 @@ std::string analyze_clean_row_offsets_json(
             }
 
             for (auto& profile : profiles) {
-                if (profile.active_samples < 4) {
+                if (profile.active_samples < min_active_samples) {
                     profile.score = 0.0;
                     continue;
                 }
@@ -8239,7 +8244,7 @@ std::string analyze_clean_row_offsets_json(
             if (emitted >= top_fields) {
                 break;
             }
-            if (profile.active_samples < 4 || profile.score <= 0.0) {
+            if (profile.active_samples < min_active_samples || profile.score <= 0.0) {
                 continue;
             }
             if (emitted++ > 0) {
@@ -8365,10 +8370,11 @@ std::string analyze_clean_row_offsets_file_json(
     std::size_t stride,
     const std::vector<std::size_t>& slot_indices,
     std::size_t top_fields,
-    std::string_view segment_type
+    std::string_view segment_type,
+    std::size_t min_active_samples
 ) {
     const auto bytes = read_file_bytes(path);
-    return analyze_clean_row_offsets_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_fields, segment_type);
+    return analyze_clean_row_offsets_json(bytes, target_length, target_first_byte, header_size, stride, slot_indices, top_fields, segment_type, min_active_samples);
 }
 
 std::string analyze_handle_links_json(
@@ -10103,7 +10109,8 @@ std::string analyze_artifact_bundle_file_json(
                     family.stride,
                     result.slot_selection.selected_slots,
                     top_fields,
-                    segment_filter);
+                    segment_filter,
+                    4);
             }
 
             return result;

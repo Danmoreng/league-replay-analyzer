@@ -378,12 +378,118 @@ Output:
 
 - `artifacts-keyframes/keyframe-state-prototype.json`
 
-Stable-assignment export result on the 47-replay corpus:
+For current-patch-only inspection:
 
-- exported replays: `34 / 47`
-- participant series: `99`
-- metric series: `565`
-- keyframe points: `4,522`
+```powershell
+npm run export:keyframe-state -- --version-group 16.9
+npm run export:keyframe-state -- --version-group 16.9 --include-unstable --output-path artifacts-keyframes\keyframe-state-prototype-16.9-all-assignments.json
+```
+
+Outputs:
+
+- `artifacts-keyframes/keyframe-state-prototype-16.9.json`
+- `artifacts-keyframes/keyframe-state-prototype-16.9-all-assignments.json`
+
+Coverage audit:
+
+```powershell
+npm run summarize:keyframe-export-coverage -- --version-group 16.9
+npm run summarize:latest-keyframe-state -- --version-group 16.9
+npm run summarize:keyframe-export-quality -- --version-group 16.9
+npm run summarize:keyframe-export-quality -- --version-group 16.9 --input-path artifacts-keyframes\keyframe-state-prototype-16.9-all-assignments.json --output-path artifacts-keyframes\keyframe-state-quality-16.9-all-assignments.json
+npm run scan:keyframe-state-band -- --version-group 16.9
+npm run scan:keyframe-state-band -- --version-group 16.9 --replay-id EUW1-7843548046 --min-active-samples 3 --output-path artifacts-keyframes\keyframe-state-band-scan-16.9-EUW1-7843548046-min3.json
+npm run analyze:keyframe-identity-order -- --version-group 16.9 --output-path artifacts-keyframes\keyframe-identity-order-analysis-16.9-stable.json
+npm run analyze:keyframe-identity-order -- --version-group 16.9 --all-assignments --output-path artifacts-keyframes\keyframe-identity-order-analysis-16.9-all.json
+npm run assign:keyframe-rofl-stats -- --version-group 16.9 --output-path artifacts-keyframes\keyframe-rofl-stat-slot-assignments-16.9.json
+npm run compare:keyframe-rofl-stats -- --version-group 16.9
+npm run validate:keyframe-rofl-stats -- --version-group 16.9
+npm run summarize:keyframe-blockers -- --version-group 16.9
+npm run verify:keyframe-state -- --version-group 16.9
+```
+
+Outputs:
+
+- `artifacts-keyframes/keyframe-export-coverage-16.9.json`
+- `artifacts-keyframes/latest-keyframe-state-summary-16.9.json`
+- `artifacts-keyframes/keyframe-state-quality-16.9.json`
+- `artifacts-keyframes/keyframe-state-quality-16.9-all-assignments.json`
+- `artifacts-keyframes/keyframe-state-band-scan-16.9.json`
+- `artifacts-keyframes/keyframe-state-band-scan-16.9-EUW1-7843548046-min3.json`
+- `artifacts-keyframes/keyframe-identity-order-analysis-16.9-stable.json`
+- `artifacts-keyframes/keyframe-identity-order-analysis-16.9-all.json`
+- `artifacts-keyframes/keyframe-rofl-stat-slot-assignments-16.9.json`
+- `artifacts-keyframes/keyframe-rofl-stat-supervised-comparison-16.9.json`
+- `artifacts-keyframes/keyframe-state-rofl-stat-validation-16.9.json`
+- `artifacts-keyframes/keyframe-blockers-16.9.json`
+
+The verifier checks that the current-patch stable/all-assignment exports, coverage audit,
+latest summary, metric-series counts, fit-quality summaries, state-band scan, blocker
+summary, and `h0` to `h16` structural correction agree.
+
+Current `16.9` coverage result:
+
+- stable export: `71 / 71` stable assigned rows exported across `18 / 20` replays
+- all-assignment export: `161 / 161` assigned rows exported across `18 / 20` replays
+- quality summaries: `0` fit-gate violations in both stable and all-assignment exports
+- corrected h16 assignments: `90`
+- replay-local exported rows: `35` stable, `84` all-assignment
+- candidate state slots: `687`
+- identity edges: `887`, with `814` surviving the assignment gate
+- replay-local fallback state slots are included when a slot has strong participant evidence but is not yet corpus-promoted
+- remaining blocker split: `2` replays have candidate state slots but no identity edges
+- no assignment at all: `EUW1-7837700332`, `EUW1-7843548046`
+- blocker report baseline: `0` blocked replays have canonical parity candidates, `1` has artifact-bundle cleaned fields, `1` has canonical targeted state-band raw/cleaned fields, `1` has diagnostic-only low-sample targeted state-band fields, and `1` has a five-point diagnostic-only short-series path
+- replay-only slot-order check: participant IDs match replay summary roster order for supervised rows (`71 / 71` stable, `161 / 161` all-assignment), but slot order is not predictive (`0.514` stable and `0.507` all-assignment aggregate slot/participant order rate)
+- replay-only final `statsJson` check: `20 / 20` current-patch replays analyzed after fixing the cleaned-field lookup. Diagnostics now show `600` candidate slots, `40` slots with readable metric values, `52` slot metric values, `230` compared metric values, `8` final-stat edges, and `2` assignments. Both assignments are `diagnostic-only`: `0` are canonical candidates, `1` is rejected for duplicate-metric support, and `1` is rejected for a near-zero winner gap. Supervised comparison reports `1` stable-row match, `0` stable-row conflicts, and `1` unstable-row conflict, so final stats alone remain diagnostic and are not a safe canonical slot identity source.
+- offline final-`statsJson` validation for already-assigned stable rows: `148` comparable metric series, `129` passing the `0.35` relative-error gate, and `19` failures when comparing the last exported keyframe value to the final metadata value. Timing matters: within the final two-minute window, `63 / 64` comparisons pass; outside that window, monotonic totals (`xp`, gold, CS, jungle CS, level) can drift before the final stats block. This is a conservative end-state sanity check, not a replay-only timeline validation.
+
+Remaining no-assignment details:
+
+- `EUW1-7837700332`: `24672-0x60-h0` has cleaned fields, and targeted state-band scan over slots `84-96` finds `288` raw and `288` cleaned fields, but the strongest fields cover only `5` distinct API frame indices (`2`, `11`, `12`, `15`, `27`), below the metric-level `minOverlap = 6` gate
+- `EUW1-7843548046`: `24672-0x60-h0` is detected as a family with only `3` active records; the canonical native row-offset analyzer requires at least `4` active samples before emitting a field, so all `12` targeted state-band slots (`84-96`) are suppressed and parity discovery has no usable field series to score. A diagnostic-only scan with `--min-active-samples 3` exposes `288` raw and `288` cleaned fields, but those fields are not promoted into the canonical export.
+
+Short-series diagnostic for `EUW1-7837700332`:
+
+```powershell
+node .\scripts\discover_keyframe_api_parity.mjs --replay-id EUW1-7837700332 --min-overlap 5 --metric-min-overlap-cap 5 --output-path tmp\keyframe-parity-EUW1-7837700332-short5.json
+node .\scripts\assign_keyframe_participant_slots.mjs --parity-report tmp\keyframe-parity-EUW1-7837700332-short5.json --output-path tmp\keyframe-slot-assignments-EUW1-7837700332-short5.json
+node .\scripts\export_keyframe_state_prototype.mjs --replay-id EUW1-7837700332 --assignments-path tmp\keyframe-slot-assignments-EUW1-7837700332-short5.json --parity-report tmp\keyframe-parity-EUW1-7837700332-short5.json --output-path tmp\keyframe-state-EUW1-7837700332-short5.json
+```
+
+Result:
+
+- parity discovery: `3547` passing matches, `50` participant-slot evidence groups
+- assignment: `8` assigned rows, `2` stable rows
+- stable export: `2` participant series, `22` metric series, `110` points
+- interpretation: useful diagnostic evidence, but not canonical yet because 5-point fits can produce large absolute errors on high-range metrics like `xp` and `totalGold`
+
+Low-sample diagnostic for `EUW1-7843548046`:
+
+```powershell
+npm run scan:keyframe-state-band -- --version-group 16.9 --replay-id EUW1-7843548046 --min-active-samples 3 --output-path artifacts-keyframes\keyframe-state-band-scan-16.9-EUW1-7843548046-min3.json
+.\build\packages\rofl-core\rofl_core_cli.exe --analyze-clean-row-offsets-json .\replays\EUW1-7843548046.rofl --length 24672 --first-byte 0x60 --header-size 0 --stride 16 --slots 84,85,86,87,88,89,90,91,93,94,95,96 --top-fields 24 --min-active-samples 3 --record-type keyframe > tmp\keyframe-cleaned-EUW1-7843548046-min3.json
+node .\scripts\discover_keyframe_api_parity.mjs --replay-id EUW1-7843548046 --min-overlap 3 --metric-min-overlap-cap 3 --cleaned-override tmp\keyframe-cleaned-EUW1-7843548046-min3.json --cleaned-override-replay-id EUW1-7843548046 --cleaned-override-family-key 24672-0x60-h0 --output-path tmp\keyframe-parity-EUW1-7843548046-min3.json
+node .\scripts\assign_keyframe_participant_slots.mjs --parity-report tmp\keyframe-parity-EUW1-7843548046-min3.json --output-path tmp\keyframe-slot-assignments-EUW1-7843548046-min3.json
+node .\scripts\export_keyframe_state_prototype.mjs --replay-id EUW1-7843548046 --assignments-path tmp\keyframe-slot-assignments-EUW1-7843548046-min3.json --parity-report tmp\keyframe-parity-EUW1-7843548046-min3.json --cleaned-override tmp\keyframe-cleaned-EUW1-7843548046-min3.json --cleaned-override-replay-id EUW1-7843548046 --cleaned-override-family-key 24672-0x60-h0 --include-unstable --output-path tmp\keyframe-state-EUW1-7843548046-min3-all.json
+npm run summarize:keyframe-export-quality -- --version-group 16.9 --input-path tmp\keyframe-state-EUW1-7843548046-min3-all.json --output-path tmp\keyframe-state-quality-EUW1-7843548046-min3-all.json
+```
+
+Result:
+
+- diagnostic parity: `288` candidates, `12889` passing matches, `50` evidence groups
+- assignment: `9` assigned rows, `0` stable rows
+- assignment ambiguity: only `2 / 9` assigned rows are rank-1, `7 / 9` have non-positive winner gaps, max winner gap is `0.0975`, and median winner gap is `-0.8345` versus the canonical stable threshold of `0.35`
+- all-assignment diagnostic export: `9` participant series, `92` metric series, `276` points
+- quality summary: `92 / 92` metric series violate canonical quality gates, primarily because the diagnostic has only three points
+- interpretation: state-band values are extractable from the replay, but this is not a canonical export path
+
+Stable-assignment export result on the 47-replay corpus after replay-local fallback assignment:
+
+- exported replays: `38 / 47`
+- participant series: `147`
+- metric series: `887`
+- keyframe points: `6,826`
 
 With unstable assignments included:
 
@@ -391,12 +497,12 @@ With unstable assignments included:
 npm run export:keyframe-state -- --include-unstable --output-path artifacts-keyframes\keyframe-state-prototype-all-assignments.json
 ```
 
-Result:
+All-assignment export result after replay-local fallback assignment:
 
-- exported replays: `35 / 47`
-- participant series: `197`
-- metric series: `1,094`
-- keyframe points: `8,574`
+- exported replays: `38 / 47`
+- participant series: `322`
+- metric series: `1,971`
+- keyframe points: `14,625`
 
 Interpretation:
 
@@ -404,6 +510,12 @@ Interpretation:
 - This export is still supervised by API parity artifacts and local affine fits; it is not yet a final replay-only decoder.
 - The next engineering step is moving the stable subset from this prototype into the native C++ core as a normalized `KeyframeStateTimeline` surface, while keeping the assignment confidence explicit.
 - The remaining blocker for replay-only participant labeling is a native identity/handle link between startup/keyframe rows and metadata roster rows.
+
+Startup roster token scan note:
+
+- `artifacts-keyframes/startup-roster-token-scan.json` does find current-patch `16.9` roster-order-like numeric tokens in all `20` replays, especially at tiny offsets such as `1` and `2`
+- those offsets are too generic to treat as participant-owner handles; they currently prove startup records contain roster-order signals, not that a startup token links to corrected h16 keyframe state rows
+- replay-only identity still needs a cross-record link from startup/metadata identity to keyframe state rows, not just a roster-order token hit
 
 ## Handle-Graph Checkpoint: 2026-05-06
 
@@ -422,6 +534,18 @@ h16SlotIndex = h0SlotIndex - 1
 ```
 
 The native C++ candidate export now reports the corrected `24672-0x60-h16` family and shifted row indices. Existing JS artifacts generated with `h0` should be treated as discovery artifacts until regenerated with the corrected header hypothesis.
+
+`scripts/export_keyframe_state_prototype.mjs` now applies that correction at export time for `16.9` state rows. It still reads the existing `24672-0x60-h0` discovery artifacts, but exported participant series use:
+
+- `familyKey: "24672-0x60-h16"`
+- `slotIndex: sourceSlotIndex - 1`
+- `sourceFamilyKey` and `sourceSlotIndex` for artifact traceability
+- `structuralCorrection: "h0-discovery-to-h16-structural-family"`
+
+Current verification on the local artifact set:
+
+- stable export: `18 / 20` `16.9` replays, `71` participant series, `446` metric series
+- all-assignment export: `18 / 20` `16.9` replays, `161` participant series, `1072` metric series
 
 The native handle-graph scanner is:
 
@@ -471,6 +595,32 @@ Supervised assignment comparison:
 - recurring focused patterns do intersect assigned source rows, but the same offsets also touch many neighboring/unassigned rows
 - this argues against treating a single u16 lane as the participant owner link
 - owner inference should require per-row agreement across multiple metrics and stable replay-local assignment evidence
+
+Candidate scoring:
+
+```powershell
+npm run score:keyframe-handle-graph -- --artifact-root artifacts-keyframes --top-candidates 50
+```
+
+Output:
+
+- `artifacts-keyframes/keyframe-handle-graph-candidate-scores.json`
+
+Refreshed score result after replay-local fallback assignment:
+
+- scored patterns: `260`
+- strong candidates: `0`
+- investigate candidates: `0`
+- weak candidates: `260`
+- top score: `0.3330`
+- supervised h16 assignment summary in the focused handle graph currently maps `13` replays and `45` source slots
+
+Interpretation:
+
+- narrow 4-byte candidates can be source/target-specific, but currently have only one assigned replay hit
+- high-coverage u16 candidates hit many assigned rows, but also many neighboring rows and target rows
+- this is useful negative evidence: the current focused handle graph does not yet expose a direct participant-owner pointer
+- next useful scoring input is per-record value stability for each assigned row, not just aggregate row/target coverage
 
 Next implication:
 

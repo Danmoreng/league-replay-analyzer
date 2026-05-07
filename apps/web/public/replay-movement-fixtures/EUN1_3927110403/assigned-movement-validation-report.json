@@ -1,0 +1,148 @@
+{
+  "replayId": "EUN1-3927110403",
+  "generatedAtUtc": "2026-03-21T18:38:53.479Z",
+  "participantMovementPath": "C:\\Development\\league-replay-analyzer\\artifacts\\EUN1-3927110403\\participant-movement.json",
+  "fixtureDir": "C:\\Development\\league-replay-analyzer\\replays\\api\\EUN1_3927110403",
+  "summary": {
+    "assignmentCount": 6,
+    "matchedAssignmentCount": 6,
+    "passingAssignmentCount": 3,
+    "averageAxisCorrelation": 0.6258476338058958,
+    "averagePathCorrelation": 0.6155160134296741,
+    "averageNormalizedDistanceRmse": 0.17733265993758415
+  },
+  "assignments": [
+    {
+      "rosterIndex": 0,
+      "champion": "Darius",
+      "team": 100,
+      "teamPosition": "TOP",
+      "entityKey": "29270-0x72-h6|8|8|0|swapped",
+      "entityGroupKey": "29270-0x72-h6|8",
+      "matchedParticipantId": 1,
+      "score": 0.520101076635728,
+      "entityQuality": 0.7480643566892378,
+      "status": "matched",
+      "validation": {
+        "overlap": 10,
+        "xCorrelation": 0.45599466469317324,
+        "yCorrelation": 0.7557630882679258,
+        "averageAxisCorrelation": 0.6058788764805495,
+        "pathCorrelation": 0.7472484018501828,
+        "distanceRmse": 5109.122207206608,
+        "normalizedDistanceRmse": 0.22579343491416087,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 1,
+      "champion": "Belveth",
+      "team": 100,
+      "teamPosition": "JUNGLE",
+      "entityKey": "29270-0x72-h6|5|4|10|normal",
+      "entityGroupKey": "29270-0x72-h6|5",
+      "matchedParticipantId": 2,
+      "score": 0.6397653046708878,
+      "entityQuality": 0.7962920791164425,
+      "status": "matched",
+      "validation": {
+        "overlap": 10,
+        "xCorrelation": 0.8494338449684408,
+        "yCorrelation": 0.6378355462540436,
+        "averageAxisCorrelation": 0.7436346956112422,
+        "pathCorrelation": 0.9258609731342666,
+        "distanceRmse": 2677.788260158391,
+        "normalizedDistanceRmse": 0.11834263983373282,
+        "passes": true
+      }
+    },
+    {
+      "rosterIndex": 2,
+      "champion": "Malzahar",
+      "team": 100,
+      "teamPosition": "MIDDLE",
+      "entityKey": "51483-0xF1-h11|22|5|7|normal",
+      "entityGroupKey": "51483-0xF1-h11|22",
+      "matchedParticipantId": 3,
+      "score": 0.3827058811571872,
+      "entityQuality": 0.6745993513723876,
+      "status": "matched",
+      "validation": {
+        "overlap": 15,
+        "xCorrelation": 0.6159774957548327,
+        "yCorrelation": 0.2601598551430484,
+        "averageAxisCorrelation": 0.43806867544894057,
+        "pathCorrelation": 0.5351029938222637,
+        "distanceRmse": 3983.0957463642753,
+        "normalizedDistanceRmse": 0.17602962577309197,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 3,
+      "champion": "Kaisa",
+      "team": 100,
+      "teamPosition": "BOTTOM",
+      "entityKey": "58082-0xE2-h2|33|10|14|normal",
+      "entityGroupKey": "58082-0xE2-h2|33",
+      "matchedParticipantId": 4,
+      "score": 0.6101218235259487,
+      "entityQuality": 0.79666571654311,
+      "status": "matched",
+      "validation": {
+        "overlap": 13,
+        "xCorrelation": 0.6519066621474368,
+        "yCorrelation": 0.5821099369076819,
+        "averageAxisCorrelation": 0.6170082995275593,
+        "pathCorrelation": 0.5640628716458035,
+        "distanceRmse": 3439.9915597254494,
+        "normalizedDistanceRmse": 0.1520275849441471,
+        "passes": true
+      }
+    },
+    {
+      "rosterIndex": 4,
+      "champion": "Leona",
+      "team": 100,
+      "teamPosition": "UTILITY",
+      "entityKey": "29270-0x72-h6|9|1|3|swapped",
+      "entityGroupKey": "29270-0x72-h6|9",
+      "matchedParticipantId": 5,
+      "score": 0.6154074884957931,
+      "entityQuality": 0.7837122962433947,
+      "status": "matched",
+      "validation": {
+        "overlap": 10,
+        "xCorrelation": 0.6834199237929048,
+        "yCorrelation": 0.9260298775841345,
+        "averageAxisCorrelation": 0.8047249006885197,
+        "pathCorrelation": 0.9179144038646398,
+        "distanceRmse": 3556.4659153100442,
+        "normalizedDistanceRmse": 0.15717507286090962,
+        "passes": true
+      }
+    },
+    {
+      "rosterIndex": 7,
+      "champion": "Azir",
+      "team": 200,
+      "teamPosition": "MIDDLE",
+      "entityKey": "29270-0x72-h6|6|10|11|normal",
+      "entityGroupKey": "29270-0x72-h6|6",
+      "matchedParticipantId": 8,
+      "score": 0.4540694333171078,
+      "entityQuality": 0.696777563282983,
+      "status": "matched",
+      "validation": {
+        "overlap": 10,
+        "xCorrelation": 0.6260633632598851,
+        "yCorrelation": 0.4654773468972419,
+        "averageAxisCorrelation": 0.5457703550785635,
+        "pathCorrelation": 0.002906436260888422,
+        "distanceRmse": 5309.016573836275,
+        "normalizedDistanceRmse": 0.23462760129946256,
+        "passes": false
+      }
+    }
+  ]
+}

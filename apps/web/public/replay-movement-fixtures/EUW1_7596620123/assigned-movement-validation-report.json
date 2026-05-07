@@ -1,0 +1,60 @@
+{
+  "replayId": "EUW1-7596620123",
+  "generatedAtUtc": "2026-03-21T18:38:53.786Z",
+  "participantMovementPath": "C:\\Development\\league-replay-analyzer\\artifacts\\EUW1-7596620123\\participant-movement.json",
+  "fixtureDir": "C:\\Development\\league-replay-analyzer\\replays\\api\\EUW1_7596620123",
+  "summary": {
+    "assignmentCount": 2,
+    "matchedAssignmentCount": 2,
+    "passingAssignmentCount": 0,
+    "averageAxisCorrelation": 0.32163210189442804,
+    "averagePathCorrelation": 0.12184469271432563,
+    "averageNormalizedDistanceRmse": 0.23035314104468516
+  },
+  "assignments": [
+    {
+      "rosterIndex": 2,
+      "champion": "Malzahar",
+      "team": 100,
+      "teamPosition": "MIDDLE",
+      "entityKey": "61894-0x00-h6|10|1|5|normal",
+      "entityGroupKey": "61894-0x00-h6|10",
+      "matchedParticipantId": 3,
+      "score": 0.5643646561495071,
+      "entityQuality": 0.7975536040678678,
+      "status": "matched",
+      "validation": {
+        "overlap": 8,
+        "xCorrelation": -0.6789430617689506,
+        "yCorrelation": 0.6022776102198572,
+        "averageAxisCorrelation": -0.038332725774546716,
+        "pathCorrelation": -0.36346148201237594,
+        "distanceRmse": 5779.600741043541,
+        "normalizedDistanceRmse": 0.2554246797839177,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 6,
+      "champion": "Khazix",
+      "team": 200,
+      "teamPosition": "JUNGLE",
+      "entityKey": "61894-0x00-h6|9|1|5|normal",
+      "entityGroupKey": "61894-0x00-h6|9",
+      "matchedParticipantId": 7,
+      "score": 0.6043907568783956,
+      "entityQuality": 0.7875509109750407,
+      "status": "matched",
+      "validation": {
+        "overlap": 8,
+        "xCorrelation": 0.7053918669891361,
+        "yCorrelation": 0.6578019921376694,
+        "averageAxisCorrelation": 0.6815969295634028,
+        "pathCorrelation": 0.6071508674410272,
+        "distanceRmse": 4644.992417376818,
+        "normalizedDistanceRmse": 0.20528160230545262,
+        "passes": false
+      }
+    }
+  ]
+}

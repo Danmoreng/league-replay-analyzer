@@ -1,8 +1,58 @@
 # Replay Decoder Status
 
-Updated: 2026-04-08
+Updated: 2026-05-07
 
 This is the canonical status document for the current replay reverse-engineering work. Use this file first when continuing decoder work.
+
+## Session Update: 2026-05-07
+
+This session focused on latest-patch `16.9` keyframe state extraction.
+
+New or updated scripts:
+
+- `scripts/assign_keyframe_participant_slots.mjs`
+- `scripts/discover_keyframe_api_parity.mjs`
+- `scripts/export_keyframe_state_prototype.mjs`
+- `scripts/scan_keyframe_state_band.mjs`
+- `scripts/analyze_keyframe_identity_order.mjs`
+- `scripts/compare_rofl_stat_assignments_to_supervised.mjs`
+- `scripts/validate_keyframe_state_against_rofl_stats.mjs`
+- `scripts/summarize_keyframe_export_coverage.mjs`
+- `scripts/summarize_keyframe_export_quality.mjs`
+- `scripts/summarize_keyframe_blockers.mjs`
+- `scripts/summarize_latest_keyframe_state.mjs`
+- `scripts/verify_keyframe_state_exports.mjs`
+
+Session-level outcome:
+
+- current-patch keyframe state export now normalizes the corrected `16.9 | 24672-0x60-h16` structural family while preserving source `h0` artifact traceability
+- participant slot assignment now allows conservative replay-local fallback slots when strong participant evidence exists on a slot that is not yet corpus-promoted
+- `16.9` stable keyframe export now covers `71 / 71` assigned rows across `18 / 20` replays, with `446` metric series
+- `16.9` all-assignment keyframe export now covers `161 / 161` assigned rows across `18 / 20` replays, with `1072` metric series
+- current-patch stable and all-assignment quality summaries report `0` fit-gate violations; `npm run verify:keyframe-state -- --version-group 16.9` now requires those quality summaries as well as the coverage and state summary artifacts
+- current-patch blocker summary records the two remaining no-assignment replays in `artifacts-keyframes/keyframe-blockers-16.9.json`; neither has canonical parity candidates, `EUW1-7837700332` has targeted state-band fields but only five distinct API frame indices, and `EUW1-7843548046` has active expected-band rows but all `12` targeted slots are below the canonical native row-offset analyzer's `4` active-sample field-emission threshold
+- diagnostic-only low-sample scan for `EUW1-7843548046` with `--min-active-samples 3` exposes `288` raw and `288` cleaned targeted state-band fields; the matching low-sample parity/export path yields `9` unstable participant series, `92` metric series, and `276` points, but only `2 / 9` assignments are rank-1, max winner gap is `0.0975`, and `92 / 92` metric series violate canonical quality gates
+- supervised current-patch participant IDs match replay summary roster order, but state slot order is not a useful replay-only identity signal: aggregate slot/participant order rate is `0.514` for stable assignments and `0.507` with unstable assignments included
+- replay-only final `statsJson` assignment was rerun for current-patch replays after fixing the cleaned-field lookup; it now reads `40` candidate slots and produces `8` weak edges plus `2` diagnostic-only assignments across `20 / 20` analyzed replays, but `0` canonical candidates. One assignment is rejected for duplicate-metric support, and one is rejected for a near-zero winner gap. Supervised comparison finds `1` stable-row match, `0` stable-row conflicts, and `1` unstable-row conflict, so final stats remain diagnostic only.
+- offline `.rofl` metadata validation for the stable current-patch keyframe export compares the last exported keyframe value against final `statsJson` targets for final-state metrics; it finds `148` comparable metric series, `129` passing the `0.35` relative-error gate, and `19` failures overall. Timing explains nearly all failures: within the final two-minute window, `63 / 64` comparisons pass; outside that window, monotonic totals often drift before final metadata.
+- whole-corpus stable keyframe export now covers `38 / 47` replays, `147` participant series, `887` metric series, and `6826` keyframe points
+- whole-corpus all-assignment keyframe export now covers `38 / 47` replays, `322` participant series, `1971` metric series, and `14625` keyframe points
+- two `16.9` replays remain blocked: `EUW1-7837700332` has only five usable keyframe sample points under the default overlap gate, and `EUW1-7843548046` has only three active records in the expected state band
+- refreshed focused `16.9` keyframe handle-graph scoring remains negative: `260` scored patterns, `0` strong, `0` investigate, top score `0.3330`
+
+Full current-patch details, commands, and diagnostic caveats are recorded in:
+
+- `docs/keyframe-api-parity.md`
+
+Fast machine-readable scorecard:
+
+- `artifacts-keyframes/latest-keyframe-state-summary-16.9.json`
+
+Fast regression guard:
+
+```powershell
+npm run verify:keyframe-state -- --version-group 16.9
+```
 
 ## Session Update: 2026-04-08
 

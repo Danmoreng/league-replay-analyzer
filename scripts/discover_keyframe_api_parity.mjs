@@ -40,6 +40,10 @@ function parseArgs(argv) {
     minOverlap: 6,
     minCorrelation: 0.7,
     maxNormalizedRmse: 0.65,
+    metricMinOverlapCap: null,
+    cleanedOverridePath: null,
+    cleanedOverrideReplayId: null,
+    cleanedOverrideFamilyKey: null,
     topMatches: 100,
     topEvidence: 50,
   };
@@ -62,6 +66,14 @@ function parseArgs(argv) {
       args.minCorrelation = Number.parseFloat(argv[++index]);
     } else if (arg === "--max-normalized-rmse" && index + 1 < argv.length) {
       args.maxNormalizedRmse = Number.parseFloat(argv[++index]);
+    } else if (arg === "--metric-min-overlap-cap" && index + 1 < argv.length) {
+      args.metricMinOverlapCap = Number.parseInt(argv[++index], 10);
+    } else if (arg === "--cleaned-override" && index + 1 < argv.length) {
+      args.cleanedOverridePath = argv[++index];
+    } else if (arg === "--cleaned-override-replay-id" && index + 1 < argv.length) {
+      args.cleanedOverrideReplayId = argv[++index];
+    } else if (arg === "--cleaned-override-family-key" && index + 1 < argv.length) {
+      args.cleanedOverrideFamilyKey = argv[++index];
     } else if (arg === "--top-matches" && index + 1 < argv.length) {
       args.topMatches = Number.parseInt(argv[++index], 10);
     } else if (arg === "--top-evidence" && index + 1 < argv.length) {
@@ -83,6 +95,12 @@ function parseArgs(argv) {
   if (!Number.isFinite(args.maxNormalizedRmse) || args.maxNormalizedRmse <= 0) {
     throw new Error("--max-normalized-rmse must be positive.");
   }
+  if (args.metricMinOverlapCap != null && (!Number.isFinite(args.metricMinOverlapCap) || args.metricMinOverlapCap < 2)) {
+    throw new Error("--metric-min-overlap-cap must be at least 2 when provided.");
+  }
+  if (args.cleanedOverridePath && (!args.cleanedOverrideReplayId || !args.cleanedOverrideFamilyKey)) {
+    throw new Error("--cleaned-override requires --cleaned-override-replay-id and --cleaned-override-family-key.");
+  }
 
   for (const metricKey of args.metrics) {
     if (!metricDefinitionByKey.has(metricKey)) {
@@ -94,7 +112,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log("Usage: node ./scripts/discover_keyframe_api_parity.mjs [--artifact-root <path>] [--api-root <path>] [--replay-id <id>] [--metrics level,xp,totalGold] [--min-correlation <n>] [--max-normalized-rmse <n>] [--output-path <path>]");
+  console.log("Usage: node ./scripts/discover_keyframe_api_parity.mjs [--artifact-root <path>] [--api-root <path>] [--replay-id <id>] [--metrics level,xp,totalGold] [--min-correlation <n>] [--max-normalized-rmse <n>] [--metric-min-overlap-cap <n>] [--cleaned-override <path> --cleaned-override-replay-id <id> --cleaned-override-family-key <key>] [--output-path <path>]");
 }
 
 function normalizeFixtureReplayId(replayId) {
@@ -255,7 +273,11 @@ function compareCandidateToParticipantMetric(candidate, participant, metric, fra
     apiFrameIndices.push(point.apiFrameIndex);
   }
 
-  const requiredOverlap = Math.max(options.minOverlap, metric.minOverlap ?? options.minOverlap);
+  const metricMinOverlap = metric.minOverlap ?? options.minOverlap;
+  const cappedMetricMinOverlap = Number.isFinite(options.metricMinOverlapCap)
+    ? Math.min(metricMinOverlap, options.metricMinOverlapCap)
+    : metricMinOverlap;
+  const requiredOverlap = Math.max(options.minOverlap, cappedMetricMinOverlap);
   if (rawValues.length < requiredOverlap) {
     return null;
   }
@@ -404,7 +426,7 @@ function loadParticipants(matchJson) {
   }));
 }
 
-function analyzeReplay({ replayId, artifactDir, apiRoot, metrics, minOverlap, minCorrelation, maxNormalizedRmse, topMatches, topEvidence }) {
+function analyzeReplay({ replayId, artifactDir, apiRoot, metrics, minOverlap, minCorrelation, maxNormalizedRmse, metricMinOverlapCap, cleanedOverride, topMatches, topEvidence }) {
   const runManifestPath = path.join(artifactDir, "run-manifest.json");
   const summaryPath = path.join(artifactDir, "summary.json");
   const fixtureDir = path.join(apiRoot, normalizeFixtureReplayId(replayId));
@@ -430,7 +452,12 @@ function analyzeReplay({ replayId, artifactDir, apiRoot, metrics, minOverlap, mi
   const metricDefs = metrics.map((metricKey) => metricDefinitionByKey.get(metricKey)).filter(Boolean);
   const candidates = [];
   for (const family of runManifest.families ?? []) {
-    const cleanedPath = path.join(artifactDir, "families", family.familyKey, "cleaned.json");
+    const usesOverride = cleanedOverride &&
+      cleanedOverride.replayId === replayId &&
+      cleanedOverride.familyKey === family.familyKey;
+    const cleanedPath = usesOverride
+      ? cleanedOverride.path
+      : path.join(artifactDir, "families", family.familyKey, "cleaned.json");
     if (!fs.existsSync(cleanedPath)) {
       continue;
     }
@@ -458,6 +485,7 @@ function analyzeReplay({ replayId, artifactDir, apiRoot, metrics, minOverlap, mi
           minOverlap,
           minCorrelation,
           maxNormalizedRmse,
+          metricMinOverlapCap,
         });
         if (match) {
           matches.push(match);
@@ -483,6 +511,11 @@ function analyzeReplay({ replayId, artifactDir, apiRoot, metrics, minOverlap, mi
     recordType: runManifest.parameters?.recordType ?? null,
     gameVersion: summary?.gameVersion ?? runManifest.summary?.gameVersion ?? null,
     versionGroup: parseVersionGroup(summary?.gameVersion ?? runManifest.summary?.gameVersion ?? ""),
+    cleanedOverride: cleanedOverride && cleanedOverride.replayId === replayId ? {
+      familyKey: cleanedOverride.familyKey,
+      path: cleanedOverride.path,
+      diagnosticOnly: true,
+    } : null,
     replayKeyframeCount: summary?.container?.keyframeCount ?? null,
     apiFrameCount: frames.length,
     comparedApiFrameCount: Math.max(frames.length - 1, 0),
@@ -504,6 +537,11 @@ function main() {
   const artifactRoot = resolveAbsolute(repoRoot, args.artifactRoot);
   const apiRoot = resolveAbsolute(repoRoot, args.apiRoot);
   const replayDirs = listReplayArtifactDirs(artifactRoot, args.replayId);
+  const cleanedOverride = args.cleanedOverridePath ? {
+    replayId: args.cleanedOverrideReplayId,
+    familyKey: args.cleanedOverrideFamilyKey,
+    path: resolveAbsolute(repoRoot, args.cleanedOverridePath),
+  } : null;
 
   const replays = replayDirs.map((entry) => analyzeReplay({
     ...entry,
@@ -512,6 +550,8 @@ function main() {
     minOverlap: args.minOverlap,
     minCorrelation: args.minCorrelation,
     maxNormalizedRmse: args.maxNormalizedRmse,
+    metricMinOverlapCap: args.metricMinOverlapCap,
+    cleanedOverride,
     topMatches: args.topMatches,
     topEvidence: args.topEvidence,
   }));
@@ -525,6 +565,12 @@ function main() {
     minOverlap: args.minOverlap,
     minCorrelation: args.minCorrelation,
     maxNormalizedRmse: args.maxNormalizedRmse,
+    cleanedOverride: cleanedOverride ? {
+      replayId: cleanedOverride.replayId,
+      familyKey: cleanedOverride.familyKey,
+      path: cleanedOverride.path,
+      diagnosticOnly: true,
+    } : null,
     replayCount: analyzed.length,
     skippedReplayCount: replays.length - analyzed.length,
     totals: {

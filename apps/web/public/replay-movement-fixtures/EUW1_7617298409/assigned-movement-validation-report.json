@@ -1,0 +1,60 @@
+{
+  "replayId": "EUW1-7617298409",
+  "generatedAtUtc": "2026-03-21T18:38:53.883Z",
+  "participantMovementPath": "C:\\Development\\league-replay-analyzer\\artifacts\\EUW1-7617298409\\participant-movement.json",
+  "fixtureDir": "C:\\Development\\league-replay-analyzer\\replays\\api\\EUW1_7617298409",
+  "summary": {
+    "assignmentCount": 2,
+    "matchedAssignmentCount": 2,
+    "passingAssignmentCount": 0,
+    "averageAxisCorrelation": 0.37687960613580035,
+    "averagePathCorrelation": 0.20012191969314988,
+    "averageNormalizedDistanceRmse": 0.17741765863213205
+  },
+  "assignments": [
+    {
+      "rosterIndex": 6,
+      "champion": "Briar",
+      "team": 200,
+      "teamPosition": "JUNGLE",
+      "entityKey": "61737-0x00-h9|17|0|10|swapped",
+      "entityGroupKey": "61737-0x00-h9|17",
+      "matchedParticipantId": 7,
+      "score": 0.5690329755852923,
+      "entityQuality": 0.8069494235165868,
+      "status": "matched",
+      "validation": {
+        "overlap": 8,
+        "xCorrelation": 0.44377179497338093,
+        "yCorrelation": 0.7789857299853189,
+        "averageAxisCorrelation": 0.6113787624793499,
+        "pathCorrelation": -0.47726334285591393,
+        "distanceRmse": 4162.411429114935,
+        "normalizedDistanceRmse": 0.18395433422597243,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 8,
+      "champion": "Corki",
+      "team": 200,
+      "teamPosition": "BOTTOM",
+      "entityKey": "61737-0x00-h9|16|0|10|swapped",
+      "entityGroupKey": "61737-0x00-h9|16",
+      "matchedParticipantId": 9,
+      "score": 0.6821785959791424,
+      "entityQuality": 0.8350934970095909,
+      "status": "matched",
+      "validation": {
+        "overlap": 8,
+        "xCorrelation": -0.48353629265801557,
+        "yCorrelation": 0.7682971922425172,
+        "averageAxisCorrelation": 0.14238044979225084,
+        "pathCorrelation": 0.8775071822422137,
+        "distanceRmse": 3866.5952602303823,
+        "normalizedDistanceRmse": 0.17088098303829166,
+        "passes": false
+      }
+    }
+  ]
+}

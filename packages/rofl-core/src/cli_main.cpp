@@ -303,6 +303,7 @@ int main(int argc, char** argv) {
             std::size_t header_size = 0;
             std::size_t stride = 16;
             std::size_t top_fields = 24;
+            std::size_t min_active_samples = 4;
             std::string record_type = "chunk";
             std::vector<std::size_t> slot_indices;
             for (int i = 3; i < argc; ++i) {
@@ -317,6 +318,8 @@ int main(int argc, char** argv) {
                     stride = std::stoull(argv[++i]);
                 } else if (arg == "--top-fields" && i + 1 < argc) {
                     top_fields = std::stoull(argv[++i]);
+                } else if (arg == "--min-active-samples" && i + 1 < argc) {
+                    min_active_samples = std::stoull(argv[++i]);
                 } else if (arg == "--record-type" && i + 1 < argc) {
                     record_type = argv[++i];
                 } else if (arg == "--slots" && i + 1 < argc) {
@@ -329,7 +332,7 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            std::cout << rofl::core::analyze_row_offsets_file_json(path, length, first_byte, header_size, stride, slot_indices, top_fields, record_type);
+            std::cout << rofl::core::analyze_row_offsets_file_json(path, length, first_byte, header_size, stride, slot_indices, top_fields, record_type, min_active_samples);
             return 0;
         } catch (const std::exception& exception) {
             std::cerr << exception.what() << '\n';
@@ -345,6 +348,7 @@ int main(int argc, char** argv) {
             std::size_t header_size = 0;
             std::size_t stride = 16;
             std::size_t top_fields = 24;
+            std::size_t min_active_samples = 4;
             std::string record_type = "chunk";
             std::vector<std::size_t> slot_indices;
             for (int i = 3; i < argc; ++i) {
@@ -359,6 +363,8 @@ int main(int argc, char** argv) {
                     stride = std::stoull(argv[++i]);
                 } else if (arg == "--top-fields" && i + 1 < argc) {
                     top_fields = std::stoull(argv[++i]);
+                } else if (arg == "--min-active-samples" && i + 1 < argc) {
+                    min_active_samples = std::stoull(argv[++i]);
                 } else if (arg == "--record-type" && i + 1 < argc) {
                     record_type = argv[++i];
                 } else if (arg == "--slots" && i + 1 < argc) {
@@ -371,7 +377,7 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            std::cout << rofl::core::analyze_clean_row_offsets_file_json(path, length, first_byte, header_size, stride, slot_indices, top_fields, record_type);
+            std::cout << rofl::core::analyze_clean_row_offsets_file_json(path, length, first_byte, header_size, stride, slot_indices, top_fields, record_type, min_active_samples);
             return 0;
         } catch (const std::exception& exception) {
             std::cerr << exception.what() << '\n';
@@ -1030,8 +1036,8 @@ int main(int argc, char** argv) {
     std::cout << "Use --analyze-artifact-bundle-json <path-to-rofl> [--min-length <n>] [--min-records <n>] [--top-families <n>] [--top-entity-slots <n>] [--top-scalar-slots <n>] [--dynamic-slot-count <n>] [--mixed-slot-count <n>] [--handle-slot-count <n>] [--top-windows <n>] [--top-fields <n>] [--skip-scalar] [--record-type chunk|keyframe|startup|all] to emit the full decoder artifact bundle as JSON in one process.\n";
     std::cout << "Use --analyze-scalar-family-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--record-type chunk|keyframe|startup|all] to emit scalar lane candidates as JSON.\n";
     std::cout << "Use --analyze-entity-slab-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> [--stride <len>] [--top-slots <n>] [--record-type chunk|keyframe|startup|all] to classify a sparse family into handle-like vs dynamic-state-like rows.\n";
-    std::cout << "Use --analyze-row-offsets-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-fields <n>] [--record-type chunk|keyframe|startup|all] to rank raw byte-offset fields inside selected sparse rows.\n";
-    std::cout << "Use --analyze-clean-row-offsets-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-fields <n>] [--record-type chunk|keyframe|startup|all] to mask descriptor/signature windows and rank cleaner offset candidates inside selected rows.\n";
+    std::cout << "Use --analyze-row-offsets-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-fields <n>] [--min-active-samples <n>] [--record-type chunk|keyframe|startup|all] to rank raw byte-offset fields inside selected sparse rows.\n";
+    std::cout << "Use --analyze-clean-row-offsets-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-fields <n>] [--min-active-samples <n>] [--record-type chunk|keyframe|startup|all] to mask descriptor/signature windows and rank cleaner offset candidates inside selected rows.\n";
     std::cout << "Use --analyze-handle-links-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-links <n>] [--top-families <n>] [--record-type chunk|keyframe|startup|all] to test whether packed row tokens point into other recurring families.\n";
     std::cout << "Use --analyze-token-bitfields-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-slices <n>] [--top-families <n>] [--record-type chunk|keyframe|startup|all] to search packed token bit slices for family-sized index fields.\n";
     std::cout << "Use --analyze-table-descriptors-json <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --slots <id1,id2,...> [--stride <len>] [--top-matches <n>] [--record-type chunk|keyframe|startup|all] to find exact 12-bit matches against known family element counts.\n";
