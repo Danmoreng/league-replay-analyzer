@@ -121,7 +121,7 @@ Current offline validation result:
 - `fieldCoverage.matchTeams.corpusValidation` marks team objective kill aggregates as `partially_stable`: they are ROFL-derived and validate on the focused replay, but corpus validation shows objective undercounts on some 16.9 replays
 - timeline reconstruction corpus audit: `artifacts-keyframes/timeline-reconstruction-model-16.9.json` confirms `20 / 20` patch `16.9` fixture-backed replays have API frames equal replay keyframes plus one, keyframe chunk formula holds, and chunk record formula holds
 - timeline reconstruction corpus audit also records `summary.topEventfulIntervals`, ranked by objectives, champion kills, item events, and total events; each target includes chunk IDs, record IDs, payload offsets, compressed lengths, uncompressed lengths, and codec, so use those chunk windows as the first reverse-engineering targets for chunk-delta event/state decoding
-- reconstruction chunk target summary: `artifacts-keyframes/reconstruction-chunk-target-summary-16.9.json` records subrecord-family counts for the top eventful chunk windows using `rofl_core_cli --dump-chunk-subrecords`; this is a decoder-target artifact, not runtime extraction
+- reconstruction chunk target summary: `artifacts-keyframes/reconstruction-chunk-target-summary-16.9.json` records subrecord-family counts for the top eventful chunk windows using `rofl_core_cli --dump-chunk-subrecords`; `aggregateTopFamilies` ranks recurring families across target chunks, and this remains a decoder-target artifact, not runtime extraction
 - goal audit output: `artifacts-keyframes/EUW1-7840220945/rofl-api-parity-goal-audit.json`
 - goal audit schema: `rofl-api-parity-goal-audit/v1`
 - mode: `offline-validation-only`

@@ -148,6 +148,48 @@ function validateOutput(output) {
   }
 }
 
+function summarizeAggregateFamilies(rows) {
+  const byFamily = new Map();
+  for (const row of rows ?? []) {
+    for (const chunk of row.chunks ?? []) {
+      for (const family of chunk.topFamilies ?? []) {
+        const entry = byFamily.get(family.familyKey) ?? {
+          familyKey: family.familyKey,
+          length: family.length,
+          firstByte: family.firstByte,
+          totalRecords: 0,
+          chunkCount: 0,
+          intervalCount: 0,
+          chunks: [],
+          sampleHexPreview: family.sampleHexPreview,
+          sampleAsciiPreview: family.sampleAsciiPreview,
+        };
+        entry.totalRecords += family.count ?? 0;
+        entry.chunkCount += 1;
+        entry.chunks.push({
+          replayId: row.replayId,
+          apiIntervalIndex: row.apiIntervalIndex,
+          chunkId: chunk.chunkId,
+          count: family.count,
+          offsets: family.offsets,
+        });
+        byFamily.set(family.familyKey, entry);
+      }
+    }
+  }
+  for (const entry of byFamily.values()) {
+    entry.intervalCount = new Set(entry.chunks.map((chunk) => `${chunk.replayId}:${chunk.apiIntervalIndex}`)).size;
+  }
+  return [...byFamily.values()]
+    .sort((left, right) =>
+      right.chunkCount - left.chunkCount ||
+      right.intervalCount - left.intervalCount ||
+      right.totalRecords - left.totalRecords ||
+      right.length - left.length ||
+      left.familyKey.localeCompare(right.familyKey),
+    );
+}
+
 function main() {
   const args = parseArgs(process.argv);
   const inputPath = path.resolve(args.inputPath ?? path.join(args.artifactRoot, "timeline-reconstruction-model-16.9.json"));
@@ -190,6 +232,7 @@ function main() {
     inputPath,
     cliPath,
     topIntervalCount: rows.length,
+    aggregateTopFamilies: summarizeAggregateFamilies(rows).slice(0, 32),
     rows,
   };
   validateOutput(output);
