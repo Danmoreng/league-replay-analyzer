@@ -107,6 +107,18 @@ Verify the saved decoder family sample analysis:
 npm run verify:reconstruction-family-sample-analysis
 ```
 
+Rank decoder targets from the verified sample analysis:
+
+```powershell
+npm run rank:reconstruction-decoder-targets
+```
+
+Verify the saved decoder target ranking:
+
+```powershell
+npm run verify:reconstruction-decoder-targets
+```
+
 Write the prompt-to-artifact goal audit:
 
 ```powershell
@@ -170,6 +182,7 @@ Current offline validation result:
 - reconstruction family sample analysis: `artifacts-keyframes/reconstruction-family-sample-analysis-16.9.json` summarizes common prefixes, byte frequencies, aligned 16/32-bit token frequencies, and recurring 4/6/8-byte sequences for the sampled enriched families; this is decoder guidance only, not extracted API data
 - recurring sequence clues from the current sample analysis include `C7 19 F1 00 02 00 C7 C1` / `00 C7 19 F1 00 02 00 C7` in `241-0x02`, `00 04 01 36 A3 4C C9 F1` in `241-0x04`, and long `65 65 65 65 ...` runs in the large families; these are candidate grammar tokens to investigate, not decoded events or state fields
 - sequence offset evidence currently points at `241-0x02` as a better structured-token target than the large `0x65`-dominated families: its top 8-byte token appears repeatedly at recurring offsets, while the large-family `65 65 65 65 65 65 65 65` token slides across many distinct offsets and is likely filler or bulk payload structure
+- reconstruction decoder target ranking: `artifacts-keyframes/reconstruction-decoder-target-ranking-16.9.json` ranks sampled families for offline decoder work only; current top targets are `241-0x02` and `241-0x04`, while `49607-0xF1` is marked `bulk-or-filler-heavy`
 - goal audit output: `artifacts-keyframes/EUW1-7840220945/rofl-api-parity-goal-audit.json`
 - goal audit schema: `rofl-api-parity-goal-audit/v1`
 - mode: `offline-validation-only`

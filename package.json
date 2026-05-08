@@ -59,6 +59,8 @@
     "verify:reconstruction-family-samples": "node ./scripts/verify_reconstruction_family_samples.mjs",
     "analyze:reconstruction-family-samples": "node ./scripts/analyze_reconstruction_family_samples.mjs",
     "verify:reconstruction-family-sample-analysis": "node ./scripts/verify_reconstruction_family_sample_analysis.mjs",
+    "rank:reconstruction-decoder-targets": "node ./scripts/rank_reconstruction_decoder_targets.mjs",
+    "verify:reconstruction-decoder-targets": "node ./scripts/verify_reconstruction_decoder_target_ranking.mjs",
     "audit:rofl-api-parity": "node ./scripts/audit_rofl_api_parity_goal.mjs",
     "verify:rofl-api-parity": "node ./scripts/verify_rofl_api_parity_checkpoint.mjs",
     "extract:replay-stats": "node ./scripts/extract_replay_stats.mjs",
