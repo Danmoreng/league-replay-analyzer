@@ -275,6 +275,30 @@ function verifyIdentitySupportSweepOutput(artifactRoot, versionGroup) {
   }
 }
 
+function verifyTimelineReconstructionOutput(replayId, artifactRoot) {
+  const reportPath = path.resolve(process.cwd(), artifactRoot, replayId, "timeline-reconstruction-model.json");
+  const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+  if (report.auditSchema !== "rofl-timeline-reconstruction-model/v1") {
+    throw new Error(`Timeline reconstruction audit has unexpected schema marker: ${report.auditSchema ?? "missing"}.`);
+  }
+  if (report.mode !== "offline-structure-audit" || report.runtimeInput !== false) {
+    throw new Error("Timeline reconstruction audit must be offline-structure-audit and non-runtime.");
+  }
+  const row = report.rows?.[0];
+  if (row?.replayId !== replayId) {
+    throw new Error(`Timeline reconstruction audit row does not match replay ${replayId}: ${row?.replayId ?? "missing"}.`);
+  }
+  if (row.structural?.apiFramesEqualKeyframesPlusOne !== true) {
+    throw new Error("Timeline reconstruction audit must verify API frames equal replay keyframes plus one.");
+  }
+  if (row.structural?.keyframeChunkFormulaHolds !== true || row.structural?.chunkRecordFormulaHolds !== true) {
+    throw new Error("Timeline reconstruction audit must verify keyframe/chunk record formulas.");
+  }
+  if (row.reconstructionModel?.model !== "keyframe-baseline-plus-chunk-deltas") {
+    throw new Error("Timeline reconstruction audit must record the keyframe baseline plus chunk-delta model.");
+  }
+}
+
 function main() {
   const args = parseArgs(process.argv);
   const exportScript = path.join("scripts", "export_rofl_api_metrics.mjs");
@@ -282,6 +306,7 @@ function main() {
   const validateScript = path.join("scripts", "validate_rofl_api_metrics_against_riot.mjs");
   const shapeGapScript = path.join("scripts", "audit_rofl_api_shape_gap.mjs");
   const challengeGapScript = path.join("scripts", "audit_rofl_challenge_gap_candidates.mjs");
+  const timelineReconstructionScript = path.join("scripts", "audit_timeline_reconstruction_model.mjs");
   const auditScript = path.join("scripts", "audit_rofl_api_parity_goal.mjs");
   const assignIdentityScript = path.join("scripts", "assign_keyframe_slots_from_rofl_stats.mjs");
   const compareIdentityScript = path.join("scripts", "compare_rofl_stat_assignments_to_supervised.mjs");
@@ -331,6 +356,8 @@ function main() {
   verifyShapeGapOutput(args.replayId, args.artifactRoot);
   runStep("offline-challenge-gap-audit", challengeGapScript, sharedArgs);
   verifyChallengeGapOutput(args.replayId, args.artifactRoot);
+  runStep("offline-timeline-reconstruction-audit", timelineReconstructionScript, sharedArgs);
+  verifyTimelineReconstructionOutput(args.replayId, args.artifactRoot);
   runStep("goal-audit", auditScript, sharedArgs);
   verifyGoalAuditOutput(args.replayId, args.artifactRoot);
   if (args.verifyIncompleteGate) {

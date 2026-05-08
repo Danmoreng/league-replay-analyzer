@@ -53,6 +53,12 @@ Offline challenge-field gap candidate audit:
 npm run audit:rofl-challenge-gaps -- --replay-id EUW1-7840220945
 ```
 
+Offline timeline reconstruction model audit:
+
+```powershell
+npm run audit:timeline-reconstruction -- --replay-id EUW1-7840220945
+```
+
 Write the prompt-to-artifact goal audit:
 
 ```powershell
@@ -98,11 +104,15 @@ Current offline validation result:
 - challenge-gap result: `2` exact normalized candidates, `29` fuzzy candidates, `95` missing across `126` Riot challenge keys
 - exact challenge value parity: `1` promoted validated exact candidate (`turretTakedowns`) and `1` exact-name candidate rejected by value mismatch (`killingSprees`)
 - challenge corpus support: `20` patch `16.9` fixture-backed replays scanned; fuzzy `snowballsHit <- Missions_SnowballsHit` is kept rejected as all-zero-only evidence, while `turretTakedowns <- TURRET_TAKEDOWNS` has non-zero corpus support
+- timeline reconstruction audit output: `artifacts-keyframes/EUW1-7840220945/timeline-reconstruction-model.json`
+- timeline reconstruction audit schema: `rofl-timeline-reconstruction-model/v1`
+- timeline reconstruction audit result on the focused replay: API frame count equals replay keyframes plus one, keyframe chunk IDs follow `2 * keyframeId + 1`, and chunk record IDs follow `recordId + 1`
 - corpus validation output: `artifacts-keyframes/rofl-api-parity-corpus-validation-16.9.json`
 - corpus validation schema: `rofl-api-parity-corpus-validation/v1`
 - corpus validation result across `20` patch `16.9` fixture-backed replays: participant final match stats `30598 / 30600`, team final stats `335 / 360`, final timeline scalar/damage stats `3400 / 3400`, metadata `140 / 140`
 - corpus validation known unstable fields: participant `perks.styles`, `totalHeal`; team objective kill counts for champion, tower, dragon, baron, horde, and inhibitor
 - `fieldCoverage.matchTeams.corpusValidation` marks team objective kill aggregates as `partially_stable`: they are ROFL-derived and validate on the focused replay, but corpus validation shows objective undercounts on some 16.9 replays
+- timeline reconstruction corpus audit: `artifacts-keyframes/timeline-reconstruction-model-16.9.json` confirms `20 / 20` patch `16.9` fixture-backed replays have API frames equal replay keyframes plus one, keyframe chunk formula holds, and chunk record formula holds
 - goal audit output: `artifacts-keyframes/EUW1-7840220945/rofl-api-parity-goal-audit.json`
 - goal audit schema: `rofl-api-parity-goal-audit/v1`
 - mode: `offline-validation-only`
