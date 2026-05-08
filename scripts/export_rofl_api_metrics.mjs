@@ -334,6 +334,23 @@ function buildApiPerks(statMap) {
   };
 }
 
+function buildTimelineDamageStats(apiLikeStats) {
+  return compactObject({
+    magicDamageDone: apiLikeStats.magicDamageDealt,
+    magicDamageDoneToChampions: apiLikeStats.magicDamageDealtToChampions,
+    magicDamageTaken: apiLikeStats.magicDamageTaken,
+    physicalDamageDone: apiLikeStats.physicalDamageDealt,
+    physicalDamageDoneToChampions: apiLikeStats.physicalDamageDealtToChampions,
+    physicalDamageTaken: apiLikeStats.physicalDamageTaken,
+    totalDamageDone: apiLikeStats.totalDamageDealt,
+    totalDamageDoneToChampions: apiLikeStats.totalDamageDealtToChampions,
+    totalDamageTaken: apiLikeStats.totalDamageTaken,
+    trueDamageDone: apiLikeStats.trueDamageDealt,
+    trueDamageDoneToChampions: apiLikeStats.trueDamageDealtToChampions,
+    trueDamageTaken: apiLikeStats.trueDamageTaken,
+  });
+}
+
 function buildApiLikeStats(statMap) {
   return compactObject({
     puuid: statString(statMap, "PUUID"),
@@ -350,6 +367,7 @@ function buildApiLikeStats(statMap) {
     assists: statNumber(statMap, "ASSISTS"),
     champLevel: statNumber(statMap, "LEVEL"),
     champExperience: statNumber(statMap, "EXP"),
+    timePlayed: statNumber(statMap, "TIME_PLAYED"),
     goldEarned: statNumber(statMap, "GOLD_EARNED"),
     goldSpent: statNumber(statMap, "GOLD_SPENT"),
     totalMinionsKilled: statNumber(statMap, "MINIONS_KILLED"),
@@ -903,8 +921,10 @@ function buildRoflDerivedFieldMap() {
         source: "api-container-empty-until-decoded",
       },
       "info.frames[].participantFrames[].damageStats": {
-        status: "shape_only",
-        source: "api-container-empty-until-decoded",
+        status: "decoded",
+        source: "rofl-metadata-statsJson",
+        participantIdentity: "rofl-summary-roster-order",
+        calibration: "direct-final-cumulative-stat",
       },
     },
   };
@@ -1030,7 +1050,6 @@ function buildFieldCoverage() {
         "info.participants[].firstTowerKill",
         "info.participants[].profileIcon",
         "info.participants[].summonerLevel",
-        "info.participants[].timePlayed",
       ],
       rejectedCandidateEvidence: [
         {
@@ -1074,12 +1093,6 @@ function buildFieldCoverage() {
           roflCandidate: "none",
           status: "not_found",
           reason: "No summoner level field is exposed by the current decoded ROFL summary or embedded statsJson.",
-        },
-        {
-          field: "info.participants[].timePlayed",
-          roflCandidate: "TIME_PLAYED",
-          status: "not_promoted",
-          reason: "Current fixture validates only 4/10 exactly because ROFL final seconds differ by one second for several participants.",
         },
         {
           field: "info.participants[].eligibleForProgression",
@@ -1803,6 +1816,10 @@ function main() {
         participantId: participant.participantId,
         championStats: {},
         damageStats: {},
+      };
+      participantFrame.damageStats = {
+        ...(participantFrame.damageStats ?? {}),
+        ...buildTimelineDamageStats(participant.apiLikeStats ?? {}),
       };
       for (const [metric, value] of Object.entries(participant.finalMetrics ?? {})) {
         if (!apiMetricPaths.has(metric) || value == null || !Number.isFinite(value)) {

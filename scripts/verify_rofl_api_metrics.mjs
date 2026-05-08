@@ -222,7 +222,7 @@ function verifyFieldCoverage(artifact) {
   assert(!(fieldCoverage.matchParticipantGaps?.fields ?? []).includes("info.participants[].role"), "Match participant gaps must not include promoted role field", {
     matchParticipantGaps: fieldCoverage.matchParticipantGaps,
   });
-  assert((fieldCoverage.matchParticipantGaps?.rejectedCandidateEvidence ?? []).some((entry) => entry.field === "info.participants[].timePlayed" && entry.status === "not_promoted"), "Match participant gaps must document rejected timePlayed candidate", {
+  assert(!(fieldCoverage.matchParticipantGaps?.fields ?? []).includes("info.participants[].timePlayed"), "Match participant gaps must not include promoted timePlayed field", {
     matchParticipantGaps: fieldCoverage.matchParticipantGaps,
   });
   assert((fieldCoverage.matchParticipantGaps?.rejectedCandidateEvidence ?? []).some((entry) => entry.field === "info.participants[].firstBloodKill" && entry.status === "not_found"), "Match participant gaps must document event-derived first blood gap", {
@@ -568,7 +568,7 @@ function verifyRoflDerivedFieldMap(artifact) {
   assert(fieldMap.timeline?.["info.frames[].participantFrames[].championStats"]?.status === "shape_only", "ROFL-derived field map must mark championStats container shape-only", {
     entry: fieldMap.timeline?.["info.frames[].participantFrames[].championStats"],
   });
-  assert(fieldMap.timeline?.["info.frames[].participantFrames[].damageStats"]?.status === "shape_only", "ROFL-derived field map must mark damageStats container shape-only", {
+  assert(fieldMap.timeline?.["info.frames[].participantFrames[].damageStats"]?.status === "decoded", "ROFL-derived field map must mark final damageStats as decoded", {
     entry: fieldMap.timeline?.["info.frames[].participantFrames[].damageStats"],
   });
 }
@@ -804,6 +804,14 @@ function main() {
   }
   assert(badParticipantFrames.length === 0, "Participant frames must include matching participantId", {
     badParticipantFrames: badParticipantFrames.slice(0, 16),
+  });
+  const finalFrame = artifact.timeline?.info?.frames?.at(-1);
+  const missingDamageStats = Object.entries(finalFrame?.participantFrames ?? {}).filter(([, frame]) =>
+    typeof frame.damageStats?.totalDamageDoneToChampions !== "number" ||
+    typeof frame.damageStats?.totalDamageTaken !== "number"
+  );
+  assert(missingDamageStats.length === 0, "Final timeline participant frames must include ROFL-derived cumulative damageStats", {
+    missingDamageStats,
   });
   assert(emittedTimelineParticipantIds.size === 10, "Timeline participantFrames do not cover all 10 participants", {
     emittedTimelineParticipantIds: [...emittedTimelineParticipantIds].sort((left, right) => left - right),

@@ -76,15 +76,16 @@ The full checkpoint also runs a negative completion gate: `audit:rofl-api-parity
 
 Current offline validation result:
 
-- participant final match-stat comparisons: `1520 / 1520`
+- participant final match-stat comparisons: `1530 / 1530`
 - team final match-stat comparisons: `18 / 18`
+- final timeline damage-stat comparisons: `120 / 120`
 - metadata comparisons: `5 / 5`
 - identifier comparisons: `0 / 22` non-blocking, because ROFL `statsJson` participant identifiers are replay-local/anonymized or legacy IDs and do not currently equal Riot API PUUIDs or encrypted summoner IDs
 - validation output: `artifacts-keyframes/EUW1-7840220945/rofl-api-metrics-riot-validation.json`
 - validation schema: `rofl-api-metrics-riot-validation/v1`
 - shape-gap output: `artifacts-keyframes/EUW1-7840220945/rofl-api-shape-gap-report.json`
 - shape-gap schema: `rofl-api-shape-gap-report/v1`
-- shape-gap result: `191 / 469` Riot API leaf paths matched, `278` missing
+- shape-gap result: `204 / 469` Riot API leaf paths matched, `265` missing
 - challenge-gap output: `artifacts-keyframes/EUW1-7840220945/rofl-challenge-gap-candidates.json`
 - challenge-gap schema: `rofl-challenge-gap-candidates/v1`
 - challenge-gap result: `2` exact normalized candidates, `29` fuzzy candidates, `95` missing across `126` Riot challenge keys
@@ -126,7 +127,7 @@ Current verified output:
 - `fieldCoverage.matchParticipantChallenges` marks Riot `participants[].challenges.*` parity as partial, with only `challenges.turretTakedowns` decoded from ROFL `statsJson`
 - `roflDerivedFieldMap` that maps decoded API-shaped match/timeline fields to ROFL sources and marks shape-only/missing fields explicitly
 - `fieldCoverage.matchMetadataGaps` for Riot match metadata fields not present in the current ROFL summary, with inspected ROFL sources and decoded metadata keys recorded
-- `fieldCoverage.matchParticipantGaps` for remaining participant fields that are not accepted as ROFL/API parity, including rejected/gap evidence for static champion IDs, event-derived first kill/tower flags, missing account/profile fields, and unstable `timePlayed`
+- `fieldCoverage.matchParticipantGaps` for remaining participant fields that are not accepted as ROFL/API parity, including rejected/gap evidence for static champion IDs, event-derived first kill/tower flags, and missing account/profile fields
 - `fieldCoverage.matchTeamGaps` for Riot team fields not present in the current ROFL summary, including bans and `objectives.*.first` event-order flags
 - `identityLinkage` that summarizes final roster linkage, Riot API identifier parity status, and non-final scalar identity blockers
 - `identityLinkage.roflMetadataParticipantIdentifiers` marks ROFL `statsJson` participant identifiers as internal/shape-only, not verified Riot API PUUIDs or encrypted summoner IDs
@@ -134,7 +135,7 @@ Current verified output:
 - `parityChecklist` includes concrete evidence paths for the conservative replay-only identity gate and records the true Riot API PUUID gap
 - `rofl-api-parity-goal-audit.json` maps the user objective to concrete artifact evidence and keeps completion status `not_complete` while full parity gaps remain
 - `rofl-api-shape-gap-report.json` is an offline-only comparison against Riot match/timeline fixture shape; it quantifies missing API leaf paths without being a runtime extraction input
-- `rofl-api-shape-gap-report.json` categorizes missing paths into actionable buckets such as match metadata, participant challenges, team bans, first-objective flags, timeline events, and timeline participant-frame gaps
+- `rofl-api-shape-gap-report.json` categorizes missing paths into actionable buckets such as match metadata, participant challenges, participant event flags, account/profile fields, static ID mapping, team bans, first-objective flags, timeline events, and timeline participant-frame gaps
 - `rofl-challenge-gap-candidates.json` is an offline-only analysis of missing Riot `challenges.*` fields against ROFL `statsJson` keys; exact-name candidates are value-checked before promotion
 - the checkpoint runner verifies the generated goal audit schema marker and `not_complete` status
 - the checkpoint runner verifies the generated ROFL API artifact schema marker and extraction mode before the deeper runtime verifier
@@ -165,7 +166,7 @@ Current verified output:
 - the goal audit independently scans the runtime artifact for `replays/api` path references
 - `timeline.info.frames[*].events` is present as an array
 - each emitted `participantFrames[id]` includes matching `participantId`
-- each emitted `participantFrames[id]` includes API-shaped `championStats` and `damageStats` containers, left empty when not decoded
+- each emitted `participantFrames[id]` includes API-shaped `championStats` and `damageStats` containers; final-frame cumulative `damageStats` are decoded from ROFL `statsJson`
 
 Coverage statuses currently used:
 
@@ -198,7 +199,7 @@ The verifier checks:
 - match and timeline metadata participant identifier lists contain all 10 participants and match each other inside the ROFL-derived artifact
 - timeline frames include `events`
 - participant frame objects include matching `participantId`
-- participant frame objects include `championStats` and `damageStats` containers
+- participant frame objects include `championStats` and decoded final-frame `damageStats`
 - the final `statsJson` frame has all six decoded metrics for all 10 participants and matches per-metric coverage provenance
 - decoded series have provenance
 - coverage status counts match `totals.coverageSummary`
@@ -221,7 +222,7 @@ The verifier checks:
 - the goal audit verifies the Riot comparison report is `offline-validation-only` and targets an unsupervised runtime artifact
 - the goal audit verifies the Riot shape-gap report is also `offline-validation-only`, targets the unsupervised runtime artifact, and records remaining missing Riot API paths
 - the full checkpoint verifies the audit's `--require-complete` mode still fails while full-parity gaps remain
-- the goal audit checks API-shaped timeline frame structure, including `events` arrays and `championStats` / `damageStats` containers on participant frames
+- the goal audit checks API-shaped timeline frame structure, including `events` arrays, `championStats` containers, and decoded final-frame `damageStats` on participant frames
 - the goal audit checks API-shaped match structure, including `match.metadata`, `match.info.participants`, `match.info.teams`, and decoded final-stat coverage
 - the verifier checks `roflDerivedFieldMap` sources for core match/timeline fields, final participant frame metrics, shape-only containers, and missing timeline events
 - the goal audit checks every participant coverage row has per-metric statuses, with 6 decoded final metrics, 5 explicit `not_found` non-final metrics, and rejected non-final keyframe annotations where identity diagnostics found weak or duplicated evidence

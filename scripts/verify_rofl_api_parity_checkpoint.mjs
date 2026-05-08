@@ -88,6 +88,9 @@ function verifyShapeGapOutput(replayId, artifactRoot) {
   for (const category of [
     "match-metadata",
     "participant-challenges",
+    "match-participant-event-flags",
+    "match-participant-account-profile",
+    "match-participant-static-id-mapping",
     "team-bans",
     "team-objective-first-flags",
     "timeline-events",
@@ -112,14 +115,17 @@ function verifyRiotValidationOutput(replayId, artifactRoot) {
     throw new Error("Riot validation report must target the unsupervised ROFL-only runtime artifact.");
   }
   const totals = report.totals ?? {};
-  if (totals.failCount !== 0 || totals.teamFailCount !== 0 || totals.metadataFailCount !== 0) {
+  if (totals.failCount !== 0 || totals.teamFailCount !== 0 || totals.finalTimelineFailCount !== 0 || totals.metadataFailCount !== 0) {
     throw new Error(`Riot validation report contains required parity failures: ${JSON.stringify(totals)}`);
   }
-  if ((totals.comparisonCount ?? 0) < 1520 || totals.passCount !== totals.comparisonCount) {
+  if ((totals.comparisonCount ?? 0) < 1530 || totals.passCount !== totals.comparisonCount) {
     throw new Error(`Riot validation report has insufficient participant parity coverage: ${JSON.stringify(totals)}`);
   }
   if ((totals.teamComparisonCount ?? 0) < 18 || totals.teamPassCount !== totals.teamComparisonCount) {
     throw new Error(`Riot validation report has insufficient team parity coverage: ${JSON.stringify(totals)}`);
+  }
+  if ((totals.finalTimelineComparisonCount ?? 0) < 120 || totals.finalTimelinePassCount !== totals.finalTimelineComparisonCount) {
+    throw new Error(`Riot validation report has insufficient final timeline parity coverage: ${JSON.stringify(totals)}`);
   }
   if ((totals.metadataComparisonCount ?? 0) < 5 || totals.metadataPassCount !== totals.metadataComparisonCount) {
     throw new Error(`Riot validation report has insufficient metadata parity coverage: ${JSON.stringify(totals)}`);

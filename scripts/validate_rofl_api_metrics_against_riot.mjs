@@ -21,6 +21,7 @@ const participantComparisons = [
   ["assists", "assists"],
   ["champLevel", "champLevel"],
   ["champExperience", "champExperience"],
+  ["timePlayed", "timePlayed", { maxAbsDiff: 1, interpretation: "ROFL statsJson TIME_PLAYED is a final whole-second counter that can differ from Riot Match-V5 by one second at game end." }],
   ["goldEarned", "goldEarned"],
   ["goldSpent", "goldSpent"],
   ["totalMinionsKilled", "totalMinionsKilled"],
@@ -171,6 +172,21 @@ const teamComparisons = [
   ["objectives.riftHerald.kills", "objectives.riftHerald.kills"],
 ];
 
+const finalTimelineParticipantComparisons = [
+  ["damageStats.magicDamageDone", "damageStats.magicDamageDone"],
+  ["damageStats.magicDamageDoneToChampions", "damageStats.magicDamageDoneToChampions"],
+  ["damageStats.magicDamageTaken", "damageStats.magicDamageTaken"],
+  ["damageStats.physicalDamageDone", "damageStats.physicalDamageDone"],
+  ["damageStats.physicalDamageDoneToChampions", "damageStats.physicalDamageDoneToChampions"],
+  ["damageStats.physicalDamageTaken", "damageStats.physicalDamageTaken"],
+  ["damageStats.totalDamageDone", "damageStats.totalDamageDone"],
+  ["damageStats.totalDamageDoneToChampions", "damageStats.totalDamageDoneToChampions"],
+  ["damageStats.totalDamageTaken", "damageStats.totalDamageTaken"],
+  ["damageStats.trueDamageDone", "damageStats.trueDamageDone"],
+  ["damageStats.trueDamageDoneToChampions", "damageStats.trueDamageDoneToChampions"],
+  ["damageStats.trueDamageTaken", "damageStats.trueDamageTaken"],
+];
+
 function parseArgs(argv) {
   const args = {
     artifactRoot: "artifacts-keyframes",
@@ -239,6 +255,13 @@ function compareValue(left, right) {
   return normalizeValue(left) === normalizeValue(right);
 }
 
+function compareValueWithOptions(left, right, options = {}) {
+  if (options.maxAbsDiff != null && Number.isFinite(left) && Number.isFinite(right)) {
+    return Math.abs(left - right) <= options.maxAbsDiff;
+  }
+  return compareValue(left, right);
+}
+
 function compareJson(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
@@ -295,6 +318,7 @@ function main() {
     args.fixtureDir ?? path.join(args.apiRoot, normalizeFixtureReplayId(replayId)),
   );
   const match = readJson(path.join(fixtureDir, "match.json"));
+  const timeline = readJson(path.join(fixtureDir, "timeline.json"));
   const outputPath = args.outputPath
     ? resolveAbsolute(root, args.outputPath)
     : path.join(path.dirname(inputPath), "rofl-api-metrics-riot-validation.json");
@@ -398,7 +422,7 @@ function main() {
       continue;
     }
 
-    for (const [roflPath, riotPath] of participantComparisons) {
+    for (const [roflPath, riotPath, options = {}] of participantComparisons) {
       const roflValue = getPath(roflParticipant, roflPath);
       const riotValue = getPath(riotParticipant, riotPath);
       comparisons.push({
@@ -407,7 +431,9 @@ function main() {
         field: roflPath,
         roflValue,
         riotValue,
-        pass: compareValue(roflValue, riotValue),
+        pass: compareValueWithOptions(roflValue, riotValue, options),
+        ...(options.maxAbsDiff != null ? { maxAbsDiff: options.maxAbsDiff } : {}),
+        ...(options.interpretation ? { interpretation: options.interpretation } : {}),
       });
     }
   }
@@ -439,6 +465,33 @@ function main() {
 
   const failures = comparisons.filter((comparison) => !comparison.pass);
   const teamFailures = teamComparisonRows.filter((comparison) => !comparison.pass);
+  const roflFinalTimelineFrame = artifact.timeline?.info?.frames?.at(-1) ?? null;
+  const riotFinalTimelineFrame = timeline.info?.frames?.at(-1) ?? null;
+  const finalTimelineComparisonRows = [];
+  for (const [participantId, roflFrame] of Object.entries(roflFinalTimelineFrame?.participantFrames ?? {})) {
+    const riotFrame = riotFinalTimelineFrame?.participantFrames?.[participantId];
+    if (!riotFrame) {
+      finalTimelineComparisonRows.push({
+        participantId: Number(participantId),
+        field: "*",
+        pass: false,
+        reason: "missing-riot-final-participant-frame",
+      });
+      continue;
+    }
+    for (const [roflPath, riotPath] of finalTimelineParticipantComparisons) {
+      const roflValue = getPath(roflFrame, roflPath);
+      const riotValue = getPath(riotFrame, riotPath);
+      finalTimelineComparisonRows.push({
+        participantId: Number(participantId),
+        field: roflPath,
+        roflValue,
+        riotValue,
+        pass: compareValue(roflValue, riotValue),
+      });
+    }
+  }
+  const finalTimelineFailures = finalTimelineComparisonRows.filter((comparison) => !comparison.pass);
   const metadataFailures = metadataComparisons.filter((comparison) => !comparison.pass);
   const identifierFailures = identifierComparisons.filter((comparison) => !comparison.pass);
   const output = {
@@ -463,6 +516,9 @@ function main() {
       teamPassCount: teamComparisonRows.length - teamFailures.length,
       teamFailCount: teamFailures.length,
       teamCount: (artifact.match?.info?.teams ?? []).length,
+      finalTimelineComparisonCount: finalTimelineComparisonRows.length,
+      finalTimelinePassCount: finalTimelineComparisonRows.length - finalTimelineFailures.length,
+      finalTimelineFailCount: finalTimelineFailures.length,
       metadataComparisonCount: metadataComparisons.length,
       metadataPassCount: metadataComparisons.length - metadataFailures.length,
       metadataFailCount: metadataFailures.length,
@@ -472,23 +528,26 @@ function main() {
     },
     failures,
     teamFailures,
+    finalTimelineFailures,
     metadataFailures,
     identifierFailures,
     metadataComparisons,
     identifierComparisons,
     comparisons,
     teamComparisons: teamComparisonRows,
+    finalTimelineComparisons: finalTimelineComparisonRows,
   };
 
   writeJson(outputPath, output);
   console.log(`Wrote Riot fixture validation to ${outputPath}`);
   console.log(`ROFL/API participant stat parity: ${output.totals.passCount}/${output.totals.comparisonCount}`);
   console.log(`ROFL/API team stat parity: ${output.totals.teamPassCount}/${output.totals.teamComparisonCount}`);
+  console.log(`ROFL/API final timeline damage parity: ${output.totals.finalTimelinePassCount}/${output.totals.finalTimelineComparisonCount}`);
   console.log(`ROFL/API metadata parity: ${output.totals.metadataPassCount}/${output.totals.metadataComparisonCount}`);
   console.log(`ROFL/API identifier parity: ${output.totals.identifierPassCount}/${output.totals.identifierComparisonCount} (non-blocking)`);
 
-  if (args.requirePerfectMatch && (failures.length > 0 || teamFailures.length > 0 || metadataFailures.length > 0)) {
-    throw new Error(`ROFL/API validation failed ${failures.length} participant, ${teamFailures.length} team, and ${metadataFailures.length} metadata comparison(s).`);
+  if (args.requirePerfectMatch && (failures.length > 0 || teamFailures.length > 0 || finalTimelineFailures.length > 0 || metadataFailures.length > 0)) {
+    throw new Error(`ROFL/API validation failed ${failures.length} participant, ${teamFailures.length} team, ${finalTimelineFailures.length} final timeline, and ${metadataFailures.length} metadata comparison(s).`);
   }
 }
 

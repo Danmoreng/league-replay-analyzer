@@ -93,6 +93,29 @@ function classifyMissingPath(sectionName, missingPath) {
     if (missingPath.startsWith("info.participants.[].challenges.")) {
       return "participant-challenges";
     }
+    if ([
+      "info.participants.[].firstBloodAssist",
+      "info.participants.[].firstBloodKill",
+      "info.participants.[].firstTowerAssist",
+      "info.participants.[].firstTowerKill",
+    ].includes(missingPath)) {
+      return "match-participant-event-flags";
+    }
+    if ([
+      "info.participants.[].profileIcon",
+      "info.participants.[].summonerLevel",
+    ].includes(missingPath)) {
+      return "match-participant-account-profile";
+    }
+    if (missingPath === "info.participants.[].championId") {
+      return "match-participant-static-id-mapping";
+    }
+    if (missingPath === "info.participants.[].timePlayed") {
+      return "match-participant-unstable-final-time";
+    }
+    if (missingPath === "info.participants.[].eligibleForProgression") {
+      return "match-participant-no-rofl-source";
+    }
     if (missingPath.startsWith("info.participants.[]")) {
       return "match-participant-fields";
     }

@@ -356,6 +356,8 @@ function buildAudit(artifact, inputPath) {
           validation?.validatedArtifact?.decoderArtifactSupervised === false &&
           (validation?.totals?.identifierComparisonCount ?? 0) >= 22 &&
           validation?.totals?.identifierPassCount === 0 &&
+          (validation?.totals?.finalTimelineComparisonCount ?? 0) >= 120 &&
+          validation?.totals?.finalTimelinePassCount === validation?.totals?.finalTimelineComparisonCount &&
           shapeGap?.shapeGapSchema === "rofl-api-shape-gap-report/v1" &&
           shapeGap?.mode === "offline-validation-only" &&
           shapeGap?.runtimeInput === false &&
@@ -364,6 +366,8 @@ function buildAudit(artifact, inputPath) {
           challengeGap?.runtimeInput === false &&
           (shapeGap?.sections ?? []).some((section) => (section.missingCategories ?? []).some((entry) => entry.category === "timeline-events")) &&
           (shapeGap?.sections ?? []).some((section) => (section.missingCategories ?? []).some((entry) => entry.category === "participant-challenges")) &&
+          (shapeGap?.sections ?? []).some((section) => (section.missingCategories ?? []).some((entry) => entry.category === "match-participant-event-flags")) &&
+          (shapeGap?.sections ?? []).some((section) => (section.missingCategories ?? []).some((entry) => entry.category === "match-participant-account-profile")) &&
           (shapeGap?.sections ?? []).some((section) => (section.missingCategories ?? []).some((entry) => entry.category === "team-bans")) &&
           (challengeGap?.totals?.exactValueParityPassCount ?? 0) > 0 &&
           (challengeGap?.totals?.rejectedExactValueMismatchCount ?? 0) > 0 &&
@@ -382,6 +386,7 @@ function buildAudit(artifact, inputPath) {
           `validation.validatedArtifact.decoderArtifactSupervised=${validation?.validatedArtifact?.decoderArtifactSupervised ?? null}`,
           `validation participant parity=${validation?.totals?.passCount ?? null}/${validation?.totals?.comparisonCount ?? null}`,
           `validation team parity=${validation?.totals?.teamPassCount ?? null}/${validation?.totals?.teamComparisonCount ?? null}`,
+          `validation final timeline parity=${validation?.totals?.finalTimelinePassCount ?? null}/${validation?.totals?.finalTimelineComparisonCount ?? null}`,
           `validation metadata parity=${validation?.totals?.metadataPassCount ?? null}/${validation?.totals?.metadataComparisonCount ?? null}`,
           `validation identifier parity=${validation?.totals?.identifierPassCount ?? null}/${validation?.totals?.identifierComparisonCount ?? null} non-blocking`,
           `shapeGapPath=${shapeGapPath}`,
@@ -409,6 +414,8 @@ function buildAudit(artifact, inputPath) {
           ...(!challengeGap ? ["offline challenge gap report missing"] : []),
           ...(shapeGap && !(shapeGap.sections ?? []).some((section) => (section.missingCategories ?? []).some((entry) => entry.category === "timeline-events")) ? ["shape gap report missing timeline-events category"] : []),
           ...(shapeGap && !(shapeGap.sections ?? []).some((section) => (section.missingCategories ?? []).some((entry) => entry.category === "participant-challenges")) ? ["shape gap report missing participant-challenges category"] : []),
+          ...(shapeGap && !(shapeGap.sections ?? []).some((section) => (section.missingCategories ?? []).some((entry) => entry.category === "match-participant-event-flags")) ? ["shape gap report missing match-participant-event-flags category"] : []),
+          ...(shapeGap && !(shapeGap.sections ?? []).some((section) => (section.missingCategories ?? []).some((entry) => entry.category === "match-participant-account-profile")) ? ["shape gap report missing match-participant-account-profile category"] : []),
           ...(shapeGap && !(shapeGap.sections ?? []).some((section) => (section.missingCategories ?? []).some((entry) => entry.category === "team-bans")) ? ["shape gap report missing team-bans category"] : []),
           ...(challengeGap && (challengeGap.totals?.exactValueParityPassCount ?? 0) <= 0 ? ["challenge gap report has no exact value parity pass"] : []),
           ...(challengeGap && (challengeGap.totals?.rejectedExactValueMismatchCount ?? 0) <= 0 ? ["challenge gap report has no rejected exact value mismatch"] : []),
@@ -420,6 +427,8 @@ function buildAudit(artifact, inputPath) {
           ...(validation && validation.validatedArtifact?.decoderArtifactSupervised !== false ? ["validation target is supervised"] : []),
           ...(validation && (validation.totals?.identifierComparisonCount ?? 0) < 22 ? ["validation identifier comparison coverage is below per-participant puuid/summonerId coverage"] : []),
           ...(validation && validation.totals?.identifierPassCount !== 0 ? ["validation identifier parity unexpectedly passed"] : []),
+          ...(validation && (validation.totals?.finalTimelineComparisonCount ?? 0) < 120 ? ["validation final timeline damage comparison coverage is below expected coverage"] : []),
+          ...(validation && validation.totals?.finalTimelinePassCount !== validation.totals?.finalTimelineComparisonCount ? ["validation final timeline damage parity failed"] : []),
         ],
       ),
     },
@@ -459,7 +468,7 @@ function buildAudit(artifact, inputPath) {
           matchParticipantGaps.status === "not_found" &&
           !(matchParticipantGaps.fields ?? []).includes("info.participants[].lane") &&
           !(matchParticipantGaps.fields ?? []).includes("info.participants[].role") &&
-          (matchParticipantGaps.rejectedCandidateEvidence ?? []).some((entry) => entry.field === "info.participants[].timePlayed") &&
+          !(matchParticipantGaps.fields ?? []).includes("info.participants[].timePlayed") &&
           (matchParticipantGaps.rejectedCandidateEvidence ?? []).some((entry) => entry.field === "info.participants[].firstBloodKill") &&
           (matchParticipantGaps.rejectedCandidateEvidence ?? []).some((entry) => entry.field === "info.participants[].profileIcon") &&
           matchTeamGaps.status === "not_found" &&
@@ -508,7 +517,7 @@ function buildAudit(artifact, inputPath) {
           ...(matchParticipantGaps.status !== "not_found" ? ["fieldCoverage.matchParticipantGaps status is not not_found"] : []),
           ...((matchParticipantGaps.fields ?? []).includes("info.participants[].lane") ? ["fieldCoverage.matchParticipantGaps still includes promoted lane"] : []),
           ...((matchParticipantGaps.fields ?? []).includes("info.participants[].role") ? ["fieldCoverage.matchParticipantGaps still includes promoted role"] : []),
-          ...(!(matchParticipantGaps.rejectedCandidateEvidence ?? []).some((entry) => entry.field === "info.participants[].timePlayed") ? ["fieldCoverage.matchParticipantGaps missing timePlayed rejected candidate evidence"] : []),
+          ...((matchParticipantGaps.fields ?? []).includes("info.participants[].timePlayed") ? ["fieldCoverage.matchParticipantGaps still includes promoted timePlayed"] : []),
           ...(!(matchParticipantGaps.rejectedCandidateEvidence ?? []).some((entry) => entry.field === "info.participants[].firstBloodKill") ? ["fieldCoverage.matchParticipantGaps missing firstBloodKill gap evidence"] : []),
           ...(!(matchParticipantGaps.rejectedCandidateEvidence ?? []).some((entry) => entry.field === "info.participants[].profileIcon") ? ["fieldCoverage.matchParticipantGaps missing profileIcon gap evidence"] : []),
           ...(matchTeamGaps.status !== "not_found" ? ["fieldCoverage.matchTeamGaps status is not not_found"] : []),
