@@ -136,6 +136,7 @@ function main() {
   const assignments = flattenRoflAssignments(roflStats).map((assignment) => compareAssignment(assignment, supervisedIndex));
 
   const output = {
+    comparisonSchema: "rofl-keyframe-stat-supervised-comparison/v1",
     generatedAtUtc: new Date().toISOString(),
     versionGroup: args.versionGroup,
     sources: {

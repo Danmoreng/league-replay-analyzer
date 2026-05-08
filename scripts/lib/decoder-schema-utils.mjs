@@ -375,6 +375,18 @@ function readRosterMetricFromStats(statMap, metricKey) {
     return own + enemy;
   }
 
+  if (metricKey === "currentGold") {
+    const direct = safeNumber(statMap.CURRENT_GOLD);
+    if (direct != null) {
+      return direct;
+    }
+    const goldEarned = safeNumber(statMap.GOLD_EARNED) ?? safeNumber(statMap.TOTAL_GOLD);
+    const goldSpent = safeNumber(statMap.GOLD_SPENT);
+    if (goldEarned != null && goldSpent != null) {
+      return Math.max(0, goldEarned - goldSpent);
+    }
+  }
+
   for (const key of metric.summaryStatKeys ?? []) {
     const value = safeNumber(statMap[key]);
     if (value != null) {
