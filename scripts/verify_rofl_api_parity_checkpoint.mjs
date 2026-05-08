@@ -143,7 +143,7 @@ function verifyRiotValidationOutput(replayId, artifactRoot) {
   if ((totals.finalTimelineComparisonCount ?? 0) < 120 || totals.finalTimelinePassCount !== totals.finalTimelineComparisonCount) {
     throw new Error(`Riot validation report has insufficient final timeline parity coverage: ${JSON.stringify(totals)}`);
   }
-  if ((totals.metadataComparisonCount ?? 0) < 5 || totals.metadataPassCount !== totals.metadataComparisonCount) {
+  if ((totals.metadataComparisonCount ?? 0) < 7 || totals.metadataPassCount !== totals.metadataComparisonCount) {
     throw new Error(`Riot validation report has insufficient metadata parity coverage: ${JSON.stringify(totals)}`);
   }
   if ((totals.identifierComparisonCount ?? 0) < 22 || totals.identifierPassCount !== 0) {

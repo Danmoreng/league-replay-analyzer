@@ -536,10 +536,12 @@ function verifyRoflDerivedFieldMap(artifact) {
   const requiredDecoded = [
     ["match", "metadata.matchId", "rofl-file-name"],
     ["match", "metadata.participants", "rofl-metadata-statsJson"],
+    ["match", "info.endOfGameResult", "rofl-metadata-statsJson"],
     ["match", "info.participants", "rofl-metadata-statsJson"],
     ["match", "info.participants[].challenges.turretTakedowns", "rofl-metadata-statsJson"],
     ["match", "info.teams", "participant-final-statsJson-aggregation"],
     ["timeline", "metadata.matchId", "rofl-file-name"],
+    ["timeline", "info.endOfGameResult", "rofl-metadata-statsJson"],
     ["timeline", "info.participants", "rofl-metadata-statsJson"],
     ["timeline", "info.frames[].participantFrames[].level", "rofl-metadata-statsJson"],
     ["timeline", "info.frames[].participantFrames[].currentGold", "rofl-metadata-statsJson"],

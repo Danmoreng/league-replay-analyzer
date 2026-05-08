@@ -844,6 +844,11 @@ function buildRoflDerivedFieldMap() {
         status: "decoded",
         source: "rofl-summary",
       },
+      "info.endOfGameResult": {
+        status: "decoded",
+        source: "rofl-metadata-statsJson",
+        calibration: "derived-final-stats-presence",
+      },
       "info.participants": {
         status: "decoded",
         source: "rofl-metadata-statsJson",
@@ -871,6 +876,11 @@ function buildRoflDerivedFieldMap() {
       "info.gameId": {
         status: "decoded",
         source: "rofl-file-name",
+      },
+      "info.endOfGameResult": {
+        status: "decoded",
+        source: "rofl-metadata-statsJson",
+        calibration: "derived-final-stats-presence",
       },
       "info.participants": {
         status: "decoded",
@@ -967,6 +977,7 @@ function buildFieldCoverage() {
         "info.platformId",
         "info.gameVersion",
         "info.gameDuration",
+        "info.endOfGameResult",
       ],
     },
     matchMetadataGaps: {
@@ -1981,6 +1992,7 @@ function main() {
         gameVersion: summary.gameVersion ?? replay?.gameVersion ?? null,
         gameDuration: Number.isFinite(summary.gameLengthMillis) ? Math.round(summary.gameLengthMillis / 1000) : null,
         gameDurationMillis: summary.gameLengthMillis ?? null,
+        endOfGameResult: rosterParticipants.length === 10 ? "GameComplete" : null,
         participants: rosterParticipants.map(buildMatchInfoParticipant),
         teams: buildTeamInfo(rosterParticipants),
       },
@@ -1998,6 +2010,7 @@ function main() {
       },
       info: {
         gameId: parseReplayGameId(args.replayId),
+        endOfGameResult: rosterParticipants.length === 10 ? "GameComplete" : null,
         frameInterval: null,
         participants: rosterParticipants.map(buildTimelineInfoParticipant),
         frames,

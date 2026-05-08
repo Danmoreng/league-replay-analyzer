@@ -80,13 +80,13 @@ Current offline validation result:
 - participant final match-stat comparisons: `1530 / 1530`
 - team final match-stat comparisons: `18 / 18`
 - final timeline damage-stat comparisons: `120 / 120`
-- metadata comparisons: `5 / 5`
+- metadata comparisons: `7 / 7`
 - identifier comparisons: `0 / 22` non-blocking, because ROFL `statsJson` participant identifiers are replay-local/anonymized or legacy IDs and do not currently equal Riot API PUUIDs or encrypted summoner IDs
 - validation output: `artifacts-keyframes/EUW1-7840220945/rofl-api-metrics-riot-validation.json`
 - validation schema: `rofl-api-metrics-riot-validation/v1`
 - shape-gap output: `artifacts-keyframes/EUW1-7840220945/rofl-api-shape-gap-report.json`
 - shape-gap schema: `rofl-api-shape-gap-report/v1`
-- shape-gap result: `204 / 469` Riot API leaf paths matched, `265` missing
+- shape-gap result: `206 / 469` Riot API leaf paths matched, `263` missing
 - challenge-gap output: `artifacts-keyframes/EUW1-7840220945/rofl-challenge-gap-candidates.json`
 - challenge-gap schema: `rofl-challenge-gap-candidates/v1`
 - challenge-gap result: `2` exact normalized candidates, `29` fuzzy candidates, `95` missing across `126` Riot challenge keys

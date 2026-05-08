@@ -363,6 +363,18 @@ function main() {
       riotValue: match.info?.platformId ?? parseReplayPlatformId(replayId),
       pass: compareValue(artifact.match?.info?.platformId, match.info?.platformId ?? parseReplayPlatformId(replayId)),
     },
+    {
+      field: "match.info.endOfGameResult",
+      roflValue: artifact.match?.info?.endOfGameResult,
+      riotValue: match.info?.endOfGameResult,
+      pass: compareValue(artifact.match?.info?.endOfGameResult, match.info?.endOfGameResult),
+    },
+    {
+      field: "timeline.info.endOfGameResult",
+      roflValue: artifact.timeline?.info?.endOfGameResult,
+      riotValue: timeline.info?.endOfGameResult,
+      pass: compareValue(artifact.timeline?.info?.endOfGameResult, timeline.info?.endOfGameResult),
+    },
   ];
   const identifierComparisons = [
     {
