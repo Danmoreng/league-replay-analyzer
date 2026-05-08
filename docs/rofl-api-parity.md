@@ -71,6 +71,12 @@ Verify the saved reconstruction chunk target summary without rerunning native ex
 npm run verify:reconstruction-chunks
 ```
 
+Compare the ranked eventful reconstruction chunks against quiet chunk windows to prioritize decoder families:
+
+```powershell
+npm run compare:reconstruction-chunks -- --top-eventful-intervals 3 --quiet-intervals 3
+```
+
 Write the prompt-to-artifact goal audit:
 
 ```powershell
@@ -128,6 +134,7 @@ Current offline validation result:
 - timeline reconstruction corpus audit: `artifacts-keyframes/timeline-reconstruction-model-16.9.json` confirms `20 / 20` patch `16.9` fixture-backed replays have API frames equal replay keyframes plus one, keyframe chunk formula holds, and chunk record formula holds
 - timeline reconstruction corpus audit also records `summary.topEventfulIntervals`, ranked by objectives, champion kills, item events, and total events; each target includes chunk IDs, record IDs, payload offsets, compressed lengths, uncompressed lengths, and codec, so use those chunk windows as the first reverse-engineering targets for chunk-delta event/state decoding
 - reconstruction chunk target summary: `artifacts-keyframes/reconstruction-chunk-target-summary-16.9.json` records subrecord-family counts for the top eventful chunk windows using `rofl_core_cli --dump-chunk-subrecords`; `aggregateTopFamilies` ranks recurring families across target chunks, and this remains a decoder-target artifact, not runtime extraction
+- reconstruction chunk family comparison: `artifacts-keyframes/reconstruction-chunk-family-comparison-16.9.json` compares eventful chunk windows against quiet windows and ranks enriched subrecord families; this is offline decoder guidance for chunk-delta reconstruction, not runtime extraction
 - goal audit output: `artifacts-keyframes/EUW1-7840220945/rofl-api-parity-goal-audit.json`
 - goal audit schema: `rofl-api-parity-goal-audit/v1`
 - mode: `offline-validation-only`
