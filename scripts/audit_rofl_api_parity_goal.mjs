@@ -299,6 +299,7 @@ function buildAudit(artifact, inputPath) {
         `identity threshold sweep schema=${identityThresholdSweep?.sweepSchema ?? null}`,
         `identity threshold sweep rows=${(identityThresholdSweep?.rows ?? []).length}`,
         `identity threshold sweep assignments=${JSON.stringify((identityThresholdSweep?.rows ?? []).map((row) => [row.minSupportScore, row.assignmentCount]))}`,
+        `identity negative controls=${JSON.stringify((identityThresholdSweep?.negativeControlRows ?? []).map((row) => [row.name, row.assignmentCount, row.comparisonCounts]))}`,
         `canonicalCandidateCount=${nonFinalIdentity?.assignmentArtifact?.canonicalCandidateCount ?? null}`,
         `supportBelowMetricScoreCount=${nonFinalIdentity?.assignmentArtifact?.diagnostics?.supportBelowMetricScoreCount ?? null}`,
         `supportBelowMetricScoreCountsByMetric=${JSON.stringify(nonFinalIdentity?.assignmentArtifact?.diagnostics?.supportBelowMetricScoreCountsByMetric ?? {})}`,
@@ -313,6 +314,7 @@ function buildAudit(artifact, inputPath) {
       gaps: [
         "accepted replay-only non-final keyframe participant identity is not available yet",
         ...(identityThresholdSweep?.sweepSchema === "rofl-keyframe-stat-support-threshold-sweep/v1" ? [] : ["identity threshold sweep schema missing or unsupported"]),
+        ...((identityThresholdSweep?.negativeControlRows ?? []).some((row) => row.name === "unsafe-single-metric" && (row.assignmentCount ?? 0) > 0 && (row.comparisonCounts?.conflict ?? 0) > 0) ? [] : ["identity threshold sweep missing unsafe single-metric negative control conflicts"]),
       ],
     },
     {

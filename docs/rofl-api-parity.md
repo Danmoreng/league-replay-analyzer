@@ -71,6 +71,7 @@ The regenerated offline identity comparison artifact has schema `rofl-keyframe-s
 The full checkpoint also regenerates `keyframe-rofl-stat-support-threshold-sweep-16.9.json` before the goal audit.
 The support-threshold sweep artifact has schema `rofl-keyframe-stat-support-threshold-sweep/v1`, which the checkpoint verifies.
 The checkpoint also requires the default sweep row (`minSupportScore=0.35`) to have 0 assignments and requires every swept threshold to have 0 canonical candidates.
+The sweep also includes an unsafe single-metric negative control; on the current 16.9 corpus it produces tempting assignments but offline comparison marks them mostly as conflicts, which is why one-metric identity links are not runtime-exported.
 
 The full checkpoint also runs a negative completion gate: `audit:rofl-api-parity -- --require-complete` must fail until full API parity is actually achieved.
 
@@ -147,6 +148,7 @@ Current verified output:
 - the checkpoint runner regenerates the replay-only identity support-threshold sweep before the goal audit
 - the checkpoint runner verifies the support-threshold sweep schema marker and version group
 - the checkpoint runner verifies the support-threshold sweep has no canonical candidates and keeps the default threshold at 0 assignments
+- the checkpoint runner verifies the unsafe single-metric identity negative control still produces offline conflicts instead of accepted runtime identity
 - the goal audit reads `rofl-api-metrics-riot-validation.json` and records offline-only participant/team/metadata/identifier parity counts
 - the goal audit verifies the Riot validation report schema marker
 - `rejectedCandidateArtifacts.nonFinalScalarIdentity` that records why non-final keyframe scalar identity is not accepted

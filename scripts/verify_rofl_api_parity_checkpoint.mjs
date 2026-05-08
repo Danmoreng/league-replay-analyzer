@@ -247,6 +247,16 @@ function verifyIdentitySupportSweepOutput(artifactRoot, versionGroup) {
   if (canonicalRows.length > 0) {
     throw new Error(`Identity support sweep produced canonical candidates that are not yet runtime-exported: ${JSON.stringify(canonicalRows)}`);
   }
+  const unsafeSingleMetric = (sweep.negativeControlRows ?? []).find((row) => row.name === "unsafe-single-metric");
+  if (!unsafeSingleMetric) {
+    throw new Error("Identity support sweep must include the unsafe single-metric negative control.");
+  }
+  if ((unsafeSingleMetric.assignmentCount ?? 0) <= 0) {
+    throw new Error(`Unsafe single-metric negative control should demonstrate tempting but rejected assignments: ${JSON.stringify(unsafeSingleMetric)}`);
+  }
+  if ((unsafeSingleMetric.comparisonCounts?.conflict ?? 0) <= 0) {
+    throw new Error(`Unsafe single-metric negative control must prove relaxed identity assignments conflict offline: ${JSON.stringify(unsafeSingleMetric)}`);
+  }
 }
 
 function main() {

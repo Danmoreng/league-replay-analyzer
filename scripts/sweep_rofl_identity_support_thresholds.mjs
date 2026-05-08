@@ -46,6 +46,10 @@ function thresholdLabel(value) {
   return String(value).replace(".", "p");
 }
 
+function scenarioLabel(scenario) {
+  return scenario.name.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
+}
+
 function runNode(scriptPath, args) {
   const result = spawnSync(process.execPath, [scriptPath, ...args], {
     cwd: process.cwd(),
@@ -111,17 +115,76 @@ function main() {
     });
   }
 
+  const relaxedNegativeControls = [
+    {
+      name: "unsafe-single-metric",
+      reason: "Shows why one-metric keyframe row assignments are not accepted as runtime participant identity.",
+      args: [
+        "--min-metric-count",
+        "1",
+        "--min-distinct-metric-count",
+        "1",
+        "--min-support-score",
+        "0.2",
+        "--min-winner-gap",
+        "0",
+      ],
+    },
+  ];
+  const negativeControlRows = [];
+  for (const scenario of relaxedNegativeControls) {
+    const label = scenarioLabel(scenario);
+    const assignmentPath = path.join(artifactRoot, `keyframe-rofl-stat-slot-assignments-${args.versionGroup}-${label}.json`);
+    const comparisonPath = path.join(artifactRoot, `keyframe-rofl-stat-supervised-comparison-${args.versionGroup}-${label}.json`);
+    runNode(assignScript, [
+      "--version-group",
+      args.versionGroup,
+      "--artifact-root",
+      artifactRoot,
+      ...scenario.args,
+      "--output-path",
+      assignmentPath,
+    ]);
+    runNode(compareScript, [
+      "--version-group",
+      args.versionGroup,
+      "--artifact-root",
+      artifactRoot,
+      "--rofl-stats-path",
+      assignmentPath,
+      "--output-path",
+      comparisonPath,
+    ]);
+    const assignment = readJson(assignmentPath);
+    const comparison = readJson(comparisonPath);
+    negativeControlRows.push({
+      name: scenario.name,
+      reason: scenario.reason,
+      assignmentPath,
+      comparisonPath,
+      assignmentCount: assignment.totals?.assignmentCount ?? null,
+      edgeCount: assignment.totals?.edgeCount ?? null,
+      maxCandidateMetricCount: assignment.totals?.diagnostics?.maxCandidateMetricCount ?? null,
+      comparisonCounts: comparison.totals?.byComparison ?? {},
+      canonicalMatchCount: comparison.totals?.canonicalMatchCount ?? null,
+      diagnosticMatchCount: comparison.totals?.diagnosticMatchCount ?? null,
+      diagnosticConflictCount: comparison.totals?.diagnosticConflictCount ?? null,
+    });
+  }
+
   const output = {
     sweepSchema: "rofl-keyframe-stat-support-threshold-sweep/v1",
     generatedAtUtc: new Date().toISOString(),
     versionGroup: args.versionGroup,
     thresholds: args.thresholds,
     rows,
+    negativeControlRows,
   };
   writeJson(outputPath, output);
   console.log(`Wrote ROFL identity support threshold sweep to ${outputPath}`);
   console.log(`thresholds: ${args.thresholds.join(", ")}`);
   console.log(`assignments: ${rows.map((row) => `${row.minSupportScore}=${row.assignmentCount}`).join(", ")}`);
+  console.log(`negative controls: ${negativeControlRows.map((row) => `${row.name}=${row.assignmentCount} (${JSON.stringify(row.comparisonCounts)})`).join(", ")}`);
 }
 
 try {
