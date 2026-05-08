@@ -329,6 +329,14 @@ High-priority missing pieces:
 - damage stat timelines
 - a stable verification gate that separates runtime ROFL-only extraction from offline Riot API validation
 
+Important direction: do not treat isolated keyframe rows as complete Riot API timeline frames. Current corpus notes show official Riot timeline frame count aligns with replay `keyframeCount + 1`, but the replay chunks between keyframes likely contain the state-update/event deltas needed to reconstruct the game state. Full timeline parity should therefore be pursued as state reconstruction:
+
+1. use replay keyframes as periodic baseline snapshots
+2. decode chunk/subrecord updates between keyframes as state deltas and events
+3. apply those deltas onto the latest baseline state
+4. sample the reconstructed state into Riot-shaped `timeline.info.frames`
+5. validate against Riot API fixtures only offline
+
 For `EUW1-7840220945`, the movement pipeline has a `participant-movement.json` diagnostic, but it is not emitted into `timeline.info.frames` because it assigns 9 of 10 participants, only 7 of 9 assignments pass offline Riot validation, and the current assignment path uses identity priors. The API-shaped artifact records this under `rejectedCandidateArtifacts.positions`.
 
 The same replay now has an offline `item-event-candidates.json` diagnostic with 689 candidates and 93 strong candidates, but it is not emitted into `timeline.info.frames[*].events` because the report is discovered against Riot API timeline item events and is not yet a ROFL-only event decoder. The API-shaped artifact records this under `rejectedCandidateArtifacts.itemEvents`.
@@ -341,13 +349,16 @@ For damage timelines, the same artifact records `rejectedCandidateArtifacts.dama
 
 ## Next Decoder Work
 
-The next concrete step is to replace supervised keyframe participant assignment with replay-only identity evidence:
+The next concrete step is to move timeline parity toward replay state reconstruction instead of direct keyframe-to-API-frame extraction:
 
-1. Use all 10 `statsJson` rows as final-state anchors.
-2. Match candidate keyframe rows to participants by final values for monotonic metrics such as level, XP, total gold, lane CS, and jungle CS.
-3. Combine evidence across metrics before accepting a participant identity.
-4. Emit timeline metrics only when identity and metric quality both pass metric-specific gates.
-5. Keep Riot API timeline comparisons in a separate validation report, not in the runtime artifact.
+1. Keep keyframes as baseline snapshots, not standalone API frames.
+2. Decode chunk subrecord families that occur between keyframes and classify them as state deltas, events, entity updates, or noise.
+3. Rebuild per-participant state by applying chunk deltas to the latest keyframe baseline.
+4. Use `statsJson` final rows, roster order, team/champion metadata, and cross-metric consistency as identity constraints on reconstructed state.
+5. Emit non-final `participantFrames` only when identity, calibration, and state-update evidence are replay-only and pass quality gates.
+6. Keep Riot API timeline comparisons in a separate validation report, not in the runtime artifact.
+
+The replay-only identity work remains a prerequisite for exposing participant-labelled state: use all 10 `statsJson` rows as final-state anchors, match candidate rows to participants by final values for monotonic metrics such as level, XP, total gold, lane CS, and jungle CS, and combine evidence across metrics before accepting a participant identity.
 
 Current `16.9` replay-only scalar identity evidence is not strong enough to emit non-final timeline metrics: `keyframe-rofl-stat-slot-assignments-16.9.json` uses the conservative metric set and has 0 assignments across 20 replays and 0 canonical candidates after duplicate same-metric support is collapsed and weak per-metric support is filtered. The API-shaped artifact records this under `rejectedCandidateArtifacts.nonFinalScalarIdentity`, including the metric set, thresholds, aggregate diagnostics, per-metric evidence counts, rejection-reason counts, strongest replay-level candidates, and strongest rejected assignment details needed to decide the next decoder iteration.
 

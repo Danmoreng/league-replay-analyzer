@@ -1204,7 +1204,19 @@ function buildFieldCoverage() {
     timelineNonFinalParticipantFrames: {
       status: "not_found",
       source: "not-runtime-exported",
-      reason: "replay-only participant identity and scalar calibration are not accepted yet",
+      reason: "replay-only participant identity, scalar calibration, and chunk-delta state reconstruction are not accepted yet",
+      reconstructionDirection: {
+        status: "planned",
+        model: "keyframe-baseline-plus-chunk-deltas",
+        reason: "Riot timeline frames appear to align with replay keyframe boundaries, but chunk/subrecord updates between keyframes likely carry the state changes needed for API-shaped non-final participantFrames.",
+        steps: [
+          "treat keyframes as baseline snapshots",
+          "decode chunk subrecords between keyframes as state deltas and events",
+          "apply deltas to the latest baseline state",
+          "sample reconstructed state into Riot-shaped timeline frames",
+          "validate sampled frames against Riot API fixtures offline only",
+        ],
+      },
     },
     timelineCurrentGold: {
       status: "not_promoted",
@@ -1214,11 +1226,13 @@ function buildFieldCoverage() {
     },
     timelineEvents: {
       status: "not_found",
-      source: "not-extracted",
+      source: "chunk-delta-events-not-extracted",
+      reconstructionDirection: "decode chunk/subrecord event deltas between keyframe baselines before emitting API-shaped timeline events",
     },
     positions: {
       status: "not_found",
-      source: "not-extracted-for-16.9",
+      source: "state-reconstruction-not-extracted-for-16.9",
+      reconstructionDirection: "decode and identity-link position/entity state through keyframe baselines plus chunk deltas before emitting participantFrames.position",
     },
     inventoryTimeline: {
       status: "not_found",

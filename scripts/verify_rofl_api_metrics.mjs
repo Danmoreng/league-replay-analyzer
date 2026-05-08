@@ -260,6 +260,15 @@ function verifyFieldCoverage(artifact) {
   assert((fieldCoverage.timelineFinalParticipantFrames?.metrics ?? []).length >= 5, "Final timeline participant frame coverage is missing decoded metrics", {
     timelineFinalParticipantFrames: fieldCoverage.timelineFinalParticipantFrames,
   });
+  assert(fieldCoverage.timelineNonFinalParticipantFrames?.reconstructionDirection?.model === "keyframe-baseline-plus-chunk-deltas", "Non-final timeline coverage must document the keyframe plus chunk-delta reconstruction direction", {
+    timelineNonFinalParticipantFrames: fieldCoverage.timelineNonFinalParticipantFrames,
+  });
+  assert(fieldCoverage.timelineEvents?.source === "chunk-delta-events-not-extracted", "Timeline event coverage must point at chunk-delta event extraction", {
+    timelineEvents: fieldCoverage.timelineEvents,
+  });
+  assert(fieldCoverage.positions?.source === "state-reconstruction-not-extracted-for-16.9", "Position coverage must point at state reconstruction as the missing extraction layer", {
+    positions: fieldCoverage.positions,
+  });
   assert(fieldCoverage.offlineRiotValidation?.runtimeInput === false, "Offline Riot validation must be marked as non-runtime input", {
     offlineRiotValidation: fieldCoverage.offlineRiotValidation,
   });
