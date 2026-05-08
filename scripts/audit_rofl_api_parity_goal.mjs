@@ -158,8 +158,8 @@ function buildAudit(artifact, inputPath) {
     row.participantId >= 1 &&
     row.participantId <= 10 &&
     Object.keys(row.metrics ?? {}).length >= 11 &&
-    row.metricStatusCounts?.decoded === 6 &&
-    row.metricStatusCounts?.not_found === 5 &&
+    row.metricStatusCounts?.decoded === 5 &&
+    (row.metricStatusCounts?.not_found ?? 0) >= 5 &&
     Object.values(row.metrics ?? {}).every((metric) => coverageStatuses.includes(metric.status)),
   );
   const nonFinalCoverageAnnotations = coverageRows.flatMap((row) =>
@@ -263,8 +263,8 @@ function buildAudit(artifact, inputPath) {
           timelineFrames.length > 0 &&
           finalParticipantFrames.length === 10 &&
           finalParticipantFramesHaveApiContainers &&
-          artifact.totals?.roflOnlyFinalMetricSeriesCount === 60 &&
-          artifact.totals?.emittedMetricPointCount === 60,
+          artifact.totals?.roflOnlyFinalMetricSeriesCount === 50 &&
+          artifact.totals?.emittedMetricPointCount === 50,
         [
           `final frame participantFrames=${finalParticipantFrameCount}`,
           `timeline.info.frames.length=${timelineFrames.length}`,
@@ -273,7 +273,7 @@ function buildAudit(artifact, inputPath) {
           `participantFrames include championStats/damageStats=${finalParticipantFramesHaveApiContainers}`,
           `roflOnlyFinalMetricSeriesCount=${artifact.totals?.roflOnlyFinalMetricSeriesCount}`,
           `emittedMetricPointCount=${artifact.totals?.emittedMetricPointCount}`,
-          `fieldMap timeline currentGold=${roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].currentGold"]?.calibration ?? null}`,
+          `fieldMap timeline currentGold=${roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].currentGold"]?.status ?? null}:${roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].currentGold"]?.calibration ?? null}`,
           `fieldMap timeline events=${roflDerivedFieldMap.timeline?.["info.frames[].events"]?.status ?? null}`,
           "final frame provenance uses rofl-metadata-statsJson/direct-final-stat",
         ],
@@ -380,7 +380,7 @@ function buildAudit(artifact, inputPath) {
           validation?.validatedArtifact?.decoderArtifactSupervised === false &&
           (validation?.totals?.identifierComparisonCount ?? 0) >= 22 &&
           validation?.totals?.identifierPassCount === 0 &&
-          (validation?.totals?.finalTimelineComparisonCount ?? 0) >= 120 &&
+          (validation?.totals?.finalTimelineComparisonCount ?? 0) >= 170 &&
           validation?.totals?.finalTimelinePassCount === validation?.totals?.finalTimelineComparisonCount &&
           shapeGap?.shapeGapSchema === "rofl-api-shape-gap-report/v1" &&
           shapeGap?.mode === "offline-validation-only" &&
@@ -464,8 +464,8 @@ function buildAudit(artifact, inputPath) {
           ...(validation && validation.validatedArtifact?.decoderArtifactSupervised !== false ? ["validation target is supervised"] : []),
           ...(validation && (validation.totals?.identifierComparisonCount ?? 0) < 22 ? ["validation identifier comparison coverage is below per-participant puuid/summonerId coverage"] : []),
           ...(validation && validation.totals?.identifierPassCount !== 0 ? ["validation identifier parity unexpectedly passed"] : []),
-          ...(validation && (validation.totals?.finalTimelineComparisonCount ?? 0) < 120 ? ["validation final timeline damage comparison coverage is below expected coverage"] : []),
-          ...(validation && validation.totals?.finalTimelinePassCount !== validation.totals?.finalTimelineComparisonCount ? ["validation final timeline damage parity failed"] : []),
+          ...(validation && (validation.totals?.finalTimelineComparisonCount ?? 0) < 170 ? ["validation final timeline scalar/damage comparison coverage is below expected coverage"] : []),
+          ...(validation && validation.totals?.finalTimelinePassCount !== validation.totals?.finalTimelineComparisonCount ? ["validation final timeline scalar/damage parity failed"] : []),
         ],
       ),
     },

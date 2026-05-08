@@ -14,7 +14,6 @@ import {
 } from "./lib/decoder-schema-utils.mjs";
 
 const apiMetricPaths = new Map([
-  ["currentGold", ["currentGold"]],
   ["totalGold", ["totalGold"]],
   ["level", ["level"]],
   ["xp", ["xp"]],
@@ -28,7 +27,6 @@ const apiMetricPaths = new Map([
 ]);
 
 const integerMetrics = new Set([
-  "currentGold",
   "totalGold",
   "level",
   "xp",
@@ -203,13 +201,8 @@ function makeRosterParticipant(rosterEntry) {
   const statMap = rosterEntry.statMap ?? {};
   const finalMetrics = Object.fromEntries(
     Object.entries(rosterEntry.finalMetrics ?? {})
-      .filter(([, value]) => value != null && Number.isFinite(value)),
+      .filter(([metric, value]) => metric !== "currentGold" && value != null && Number.isFinite(value)),
   );
-  const goldEarned = statNumber(statMap, "GOLD_EARNED");
-  const goldSpent = statNumber(statMap, "GOLD_SPENT");
-  if (goldEarned != null && goldSpent != null) {
-    finalMetrics.currentGold = Math.max(0, goldEarned - goldSpent);
-  }
   return {
     participantId: rosterEntry.rosterIndex + 1,
     championName: rosterEntry.champion,
@@ -897,10 +890,10 @@ function buildRoflDerivedFieldMap() {
         calibration: "direct-final-stat",
       },
       "info.frames[].participantFrames[].currentGold": {
-        status: "decoded",
+        status: "not_promoted",
         source: "rofl-metadata-statsJson",
         participantIdentity: "rofl-summary-roster-order",
-        calibration: "GOLD_EARNED - GOLD_SPENT",
+        calibration: "GOLD_EARNED - GOLD_SPENT rejected: does not match Riot final timeline currentGold",
       },
       "info.frames[].participantFrames[].totalGold": {
         status: "decoded",
@@ -1171,7 +1164,6 @@ function buildFieldCoverage() {
       frameKind: "final-stats",
       metrics: [
         "level",
-        "currentGold",
         "totalGold",
         "xp",
         "minionsKilled",
@@ -1186,6 +1178,12 @@ function buildFieldCoverage() {
       status: "not_found",
       source: "not-runtime-exported",
       reason: "replay-only participant identity and scalar calibration are not accepted yet",
+    },
+    timelineCurrentGold: {
+      status: "not_promoted",
+      source: "rofl-metadata-statsJson",
+      candidate: "GOLD_EARNED - GOLD_SPENT",
+      reason: "The ROFL final statsJson candidate is internally meaningful but does not match Riot timeline participantFrames.currentGold at the final frame, so it is not emitted as API parity data.",
     },
     timelineEvents: {
       status: "not_found",

@@ -79,14 +79,14 @@ Current offline validation result:
 
 - participant final match-stat comparisons: `1530 / 1530`
 - team final match-stat comparisons: `18 / 18`
-- final timeline damage-stat comparisons: `120 / 120`
+- final timeline scalar/damage-stat comparisons: `170 / 170`
 - metadata comparisons: `7 / 7`
 - identifier comparisons: `0 / 22` non-blocking, because ROFL `statsJson` participant identifiers are replay-local/anonymized or legacy IDs and do not currently equal Riot API PUUIDs or encrypted summoner IDs
 - validation output: `artifacts-keyframes/EUW1-7840220945/rofl-api-metrics-riot-validation.json`
 - validation schema: `rofl-api-metrics-riot-validation/v1`
 - shape-gap output: `artifacts-keyframes/EUW1-7840220945/rofl-api-shape-gap-report.json`
 - shape-gap schema: `rofl-api-shape-gap-report/v1`
-- shape-gap result: `206 / 469` Riot API leaf paths matched, `263` missing
+- shape-gap result: `205 / 469` Riot API leaf paths matched, `264` missing
 - challenge-gap output: `artifacts-keyframes/EUW1-7840220945/rofl-challenge-gap-candidates.json`
 - challenge-gap schema: `rofl-challenge-gap-candidates/v1`
 - challenge-gap result: `2` exact normalized candidates, `29` fuzzy candidates, `95` missing across `126` Riot challenge keys
@@ -119,8 +119,8 @@ Current verified output:
 - 1 final ROFL-only `statsJson` timeline frame with all 10 participants
 - `totals.timelineParticipantCount: 10` based on emitted `frames[].participantFrames`
 - 0 research keyframe metric series in the default runtime artifact
-- 60 ROFL-only final timeline metric series
-- 60 runtime timeline metric points
+- 50 ROFL-only final timeline metric series
+- 50 runtime timeline metric points
 - explicit per-participant/per-metric coverage
 - per-participant `metricStatusCounts` summarizing each coverage row
 - `coverageStatusLegend` for `decoded`, `noisy`, `unstable_identity`, `duplicate_rejected`, and `not_found`
@@ -228,7 +228,7 @@ The verifier checks:
 - the goal audit checks API-shaped timeline frame structure, including `events` arrays, `championStats` containers, and decoded final-frame `damageStats` on participant frames
 - the goal audit checks API-shaped match structure, including `match.metadata`, `match.info.participants`, `match.info.teams`, and decoded final-stat coverage
 - the verifier checks `roflDerivedFieldMap` sources for core match/timeline fields, final participant frame metrics, shape-only containers, and missing timeline events
-- the goal audit checks every participant coverage row has per-metric statuses, with 6 decoded final metrics, 5 explicit `not_found` non-final metrics, and rejected non-final keyframe annotations where identity diagnostics found weak or duplicated evidence
+- the goal audit checks every participant coverage row has per-metric statuses, with 5 decoded final metrics, explicit `not_found` non-final metrics, and rejected non-final keyframe annotations where identity diagnostics found weak or duplicated evidence
 - the goal audit checks rejected candidate evidence exists for positions, item events, inventory timeline, and damage timeline
 - the goal audit records the 16.9 replay-only scalar identity corpus scorecard from `keyframe-rofl-stat-slot-assignments-16.9.json`
 - non-final scalar identity evidence is either absent or explicitly rejected with assignment/comparison counts
@@ -267,7 +267,7 @@ The following fields are extracted from the ROFL file only:
 - final `jungleMinionsKilled`
 - final API-shaped `frames[].participantFrames` values for all 10 participants for:
   - `level`
-  - `currentGold` derived as `GOLD_EARNED - GOLD_SPENT`
+  - `currentGold` is not emitted as API parity: the available ROFL `GOLD_EARNED - GOLD_SPENT` candidate does not match Riot final timeline `participantFrames.currentGold`
   - `totalGold`
   - `xp`
   - `minionsKilled`

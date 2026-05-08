@@ -91,7 +91,6 @@ const requiredFieldCoverage = {
 };
 
 const finalTimelineMetricPaths = new Map([
-  ["currentGold", ["currentGold"]],
   ["totalGold", ["totalGold"]],
   ["level", ["level"]],
   ["xp", ["xp"]],
@@ -258,7 +257,7 @@ function verifyFieldCoverage(artifact) {
   assert(fieldCoverage.timelineFinalParticipantFrames?.participantCount === 10, "Final timeline participant frame coverage must report 10 participants", {
     timelineFinalParticipantFrames: fieldCoverage.timelineFinalParticipantFrames,
   });
-  assert((fieldCoverage.timelineFinalParticipantFrames?.metrics ?? []).length >= 6, "Final timeline participant frame coverage is missing decoded metrics", {
+  assert((fieldCoverage.timelineFinalParticipantFrames?.metrics ?? []).length >= 5, "Final timeline participant frame coverage is missing decoded metrics", {
     timelineFinalParticipantFrames: fieldCoverage.timelineFinalParticipantFrames,
   });
   assert(fieldCoverage.offlineRiotValidation?.runtimeInput === false, "Offline Riot validation must be marked as non-runtime input", {
@@ -544,7 +543,6 @@ function verifyRoflDerivedFieldMap(artifact) {
     ["timeline", "info.endOfGameResult", "rofl-metadata-statsJson"],
     ["timeline", "info.participants", "rofl-metadata-statsJson"],
     ["timeline", "info.frames[].participantFrames[].level", "rofl-metadata-statsJson"],
-    ["timeline", "info.frames[].participantFrames[].currentGold", "rofl-metadata-statsJson"],
     ["timeline", "info.frames[].participantFrames[].totalGold", "rofl-metadata-statsJson"],
     ["timeline", "info.frames[].participantFrames[].xp", "rofl-metadata-statsJson"],
     ["timeline", "info.frames[].participantFrames[].minionsKilled", "rofl-metadata-statsJson"],
@@ -566,6 +564,9 @@ function verifyRoflDerivedFieldMap(artifact) {
   }
   assert(fieldMap.timeline?.["info.frames[].events"]?.status === "not_found", "ROFL-derived field map must keep timeline events missing", {
     entry: fieldMap.timeline?.["info.frames[].events"],
+  });
+  assert(fieldMap.timeline?.["info.frames[].participantFrames[].currentGold"]?.status === "not_promoted", "ROFL-derived field map must not promote final currentGold without API parity", {
+    entry: fieldMap.timeline?.["info.frames[].participantFrames[].currentGold"],
   });
   assert(fieldMap.timeline?.["info.frames[].participantFrames[].championStats"]?.status === "shape_only", "ROFL-derived field map must mark championStats container shape-only", {
     entry: fieldMap.timeline?.["info.frames[].participantFrames[].championStats"],

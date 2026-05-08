@@ -173,6 +173,11 @@ const teamComparisons = [
 ];
 
 const finalTimelineParticipantComparisons = [
+  ["level", "level"],
+  ["xp", "xp"],
+  ["totalGold", "totalGold"],
+  ["minionsKilled", "minionsKilled"],
+  ["jungleMinionsKilled", "jungleMinionsKilled"],
   ["damageStats.magicDamageDone", "damageStats.magicDamageDone"],
   ["damageStats.magicDamageDoneToChampions", "damageStats.magicDamageDoneToChampions"],
   ["damageStats.magicDamageTaken", "damageStats.magicDamageTaken"],
@@ -554,7 +559,7 @@ function main() {
   console.log(`Wrote Riot fixture validation to ${outputPath}`);
   console.log(`ROFL/API participant stat parity: ${output.totals.passCount}/${output.totals.comparisonCount}`);
   console.log(`ROFL/API team stat parity: ${output.totals.teamPassCount}/${output.totals.teamComparisonCount}`);
-  console.log(`ROFL/API final timeline damage parity: ${output.totals.finalTimelinePassCount}/${output.totals.finalTimelineComparisonCount}`);
+  console.log(`ROFL/API final timeline scalar/damage parity: ${output.totals.finalTimelinePassCount}/${output.totals.finalTimelineComparisonCount}`);
   console.log(`ROFL/API metadata parity: ${output.totals.metadataPassCount}/${output.totals.metadataComparisonCount}`);
   console.log(`ROFL/API identifier parity: ${output.totals.identifierPassCount}/${output.totals.identifierComparisonCount} (non-blocking)`);
 
