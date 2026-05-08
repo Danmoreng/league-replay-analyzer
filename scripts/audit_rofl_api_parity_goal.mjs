@@ -515,6 +515,9 @@ function buildAudit(artifact, inputPath) {
           (matchTeamGaps.fields ?? []).includes("info.teams[].bans[].championId") &&
           (matchTeamGaps.fields ?? []).includes("info.teams[].objectives.dragon.first") &&
           (matchTeamGaps.decodedTeamFields ?? []).includes("info.teams[].objectives.*.kills") &&
+          artifact.fieldCoverage?.matchTeams?.corpusValidation?.status === "partially_stable" &&
+          (artifact.fieldCoverage?.matchTeams?.corpusValidation?.knownUnstableFields ?? []).includes("info.teams[].objectives.dragon.kills") &&
+          (matchTeamGaps.unstableDecodedFields ?? []).includes("info.teams[].objectives.dragon.kills") &&
           docsText.includes(artifactRelativePath) &&
           docsText.includes(auditRelativePath) &&
           docsText.includes(shapeGapRelativePath) &&
@@ -545,6 +548,9 @@ function buildAudit(artifact, inputPath) {
           `fieldCoverage.matchTeamGaps.status=${matchTeamGaps.status ?? null}`,
           `fieldCoverage.matchTeamGaps.fields=${(matchTeamGaps.fields ?? []).join(",")}`,
           `fieldCoverage.matchTeamGaps.decodedTeamFields=${(matchTeamGaps.decodedTeamFields ?? []).join(",")}`,
+          `fieldCoverage.matchTeams.corpusValidation.status=${artifact.fieldCoverage?.matchTeams?.corpusValidation?.status ?? null}`,
+          `fieldCoverage.matchTeams.corpusValidation.knownUnstableFields=${(artifact.fieldCoverage?.matchTeams?.corpusValidation?.knownUnstableFields ?? []).join(",")}`,
+          `fieldCoverage.matchTeamGaps.unstableDecodedFields=${(matchTeamGaps.unstableDecodedFields ?? []).join(",")}`,
         ],
         [
           ...requiredFullParityGaps.filter((gap) => !fullParityGaps.has(gap)),
@@ -564,6 +570,9 @@ function buildAudit(artifact, inputPath) {
           ...(!(matchTeamGaps.fields ?? []).includes("info.teams[].bans[].championId") ? ["fieldCoverage.matchTeamGaps missing bans championId"] : []),
           ...(!(matchTeamGaps.fields ?? []).includes("info.teams[].objectives.dragon.first") ? ["fieldCoverage.matchTeamGaps missing dragon first objective"] : []),
           ...(!(matchTeamGaps.decodedTeamFields ?? []).includes("info.teams[].objectives.*.kills") ? ["fieldCoverage.matchTeamGaps does not distinguish decoded objective kills"] : []),
+          ...(artifact.fieldCoverage?.matchTeams?.corpusValidation?.status !== "partially_stable" ? ["fieldCoverage.matchTeams missing partially_stable corpus validation status"] : []),
+          ...(!(artifact.fieldCoverage?.matchTeams?.corpusValidation?.knownUnstableFields ?? []).includes("info.teams[].objectives.dragon.kills") ? ["fieldCoverage.matchTeams corpus validation missing objective instability"] : []),
+          ...(!(matchTeamGaps.unstableDecodedFields ?? []).includes("info.teams[].objectives.dragon.kills") ? ["fieldCoverage.matchTeamGaps missing unstable decoded objective fields"] : []),
           ...(!fs.existsSync(docsPath) ? ["docs/rofl-api-parity.md missing"] : []),
           ...(!docsText.includes(artifactRelativePath) ? [`docs missing ${artifactRelativePath}`] : []),
           ...(!docsText.includes(auditRelativePath) ? [`docs missing ${auditRelativePath}`] : []),

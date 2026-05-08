@@ -102,6 +102,7 @@ Current offline validation result:
 - corpus validation schema: `rofl-api-parity-corpus-validation/v1`
 - corpus validation result across `20` patch `16.9` fixture-backed replays: participant final match stats `30598 / 30600`, team final stats `335 / 360`, final timeline scalar/damage stats `3400 / 3400`, metadata `140 / 140`
 - corpus validation known unstable fields: participant `perks.styles`, `totalHeal`; team objective kill counts for champion, tower, dragon, baron, horde, and inhibitor
+- `fieldCoverage.matchTeams.corpusValidation` marks team objective kill aggregates as `partially_stable`: they are ROFL-derived and validate on the focused replay, but corpus validation shows objective undercounts on some 16.9 replays
 - goal audit output: `artifacts-keyframes/EUW1-7840220945/rofl-api-parity-goal-audit.json`
 - goal audit schema: `rofl-api-parity-goal-audit/v1`
 - mode: `offline-validation-only`
@@ -141,6 +142,7 @@ Current verified output:
 - `fieldCoverage.matchMetadataGaps` for Riot match metadata fields not present in the current ROFL summary, with inspected ROFL sources and decoded metadata keys recorded
 - `fieldCoverage.matchParticipantGaps` for remaining participant fields that are not accepted as ROFL/API parity, including rejected/gap evidence for static champion IDs, event-derived first kill/tower flags, and missing account/profile fields
 - `fieldCoverage.matchTeamGaps` for Riot team fields not present in the current ROFL summary, including bans and `objectives.*.first` event-order flags
+- `fieldCoverage.matchTeamGaps.unstableDecodedFields` lists decoded team objective kill fields that still need event-level or alternate ROFL evidence before they can be treated as patch-wide stable parity
 - `identityLinkage` that summarizes final roster linkage, Riot API identifier parity status, and non-final scalar identity blockers
 - `identityLinkage.roflMetadataParticipantIdentifiers` marks ROFL `statsJson` participant identifiers as internal/shape-only, not verified Riot API PUUIDs or encrypted summoner IDs
 - `parityChecklist` that maps the current goal requirements to artifact evidence and explicit gaps

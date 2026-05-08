@@ -1134,6 +1134,21 @@ function buildFieldCoverage() {
         "objectives.dragon.kills",
         "objectives.baron.kills",
       ],
+      corpusValidation: {
+        status: "partially_stable",
+        validationArtifact: "artifacts-keyframes/rofl-api-parity-corpus-validation-16.9.json",
+        patch: "16.9",
+        stableOnFocusedReplay: true,
+        knownUnstableFields: [
+          "info.teams[].objectives.champion.kills",
+          "info.teams[].objectives.tower.kills",
+          "info.teams[].objectives.inhibitor.kills",
+          "info.teams[].objectives.dragon.kills",
+          "info.teams[].objectives.baron.kills",
+          "info.teams[].objectives.horde.kills",
+        ],
+        reason: "Participant final statsJson aggregation matches the focused replay, but the 16.9 corpus shows systematic objective undercounts on some replays, so these values remain ROFL-derived candidate parity rather than patch-wide stable parity.",
+      },
     },
     matchTeamGaps: {
       status: "not_found",
@@ -1146,6 +1161,14 @@ function buildFieldCoverage() {
       decodedTeamFields: [
         "info.teams[].win",
         "info.teams[].objectives.*.kills",
+      ],
+      unstableDecodedFields: [
+        "info.teams[].objectives.champion.kills",
+        "info.teams[].objectives.tower.kills",
+        "info.teams[].objectives.inhibitor.kills",
+        "info.teams[].objectives.dragon.kills",
+        "info.teams[].objectives.baron.kills",
+        "info.teams[].objectives.horde.kills",
       ],
       fields: [
         "info.teams[].bans[].championId",
