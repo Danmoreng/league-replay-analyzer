@@ -65,6 +65,12 @@ Summarize subrecord families for the ranked reconstruction chunk targets:
 npm run summarize:reconstruction-chunks -- --top-intervals 3
 ```
 
+Verify the saved reconstruction chunk target summary without rerunning native extraction:
+
+```powershell
+npm run verify:reconstruction-chunks
+```
+
 Write the prompt-to-artifact goal audit:
 
 ```powershell
