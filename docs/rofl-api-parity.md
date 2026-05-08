@@ -77,6 +77,12 @@ Compare the ranked eventful reconstruction chunks against quiet chunk windows to
 npm run compare:reconstruction-chunks -- --top-eventful-intervals 3 --quiet-intervals 3
 ```
 
+Verify the saved eventful-vs-quiet chunk-family comparison:
+
+```powershell
+npm run verify:reconstruction-chunk-comparison
+```
+
 Write the prompt-to-artifact goal audit:
 
 ```powershell
