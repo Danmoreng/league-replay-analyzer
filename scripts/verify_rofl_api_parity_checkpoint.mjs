@@ -297,6 +297,21 @@ function verifyTimelineReconstructionOutput(replayId, artifactRoot) {
   if (row.reconstructionModel?.model !== "keyframe-baseline-plus-chunk-deltas") {
     throw new Error("Timeline reconstruction audit must record the keyframe baseline plus chunk-delta model.");
   }
+  const topInterval = row.topEventfulIntervals?.[0];
+  if (!topInterval || (topInterval.eventCounts?.total ?? 0) <= 0) {
+    throw new Error("Timeline reconstruction audit must record eventful intervals for decoder targeting.");
+  }
+  const missingChunkTarget = (topInterval.chunkTargets ?? []).find((chunk) =>
+    !Number.isFinite(chunk.chunkId) ||
+    !Number.isFinite(chunk.id) ||
+    !Number.isFinite(chunk.payloadOffset) ||
+    !Number.isFinite(chunk.length) ||
+    !Number.isFinite(chunk.uncompressedLength) ||
+    chunk.codec !== "zstd"
+  );
+  if ((topInterval.chunkTargets ?? []).length === 0 || missingChunkTarget) {
+    throw new Error(`Timeline reconstruction audit eventful intervals must include concrete zstd chunk payload targets: ${JSON.stringify(topInterval)}`);
+  }
 }
 
 function main() {
