@@ -95,6 +95,18 @@ Verify the saved decoder family payload samples:
 npm run verify:reconstruction-family-samples
 ```
 
+Analyze byte-pattern summaries for the saved decoder family payload samples:
+
+```powershell
+npm run analyze:reconstruction-family-samples
+```
+
+Verify the saved decoder family sample analysis:
+
+```powershell
+npm run verify:reconstruction-family-sample-analysis
+```
+
 Write the prompt-to-artifact goal audit:
 
 ```powershell
@@ -155,6 +167,7 @@ Current offline validation result:
 - reconstruction chunk family comparison: `artifacts-keyframes/reconstruction-chunk-family-comparison-16.9.json` compares eventful chunk windows against quiet windows and ranks enriched subrecord families; this is offline decoder guidance for chunk-delta reconstruction, not runtime extraction
 - current event-enriched decoder queue from that comparison starts with `241-0x02`, `241-0x04`, `512-0x00`, `2-0xC7`, `49607-0xF1`, and `61724-0x00`; initial native profiles show dense/high-variance payloads and repeated token patterns, so none of these should be exposed as runtime API metrics until a chunk-delta state or event schema is decoded and validated
 - reconstruction family samples: `artifacts-keyframes/reconstruction-family-samples-16.9.json` stores full chunk payload hex samples for those enriched families across the eventful replay windows; this is an offline reverse-engineering artifact and must not be treated as decoded API parity
+- reconstruction family sample analysis: `artifacts-keyframes/reconstruction-family-sample-analysis-16.9.json` summarizes common prefixes, byte frequencies, and aligned 16/32-bit token frequencies for the sampled enriched families; this is decoder guidance only, not extracted API data
 - goal audit output: `artifacts-keyframes/EUW1-7840220945/rofl-api-parity-goal-audit.json`
 - goal audit schema: `rofl-api-parity-goal-audit/v1`
 - mode: `offline-validation-only`
