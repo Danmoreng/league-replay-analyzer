@@ -81,7 +81,26 @@ function verify(output, args, inputPath) {
     for (const [name, rows] of Object.entries(family.topByteSequences ?? {})) {
       assert(["length4", "length6", "length8"].includes(name), "Invalid byte sequence bucket.", { name, rows });
       for (const sequence of rows ?? []) {
-        assert(/^([0-9A-F]{2})( [0-9A-F]{2})+$/.test(sequence.value) && (sequence.count ?? 0) > 0, "Invalid byte sequence row.", sequence);
+        assert(/^([0-9A-F]{2})( [0-9A-F]{2})+$/.test(sequence.value) &&
+          (sequence.count ?? 0) > 0 &&
+          (sequence.distinctOffsets ?? 0) > 0 &&
+          (sequence.topOffsets ?? []).length > 0 &&
+          (sequence.examples ?? []).length > 0,
+          "Invalid byte sequence row.",
+          sequence,
+        );
+        for (const offset of sequence.topOffsets ?? []) {
+          assert(Number.isFinite(offset.offset) && (offset.count ?? 0) > 0, "Invalid byte sequence offset row.", offset);
+        }
+        for (const example of sequence.examples ?? []) {
+          assert(example.replayId &&
+            Number.isFinite(example.chunkId) &&
+            Number.isFinite(example.recordOffset) &&
+            Number.isFinite(example.relativeOffset),
+            "Invalid byte sequence example.",
+            example,
+          );
+        }
       }
     }
   }

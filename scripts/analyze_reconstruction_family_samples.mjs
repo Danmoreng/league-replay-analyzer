@@ -78,6 +78,46 @@ function sequenceKey(bytes, offset, length) {
   return bytes.slice(offset, offset + length).map(hexByte).join(" ");
 }
 
+function recordSequence(sequences, key, record, relativeOffset) {
+  const entry = sequences.get(key) ?? {
+    value: key,
+    count: 0,
+    offsets: new Map(),
+    examples: [],
+  };
+  entry.count += 1;
+  increment(entry.offsets, String(relativeOffset));
+  if (entry.examples.length < 6) {
+    entry.examples.push({
+      replayId: record.replayId,
+      chunkId: record.chunkId,
+      recordOffset: record.offset,
+      relativeOffset,
+    });
+  }
+  sequences.set(key, entry);
+}
+
+function summarizeSequences(sequences, limit) {
+  return [...sequences.values()]
+    .map((entry) => ({
+      value: entry.value,
+      count: entry.count,
+      distinctOffsets: entry.offsets.size,
+      topOffsets: sortedCounts(entry.offsets, 8).map((offset) => ({
+        offset: Number.parseInt(offset.value, 10),
+        count: offset.count,
+      })),
+      examples: entry.examples,
+    }))
+    .sort((left, right) =>
+      right.count - left.count ||
+      left.distinctOffsets - right.distinctOffsets ||
+      left.value.localeCompare(right.value),
+    )
+    .slice(0, limit);
+}
+
 function commonPrefixLength(records) {
   if (records.length === 0) {
     return 0;
@@ -142,13 +182,13 @@ function analyzeFamily(family, args) {
       increment(u32Counts, `0x${hexWord(value >>> 0)}`);
     }
     for (let index = 0; index + 3 < record.bytes.length; index += 1) {
-      increment(seq4Counts, sequenceKey(record.bytes, index, 4));
+      recordSequence(seq4Counts, sequenceKey(record.bytes, index, 4), record, index);
     }
     for (let index = 0; index + 5 < record.bytes.length; index += 1) {
-      increment(seq6Counts, sequenceKey(record.bytes, index, 6));
+      recordSequence(seq6Counts, sequenceKey(record.bytes, index, 6), record, index);
     }
     for (let index = 0; index + 7 < record.bytes.length; index += 1) {
-      increment(seq8Counts, sequenceKey(record.bytes, index, 8));
+      recordSequence(seq8Counts, sequenceKey(record.bytes, index, 8), record, index);
     }
   }
   return {
@@ -167,9 +207,9 @@ function analyzeFamily(family, args) {
     topU16Words: sortedCounts(u16Counts, args.topWords),
     topU32Words: sortedCounts(u32Counts, args.topWords),
     topByteSequences: {
-      length4: sortedCounts(seq4Counts, args.topSequences),
-      length6: sortedCounts(seq6Counts, args.topSequences),
-      length8: sortedCounts(seq8Counts, args.topSequences),
+      length4: summarizeSequences(seq4Counts, args.topSequences),
+      length6: summarizeSequences(seq6Counts, args.topSequences),
+      length8: summarizeSequences(seq8Counts, args.topSequences),
     },
     sampleLocations: records.slice(0, 8).map((record) => ({
       replayId: record.replayId,
