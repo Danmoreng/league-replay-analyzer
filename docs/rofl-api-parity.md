@@ -110,6 +110,7 @@ Current offline validation result:
 - corpus validation output: `artifacts-keyframes/rofl-api-parity-corpus-validation-16.9.json`
 - corpus validation schema: `rofl-api-parity-corpus-validation/v1`
 - corpus validation result across `20` patch `16.9` fixture-backed replays: participant final match stats `30598 / 30600`, team final stats `335 / 360`, final timeline scalar/damage stats `3400 / 3400`, metadata `140 / 140`
+- corpus validation timeline reconstruction block: `20 / 20` replays have API frames equal replay keyframes plus one, `20 / 20` pass the keyframe chunk formula, `20 / 20` pass the chunk record formula, `572 / 572` API intervals map to chunks, and the model is `keyframe-baseline-plus-chunk-deltas`
 - corpus validation known unstable fields: participant `perks.styles`, `totalHeal`; team objective kill counts for champion, tower, dragon, baron, horde, and inhibitor
 - `fieldCoverage.matchTeams.corpusValidation` marks team objective kill aggregates as `partially_stable`: they are ROFL-derived and validate on the focused replay, but corpus validation shows objective undercounts on some 16.9 replays
 - timeline reconstruction corpus audit: `artifacts-keyframes/timeline-reconstruction-model-16.9.json` confirms `20 / 20` patch `16.9` fixture-backed replays have API frames equal replay keyframes plus one, keyframe chunk formula holds, and chunk record formula holds

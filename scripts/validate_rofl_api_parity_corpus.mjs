@@ -85,6 +85,8 @@ function main() {
   const replayIds = discoverReplayIds(artifactRoot, apiRoot, args.versionGroup);
   const exportScript = path.join("scripts", "export_rofl_api_metrics.mjs");
   const validateScript = path.join("scripts", "validate_rofl_api_metrics_against_riot.mjs");
+  const timelineReconstructionScript = path.join("scripts", "audit_timeline_reconstruction_model.mjs");
+  const timelineReconstructionPath = path.join(artifactRoot, `timeline-reconstruction-model-${args.versionGroup}.json`);
 
   const rows = [];
   for (const replayId of replayIds) {
@@ -155,6 +157,16 @@ function main() {
     metadata: { pass: 0, total: 0, fail: 0 },
     identifiers: { pass: 0, total: 0, fail: 0 },
   });
+  runNode(timelineReconstructionScript, [
+    "--version-group",
+    args.versionGroup,
+    "--artifact-root",
+    artifactRoot,
+    "--api-root",
+    apiRoot,
+    "--output-path",
+    timelineReconstructionPath,
+  ]);
   const output = {
     corpusValidationSchema: "rofl-api-parity-corpus-validation/v1",
     generatedAtUtc: new Date().toISOString(),
@@ -165,6 +177,7 @@ function main() {
     artifactRoot,
     apiRoot,
     totals,
+    timelineReconstruction: summarizeTimelineReconstruction(timelineReconstructionPath),
     failureSummary: {
       participantFields: mergeCounts(rows.map((row) => row.failureSummary.participantFields)),
       teamFields: mergeCounts(rows.map((row) => row.failureSummary.teamFields)),
@@ -180,6 +193,7 @@ function main() {
   console.log(`team parity: ${totals.team.pass}/${totals.team.total}`);
   console.log(`final timeline parity: ${totals.finalTimeline.pass}/${totals.finalTimeline.total}`);
   console.log(`metadata parity: ${totals.metadata.pass}/${totals.metadata.total}`);
+  console.log(`timeline reconstruction frame/keyframe +1: ${output.timelineReconstruction?.apiFramesEqualKeyframesPlusOne ?? null}/${output.timelineReconstruction?.replayCount ?? null}`);
   if (args.requirePerfectMatch && (
     totals.participant.fail !== 0 ||
     totals.team.fail !== 0 ||
@@ -207,6 +221,30 @@ function mergeCounts(countsList) {
     }
   }
   return Object.fromEntries(Object.entries(merged).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function summarizeTimelineReconstruction(reportPath) {
+  if (!fs.existsSync(reportPath)) {
+    return {
+      status: "missing",
+      reportPath,
+    };
+  }
+  const report = readJson(reportPath);
+  return {
+    status: report.auditSchema === "rofl-timeline-reconstruction-model/v1" ? "available" : "schema_mismatch",
+    reportPath,
+    mode: report.mode ?? null,
+    runtimeInput: report.runtimeInput ?? null,
+    replayCount: report.summary?.replayCount ?? null,
+    apiFramesEqualKeyframesPlusOne: report.summary?.apiFramesEqualKeyframesPlusOne ?? null,
+    keyframeChunkFormulaHolds: report.summary?.keyframeChunkFormulaHolds ?? null,
+    chunkRecordFormulaHolds: report.summary?.chunkRecordFormulaHolds ?? null,
+    totalApiIntervals: report.summary?.totalApiIntervals ?? null,
+    totalChunkMappedIntervals: report.summary?.totalChunkMappedIntervals ?? null,
+    totalTimelineEvents: report.summary?.totalTimelineEvents ?? null,
+    reconstructionModel: report.rows?.[0]?.reconstructionModel?.model ?? null,
+  };
 }
 
 try {
