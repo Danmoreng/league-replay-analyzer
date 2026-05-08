@@ -127,10 +127,13 @@ function buildAudit(artifact, inputPath) {
   const shapeGap = readOptionalJson(shapeGapPath);
   const challengeGapPath = path.join(path.dirname(inputPath), "rofl-challenge-gap-candidates.json");
   const challengeGap = readOptionalJson(challengeGapPath);
+  const timelineReconstructionPath = path.join(path.dirname(inputPath), "timeline-reconstruction-model.json");
+  const timelineReconstruction = readOptionalJson(timelineReconstructionPath);
   const artifactRelativePath = path.relative(process.cwd(), inputPath).replaceAll("\\", "/");
   const auditRelativePath = path.relative(process.cwd(), path.join(path.dirname(inputPath), "rofl-api-parity-goal-audit.json")).replaceAll("\\", "/");
   const shapeGapRelativePath = path.relative(process.cwd(), shapeGapPath).replaceAll("\\", "/");
   const challengeGapRelativePath = path.relative(process.cwd(), challengeGapPath).replaceAll("\\", "/");
+  const timelineReconstructionRelativePath = path.relative(process.cwd(), timelineReconstructionPath).replaceAll("\\", "/");
   const identityCorpusPath = path.join(process.cwd(), "artifacts-keyframes", "keyframe-rofl-stat-slot-assignments-16.9.json");
   const identityCorpus = readOptionalJson(identityCorpusPath);
   const identityThresholdSweepPath = path.join(process.cwd(), "artifacts-keyframes", "keyframe-rofl-stat-support-threshold-sweep-16.9.json");
@@ -521,10 +524,19 @@ function buildAudit(artifact, inputPath) {
           artifact.fieldCoverage?.timelineNonFinalParticipantFrames?.reconstructionDirection?.model === "keyframe-baseline-plus-chunk-deltas" &&
           artifact.fieldCoverage?.timelineEvents?.source === "chunk-delta-events-not-extracted" &&
           artifact.fieldCoverage?.positions?.source === "state-reconstruction-not-extracted-for-16.9" &&
+          timelineReconstruction?.auditSchema === "rofl-timeline-reconstruction-model/v1" &&
+          timelineReconstruction?.mode === "offline-structure-audit" &&
+          timelineReconstruction?.runtimeInput === false &&
+          timelineReconstruction?.rows?.[0]?.replayId === artifact.source?.replayId &&
+          timelineReconstruction?.rows?.[0]?.structural?.apiFramesEqualKeyframesPlusOne === true &&
+          timelineReconstruction?.rows?.[0]?.structural?.keyframeChunkFormulaHolds === true &&
+          timelineReconstruction?.rows?.[0]?.structural?.chunkRecordFormulaHolds === true &&
+          timelineReconstruction?.rows?.[0]?.reconstructionModel?.model === "keyframe-baseline-plus-chunk-deltas" &&
           docsText.includes(artifactRelativePath) &&
           docsText.includes(auditRelativePath) &&
           docsText.includes(shapeGapRelativePath) &&
           docsText.includes(challengeGapRelativePath) &&
+          docsText.includes(timelineReconstructionRelativePath) &&
           docsText.includes("inspected ROFL sources") &&
           docsText.includes("npm run audit:rofl-api-shape-gap") &&
           docsText.includes("npm run audit:rofl-challenge-gaps") &&
@@ -559,6 +571,16 @@ function buildAudit(artifact, inputPath) {
           `fieldCoverage.timelineNonFinalParticipantFrames.reconstructionDirection.model=${artifact.fieldCoverage?.timelineNonFinalParticipantFrames?.reconstructionDirection?.model ?? null}`,
           `fieldCoverage.timelineEvents.source=${artifact.fieldCoverage?.timelineEvents?.source ?? null}`,
           `fieldCoverage.positions.source=${artifact.fieldCoverage?.positions?.source ?? null}`,
+          `timelineReconstructionPath=${timelineReconstructionPath}`,
+          `timelineReconstruction.auditSchema=${timelineReconstruction?.auditSchema ?? null}`,
+          `timelineReconstruction.mode=${timelineReconstruction?.mode ?? null}`,
+          `timelineReconstruction.runtimeInput=${timelineReconstruction?.runtimeInput ?? null}`,
+          `timelineReconstruction replayId=${timelineReconstruction?.rows?.[0]?.replayId ?? null}`,
+          `timelineReconstruction apiFrameCount=${timelineReconstruction?.rows?.[0]?.structural?.apiFrameCount ?? null}`,
+          `timelineReconstruction replayKeyframeCount=${timelineReconstruction?.rows?.[0]?.structural?.replayKeyframeCount ?? null}`,
+          `timelineReconstruction apiFramesEqualKeyframesPlusOne=${timelineReconstruction?.rows?.[0]?.structural?.apiFramesEqualKeyframesPlusOne ?? null}`,
+          `timelineReconstruction keyframeChunkFormulaHolds=${timelineReconstruction?.rows?.[0]?.structural?.keyframeChunkFormulaHolds ?? null}`,
+          `timelineReconstruction chunkRecordFormulaHolds=${timelineReconstruction?.rows?.[0]?.structural?.chunkRecordFormulaHolds ?? null}`,
         ],
         [
           ...requiredFullParityGaps.filter((gap) => !fullParityGaps.has(gap)),
@@ -584,11 +606,21 @@ function buildAudit(artifact, inputPath) {
           ...(artifact.fieldCoverage?.timelineNonFinalParticipantFrames?.reconstructionDirection?.model !== "keyframe-baseline-plus-chunk-deltas" ? ["fieldCoverage.timelineNonFinalParticipantFrames missing chunk-delta reconstruction direction"] : []),
           ...(artifact.fieldCoverage?.timelineEvents?.source !== "chunk-delta-events-not-extracted" ? ["fieldCoverage.timelineEvents missing chunk-delta event extraction source"] : []),
           ...(artifact.fieldCoverage?.positions?.source !== "state-reconstruction-not-extracted-for-16.9" ? ["fieldCoverage.positions missing state reconstruction source"] : []),
+          ...(!timelineReconstruction ? ["timeline reconstruction audit missing"] : []),
+          ...(timelineReconstruction && timelineReconstruction.auditSchema !== "rofl-timeline-reconstruction-model/v1" ? ["timeline reconstruction audit schema mismatch"] : []),
+          ...(timelineReconstruction && timelineReconstruction.mode !== "offline-structure-audit" ? ["timeline reconstruction audit mode mismatch"] : []),
+          ...(timelineReconstruction && timelineReconstruction.runtimeInput !== false ? ["timeline reconstruction audit must be non-runtime"] : []),
+          ...(timelineReconstruction && timelineReconstruction.rows?.[0]?.replayId !== artifact.source?.replayId ? ["timeline reconstruction audit replay mismatch"] : []),
+          ...(timelineReconstruction && timelineReconstruction.rows?.[0]?.structural?.apiFramesEqualKeyframesPlusOne !== true ? ["timeline reconstruction audit missing API frame/keyframe +1 evidence"] : []),
+          ...(timelineReconstruction && timelineReconstruction.rows?.[0]?.structural?.keyframeChunkFormulaHolds !== true ? ["timeline reconstruction audit missing keyframe chunk formula evidence"] : []),
+          ...(timelineReconstruction && timelineReconstruction.rows?.[0]?.structural?.chunkRecordFormulaHolds !== true ? ["timeline reconstruction audit missing chunk record formula evidence"] : []),
+          ...(timelineReconstruction && timelineReconstruction.rows?.[0]?.reconstructionModel?.model !== "keyframe-baseline-plus-chunk-deltas" ? ["timeline reconstruction audit missing reconstruction model"] : []),
           ...(!fs.existsSync(docsPath) ? ["docs/rofl-api-parity.md missing"] : []),
           ...(!docsText.includes(artifactRelativePath) ? [`docs missing ${artifactRelativePath}`] : []),
           ...(!docsText.includes(auditRelativePath) ? [`docs missing ${auditRelativePath}`] : []),
           ...(!docsText.includes(shapeGapRelativePath) ? [`docs missing ${shapeGapRelativePath}`] : []),
           ...(!docsText.includes(challengeGapRelativePath) ? [`docs missing ${challengeGapRelativePath}`] : []),
+          ...(!docsText.includes(timelineReconstructionRelativePath) ? [`docs missing ${timelineReconstructionRelativePath}`] : []),
           ...(!docsText.includes("inspected ROFL sources") ? ["docs missing inspected ROFL sources metadata-gap wording"] : []),
           ...(!docsText.includes("npm run audit:rofl-api-shape-gap") ? ["docs missing shape gap command"] : []),
           ...(!docsText.includes("npm run audit:rofl-challenge-gaps") ? ["docs missing challenge gap command"] : []),
