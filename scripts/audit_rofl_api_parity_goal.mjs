@@ -67,6 +67,28 @@ function checklistByRequirement(artifact) {
   return new Map((artifact.parityChecklist ?? []).map((entry) => [entry.requirement, entry]));
 }
 
+function statusForChecklist(status) {
+  if (status === "satisfied") {
+    return "satisfied";
+  }
+  if (status === "partial") {
+    return "partial";
+  }
+  return "not_satisfied";
+}
+
+function buildPromptToArtifactChecklist(checks) {
+  return checks.map((check, index) => ({
+    item: index + 1,
+    requirement: check.requirement,
+    status: statusForChecklist(check.status),
+    evidenceCount: check.evidence?.length ?? 0,
+    gapCount: check.gaps?.length ?? 0,
+    primaryEvidence: (check.evidence ?? []).slice(0, 8),
+    gaps: check.gaps ?? [],
+  }));
+}
+
 function readOptionalJson(filePath) {
   if (!fs.existsSync(filePath)) {
     return null;
@@ -563,13 +585,25 @@ function buildAudit(artifact, inputPath) {
   ];
 
   const missingOrIncomplete = checks.filter((check) => check.status !== "satisfied");
+  const promptToArtifactChecklist = buildPromptToArtifactChecklist(checks);
   return {
     auditSchema: "rofl-api-parity-goal-audit/v1",
     generatedAtUtc: new Date().toISOString(),
     inputPath,
     replayId: artifact.source?.replayId ?? null,
     objective: "Achieve API-data parity from ROFL-only extraction.",
+    successCriteria: [
+      "runtime artifact is generated from ROFL metadata/statsJson without Riot API runtime input",
+      "all 10 participants are present in API-shaped match and timeline structures",
+      "decoded match/timeline fields identify their ROFL source and validation coverage",
+      "per-participant/per-metric coverage states decoded, noisy, unstable_identity, duplicate_rejected, or not_found",
+      "low-confidence keyframe candidates are rejected unless replay-only identity is stable",
+      "offline Riot API fixtures are used only for validation and gap analysis",
+      "latest patch 16.9 has at least one useful ROFL-only artifact and documented gaps",
+      "full Riot match/timeline API parity is reached only when shape-gap and goal checks have no missing items",
+    ],
     completionStatus: missingOrIncomplete.length === 0 ? "complete" : "not_complete",
+    promptToArtifactChecklist,
     checks,
     missingOrIncomplete,
   };

@@ -65,6 +65,22 @@ function verifyGoalAuditOutput(replayId, artifactRoot) {
   if (audit.completionStatus !== "not_complete") {
     throw new Error(`Goal audit should remain not_complete while full parity gaps remain: ${audit.completionStatus}.`);
   }
+  if ((audit.successCriteria ?? []).length < 8) {
+    throw new Error("Goal audit must restate concrete success criteria.");
+  }
+  if ((audit.promptToArtifactChecklist ?? []).length !== (audit.checks ?? []).length) {
+    throw new Error("Goal audit prompt-to-artifact checklist must map every check.");
+  }
+  const checklistByRequirement = new Map((audit.promptToArtifactChecklist ?? []).map((entry) => [entry.requirement, entry]));
+  for (const requirement of [
+    "Improve replay-only participant identity linkage using ROFL-only evidence.",
+    "Full API-data parity from ROFL-only extraction.",
+  ]) {
+    const entry = checklistByRequirement.get(requirement);
+    if (!entry || entry.status === "satisfied" || (entry.gapCount ?? 0) <= 0) {
+      throw new Error(`Goal audit checklist must keep '${requirement}' open with concrete gaps: ${JSON.stringify(entry)}`);
+    }
+  }
 }
 
 function verifyShapeGapOutput(replayId, artifactRoot) {
