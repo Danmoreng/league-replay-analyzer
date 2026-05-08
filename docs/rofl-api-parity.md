@@ -114,6 +114,7 @@ Current offline validation result:
 - corpus validation known unstable fields: participant `perks.styles`, `totalHeal`; team objective kill counts for champion, tower, dragon, baron, horde, and inhibitor
 - `fieldCoverage.matchTeams.corpusValidation` marks team objective kill aggregates as `partially_stable`: they are ROFL-derived and validate on the focused replay, but corpus validation shows objective undercounts on some 16.9 replays
 - timeline reconstruction corpus audit: `artifacts-keyframes/timeline-reconstruction-model-16.9.json` confirms `20 / 20` patch `16.9` fixture-backed replays have API frames equal replay keyframes plus one, keyframe chunk formula holds, and chunk record formula holds
+- timeline reconstruction corpus audit also records `summary.topEventfulIntervals`, ranked by objectives, champion kills, item events, and total events; use those chunk windows as the first reverse-engineering targets for chunk-delta event/state decoding
 - goal audit output: `artifacts-keyframes/EUW1-7840220945/rofl-api-parity-goal-audit.json`
 - goal audit schema: `rofl-api-parity-goal-audit/v1`
 - mode: `offline-validation-only`

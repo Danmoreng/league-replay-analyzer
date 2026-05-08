@@ -72,6 +72,34 @@ function eventCounts(events) {
   };
 }
 
+function eventPriority(counts) {
+  return (counts.eliteMonsterKills * 100)
+    + (counts.buildingKills * 80)
+    + (counts.championKills * 25)
+    + (counts.itemEvents * 3)
+    + counts.total;
+}
+
+function topEventfulIntervals(rows, limit = 12) {
+  return rows.flatMap((row) => row.intervals.map((interval) => ({
+    replayId: row.replayId,
+    apiIntervalIndex: interval.apiIntervalIndex,
+    startMs: interval.startMs,
+    endMs: interval.endMs,
+    chunkIds: interval.chunkIds,
+    eventCounts: interval.eventCounts,
+    priority: eventPriority(interval.eventCounts),
+  })))
+    .filter((interval) => interval.eventCounts.total > 0)
+    .sort((left, right) =>
+      right.priority - left.priority ||
+      right.eventCounts.total - left.eventCounts.total ||
+      left.replayId.localeCompare(right.replayId) ||
+      left.apiIntervalIndex - right.apiIntervalIndex,
+    )
+    .slice(0, limit);
+}
+
 function flattenEvents(timeline) {
   return (timeline.info?.frames ?? []).flatMap((frame, frameIndex) =>
     (frame.events ?? []).map((event) => ({ ...event, frameIndex })),
@@ -120,7 +148,7 @@ function auditReplay(artifactRoot, apiRoot, replayId) {
   });
 
   const tailIntervalMs = frames.length > 1 ? frames.at(-1).timestamp - frames.at(-2).timestamp : null;
-  return {
+  const row = {
     replayId,
     gameVersion: summary.gameVersion ?? null,
     summaryPath,
@@ -151,6 +179,10 @@ function auditReplay(artifactRoot, apiRoot, replayId) {
     },
     intervals,
   };
+  return {
+    ...row,
+    topEventfulIntervals: topEventfulIntervals([row], 8),
+  };
 }
 
 function summarize(rows) {
@@ -162,6 +194,7 @@ function summarize(rows) {
     totalApiIntervals: rows.reduce((sum, row) => sum + row.intervals.length, 0),
     totalChunkMappedIntervals: rows.reduce((sum, row) => sum + row.intervals.filter((interval) => interval.chunkIds.length > 0).length, 0),
     totalTimelineEvents: rows.reduce((sum, row) => sum + row.intervals.reduce((inner, interval) => inner + interval.eventCounts.total, 0), 0),
+    topEventfulIntervals: topEventfulIntervals(rows, 16),
   };
 }
 
