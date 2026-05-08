@@ -90,6 +90,7 @@ Current offline validation result:
 - challenge-gap schema: `rofl-challenge-gap-candidates/v1`
 - challenge-gap result: `2` exact normalized candidates, `29` fuzzy candidates, `95` missing across `126` Riot challenge keys
 - exact challenge value parity: `1` promoted validated exact candidate (`turretTakedowns`) and `1` exact-name candidate rejected by value mismatch (`killingSprees`)
+- challenge corpus support: `20` patch `16.9` fixture-backed replays scanned; fuzzy `snowballsHit <- Missions_SnowballsHit` is kept rejected as all-zero-only evidence, while `turretTakedowns <- TURRET_TAKEDOWNS` has non-zero corpus support
 - goal audit output: `artifacts-keyframes/EUW1-7840220945/rofl-api-parity-goal-audit.json`
 - goal audit schema: `rofl-api-parity-goal-audit/v1`
 - mode: `offline-validation-only`
@@ -136,7 +137,7 @@ Current verified output:
 - `rofl-api-parity-goal-audit.json` maps the user objective to concrete artifact evidence and keeps completion status `not_complete` while full parity gaps remain
 - `rofl-api-shape-gap-report.json` is an offline-only comparison against Riot match/timeline fixture shape; it quantifies missing API leaf paths without being a runtime extraction input
 - `rofl-api-shape-gap-report.json` categorizes missing paths into actionable buckets such as match metadata, participant challenges, participant event flags, account/profile fields, static ID mapping, team bans, first-objective flags, timeline events, and timeline participant-frame gaps
-- `rofl-challenge-gap-candidates.json` is an offline-only analysis of missing Riot `challenges.*` fields against ROFL `statsJson` keys; exact-name candidates are value-checked before promotion
+- `rofl-challenge-gap-candidates.json` is an offline-only analysis of missing Riot `challenges.*` fields against ROFL `statsJson` keys; exact-name candidates are value-checked before promotion and fuzzy matches record patch-corpus/all-zero evidence
 - the checkpoint runner verifies the generated goal audit schema marker and `not_complete` status
 - the checkpoint runner verifies the generated ROFL API artifact schema marker and extraction mode before the deeper runtime verifier
 - the checkpoint runner rebuilds replay-only scalar identity evidence before exporting the ROFL API-shaped artifact

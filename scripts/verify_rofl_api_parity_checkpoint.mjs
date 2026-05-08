@@ -153,13 +153,30 @@ function verifyChallengeGapOutput(replayId, artifactRoot) {
   if ((report.totals?.rejectedExactValueMismatchCount ?? 0) <= 0) {
     throw new Error("Challenge gap candidate report must record exact-name candidates rejected by value mismatch.");
   }
+  if ((report.totals?.corpusReplayCount ?? 0) < 20) {
+    throw new Error(`Challenge gap candidate report must include patch-corpus support evidence: ${JSON.stringify(report.totals)}`);
+  }
+  if ((report.totals?.fuzzyAllZeroOnlyCount ?? 0) <= 0) {
+    throw new Error("Challenge gap candidate report must identify all-zero-only fuzzy candidates instead of treating them as promotable parity.");
+  }
+  if ((report.totals?.fuzzyValidatedNonZeroCount ?? 0) !== 0) {
+    throw new Error(`Challenge gap candidate report found unexpected non-zero fuzzy candidates that need explicit promotion review: ${JSON.stringify(report.totals)}`);
+  }
   const turretTakedowns = (report.candidates ?? []).find((entry) => entry.challengeKey === "turretTakedowns");
   const killingSprees = (report.candidates ?? []).find((entry) => entry.challengeKey === "killingSprees");
+  const snowballsHit = (report.candidates ?? []).find((entry) => entry.challengeKey === "snowballsHit");
   if (turretTakedowns?.promotionStatus !== "promoted_validated_exact") {
     throw new Error(`turretTakedowns challenge candidate must be promoted only after exact value parity: ${JSON.stringify(turretTakedowns)}`);
   }
+  if (turretTakedowns?.corpusSupport?.supportedStatKeys?.[0]?.evidenceStrength !== "validated_nonzero") {
+    throw new Error(`turretTakedowns challenge candidate must have non-zero corpus support: ${JSON.stringify(turretTakedowns?.corpusSupport)}`);
+  }
   if (killingSprees?.promotionStatus !== "rejected_value_mismatch") {
     throw new Error(`killingSprees challenge candidate must remain rejected when exact-name values do not match Riot challenge semantics: ${JSON.stringify(killingSprees)}`);
+  }
+  const snowballsSupport = snowballsHit?.corpusSupport?.supportedStatKeys?.find((entry) => entry.statKey === "Missions_SnowballsHit");
+  if (snowballsSupport?.evidenceStrength !== "all_zero_only") {
+    throw new Error(`snowballsHit fuzzy candidate must remain all-zero-only evidence, not promoted parity: ${JSON.stringify(snowballsHit)}`);
   }
 }
 

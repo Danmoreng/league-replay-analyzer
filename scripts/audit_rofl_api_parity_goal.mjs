@@ -371,8 +371,13 @@ function buildAudit(artifact, inputPath) {
           (shapeGap?.sections ?? []).some((section) => (section.missingCategories ?? []).some((entry) => entry.category === "team-bans")) &&
           (challengeGap?.totals?.exactValueParityPassCount ?? 0) > 0 &&
           (challengeGap?.totals?.rejectedExactValueMismatchCount ?? 0) > 0 &&
+          (challengeGap?.totals?.corpusReplayCount ?? 0) >= 20 &&
+          (challengeGap?.totals?.fuzzyAllZeroOnlyCount ?? 0) > 0 &&
+          (challengeGap?.totals?.fuzzyValidatedNonZeroCount ?? 0) === 0 &&
           (challengeGap?.candidates ?? []).some((entry) => entry.challengeKey === "turretTakedowns" && entry.promotionStatus === "promoted_validated_exact") &&
-          (challengeGap?.candidates ?? []).some((entry) => entry.challengeKey === "killingSprees" && entry.promotionStatus === "rejected_value_mismatch"),
+          (challengeGap?.candidates ?? []).some((entry) => entry.challengeKey === "turretTakedowns" && entry.corpusSupport?.supportedStatKeys?.[0]?.evidenceStrength === "validated_nonzero") &&
+          (challengeGap?.candidates ?? []).some((entry) => entry.challengeKey === "killingSprees" && entry.promotionStatus === "rejected_value_mismatch") &&
+          (challengeGap?.candidates ?? []).some((entry) => entry.challengeKey === "snowballsHit" && (entry.corpusSupport?.supportedStatKeys ?? []).some((candidate) => candidate.statKey === "Missions_SnowballsHit" && candidate.evidenceStrength === "all_zero_only")),
         [
           "fieldCoverage.offlineRiotValidation.runtimeInput=false",
           "source.inputClasses.riotApiFixtures.requiredForRuntime=false",
@@ -403,10 +408,15 @@ function buildAudit(artifact, inputPath) {
           `challengeGap exact=${challengeGap?.totals?.exactNormalizedCount ?? null}`,
           `challengeGap exactValueParityPass=${challengeGap?.totals?.exactValueParityPassCount ?? null}`,
           `challengeGap rejectedExactValueMismatch=${challengeGap?.totals?.rejectedExactValueMismatchCount ?? null}`,
+          `challengeGap corpusReplayCount=${challengeGap?.totals?.corpusReplayCount ?? null}`,
+          `challengeGap fuzzyAllZeroOnly=${challengeGap?.totals?.fuzzyAllZeroOnlyCount ?? null}`,
+          `challengeGap fuzzyValidatedNonZero=${challengeGap?.totals?.fuzzyValidatedNonZeroCount ?? null}`,
           `challengeGap fuzzy=${challengeGap?.totals?.fuzzyCandidateCount ?? null}`,
           `challengeGap missing=${challengeGap?.totals?.notFoundCount ?? null}`,
           `challengeGap turretTakedowns promotion=${(challengeGap?.candidates ?? []).find((entry) => entry.challengeKey === "turretTakedowns")?.promotionStatus ?? null}`,
+          `challengeGap turretTakedowns corpusEvidence=${(challengeGap?.candidates ?? []).find((entry) => entry.challengeKey === "turretTakedowns")?.corpusSupport?.supportedStatKeys?.[0]?.evidenceStrength ?? null}`,
           `challengeGap killingSprees promotion=${(challengeGap?.candidates ?? []).find((entry) => entry.challengeKey === "killingSprees")?.promotionStatus ?? null}`,
+          `challengeGap snowballsHit corpusEvidence=${(challengeGap?.candidates ?? []).find((entry) => entry.challengeKey === "snowballsHit")?.corpusSupport?.supportedStatKeys?.find((candidate) => candidate.statKey === "Missions_SnowballsHit")?.evidenceStrength ?? null}`,
         ],
         [
           ...(!validation ? ["offline validation report missing"] : []),
@@ -419,6 +429,9 @@ function buildAudit(artifact, inputPath) {
           ...(shapeGap && !(shapeGap.sections ?? []).some((section) => (section.missingCategories ?? []).some((entry) => entry.category === "team-bans")) ? ["shape gap report missing team-bans category"] : []),
           ...(challengeGap && (challengeGap.totals?.exactValueParityPassCount ?? 0) <= 0 ? ["challenge gap report has no exact value parity pass"] : []),
           ...(challengeGap && (challengeGap.totals?.rejectedExactValueMismatchCount ?? 0) <= 0 ? ["challenge gap report has no rejected exact value mismatch"] : []),
+          ...(challengeGap && (challengeGap.totals?.corpusReplayCount ?? 0) < 20 ? ["challenge gap report has insufficient patch-corpus support"] : []),
+          ...(challengeGap && (challengeGap.totals?.fuzzyAllZeroOnlyCount ?? 0) <= 0 ? ["challenge gap report does not identify all-zero-only fuzzy candidates"] : []),
+          ...(challengeGap && (challengeGap.totals?.fuzzyValidatedNonZeroCount ?? 0) !== 0 ? ["challenge gap report has unreviewed non-zero fuzzy candidates"] : []),
           ...(validation && validation.validationSchema !== "rofl-api-metrics-riot-validation/v1" ? ["validation schema marker is not rofl-api-metrics-riot-validation/v1"] : []),
           ...(validation && validation.mode !== "offline-validation-only" ? ["validation mode is not offline-validation-only"] : []),
           ...(validation && validation.replayId !== artifact.source?.replayId ? ["validation replay id does not match runtime artifact"] : []),

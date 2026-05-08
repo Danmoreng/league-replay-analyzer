@@ -10,6 +10,7 @@ function parseArgs(argv) {
     artifactRoot: "artifacts-keyframes",
     apiRoot: "replays/api",
     replayId: null,
+    versionGroup: "16.9",
     outputPath: null,
   };
   for (let index = 2; index < argv.length; index += 1) {
@@ -20,6 +21,8 @@ function parseArgs(argv) {
       args.apiRoot = argv[++index];
     } else if (arg === "--replay-id" && index + 1 < argv.length) {
       args.replayId = argv[++index];
+    } else if (arg === "--version-group" && index + 1 < argv.length) {
+      args.versionGroup = argv[++index];
     } else if (arg === "--output-path" && index + 1 < argv.length) {
       args.outputPath = argv[++index];
     } else if (arg === "--help" || arg === "-h") {
@@ -36,7 +39,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log("Usage: node ./scripts/audit_rofl_challenge_gap_candidates.mjs --replay-id <id>");
+  console.log("Usage: node ./scripts/audit_rofl_challenge_gap_candidates.mjs --replay-id <id> [--version-group 16.9]");
 }
 
 function normalizeFixtureReplayId(replayId) {
@@ -64,12 +67,103 @@ function numberOrNull(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function readCorpusEntries(artifactRoot, apiRoot, versionGroup) {
+  return fs.readdirSync(artifactRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      const replayId = entry.name;
+      const summaryPath = path.join(artifactRoot, replayId, "summary.json");
+      const fixtureDir = path.join(apiRoot, normalizeFixtureReplayId(replayId));
+      const matchPath = path.join(fixtureDir, "match.json");
+      if (!fs.existsSync(summaryPath) || !fs.existsSync(matchPath)) {
+        return null;
+      }
+      const summary = readJson(summaryPath);
+      if (versionGroup && !String(summary.gameVersion ?? "").startsWith(versionGroup)) {
+        return null;
+      }
+      const match = readJson(matchPath);
+      return {
+        replayId,
+        summary,
+        match,
+        statsJson: readStatsJson(summary),
+      };
+    })
+    .filter(Boolean);
+}
+
+function buildCorpusSupport(corpusEntries, challengeKey, candidateStatKeys) {
+  const supportedStatKeys = [];
+  for (const statKey of candidateStatKeys) {
+    const replayRows = [];
+    let comparisonCount = 0;
+    let passCount = 0;
+    let nonZeroPairCount = 0;
+    for (const entry of corpusEntries) {
+      const participants = entry.match.info?.participants ?? [];
+      const rows = participants.map((participant, index) => {
+        const riotValue = numberOrNull(participant.challenges?.[challengeKey]);
+        const roflValue = numberOrNull(entry.statsJson[index]?.[statKey]);
+        const pass = riotValue === roflValue;
+        if (riotValue != null && roflValue != null) {
+          comparisonCount += 1;
+          if (pass) {
+            passCount += 1;
+          }
+          if (riotValue !== 0 || roflValue !== 0) {
+            nonZeroPairCount += 1;
+          }
+        }
+        return { riotValue, roflValue, pass };
+      });
+      replayRows.push({
+        replayId: entry.replayId,
+        pass: rows.every((row) => row.pass),
+        nonZeroPairCount: rows.filter((row) => row.riotValue !== 0 || row.roflValue !== 0).length,
+        mismatches: rows
+          .map((row, index) => ({ participantId: index + 1, ...row }))
+          .filter((row) => !row.pass)
+          .slice(0, 3),
+      });
+    }
+    supportedStatKeys.push({
+      statKey,
+      comparisonCount,
+      passCount,
+      failCount: comparisonCount - passCount,
+      replayCount: replayRows.length,
+      replayPassCount: replayRows.filter((row) => row.pass).length,
+      nonZeroPairCount,
+      evidenceStrength: comparisonCount > 0 && comparisonCount === passCount && nonZeroPairCount > 0
+        ? "validated_nonzero"
+        : comparisonCount > 0 && comparisonCount === passCount
+          ? "all_zero_only"
+          : "mismatch",
+      failingReplays: replayRows.filter((row) => !row.pass).slice(0, 5),
+      nonZeroReplays: replayRows.filter((row) => row.nonZeroPairCount > 0).slice(0, 5),
+    });
+  }
+  supportedStatKeys.sort((left, right) =>
+    right.passCount - left.passCount ||
+    right.nonZeroPairCount - left.nonZeroPairCount ||
+    left.statKey.localeCompare(right.statKey),
+  );
+  return {
+    versionGroup: corpusEntries[0]?.summary?.gameVersion?.split(".").slice(0, 2).join(".") ?? null,
+    replayCount: corpusEntries.length,
+    candidateStatKeyCount: supportedStatKeys.length,
+    supportedStatKeys,
+  };
+}
+
 function main() {
   const root = process.cwd();
   const args = parseArgs(process.argv);
   const artifactRoot = resolveAbsolute(root, args.artifactRoot);
+  const apiRoot = resolveAbsolute(root, args.apiRoot);
   const summaryPath = path.join(artifactRoot, args.replayId, "summary.json");
-  const fixtureDir = path.join(resolveAbsolute(root, args.apiRoot), normalizeFixtureReplayId(args.replayId));
+  const fixtureDir = path.join(apiRoot, normalizeFixtureReplayId(args.replayId));
   const outputPath = args.outputPath
     ? resolveAbsolute(root, args.outputPath)
     : path.join(artifactRoot, args.replayId, "rofl-challenge-gap-candidates.json");
@@ -78,6 +172,7 @@ function main() {
   const artifactPath = path.join(artifactRoot, args.replayId, "rofl-api-metrics.json");
   const artifact = fs.existsSync(artifactPath) ? readJson(artifactPath) : null;
   const statsJson = readStatsJson(summary);
+  const corpusEntries = readCorpusEntries(artifactRoot, apiRoot, args.versionGroup);
   const statKeys = Object.keys(statsJson[0] ?? {}).sort();
   const statKeysByNormalized = new Map(statKeys.map((key) => [normalizeKey(key), key]));
   const challengeKeys = Object.keys(match.info?.participants?.[0]?.challenges ?? {}).sort();
@@ -104,6 +199,8 @@ function main() {
       : [];
     const valueParityPassCount = valueParity.filter((entry) => entry.pass).length;
     const valueParityFailCount = valueParity.length - valueParityPassCount;
+    const candidateStatKeys = exactNormalized ? [exactNormalized] : contains;
+    const corpusSupport = buildCorpusSupport(corpusEntries, challengeKey, candidateStatKeys);
     const promotedArtifactValues = artifact
       ? match.info.participants.map((participant, index) => ({
           participantId: participant.participantId,
@@ -131,6 +228,7 @@ function main() {
             mismatches: valueParity.filter((entry) => !entry.pass),
           }
         : null,
+      corpusSupport,
       promotedInArtifact,
       promotionStatus,
     };
@@ -142,6 +240,7 @@ function main() {
     mode: "offline-analysis-only",
     runtimeInput: false,
     replayId: args.replayId,
+    versionGroup: args.versionGroup,
     summaryPath,
     fixtureDir,
     artifactPath,
@@ -155,6 +254,15 @@ function main() {
       exactValueParityFailCount: exactCandidates.filter((entry) => (entry.valueParity?.failCount ?? 0) > 0).length,
       promotedValidatedExactCount: exactCandidates.filter((entry) => entry.promotionStatus === "promoted_validated_exact").length,
       rejectedExactValueMismatchCount: exactCandidates.filter((entry) => entry.promotionStatus === "rejected_value_mismatch").length,
+      corpusReplayCount: corpusEntries.length,
+      fuzzyAllZeroOnlyCount: candidates.filter((entry) =>
+        entry.status === "candidate_fuzzy" &&
+        (entry.corpusSupport?.supportedStatKeys ?? []).some((candidate) => candidate.evidenceStrength === "all_zero_only"),
+      ).length,
+      fuzzyValidatedNonZeroCount: candidates.filter((entry) =>
+        entry.status === "candidate_fuzzy" &&
+        (entry.corpusSupport?.supportedStatKeys ?? []).some((candidate) => candidate.evidenceStrength === "validated_nonzero"),
+      ).length,
     },
     candidates,
   };
