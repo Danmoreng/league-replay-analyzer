@@ -87,6 +87,7 @@ function topEventfulIntervals(rows, limit = 12) {
     startMs: interval.startMs,
     endMs: interval.endMs,
     chunkIds: interval.chunkIds,
+    chunkTargets: interval.chunkTargets,
     eventCounts: interval.eventCounts,
     priority: eventPriority(interval.eventCounts),
   })))
@@ -143,6 +144,16 @@ function auditReplay(artifactRoot, apiRoot, replayId) {
       startsAtKeyframeId: keyframes[index]?.id ?? null,
       endsAtKeyframeId: keyframes[index + 1]?.id ?? null,
       chunkIds: intervalChunks.map((chunk) => chunk.chunkId),
+      chunkTargets: intervalChunks.map((chunk) => ({
+        id: chunk.id,
+        chunkId: chunk.chunkId,
+        offset: chunk.offset ?? null,
+        headerOffset: chunk.headerOffset ?? null,
+        payloadOffset: chunk.payloadOffset ?? null,
+        length: chunk.length ?? null,
+        uncompressedLength: chunk.uncompressedLength ?? null,
+        codec: chunk.codec ?? null,
+      })),
       eventCounts: eventCounts(intervalEvents),
     };
   });
