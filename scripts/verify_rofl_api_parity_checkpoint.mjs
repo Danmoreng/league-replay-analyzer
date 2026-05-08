@@ -326,6 +326,7 @@ function main() {
   const verifyReconstructionFamilySamplesScript = path.join("scripts", "verify_reconstruction_family_samples.mjs");
   const verifyReconstructionFamilySampleAnalysisScript = path.join("scripts", "verify_reconstruction_family_sample_analysis.mjs");
   const verifyReconstructionDecoderTargetsScript = path.join("scripts", "verify_reconstruction_decoder_target_ranking.mjs");
+  const verifyReconstructionTargetDossierScript = path.join("scripts", "verify_reconstruction_target_dossier.mjs");
   const auditScript = path.join("scripts", "audit_rofl_api_parity_goal.mjs");
   const assignIdentityScript = path.join("scripts", "assign_keyframe_slots_from_rofl_stats.mjs");
   const compareIdentityScript = path.join("scripts", "compare_rofl_stat_assignments_to_supervised.mjs");
@@ -392,6 +393,12 @@ function main() {
   runStep("verify-reconstruction-decoder-targets", verifyReconstructionDecoderTargetsScript, [
     "--artifact-root",
     args.artifactRoot,
+  ]);
+  runStep("verify-reconstruction-target-dossier", verifyReconstructionTargetDossierScript, [
+    "--artifact-root",
+    args.artifactRoot,
+    "--family-key",
+    "241-0x02",
   ]);
   runStep("goal-audit", auditScript, sharedArgs);
   verifyGoalAuditOutput(args.replayId, args.artifactRoot);
