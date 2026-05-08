@@ -323,6 +323,7 @@ function main() {
   const challengeGapScript = path.join("scripts", "audit_rofl_challenge_gap_candidates.mjs");
   const timelineReconstructionScript = path.join("scripts", "audit_timeline_reconstruction_model.mjs");
   const verifyReconstructionChunkComparisonScript = path.join("scripts", "verify_reconstruction_chunk_family_comparison.mjs");
+  const verifyReconstructionFamilySamplesScript = path.join("scripts", "verify_reconstruction_family_samples.mjs");
   const auditScript = path.join("scripts", "audit_rofl_api_parity_goal.mjs");
   const assignIdentityScript = path.join("scripts", "assign_keyframe_slots_from_rofl_stats.mjs");
   const compareIdentityScript = path.join("scripts", "compare_rofl_stat_assignments_to_supervised.mjs");
@@ -375,6 +376,10 @@ function main() {
   runStep("offline-timeline-reconstruction-audit", timelineReconstructionScript, sharedArgs);
   verifyTimelineReconstructionOutput(args.replayId, args.artifactRoot);
   runStep("verify-reconstruction-chunk-family-comparison", verifyReconstructionChunkComparisonScript, [
+    "--artifact-root",
+    args.artifactRoot,
+  ]);
+  runStep("verify-reconstruction-family-samples", verifyReconstructionFamilySamplesScript, [
     "--artifact-root",
     args.artifactRoot,
   ]);
