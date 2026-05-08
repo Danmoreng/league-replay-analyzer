@@ -348,6 +348,7 @@ function buildAudit(artifact, inputPath) {
           rejectedCandidates.positions != null &&
           rejectedCandidates.itemEvents != null &&
           rejectedCandidates.inventoryTimeline != null &&
+          rejectedCandidates.championStatsFinal != null &&
           rejectedCandidates.damageTimeline != null,
         [
           `researchKeyframeMetricSeriesCount=${artifact.totals?.researchKeyframeMetricSeriesCount ?? 0}`,
@@ -356,12 +357,14 @@ function buildAudit(artifact, inputPath) {
           `positions.status=${rejectedCandidates.positions?.status ?? null}`,
           `itemEvents.status=${rejectedCandidates.itemEvents?.status ?? null}`,
           `inventoryTimeline.status=${rejectedCandidates.inventoryTimeline?.status ?? null}`,
+          `championStatsFinal.status=${rejectedCandidates.championStatsFinal?.status ?? null}`,
           `damageTimeline.status=${rejectedCandidates.damageTimeline?.status ?? null}`,
         ],
         [
           ...(!rejectedCandidates.positions ? ["missing position rejection evidence"] : []),
           ...(!rejectedCandidates.itemEvents ? ["missing item-event rejection evidence"] : []),
           ...(!rejectedCandidates.inventoryTimeline ? ["missing inventory timeline rejection evidence"] : []),
+          ...(!rejectedCandidates.championStatsFinal ? ["missing final championStats rejection evidence"] : []),
           ...(!rejectedCandidates.damageTimeline ? ["missing damage timeline rejection evidence"] : []),
         ],
       ),

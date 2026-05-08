@@ -161,6 +161,7 @@ Current verified output:
 - `rejectedCandidateArtifacts.positions` that records existing movement evidence and why it is not emitted as runtime API data
 - `rejectedCandidateArtifacts.itemEvents` that records supervised item-event candidates and why they are not emitted as runtime API data
 - `rejectedCandidateArtifacts.inventoryTimeline` that records why item/inventory state over time is not emitted
+- `rejectedCandidateArtifacts.championStatsFinal` that records why final `participantFrames[].championStats` is only shape-compatible: current `statsJson` candidates are all-zero or unrelated counter collisions, not accepted API parity
 - `rejectedCandidateArtifacts.damageTimeline` that records whether any extracted-stat damage candidates exist
 - separate `matchCoverage` for ROFL-only final match data
 - aggregate coverage summary in `totals.coverageSummary`
@@ -321,6 +322,8 @@ For `EUW1-7840220945`, the movement pipeline has a `participant-movement.json` d
 The same replay now has an offline `item-event-candidates.json` diagnostic with 689 candidates and 93 strong candidates, but it is not emitted into `timeline.info.frames[*].events` because the report is discovered against Riot API timeline item events and is not yet a ROFL-only event decoder. The API-shaped artifact records this under `rejectedCandidateArtifacts.itemEvents`.
 
 Inventory timeline parity is tracked separately under `rejectedCandidateArtifacts.inventoryTimeline`: final item slots are ROFL-only in `match.info.participants`, but item state over time is not reconstructed because there is no accepted ROFL-only item-event or slot-state timeline decoder yet.
+
+Final `championStats` parity is tracked under `rejectedCandidateArtifacts.championStatsFinal`. The artifact keeps the API-shaped `championStats` container, but does not emit values because the current `statsJson` scan only finds all-zero collisions or unrelated counters, not decoded champion stat semantics.
 
 For damage timelines, the same artifact records `rejectedCandidateArtifacts.damageTimeline`. On `EUW1-7840220945`, no damage timeline candidate metrics are present in `extracted-stats.json`, so damage remains `not_found` for runtime parity.
 

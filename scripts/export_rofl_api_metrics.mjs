@@ -1595,6 +1595,19 @@ function buildRejectedCandidateArtifacts(root, replayId) {
           status: "not_found",
           reason: "no ROFL-only item event or inventory slot timeline decoder found for this replay",
         },
+    championStatsFinal: {
+      status: "not_promoted",
+      source: "rofl-metadata-statsJson",
+      reason: "No accepted direct final statsJson source matches Riot timeline participantFrames.championStats semantics. Apparent matches are all-zero or unrelated counter collisions, so championStats remains an API-shaped empty container.",
+      rejectedCandidateSummary: {
+        inspectedSource: "summary.metadataJson.statsJson",
+        inspectedApiContainer: "timeline.info.frames[-1].participantFrames[].championStats",
+        collisionClasses: [
+          "all-zero stat keys matching zero-valued championStats fields",
+          "unrelated counters with partial participant value overlap",
+        ],
+      },
+    },
     damageTimeline: damageMetricKeys.length > 0
       ? {
           status: "rejected_for_runtime",

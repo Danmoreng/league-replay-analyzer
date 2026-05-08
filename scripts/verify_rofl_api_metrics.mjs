@@ -470,6 +470,20 @@ function verifyRejectedCandidateArtifacts(artifact) {
     assertNoRuntimeRiotApiPath(inventoryTimeline, ["rejectedCandidateArtifacts", "inventoryTimeline"]);
   }
 
+  const championStatsFinal = rejected.championStatsFinal;
+  assert(championStatsFinal != null, "Artifact must include final championStats rejection evidence", {
+    rejectedCandidateArtifacts: artifact.rejectedCandidateArtifacts,
+  });
+  assert(championStatsFinal.status === "not_promoted", "Final championStats evidence must remain not_promoted until ROFL semantics are decoded", {
+    championStatsFinal,
+  });
+  assert(championStatsFinal.rejectedCandidateSummary?.inspectedSource === "summary.metadataJson.statsJson", "Final championStats rejection evidence must identify inspected ROFL source", {
+    championStatsFinal,
+  });
+  assert((championStatsFinal.rejectedCandidateSummary?.collisionClasses ?? []).length > 0, "Final championStats rejection evidence must describe collision classes", {
+    championStatsFinal,
+  });
+
   const damageTimeline = rejected.damageTimeline;
   assert(damageTimeline != null, "Artifact must include damage timeline candidate evidence", {
     rejectedCandidateArtifacts: artifact.rejectedCandidateArtifacts,
