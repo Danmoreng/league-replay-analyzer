@@ -117,6 +117,37 @@ function replayPathFor(replayId) {
   return path.resolve("replays", `${replayId}.rofl`);
 }
 
+function validateOutput(output) {
+  if (output.summarySchema !== "rofl-reconstruction-chunk-target-summary/v1") {
+    throw new Error("Unexpected reconstruction chunk target summary schema.");
+  }
+  if (output.mode !== "offline-decoder-target-summary" || output.runtimeInput !== false) {
+    throw new Error("Reconstruction chunk target summary must be marked offline-only and non-runtime.");
+  }
+  if ((output.rows ?? []).length === 0) {
+    throw new Error("Reconstruction chunk target summary has no eventful interval rows.");
+  }
+  for (const row of output.rows ?? []) {
+    if (!row.replayId || !Number.isFinite(row.apiIntervalIndex) || (row.eventCounts?.total ?? 0) <= 0) {
+      throw new Error(`Invalid reconstruction interval row: ${JSON.stringify(row)}`);
+    }
+    if ((row.chunks ?? []).length === 0) {
+      throw new Error(`Reconstruction interval has no chunk targets: ${JSON.stringify(row)}`);
+    }
+    for (const chunk of row.chunks ?? []) {
+      if (!Number.isFinite(chunk.chunkId) ||
+        !Number.isFinite(chunk.payloadOffset) ||
+        !Number.isFinite(chunk.length) ||
+        !Number.isFinite(chunk.uncompressedLength) ||
+        chunk.codec !== "zstd" ||
+        (chunk.subrecordCount ?? 0) <= 0 ||
+        (chunk.topFamilies ?? []).length === 0) {
+        throw new Error(`Invalid reconstruction chunk target: ${JSON.stringify(chunk)}`);
+      }
+    }
+  }
+}
+
 function main() {
   const args = parseArgs(process.argv);
   const inputPath = path.resolve(args.inputPath ?? path.join(args.artifactRoot, "timeline-reconstruction-model-16.9.json"));
@@ -161,6 +192,7 @@ function main() {
     topIntervalCount: rows.length,
     rows,
   };
+  validateOutput(output);
   const outputPath = path.resolve(args.outputPath ?? path.join(args.artifactRoot, "reconstruction-chunk-target-summary-16.9.json"));
   writeJson(outputPath, output);
   console.log(`Wrote reconstruction chunk target summary to ${outputPath}`);
