@@ -518,6 +518,9 @@ function buildAudit(artifact, inputPath) {
           artifact.fieldCoverage?.matchTeams?.corpusValidation?.status === "partially_stable" &&
           (artifact.fieldCoverage?.matchTeams?.corpusValidation?.knownUnstableFields ?? []).includes("info.teams[].objectives.dragon.kills") &&
           (matchTeamGaps.unstableDecodedFields ?? []).includes("info.teams[].objectives.dragon.kills") &&
+          artifact.fieldCoverage?.timelineNonFinalParticipantFrames?.reconstructionDirection?.model === "keyframe-baseline-plus-chunk-deltas" &&
+          artifact.fieldCoverage?.timelineEvents?.source === "chunk-delta-events-not-extracted" &&
+          artifact.fieldCoverage?.positions?.source === "state-reconstruction-not-extracted-for-16.9" &&
           docsText.includes(artifactRelativePath) &&
           docsText.includes(auditRelativePath) &&
           docsText.includes(shapeGapRelativePath) &&
@@ -525,7 +528,9 @@ function buildAudit(artifact, inputPath) {
           docsText.includes("inspected ROFL sources") &&
           docsText.includes("npm run audit:rofl-api-shape-gap") &&
           docsText.includes("npm run audit:rofl-challenge-gaps") &&
-          docsText.includes("npm run verify:rofl-api-parity"),
+          docsText.includes("npm run verify:rofl-api-parity") &&
+          docsText.includes("keyframes as baseline snapshots") &&
+          docsText.includes("chunk/subrecord updates between keyframes"),
         [
           "docs/rofl-api-parity.md",
           `docs exists=${fs.existsSync(docsPath)}`,
@@ -551,6 +556,9 @@ function buildAudit(artifact, inputPath) {
           `fieldCoverage.matchTeams.corpusValidation.status=${artifact.fieldCoverage?.matchTeams?.corpusValidation?.status ?? null}`,
           `fieldCoverage.matchTeams.corpusValidation.knownUnstableFields=${(artifact.fieldCoverage?.matchTeams?.corpusValidation?.knownUnstableFields ?? []).join(",")}`,
           `fieldCoverage.matchTeamGaps.unstableDecodedFields=${(matchTeamGaps.unstableDecodedFields ?? []).join(",")}`,
+          `fieldCoverage.timelineNonFinalParticipantFrames.reconstructionDirection.model=${artifact.fieldCoverage?.timelineNonFinalParticipantFrames?.reconstructionDirection?.model ?? null}`,
+          `fieldCoverage.timelineEvents.source=${artifact.fieldCoverage?.timelineEvents?.source ?? null}`,
+          `fieldCoverage.positions.source=${artifact.fieldCoverage?.positions?.source ?? null}`,
         ],
         [
           ...requiredFullParityGaps.filter((gap) => !fullParityGaps.has(gap)),
@@ -573,6 +581,9 @@ function buildAudit(artifact, inputPath) {
           ...(artifact.fieldCoverage?.matchTeams?.corpusValidation?.status !== "partially_stable" ? ["fieldCoverage.matchTeams missing partially_stable corpus validation status"] : []),
           ...(!(artifact.fieldCoverage?.matchTeams?.corpusValidation?.knownUnstableFields ?? []).includes("info.teams[].objectives.dragon.kills") ? ["fieldCoverage.matchTeams corpus validation missing objective instability"] : []),
           ...(!(matchTeamGaps.unstableDecodedFields ?? []).includes("info.teams[].objectives.dragon.kills") ? ["fieldCoverage.matchTeamGaps missing unstable decoded objective fields"] : []),
+          ...(artifact.fieldCoverage?.timelineNonFinalParticipantFrames?.reconstructionDirection?.model !== "keyframe-baseline-plus-chunk-deltas" ? ["fieldCoverage.timelineNonFinalParticipantFrames missing chunk-delta reconstruction direction"] : []),
+          ...(artifact.fieldCoverage?.timelineEvents?.source !== "chunk-delta-events-not-extracted" ? ["fieldCoverage.timelineEvents missing chunk-delta event extraction source"] : []),
+          ...(artifact.fieldCoverage?.positions?.source !== "state-reconstruction-not-extracted-for-16.9" ? ["fieldCoverage.positions missing state reconstruction source"] : []),
           ...(!fs.existsSync(docsPath) ? ["docs/rofl-api-parity.md missing"] : []),
           ...(!docsText.includes(artifactRelativePath) ? [`docs missing ${artifactRelativePath}`] : []),
           ...(!docsText.includes(auditRelativePath) ? [`docs missing ${auditRelativePath}`] : []),
@@ -582,6 +593,8 @@ function buildAudit(artifact, inputPath) {
           ...(!docsText.includes("npm run audit:rofl-api-shape-gap") ? ["docs missing shape gap command"] : []),
           ...(!docsText.includes("npm run audit:rofl-challenge-gaps") ? ["docs missing challenge gap command"] : []),
           ...(!docsText.includes("npm run verify:rofl-api-parity") ? ["docs missing full checkpoint command"] : []),
+          ...(!docsText.includes("keyframes as baseline snapshots") ? ["docs missing keyframe baseline reconstruction direction"] : []),
+          ...(!docsText.includes("chunk/subrecord updates between keyframes") ? ["docs missing chunk/subrecord delta reconstruction direction"] : []),
         ],
       ),
     },
