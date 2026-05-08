@@ -65,6 +65,12 @@ Run the full export, runtime verification, and offline validation checkpoint:
 npm run verify:rofl-api-parity -- --replay-id EUW1-7840220945
 ```
 
+Run the offline patch-corpus stability audit:
+
+```powershell
+npm run validate:rofl-api-parity-corpus -- --version-group 16.9 --allow-validation-mismatch
+```
+
 The full checkpoint regenerates `keyframe-rofl-stat-slot-assignments-16.9.json` and the offline supervised comparison before export, so identity blocker evidence cannot go stale.
 The regenerated identity assignment artifact has schema `rofl-keyframe-stat-slot-assignments/v1`, which the checkpoint verifies before export.
 The regenerated offline identity comparison artifact has schema `rofl-keyframe-stat-supervised-comparison/v1`, which the checkpoint verifies before export.
@@ -92,6 +98,10 @@ Current offline validation result:
 - challenge-gap result: `2` exact normalized candidates, `29` fuzzy candidates, `95` missing across `126` Riot challenge keys
 - exact challenge value parity: `1` promoted validated exact candidate (`turretTakedowns`) and `1` exact-name candidate rejected by value mismatch (`killingSprees`)
 - challenge corpus support: `20` patch `16.9` fixture-backed replays scanned; fuzzy `snowballsHit <- Missions_SnowballsHit` is kept rejected as all-zero-only evidence, while `turretTakedowns <- TURRET_TAKEDOWNS` has non-zero corpus support
+- corpus validation output: `artifacts-keyframes/rofl-api-parity-corpus-validation-16.9.json`
+- corpus validation schema: `rofl-api-parity-corpus-validation/v1`
+- corpus validation result across `20` patch `16.9` fixture-backed replays: participant final match stats `30578 / 30600`, team final stats `335 / 360`, final timeline scalar/damage stats `3400 / 3400`, metadata `140 / 140`
+- corpus validation known unstable fields: participant `lane`, `perks.styles`, `totalHeal`; team objective kill counts for champion, tower, dragon, baron, horde, and inhibitor
 - goal audit output: `artifacts-keyframes/EUW1-7840220945/rofl-api-parity-goal-audit.json`
 - goal audit schema: `rofl-api-parity-goal-audit/v1`
 - mode: `offline-validation-only`
