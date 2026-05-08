@@ -283,6 +283,10 @@ function statCodeMap(statMap, statKey, mapping) {
   return code == null ? null : mapping.get(code) ?? null;
 }
 
+function statCodeMapOrDefault(statMap, statKey, mapping, fallback) {
+  return statCodeMap(statMap, statKey, mapping) ?? fallback;
+}
+
 function buildPerkSelection(statMap, index) {
   const perk = statNumber(statMap, `PERK${index}`);
   if (perk == null) {
@@ -352,7 +356,7 @@ function buildApiLikeStats(statMap) {
     riotIdGameName: statString(statMap, "RIOT_ID_GAME_NAME"),
     riotIdTagline: statString(statMap, "RIOT_ID_TAG_LINE"),
     championName: statString(statMap, "SKIN"),
-    lane: statCodeMap(statMap, "PLAYER_POSITION", laneByPlayerPositionCode),
+    lane: statCodeMapOrDefault(statMap, "PLAYER_POSITION", laneByPlayerPositionCode, "NONE"),
     role: statCodeMap(statMap, "PLAYER_ROLE", roleByPlayerRoleCode),
     win: boolFromWin(statMap.WIN),
     kills: statNumber(statMap, "CHAMPIONS_KILLED"),

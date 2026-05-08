@@ -100,8 +100,8 @@ Current offline validation result:
 - challenge corpus support: `20` patch `16.9` fixture-backed replays scanned; fuzzy `snowballsHit <- Missions_SnowballsHit` is kept rejected as all-zero-only evidence, while `turretTakedowns <- TURRET_TAKEDOWNS` has non-zero corpus support
 - corpus validation output: `artifacts-keyframes/rofl-api-parity-corpus-validation-16.9.json`
 - corpus validation schema: `rofl-api-parity-corpus-validation/v1`
-- corpus validation result across `20` patch `16.9` fixture-backed replays: participant final match stats `30578 / 30600`, team final stats `335 / 360`, final timeline scalar/damage stats `3400 / 3400`, metadata `140 / 140`
-- corpus validation known unstable fields: participant `lane`, `perks.styles`, `totalHeal`; team objective kill counts for champion, tower, dragon, baron, horde, and inhibitor
+- corpus validation result across `20` patch `16.9` fixture-backed replays: participant final match stats `30598 / 30600`, team final stats `335 / 360`, final timeline scalar/damage stats `3400 / 3400`, metadata `140 / 140`
+- corpus validation known unstable fields: participant `perks.styles`, `totalHeal`; team objective kill counts for champion, tower, dragon, baron, horde, and inhibitor
 - goal audit output: `artifacts-keyframes/EUW1-7840220945/rofl-api-parity-goal-audit.json`
 - goal audit schema: `rofl-api-parity-goal-audit/v1`
 - mode: `offline-validation-only`
