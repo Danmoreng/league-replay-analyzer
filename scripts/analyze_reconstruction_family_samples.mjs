@@ -8,6 +8,7 @@ function parseArgs(argv) {
     outputPath: null,
     topBytes: 12,
     topWords: 12,
+    topSequences: 12,
   };
   for (let index = 2; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -21,6 +22,8 @@ function parseArgs(argv) {
       args.topBytes = Number.parseInt(argv[++index], 10);
     } else if (arg === "--top-words" && index + 1 < argv.length) {
       args.topWords = Number.parseInt(argv[++index], 10);
+    } else if (arg === "--top-sequences" && index + 1 < argv.length) {
+      args.topSequences = Number.parseInt(argv[++index], 10);
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -32,7 +35,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log("Usage: node ./scripts/analyze_reconstruction_family_samples.mjs [--artifact-root artifacts-keyframes] [--top-bytes 12] [--top-words 12]");
+  console.log("Usage: node ./scripts/analyze_reconstruction_family_samples.mjs [--artifact-root artifacts-keyframes] [--top-bytes 12] [--top-words 12] [--top-sequences 12]");
 }
 
 function readJson(filePath) {
@@ -69,6 +72,10 @@ function sortedCounts(map, limit) {
     .map(([value, count]) => ({ value, count }))
     .sort((left, right) => right.count - left.count || left.value.localeCompare(right.value))
     .slice(0, limit);
+}
+
+function sequenceKey(bytes, offset, length) {
+  return bytes.slice(offset, offset + length).map(hexByte).join(" ");
 }
 
 function commonPrefixLength(records) {
@@ -116,6 +123,9 @@ function analyzeFamily(family, args) {
   const byteCounts = new Map();
   const u32Counts = new Map();
   const u16Counts = new Map();
+  const seq4Counts = new Map();
+  const seq6Counts = new Map();
+  const seq8Counts = new Map();
   for (const record of records) {
     for (const byte of record.bytes) {
       increment(byteCounts, `0x${hexByte(byte)}`);
@@ -130,6 +140,15 @@ function analyzeFamily(family, args) {
         (record.bytes[index + 2] << 16) |
         (record.bytes[index + 3] << 24);
       increment(u32Counts, `0x${hexWord(value >>> 0)}`);
+    }
+    for (let index = 0; index + 3 < record.bytes.length; index += 1) {
+      increment(seq4Counts, sequenceKey(record.bytes, index, 4));
+    }
+    for (let index = 0; index + 5 < record.bytes.length; index += 1) {
+      increment(seq6Counts, sequenceKey(record.bytes, index, 6));
+    }
+    for (let index = 0; index + 7 < record.bytes.length; index += 1) {
+      increment(seq8Counts, sequenceKey(record.bytes, index, 8));
     }
   }
   return {
@@ -147,6 +166,11 @@ function analyzeFamily(family, args) {
     topBytes: sortedCounts(byteCounts, args.topBytes),
     topU16Words: sortedCounts(u16Counts, args.topWords),
     topU32Words: sortedCounts(u32Counts, args.topWords),
+    topByteSequences: {
+      length4: sortedCounts(seq4Counts, args.topSequences),
+      length6: sortedCounts(seq6Counts, args.topSequences),
+      length8: sortedCounts(seq8Counts, args.topSequences),
+    },
     sampleLocations: records.slice(0, 8).map((record) => ({
       replayId: record.replayId,
       chunkId: record.chunkId,
@@ -192,6 +216,7 @@ function main() {
     selection: {
       topBytes: args.topBytes,
       topWords: args.topWords,
+      topSequences: args.topSequences,
     },
     families,
   };

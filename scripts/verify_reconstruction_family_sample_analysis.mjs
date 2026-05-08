@@ -62,6 +62,9 @@ function verify(output, args, inputPath) {
       Number.isFinite(family.commonPrefixBytes) &&
       typeof family.stabilityMap === "string" &&
       (family.topBytes ?? []).length > 0 &&
+      (family.length < 4 || (family.topByteSequences?.length4 ?? []).length > 0) &&
+      (family.length < 6 || (family.topByteSequences?.length6 ?? []).length > 0) &&
+      (family.length < 8 || (family.topByteSequences?.length8 ?? []).length > 0) &&
       (family.sampleLocations ?? []).length > 0,
       "Invalid analyzed family row.",
       family,
@@ -74,6 +77,12 @@ function verify(output, args, inputPath) {
     }
     for (const word of family.topU32Words ?? []) {
       assert(/^0x[0-9A-F]{8}$/.test(word.value) && (word.count ?? 0) > 0, "Invalid u32 frequency row.", word);
+    }
+    for (const [name, rows] of Object.entries(family.topByteSequences ?? {})) {
+      assert(["length4", "length6", "length8"].includes(name), "Invalid byte sequence bucket.", { name, rows });
+      for (const sequence of rows ?? []) {
+        assert(/^([0-9A-F]{2})( [0-9A-F]{2})+$/.test(sequence.value) && (sequence.count ?? 0) > 0, "Invalid byte sequence row.", sequence);
+      }
     }
   }
 }
