@@ -174,4 +174,16 @@ When architecture, workflow, or tooling assumptions materially change:
 - add or update focused docs in `docs/`
 - keep future sessions from relying on stale assumptions in `docs/chat.md`
 
+## Autonomous Decoder Loop
+
+This repo now also has a root [program.md](/C:/Development/league-replay-analyzer/program.md) that defines an autonomous overnight decoder-research loop.
+
+If the user wants autonomous decoder iteration, read that file and [docs/autonomous-decoder-research.md](/C:/Development/league-replay-analyzer/docs/autonomous-decoder-research.md) before starting. The loop is intentionally narrower than general repo work:
+
+- prefer decoder scripts and decoder docs
+- require a full corpus rerun before keeping changes
+- use [scripts/summarize_decoder_corpus.mjs](/C:/Development/league-replay-analyzer/scripts/summarize_decoder_corpus.mjs) as the machine-readable scorecard
+- use [scripts/run_autoresearch.ps1](/C:/Development/league-replay-analyzer/scripts/run_autoresearch.ps1) as the recommended supervisor and [scripts/stop_autoresearch.ps1](/C:/Development/league-replay-analyzer/scripts/stop_autoresearch.ps1) to stop it cleanly
+- do not commit replay movement fixtures or scratch artifacts during the loop
+
 If you make an important project-level decision, leave a short written record near the code instead of relying on conversation history alone.

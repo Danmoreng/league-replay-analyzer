@@ -1,0 +1,192 @@
+{
+  "replayId": "EUW1-7689604967",
+  "generatedAtUtc": "2026-03-21T18:38:54.170Z",
+  "participantMovementPath": "C:\\Development\\league-replay-analyzer\\artifacts\\EUW1-7689604967\\participant-movement.json",
+  "fixtureDir": "C:\\Development\\league-replay-analyzer\\replays\\api\\EUW1_7689604967",
+  "summary": {
+    "assignmentCount": 8,
+    "matchedAssignmentCount": 8,
+    "passingAssignmentCount": 1,
+    "averageAxisCorrelation": 0.2921870352576901,
+    "averagePathCorrelation": 0.07634770231086921,
+    "averageNormalizedDistanceRmse": 0.22564269432697714
+  },
+  "assignments": [
+    {
+      "rosterIndex": 1,
+      "champion": "Rumble",
+      "team": 100,
+      "teamPosition": "JUNGLE",
+      "entityKey": "23296-0x25-h0|14|0|8|normal",
+      "entityGroupKey": "23296-0x25-h0|14",
+      "matchedParticipantId": 2,
+      "score": 0.6616401238826484,
+      "entityQuality": 0.7753784038254574,
+      "status": "matched",
+      "validation": {
+        "overlap": 8,
+        "xCorrelation": 0.20174347707261367,
+        "yCorrelation": 0.8547502813563979,
+        "averageAxisCorrelation": 0.5282468792145057,
+        "pathCorrelation": 0.11103761318543662,
+        "distanceRmse": 4384.278253370065,
+        "normalizedDistanceRmse": 0.19375955522291782,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 2,
+      "champion": "Orianna",
+      "team": 100,
+      "teamPosition": "MIDDLE",
+      "entityKey": "13878-0x36-h6|9|7|8|swapped",
+      "entityGroupKey": "13878-0x36-h6|9",
+      "matchedParticipantId": 3,
+      "score": 0.6310049368081343,
+      "entityQuality": 0.745385610001644,
+      "status": "matched",
+      "validation": {
+        "overlap": 14,
+        "xCorrelation": 0.7108767205999025,
+        "yCorrelation": 0.7312082237470482,
+        "averageAxisCorrelation": 0.7210424721734754,
+        "pathCorrelation": 0.814067483379495,
+        "distanceRmse": 2197.4662108814314,
+        "normalizedDistanceRmse": 0.0971152036964105,
+        "passes": true
+      }
+    },
+    {
+      "rosterIndex": 3,
+      "champion": "Tristana",
+      "team": 100,
+      "teamPosition": "BOTTOM",
+      "entityKey": "61733-0x00-h5|13|1|2|normal",
+      "entityGroupKey": "61733-0x00-h5|13",
+      "matchedParticipantId": 4,
+      "score": 0.4753141139277931,
+      "entityQuality": 0.7302501716634904,
+      "status": "matched",
+      "validation": {
+        "overlap": 7,
+        "xCorrelation": 0.7215019827913768,
+        "yCorrelation": -0.10879242219809114,
+        "averageAxisCorrelation": 0.3063547802966428,
+        "pathCorrelation": -0.1635797708279609,
+        "distanceRmse": 6485.207801293437,
+        "normalizedDistanceRmse": 0.2866084008561556,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 4,
+      "champion": "Braum",
+      "team": 100,
+      "teamPosition": "UTILITY",
+      "entityKey": "23296-0x25-h0|11|0|8|normal",
+      "entityGroupKey": "23296-0x25-h0|11",
+      "matchedParticipantId": 5,
+      "score": 0.4850424463198009,
+      "entityQuality": 0.7435697852324534,
+      "status": "matched",
+      "validation": {
+        "overlap": 8,
+        "xCorrelation": -0.6948312943060518,
+        "yCorrelation": 0.6355994021263444,
+        "averageAxisCorrelation": -0.02961594608985374,
+        "pathCorrelation": 0.11900933632273465,
+        "distanceRmse": 5035.354099656167,
+        "normalizedDistanceRmse": 0.2225333143463974,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 5,
+      "champion": "Irelia",
+      "team": 200,
+      "teamPosition": "TOP",
+      "entityKey": "61733-0x00-h5|7|1|2|normal",
+      "entityGroupKey": "61733-0x00-h5|7",
+      "matchedParticipantId": 6,
+      "score": 0.5064509712905514,
+      "entityQuality": 0.7279145748300131,
+      "status": "matched",
+      "validation": {
+        "overlap": 7,
+        "xCorrelation": -0.2886168688369493,
+        "yCorrelation": 0.20712290552645063,
+        "averageAxisCorrelation": -0.04074698165524934,
+        "pathCorrelation": -0.40717726823006,
+        "distanceRmse": 7487.777467973697,
+        "normalizedDistanceRmse": 0.3309161389762523,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 6,
+      "champion": "RekSai",
+      "team": 200,
+      "teamPosition": "JUNGLE",
+      "entityKey": "26203-0xF1-h11|13|7|9|swapped",
+      "entityGroupKey": "26203-0xF1-h11|13",
+      "matchedParticipantId": 7,
+      "score": 0.4597647754816271,
+      "entityQuality": 0.7771038406755889,
+      "status": "matched",
+      "validation": {
+        "overlap": 8,
+        "xCorrelation": 0.3132506203527611,
+        "yCorrelation": 0.6908005189816404,
+        "averageAxisCorrelation": 0.5020255696672007,
+        "pathCorrelation": 0.065986917334125,
+        "distanceRmse": 4873.930586087768,
+        "normalizedDistanceRmse": 0.215399335528449,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 7,
+      "champion": "Malzahar",
+      "team": 200,
+      "teamPosition": "MIDDLE",
+      "entityKey": "23296-0x66-h0|14|7|4|normal",
+      "entityGroupKey": "23296-0x66-h0|14",
+      "matchedParticipantId": 8,
+      "score": 0.5231084600501222,
+      "entityQuality": 0.7812884646673286,
+      "status": "matched",
+      "validation": {
+        "overlap": 10,
+        "xCorrelation": -0.4796868411094486,
+        "yCorrelation": 0.19994092705264724,
+        "averageAxisCorrelation": -0.1398729570284007,
+        "pathCorrelation": 0.0061818975628094245,
+        "distanceRmse": 5173.024382271288,
+        "normalizedDistanceRmse": 0.22861753874671117,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 9,
+      "champion": "Karma",
+      "team": 200,
+      "teamPosition": "UTILITY",
+      "entityKey": "23296-0x66-h0|16|3|0|swapped",
+      "entityGroupKey": "23296-0x66-h0|16",
+      "matchedParticipantId": 10,
+      "score": 0.5641760429788929,
+      "entityQuality": 0.7488292271145423,
+      "status": "matched",
+      "validation": {
+        "overlap": 10,
+        "xCorrelation": 0.32931839420503534,
+        "yCorrelation": 0.6508065367613641,
+        "averageAxisCorrelation": 0.49006246548319976,
+        "pathCorrelation": 0.06525540976037388,
+        "distanceRmse": 5208.65189512122,
+        "normalizedDistanceRmse": 0.23019206724252353,
+        "passes": false
+      }
+    }
+  ]
+}

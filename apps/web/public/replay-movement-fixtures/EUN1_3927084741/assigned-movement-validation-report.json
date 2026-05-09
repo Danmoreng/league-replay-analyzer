@@ -1,0 +1,170 @@
+{
+  "replayId": "EUN1-3927084741",
+  "generatedAtUtc": "2026-03-21T18:38:53.370Z",
+  "participantMovementPath": "C:\\Development\\league-replay-analyzer\\artifacts\\EUN1-3927084741\\participant-movement.json",
+  "fixtureDir": "C:\\Development\\league-replay-analyzer\\replays\\api\\EUN1_3927084741",
+  "summary": {
+    "assignmentCount": 7,
+    "matchedAssignmentCount": 7,
+    "passingAssignmentCount": 2,
+    "averageAxisCorrelation": 0.4702557065084024,
+    "averagePathCorrelation": 0.5695958163108601,
+    "averageNormalizedDistanceRmse": 0.1821724101674822
+  },
+  "assignments": [
+    {
+      "rosterIndex": 1,
+      "champion": "Hecarim",
+      "team": 100,
+      "teamPosition": "JUNGLE",
+      "entityKey": "6912-0xC9-h0|21|8|10|swapped",
+      "entityGroupKey": "6912-0xC9-h0|21",
+      "matchedParticipantId": 2,
+      "score": 0.5839365510783265,
+      "entityQuality": 0.7070930590086542,
+      "status": "matched",
+      "validation": {
+        "overlap": 17,
+        "xCorrelation": 0.5968897679771391,
+        "yCorrelation": 0.48657933029233047,
+        "averageAxisCorrelation": 0.5417345491347347,
+        "pathCorrelation": 0.6650239681784563,
+        "distanceRmse": 3463.6785030789215,
+        "normalizedDistanceRmse": 0.15307440983607346,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 2,
+      "champion": "Smolder",
+      "team": 100,
+      "teamPosition": "MIDDLE",
+      "entityKey": "29298-0x72-h2|31|11|3|swapped",
+      "entityGroupKey": "29298-0x72-h2|31",
+      "matchedParticipantId": 3,
+      "score": 0.4065686136160839,
+      "entityQuality": 0.6643156932069233,
+      "status": "matched",
+      "validation": {
+        "overlap": 17,
+        "xCorrelation": 0.5277034498068567,
+        "yCorrelation": 0.5701366716673117,
+        "averageAxisCorrelation": 0.5489200607370842,
+        "pathCorrelation": 0.6073992810097754,
+        "distanceRmse": 3166.579787026396,
+        "normalizedDistanceRmse": 0.13994437753591363,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 3,
+      "champion": "Tristana",
+      "team": 100,
+      "teamPosition": "BOTTOM",
+      "entityKey": "6912-0xC6-h0|17|6|5|swapped",
+      "entityGroupKey": "6912-0xC6-h0|17",
+      "matchedParticipantId": 4,
+      "score": 0.5976858016413474,
+      "entityQuality": 0.7541713259242674,
+      "status": "matched",
+      "validation": {
+        "overlap": 16,
+        "xCorrelation": 0.6778243364235359,
+        "yCorrelation": 0.5009251886022066,
+        "averageAxisCorrelation": 0.5893747625128712,
+        "pathCorrelation": 0.30075446906836123,
+        "distanceRmse": 3659.504761153624,
+        "normalizedDistanceRmse": 0.16172878952476152,
+        "passes": true
+      }
+    },
+    {
+      "rosterIndex": 4,
+      "champion": "Rakan",
+      "team": 100,
+      "teamPosition": "UTILITY",
+      "entityKey": "44718-0xAE-h14|7|8|12|normal",
+      "entityGroupKey": "44718-0xAE-h14|7",
+      "matchedParticipantId": 5,
+      "score": 0.4950457515131198,
+      "entityQuality": 0.7336519258715466,
+      "status": "matched",
+      "validation": {
+        "overlap": 15,
+        "xCorrelation": 0.45887251556946945,
+        "yCorrelation": 0.5468776771623425,
+        "averageAxisCorrelation": 0.502875096365906,
+        "pathCorrelation": 0.6935602765164195,
+        "distanceRmse": 4912.571013877352,
+        "normalizedDistanceRmse": 0.21710701731082177,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 6,
+      "champion": "Warwick",
+      "team": 200,
+      "teamPosition": "JUNGLE",
+      "entityKey": "61894-0x00-h6|16|2|5|normal",
+      "entityGroupKey": "61894-0x00-h6|16",
+      "matchedParticipantId": 7,
+      "score": 0.5697355253155366,
+      "entityQuality": 0.7835538757319778,
+      "status": "matched",
+      "validation": {
+        "overlap": 13,
+        "xCorrelation": -0.20073033144457803,
+        "yCorrelation": 0.44504075714682995,
+        "averageAxisCorrelation": 0.12215521285112596,
+        "pathCorrelation": 0.24022684915973114,
+        "distanceRmse": 5349.056238983928,
+        "normalizedDistanceRmse": 0.23639712122085907,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 7,
+      "champion": "Malzahar",
+      "team": 200,
+      "teamPosition": "MIDDLE",
+      "entityKey": "61894-0x00-h6|6|8|6|swapped",
+      "entityGroupKey": "61894-0x00-h6|6",
+      "matchedParticipantId": 8,
+      "score": 0.5857520665212196,
+      "entityQuality": 0.7287350861144719,
+      "status": "matched",
+      "validation": {
+        "overlap": 13,
+        "xCorrelation": 0.5899000200384676,
+        "yCorrelation": 0.6570362884987585,
+        "averageAxisCorrelation": 0.6234681542686131,
+        "pathCorrelation": 0.5778352041022649,
+        "distanceRmse": 4036.2064782087677,
+        "normalizedDistanceRmse": 0.17837681068815578,
+        "passes": true
+      }
+    },
+    {
+      "rosterIndex": 9,
+      "champion": "Zilean",
+      "team": 200,
+      "teamPosition": "UTILITY",
+      "entityKey": "51483-0xF1-h11|11|7|11|normal",
+      "entityGroupKey": "51483-0xF1-h11|11",
+      "matchedParticipantId": 10,
+      "score": 0.5090332849305769,
+      "entityQuality": 0.7714445123687802,
+      "status": "matched",
+      "validation": {
+        "overlap": 13,
+        "xCorrelation": -0.10589311805823996,
+        "yCorrelation": 0.8324173374352032,
+        "averageAxisCorrelation": 0.3632621096884816,
+        "pathCorrelation": 0.9023706661410118,
+        "distanceRmse": 4267.040850364345,
+        "normalizedDistanceRmse": 0.18857834505579002,
+        "passes": false
+      }
+    }
+  ]
+}

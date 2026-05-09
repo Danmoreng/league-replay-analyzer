@@ -1,0 +1,192 @@
+{
+  "replayId": "EUN1-3927135846",
+  "generatedAtUtc": "2026-03-21T18:38:53.590Z",
+  "participantMovementPath": "C:\\Development\\league-replay-analyzer\\artifacts\\EUN1-3927135846\\participant-movement.json",
+  "fixtureDir": "C:\\Development\\league-replay-analyzer\\replays\\api\\EUN1_3927135846",
+  "summary": {
+    "assignmentCount": 8,
+    "matchedAssignmentCount": 8,
+    "passingAssignmentCount": 1,
+    "averageAxisCorrelation": 0.27244741494213665,
+    "averagePathCorrelation": 0.4034429629410961,
+    "averageNormalizedDistanceRmse": 0.2118720352760795
+  },
+  "assignments": [
+    {
+      "rosterIndex": 1,
+      "champion": "Khazix",
+      "team": 100,
+      "teamPosition": "JUNGLE",
+      "entityKey": "61897-0x00-h9|20|3|8|normal",
+      "entityGroupKey": "61897-0x00-h9|20",
+      "matchedParticipantId": 2,
+      "score": 0.5452885541488638,
+      "entityQuality": 0.7166933181172634,
+      "status": "matched",
+      "validation": {
+        "overlap": 17,
+        "xCorrelation": 0.4541993181768965,
+        "yCorrelation": -0.1352312248347036,
+        "averageAxisCorrelation": 0.15948404667109645,
+        "pathCorrelation": -0.19428299466519844,
+        "distanceRmse": 4957.188010899822,
+        "normalizedDistanceRmse": 0.21907882863274483,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 2,
+      "champion": "Malzahar",
+      "team": 100,
+      "teamPosition": "MIDDLE",
+      "entityKey": "50715-0xF1-h11|18|1|2|normal",
+      "entityGroupKey": "50715-0xF1-h11|18",
+      "matchedParticipantId": 3,
+      "score": 0.6032544678736409,
+      "entityQuality": 0.7265768009328791,
+      "status": "matched",
+      "validation": {
+        "overlap": 15,
+        "xCorrelation": 0.7168383095197645,
+        "yCorrelation": 0.42878579601428524,
+        "averageAxisCorrelation": 0.5728120527670248,
+        "pathCorrelation": 0.6019061935937204,
+        "distanceRmse": 3274.6893043276814,
+        "normalizedDistanceRmse": 0.14472218833557257,
+        "passes": true
+      }
+    },
+    {
+      "rosterIndex": 3,
+      "champion": "Aphelios",
+      "team": 100,
+      "teamPosition": "BOTTOM",
+      "entityKey": "51483-0xF1-h11|12|12|7|swapped",
+      "entityGroupKey": "51483-0xF1-h11|12",
+      "matchedParticipantId": 4,
+      "score": 0.5119192146808086,
+      "entityQuality": 0.7835046911813743,
+      "status": "matched",
+      "validation": {
+        "overlap": 11,
+        "xCorrelation": 0.8647370764861538,
+        "yCorrelation": 0.5557527822440189,
+        "averageAxisCorrelation": 0.7102449293650863,
+        "pathCorrelation": 0.7389100195787413,
+        "distanceRmse": 4463.954639499269,
+        "normalizedDistanceRmse": 0.19728078728119272,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 4,
+      "champion": "Pyke",
+      "team": 100,
+      "teamPosition": "UTILITY",
+      "entityKey": "61894-0x00-h6|17|5|7|normal",
+      "entityGroupKey": "61894-0x00-h6|17",
+      "matchedParticipantId": 5,
+      "score": 0.5645626917757088,
+      "entityQuality": 0.6836158808395684,
+      "status": "matched",
+      "validation": {
+        "overlap": 15,
+        "xCorrelation": 0.3766974643162793,
+        "yCorrelation": -0.061996563664567614,
+        "averageAxisCorrelation": 0.15735045032585585,
+        "pathCorrelation": 0.3487214617359256,
+        "distanceRmse": 7294.621981557783,
+        "normalizedDistanceRmse": 0.32237979183449744,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 6,
+      "champion": "Nunu",
+      "team": 200,
+      "teamPosition": "JUNGLE",
+      "entityKey": "51483-0xF1-h11|13|10|0|normal",
+      "entityGroupKey": "51483-0xF1-h11|13",
+      "matchedParticipantId": 7,
+      "score": 0.6163274600666105,
+      "entityQuality": 0.7477099939616433,
+      "status": "matched",
+      "validation": {
+        "overlap": 11,
+        "xCorrelation": -0.47942659131799986,
+        "yCorrelation": 0.42597014490513996,
+        "averageAxisCorrelation": -0.026728223206429952,
+        "pathCorrelation": 0.12852803239759836,
+        "distanceRmse": 4511.526356419202,
+        "normalizedDistanceRmse": 0.1993831800078659,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 7,
+      "champion": "Yasuo",
+      "team": 200,
+      "teamPosition": "MIDDLE",
+      "entityKey": "6912-0xC9-h0|23|11|1|swapped",
+      "entityGroupKey": "6912-0xC9-h0|23",
+      "matchedParticipantId": 8,
+      "score": 0.6580063628286953,
+      "entityQuality": 0.7161510750500542,
+      "status": "matched",
+      "validation": {
+        "overlap": 22,
+        "xCorrelation": 0.4570328668089355,
+        "yCorrelation": 0.5457490033058854,
+        "averageAxisCorrelation": 0.5013909350574104,
+        "pathCorrelation": 0.6350606032304834,
+        "distanceRmse": 2935.4954401721648,
+        "normalizedDistanceRmse": 0.12973179574299543,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 8,
+      "champion": "Draven",
+      "team": 200,
+      "teamPosition": "BOTTOM",
+      "entityKey": "44718-0xAE-h14|11|10|4|normal",
+      "entityGroupKey": "44718-0xAE-h14|11",
+      "matchedParticipantId": 9,
+      "score": 0.5462494603930066,
+      "entityQuality": 0.7675770730761298,
+      "status": "matched",
+      "validation": {
+        "overlap": 10,
+        "xCorrelation": -0.1188339956754582,
+        "yCorrelation": 0.6220910291160904,
+        "averageAxisCorrelation": 0.2516285167203161,
+        "pathCorrelation": 0.5774218338584953,
+        "distanceRmse": 4239.050472466336,
+        "normalizedDistanceRmse": 0.18734133342956152,
+        "passes": false
+      }
+    },
+    {
+      "rosterIndex": 9,
+      "champion": "Seraphine",
+      "team": 200,
+      "teamPosition": "UTILITY",
+      "entityKey": "6912-0xC6-h0|16|2|4|normal",
+      "entityGroupKey": "6912-0xC6-h0|16",
+      "matchedParticipantId": 10,
+      "score": 0.5913534363003246,
+      "entityQuality": 0.68629854359045,
+      "status": "matched",
+      "validation": {
+        "overlap": 14,
+        "xCorrelation": 0.21164053918909442,
+        "yCorrelation": -0.504847315515629,
+        "averageAxisCorrelation": -0.1466033881632673,
+        "pathCorrelation": 0.39127855379900306,
+        "distanceRmse": 6676.408933860625,
+        "normalizedDistanceRmse": 0.295058376944206,
+        "passes": false
+      }
+    }
+  ]
+}

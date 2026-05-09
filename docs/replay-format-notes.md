@@ -1,3 +1,5 @@
+> Note: use `docs/decoder-status.md` for the latest decoder state. This file is for more stable format and container notes.
+
 # Replay Format Notes
 
 ## Verified So Far
@@ -68,6 +70,7 @@ Implication for the next parser step:
 - keep the footer-style record indexing path; it is now validated
 - inspect decompressed startup, keyframe, and chunk payloads for packet/frame structure
 - avoid assuming the classic `payload_offset -> 17-byte table -> segment bytes` layout exists in this replay era
+- if nested zstd frames appear inside decompressed chunk payloads, explicitly test skippable-frame and seek-table interpretations before assuming a custom wrapper
 
 ## Footer-Style Zstd Record Layout
 
@@ -136,6 +139,33 @@ When the classic header path validates, the parser reads segment headers as 17-b
 
 `rofl-core` currently exposes those fields in normalized form but does not decode classic segment payloads yet.
 
+## Riot API Correlation Findings
+
+On March 15, 2026, we compared the local replay corpus directly against official Match-V5 and timeline fixtures.
+
+High-confidence matches across the current seven-replay corpus:
+
+- replay `gameLengthMillis` stays within `14` to `502` ms of Match-V5 `gameDuration * 1000`
+- replay metadata player summaries match Match-V5 exactly for champion, team, team position, Riot ID, K/D/A, total damage to champions, vision score, and win/loss across all `70` participants checked
+- replay `goldEarned` is almost the same as Match-V5 but not perfectly identical: `40 / 70` exact, `29 / 70` at `-1`, and `1 / 70` at `-2` when computed as `replay - API`
+- official timeline `frameCount` equals replay `keyframeCount + 1` on all seven replays
+- every checked keyframe record satisfies `keyframe.chunkId = 2 * keyframe.id + 1`
+- every checked chunk record satisfies `chunk.chunkId = chunk.id + 1`, which means metadata `lastGameChunkId` matches the highest chunk record `id`, not the highest normalized `chunkId` exposed by the parser; across the current corpus, the highest normalized `chunkId` is always `lastGameChunkId + 1`
+
+This strongly suggests a time model for newer footer-style files:
+
+- keyframes align to the official timeline frame boundaries, with replay keyframe `1` corresponding to timeline frame `0`
+- chunk records behave like approximately `30` second delta windows between those minute snapshots
+- the final replay chunk parity matches the final official timeline interval length: replays with a tail shorter than `30` seconds end on an odd `lastGameChunkId`, while longer tails keep the second half-minute chunk
+
+Practical implication for decoding:
+
+- when the API shows a dragon, baron, herald, tower, or kill cluster at time `T`, inspect the replay chunk whose half-minute window covers `T` before scanning neighboring chunks
+- use replay metadata `statsJson` as a stable bridge for player ordering and identity, but do not assume `goldEarned` is a perfect byte-for-byte copy of Match-V5
+- raw chunk size is only a weak semantic signal overall, although compressed chunk size has a moderate corpus-level correlation with champion kills (`r ~= 0.37`)
+
+This does not decode payloads yet, but it gives us a reliable time-alignment layer for subrecord-family work.
+
 ## Current Boundary
 
 What is implemented now:
@@ -189,6 +219,11 @@ Current interpretation:
 
 These are still heuristics, not a verified packet schema, but they are strong enough to justify building the next inspection layer around chunk-subrecord extraction.
 
+Methodological note:
+
+- future chunk inspection tooling should prefer deterministic JSON summaries, family hashes, and corpus-level comparisons over console-only dumps
+- regression fixtures for extracted subrecord families will be more valuable than synthetic-only tests once a family-level decoder starts to stabilize
+
 ## Confidence Levels
 
 High confidence:
@@ -207,3 +242,147 @@ Lower confidence / still needs verification:
 - where packet opcode and field mappings diverge by version
 
 
+## Event-Family Correlation Update
+
+On March 15, 2026, we reran chunk-family correlation against the local Riot API fixtures using the corrected chunk window mapping:
+
+- first regular gameplay chunk id is `4` in `replays/EUW1-7779216102.rofl`
+- event timestamps map to replay chunks as `chunkId = firstRegularChunkId + floor(timestamp / 30000)`
+- the native CLI path may be `build/packages/rofl-core/rofl_core_cli.exe` under Ninja or `build/packages/rofl-core/Debug/rofl_core_cli.exe` under multi-config builds
+
+Using the corrected `payload-pattern-hunter` flow on the local sample:
+
+- `CHAMPION_KILL` events occur in `27` different chunks, but there is no single subrecord family that appears in every kill-bearing chunk while being absent from the quiet baseline chunk
+- `ELITE_MONSTER_KILL` and `BUILDING_KILL` show the same result: no universal event-only family across all eventful chunks
+- the only family that appears in every checked kill/objective/building chunk and also in the quiet baseline is the sparse family `firstByte = 0xD2`, `length = 53,970`
+- in the kill scan, that `0xD2/53,970` family appears `301` times across `27` eventful chunks and also appears `12` times in quiet chunk `6`
+
+Implication:
+
+- the dominant `53,970` family is not a simple one-record-per-event packet
+- it behaves like recurring world-state or entity-slab data that is present in quiet and eventful windows alike
+- chunk semantics are likely mixed: each chunk contains several subrecord families, and visible gameplay events probably emerge either from smaller chunk-local families or from state transitions inside the recurrent sparse slabs
+
+This is the strongest current answer to what later chunk payloads represent:
+
+- not a flat event log with one stable kill/objective opcode family
+- more likely a bundle of heterogeneous state/update records, where the sparse fixed-size families carry broad world/entity state and other families carry additional specialized delta data
+
+## Working Interpretation And Next Step
+
+As of March 15, 2026, the current evidence is more consistent with stored spectator-style state and delta data than with a compact stream of raw player inputs:
+
+- the dominant sparse family recurs in quiet and eventful windows alike
+- its body looks like a fixed-capacity slot table with mixed float-like and non-float-like lanes
+- chunk timing aligns cleanly with replay timeline windows and keyframe boundaries
+- no single universal kill/objective family has appeared across all eventful chunks
+
+That does not prove player inputs are absent, but inputs do not currently look like the primary payload layer we have identified.
+
+The decoding focus should therefore be:
+
+1. rank sparse slots by coordinate-like smooth motion across adjacent records
+2. group those slots into coarse classes by lane pair, dominant first byte, and lane mask
+3. compare the best candidates against champion counts, ward timing, and objective windows
+4. use keyframes as minute-boundary anchors to separate baseline state from half-minute deltas
+
+This direction is now backed by the native slot profiler command:
+
+- `rofl_core_cli --profile-position-slots <path> --length 53970 --first-byte 0xD2 --header-size 2 --stride 16`
+- `rofl_core_cli --compare-position-classes <path> --length 53970 --first-byte 0xD2 --header-size 2 --stride 16`
+
+That command is intended to surface candidate position/state slots before we try to assign specific semantic identities such as champion, ward, missile, or minion.
+
+
+
+## Cross-Patch Sparse Family Comparison
+
+On March 16, 2026, we ran the native position-class comparer across representative local replays from five replay versions:
+
+- `15.22.724.5161` via `replays/EUW1-7596231295.rofl`
+- `15.23.728.3286` via `replays/EUW1-7617298409.rofl`
+- `15.24.733.6673` via `replays/EUW1-7648140653.rofl`
+- `16.1.737.4870` via `replays/EUW1-7678536418.rofl`
+- `16.5.752.7101` via `replays/EUW1-7779216102.rofl`
+
+The first important negative result is that the previously useful `16.5` sparse family is not portable:
+
+- `length = 53,970`, `firstByte = 0xD2`, `headerSize = 2` produced strong results on `16.5`
+- the same family produced `0` matching records on the checked `15.22`, `15.23`, `15.24`, and `16.1` samples
+
+That means the sparse world/entity slab hypothesis survives, but the exact subrecord family carrying that slab is version-sensitive.
+
+### Large Recurring Families Found Per Version
+
+Using real chunk-subrecord dumps rather than the lower-level heuristic `--inspect` framing output, the large recurring families that actually exist in each sample were:
+
+- `15.22`: `firstByte = 0x41`, `length = 16,705`
+- `15.23`: `firstByte = 0xA8`, `length = 43,176`
+- `15.24`: `firstByte = 0xFE`, `length = 65,278`
+- `16.1`: `firstByte = 0xC2`, `length = 49,858`
+- `16.5`: `firstByte = 0xD2`, `length = 53,970`
+
+Not all large families are equally useful:
+
+- some are analyzable sparse tables with smooth multi-slot motion
+- some are mostly repeated-fill slabs that the comparer can scan but that do not yield useful candidate classes
+
+### Results By Patch
+
+`15.22` on `0x41 / 16,705`:
+
+- the strongest classes were only `5`, `5`, and `4` slots
+- all top classes remained `mixed state candidate`
+- this does not look like a clean persistent 10-entity class
+
+`15.23` on `0xA8 / 43,176`:
+
+- the comparer produced useful output
+- strongest classes were `13`, `13`, and `6` slots
+- these behaved like a real sparse table, but less cleanly than later versions
+
+`15.24` on `0xFE / 65,278`:
+
+- this was the strongest pre-`16.x` result
+- best classes were `11`, `12`, `8`, `15`, and `16` slots
+- this is consistent with a persistent state slab that can produce champion-like class sizes
+
+`16.1` on `0xC2 / 49,858`:
+
+- the family was analyzable, but the output was noisier
+- nearest class was `11` slots, with broader mixed-state classes around it
+- motion looked more mobile and less cleanly separated than `16.5`
+
+`16.5` on `0xD2 / 53,970`:
+
+- still the cleanest sample so far
+- strongest classes remained `9`, `11`, and `7` slots
+- this is still the best evidence that one sparse family is carrying broad entity/world state rather than event-only packets
+
+### Interpretation
+
+Cross-patch comparison strengthens two conclusions:
+
+- the replay payload is still better explained as version-specific spectator/state-delta transport than as a stable event packet stream
+- the broad sparse-slot-table idea appears to survive across patches, but the concrete family signature changes by version
+
+So the current problem is no longer just `decode 0xD2 / 53,970`. The real problem is:
+
+1. find the candidate sparse families for a given replay version
+2. rank them by smooth-motion and persistence
+3. run slot-class comparison only on the best families
+4. then try to separate champion-like classes from wards, minions, missiles, and broader mixed world state
+
+### Updated Workflow
+
+The manual cross-patch pass showed that one hard-coded `length / firstByte / headerSize` triple is not enough for corpus work.
+
+The next tooling step should therefore be an automated family-discovery pipeline:
+
+1. dump chunk subrecords for representative chunks in the replay
+2. identify large recurring families that appear across many chunks
+3. reject obvious filler-only slabs
+4. rank surviving families by coordinate-like smooth motion and slot persistence
+5. run `--compare-position-classes` only on the top candidates
+
+This is now the recommended path for batch-scanning the local replay corpus. The earlier `0xD2 / 53,970` workflow should be treated as a successful version-specific case study, not as a universal replay-era invariant.

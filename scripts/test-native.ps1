@@ -24,3 +24,7 @@ Write-Host "Building native test target..." -ForegroundColor Cyan
 
 Write-Host "Running native tests..." -ForegroundColor Cyan
 ctest --test-dir $resolvedBuildDir --output-on-failure --build-config $Configuration
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Native tests failed with exit code $LASTEXITCODE."
+}

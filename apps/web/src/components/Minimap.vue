@@ -6,81 +6,188 @@ import { type PlayerMovementData, usePlayback } from "../composables/usePlayback
 const props = withDefaults(
   defineProps<{
     playerData?: PlayerMovementData[];
-    label?: string;
+    comparisonData?: PlayerMovementData[];
     emptyMessage?: string;
+    backgroundImageSrc?: string;
+    primaryLabel?: string;
+    comparisonLabel?: string;
+    showSideColumns?: boolean;
   }>(),
   {
     playerData: () => [],
-    label: "Minimap",
+    comparisonData: () => [],
     emptyMessage: "No map coordinates are available from the current parser output.",
+    backgroundImageSrc: "/summoners-rift-minimap.png",
+    primaryLabel: "Primary",
+    comparisonLabel: "Comparison",
+    showSideColumns: true,
   },
 );
 
 const { currentTime } = usePlayback();
 const canvasRef = ref<HTMLCanvasElement | null>(null);
-const mapSize = 512;
+const mapSize = 768;
 const leagueMapSize = 15000;
+const trailPointCount = 5;
 
-const hasRenderablePlayers = computed(() =>
-  props.playerData.some((player) => player.positions.length > 0),
+const roleOrder = ["Top", "Jungle", "Middle", "Bottom", "Support", "Utility", "Unknown"];
+
+const renderablePlayers = computed(() =>
+  props.playerData.filter((player) => player.positions.length > 0),
 );
+const renderableComparisonPlayers = computed(() =>
+  props.comparisonData.filter((player) => player.positions.length > 0),
+);
+const hasRenderablePlayers = computed(() => renderablePlayers.value.length > 0);
+const hasRenderableComparisonPlayers = computed(() => renderableComparisonPlayers.value.length > 0);
 
 function toCanvasCoord(leagueCoord: number): number {
   return (leagueCoord / leagueMapSize) * mapSize;
 }
 
-function drawBackground(ctx: CanvasRenderingContext2D): void {
-  const gradient = ctx.createLinearGradient(0, 0, mapSize, mapSize);
-  gradient.addColorStop(0, "#20331e");
-  gradient.addColorStop(0.5, "#2a4030");
-  gradient.addColorStop(1, "#19262a");
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, mapSize, mapSize);
+function getTeamColor(team: number, alpha = 1): string {
+  return team === 100 ? `rgba(74, 158, 255, ${alpha})` : `rgba(255, 108, 95, ${alpha})`;
+}
 
-  ctx.strokeStyle = "rgba(255,255,255,0.08)";
-  ctx.lineWidth = 1;
-  for (let index = 1; index < 8; index += 1) {
-    const offset = (mapSize / 8) * index;
-    ctx.beginPath();
-    ctx.moveTo(offset, 0);
-    ctx.lineTo(offset, mapSize);
-    ctx.stroke();
+function getVisiblePositions(player: PlayerMovementData) {
+  const visible = [];
+  for (const position of player.positions) {
+    if (position.timestamp <= currentTime.value) {
+      visible.push(position);
+      continue;
+    }
+    break;
+  }
+
+  return visible.length > 0 ? visible : [player.positions[0]];
+}
+
+function getComparisonColor(team: number, alpha = 1): string {
+  return team === 100 ? `rgba(147, 224, 255, ${alpha})` : `rgba(255, 211, 132, ${alpha})`;
+}
+
+function getRoleRank(roleLabel?: string): number {
+  const role = roleLabel ?? "Unknown";
+  const exactIndex = roleOrder.indexOf(role);
+  if (exactIndex >= 0) {
+    return exactIndex;
+  }
+
+  const normalized = role.toLowerCase();
+  if (normalized.includes("top")) return 0;
+  if (normalized.includes("jungle")) return 1;
+  if (normalized.includes("mid")) return 2;
+  if (normalized.includes("bottom") || normalized.includes("bot") || normalized.includes("adc")) return 3;
+  if (normalized.includes("support")) return 4;
+  return roleOrder.length - 1;
+}
+
+const markerPlayers = computed(() =>
+  renderablePlayers.value.map((player) => {
+    const visiblePositions = getVisiblePositions(player);
+    const currentPosition = visiblePositions[visiblePositions.length - 1];
+
+    return {
+      champion: player.champion,
+      playerName: player.playerName ?? "Unknown Player",
+      championIconSrc: player.championIconSrc ?? "",
+      roleLabel: player.roleLabel ?? "Unknown",
+      team: player.team,
+      left: `${(currentPosition.x / leagueMapSize) * 100}%`,
+      top: `${100 - ((currentPosition.y / leagueMapSize) * 100)}%`,
+    };
+  }),
+);
+
+const blueTeamPlayers = computed(() =>
+  markerPlayers.value
+    .filter((player) => player.team === 100)
+    .sort((left, right) => getRoleRank(left.roleLabel) - getRoleRank(right.roleLabel) || left.champion.localeCompare(right.champion)),
+);
+
+const redTeamPlayers = computed(() =>
+  markerPlayers.value
+    .filter((player) => player.team === 200)
+    .sort((left, right) => getRoleRank(left.roleLabel) - getRoleRank(right.roleLabel) || left.champion.localeCompare(right.champion)),
+);
+
+function drawTrail(ctx: CanvasRenderingContext2D, player: PlayerMovementData, positions: PlayerMovementData["positions"]): void {
+  if (positions.length < 2) {
+    return;
+  }
+
+  const visibleTrail = positions.slice(-trailPointCount);
+  for (let index = 1; index < visibleTrail.length; index += 1) {
+    const previous = visibleTrail[index - 1];
+    const current = visibleTrail[index];
+    const alpha = 0.18 + ((0.74 * index) / (visibleTrail.length - 1));
 
     ctx.beginPath();
-    ctx.moveTo(0, offset);
-    ctx.lineTo(mapSize, offset);
+    ctx.moveTo(toCanvasCoord(previous.x), mapSize - toCanvasCoord(previous.y));
+    ctx.lineTo(toCanvasCoord(current.x), mapSize - toCanvasCoord(current.y));
+    ctx.strokeStyle = getTeamColor(player.team, alpha);
+    ctx.lineWidth = 3;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
     ctx.stroke();
   }
 }
 
-function drawPlayers(ctx: CanvasRenderingContext2D): void {
-  for (const player of props.playerData) {
-    if (player.positions.length === 0) {
-      continue;
-    }
+function drawComparisonTrail(ctx: CanvasRenderingContext2D, player: PlayerMovementData, positions: PlayerMovementData["positions"]): void {
+  if (positions.length < 2) {
+    return;
+  }
 
-    const currentPos = player.positions.reduce((previous, current) => {
-      if (current.timestamp <= currentTime.value) {
-        return current;
-      }
-      return previous;
-    }, player.positions[0]);
+  const visibleTrail = positions.slice(-trailPointCount);
+  for (let index = 1; index < visibleTrail.length; index += 1) {
+    const previous = visibleTrail[index - 1];
+    const current = visibleTrail[index];
+    const alpha = 0.2 + ((0.55 * index) / (visibleTrail.length - 1));
 
-    const x = toCanvasCoord(currentPos.x);
-    const y = mapSize - toCanvasCoord(currentPos.y);
-
+    ctx.save();
     ctx.beginPath();
-    ctx.arc(x, y, 8, 0, Math.PI * 2);
-    ctx.fillStyle = player.team === 100 ? "#4a9eff" : "#ff6c5f";
-    ctx.fill();
-    ctx.strokeStyle = "white";
+    ctx.setLineDash([8, 7]);
+    ctx.moveTo(toCanvasCoord(previous.x), mapSize - toCanvasCoord(previous.y));
+    ctx.lineTo(toCanvasCoord(current.x), mapSize - toCanvasCoord(current.y));
+    ctx.strokeStyle = getComparisonColor(player.team, alpha);
     ctx.lineWidth = 2;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
     ctx.stroke();
+    ctx.restore();
+  }
+}
 
-    ctx.fillStyle = "white";
-    ctx.font = "bold 10px Segoe UI, sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(player.champion, x, y - 12);
+function drawComparisonMarker(ctx: CanvasRenderingContext2D, player: PlayerMovementData, positions: PlayerMovementData["positions"]): void {
+  if (positions.length === 0) {
+    return;
+  }
+
+  const current = positions[positions.length - 1];
+  const x = toCanvasCoord(current.x);
+  const y = mapSize - toCanvasCoord(current.y);
+
+  ctx.save();
+  ctx.strokeStyle = getComparisonColor(player.team, 0.95);
+  ctx.fillStyle = "rgba(8, 11, 18, 0.88)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(x, y, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawPlayers(ctx: CanvasRenderingContext2D): void {
+  for (const player of renderableComparisonPlayers.value) {
+    const visiblePositions = getVisiblePositions(player);
+    drawComparisonTrail(ctx, player, visiblePositions);
+    drawComparisonMarker(ctx, player, visiblePositions);
+  }
+
+  for (const player of renderablePlayers.value) {
+    const visiblePositions = getVisiblePositions(player);
+    drawTrail(ctx, player, visiblePositions);
   }
 }
 
@@ -96,7 +203,6 @@ function draw(): void {
   }
 
   ctx.clearRect(0, 0, mapSize, mapSize);
-  drawBackground(ctx);
   drawPlayers(ctx);
 }
 
@@ -117,69 +223,296 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="minimap-container">
-    <canvas ref="canvasRef" :width="mapSize" :height="mapSize" class="minimap-canvas"></canvas>
-    <div class="minimap-overlay">
-      <div class="minimap-label">{{ label }}</div>
+  <div class="minimap-shell" :class="{ 'minimap-shell-compact': !showSideColumns }">
+    <div v-if="showSideColumns && hasRenderablePlayers" class="team-column team-column-left">
+      <div v-for="player in blueTeamPlayers" :key="`${player.team}-${player.champion}-${player.playerName}-left`" class="team-item">
+        <img v-if="player.championIconSrc" :src="player.championIconSrc" :alt="player.champion" class="team-icon blue-team" />
+        <div v-else class="team-icon team-fallback blue-team"></div>
+        <div class="team-copy team-copy-left">
+          <div class="team-role">{{ player.roleLabel }}</div>
+          <div class="team-champion">{{ player.champion }}</div>
+          <div class="team-player">{{ player.playerName }}</div>
+        </div>
+      </div>
     </div>
-    <div v-if="!hasRenderablePlayers" class="empty-overlay">
-      <p>{{ emptyMessage }}</p>
+
+    <div class="minimap-container">
+      <img :src="backgroundImageSrc" alt="Summoner's Rift minimap" class="map-background" />
+      <canvas ref="canvasRef" :width="mapSize" :height="mapSize" class="minimap-canvas"></canvas>
+      <div class="marker-layer">
+        <div
+          v-for="player in markerPlayers"
+          :key="`${player.team}-${player.champion}-${player.playerName}`"
+          class="marker"
+          :style="{ left: player.left, top: player.top }"
+        >
+          <img
+            v-if="player.championIconSrc"
+            :src="player.championIconSrc"
+            :alt="player.champion"
+            class="champion-icon"
+            :class="player.team === 100 ? 'blue-team' : 'red-team'"
+          />
+          <div v-else class="marker-dot" :class="player.team === 100 ? 'blue-team' : 'red-team'"></div>
+        </div>
+      </div>
+      <div v-if="hasRenderableComparisonPlayers" class="comparison-legend">
+        <span class="legend-chip legend-primary">{{ primaryLabel }}</span>
+        <span class="legend-chip legend-comparison">{{ comparisonLabel }}</span>
+      </div>
+      <div v-if="!hasRenderablePlayers" class="empty-overlay">
+        <p>{{ emptyMessage }}</p>
+      </div>
+    </div>
+
+    <div v-if="showSideColumns && hasRenderablePlayers" class="team-column team-column-right">
+      <div v-for="player in redTeamPlayers" :key="`${player.team}-${player.champion}-${player.playerName}-right`" class="team-item team-item-right">
+        <div class="team-copy team-copy-right">
+          <div class="team-role">{{ player.roleLabel }}</div>
+          <div class="team-champion">{{ player.champion }}</div>
+          <div class="team-player">{{ player.playerName }}</div>
+        </div>
+        <img v-if="player.championIconSrc" :src="player.championIconSrc" :alt="player.champion" class="team-icon red-team" />
+        <div v-else class="team-icon team-fallback red-team"></div>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+.minimap-shell {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(148px, 176px) minmax(0, 1fr) minmax(148px, 176px);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.team-column {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+}
+
+.minimap-shell-compact {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.team-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 74px;
+  padding: 10px 11px;
+  background: rgba(8, 13, 20, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+}
+
+.team-item-right {
+  justify-content: flex-end;
+}
+
+.team-copy {
+  min-width: 0;
+}
+
+.team-copy-left {
+  text-align: left;
+}
+
+.team-copy-right {
+  text-align: right;
+}
+
+.team-role {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.team-champion {
+  color: white;
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.team-player {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.74rem;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .minimap-container {
   position: relative;
-  width: min(100%, 512px);
+  width: 100%;
+  max-width: none;
   aspect-ratio: 1;
   border: 2px solid var(--border-strong);
   border-radius: 18px;
   overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
-  background: #1f2f27;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22);
+  background: #10161d;
+}
+
+.map-background {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .minimap-canvas {
+  position: relative;
+  z-index: 1;
   display: block;
   width: 100%;
   height: 100%;
 }
 
-.minimap-overlay {
+.marker-layer {
   position: absolute;
-  top: 12px;
-  left: 12px;
+  inset: 0;
+  z-index: 2;
   pointer-events: none;
 }
 
-.minimap-label {
-  padding: 4px 10px;
-  background: rgba(0, 0, 0, 0.6);
-  color: white;
-  border-radius: 6px;
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+.marker {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  transform: translate(-50%, -50%);
+}
+
+.champion-icon,
+.team-icon,
+.marker-dot {
+  display: block;
+  object-fit: cover;
+  border-radius: 999px;
+  background: rgba(8, 11, 18, 0.92);
+}
+
+.champion-icon {
+  width: 28px;
+  height: 28px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+
+.marker-dot {
+  width: 18px;
+  height: 18px;
+  margin: 5px;
+}
+
+.team-icon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+}
+
+.team-fallback {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.blue-team {
+  box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.95), 0 0 0 4px rgba(8, 11, 18, 0.8);
+}
+
+.red-team {
+  box-shadow: 0 0 0 2px rgba(255, 108, 95, 0.95), 0 0 0 4px rgba(8, 11, 18, 0.8);
 }
 
 .empty-overlay {
   position: absolute;
+  z-index: 3;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
   text-align: center;
-  background: linear-gradient(180deg, rgba(14, 18, 21, 0.22), rgba(14, 18, 21, 0.48));
+  background: linear-gradient(180deg, rgba(6, 10, 16, 0.18), rgba(6, 10, 16, 0.56));
 }
 
 .empty-overlay p {
-  max-width: 26ch;
+  max-width: 28ch;
   padding: 16px 18px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.9);
   color: #17202a;
   font-weight: 600;
+}
+
+.comparison-legend {
+  position: absolute;
+  z-index: 3;
+  left: 14px;
+  bottom: 14px;
+  display: flex;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(8, 11, 18, 0.84);
+  color: white;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.legend-primary::before,
+.legend-comparison::before {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  height: 0;
+  border-top: 3px solid currentColor;
+}
+
+.legend-primary {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.legend-comparison {
+  color: rgba(255, 211, 132, 0.95);
+}
+
+.legend-comparison::before {
+  border-top-style: dashed;
+}
+
+@media (max-width: 1080px) {
+  .minimap-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .team-column-left {
+    order: 1;
+  }
+
+  .minimap-container {
+    order: 2;
+  }
+
+  .team-column-right {
+    order: 3;
+  }
 }
 </style>

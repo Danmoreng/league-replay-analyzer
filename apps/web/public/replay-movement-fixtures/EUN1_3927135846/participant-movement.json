@@ -1,0 +1,984 @@
+{
+  "replayId": "EUN1-3927135846",
+  "generatedAtUtc": "2026-03-21T18:38:53.530Z",
+  "movementPath": "C:\\Development\\league-replay-analyzer\\artifacts\\EUN1-3927135846\\extracted-movement.json",
+  "statsPath": "C:\\Development\\league-replay-analyzer\\artifacts\\EUN1-3927135846\\extracted-stats.json",
+  "priorsPath": "C:\\Development\\league-replay-analyzer\\artifacts\\movement-identity-priors.json",
+  "assignments": [
+    {
+      "rosterIndex": 1,
+      "champion": "Khazix",
+      "team": 100,
+      "teamPosition": "JUNGLE",
+      "entityKey": "61897-0x00-h9|20|3|8|normal",
+      "entityGroupKey": "61897-0x00-h9|20",
+      "familyKey": "61897-0x00-h9",
+      "patternKey": "61897-0x00-h9|3|f32|8|i32|normal",
+      "slotIndex": 20,
+      "score": 0.5452885541488638,
+      "scoreComponents": {
+        "entityQuality": 0.7166933181172634,
+        "teamScore": 0.02443718604773501,
+        "roleScore": 0.5481064524413252,
+        "scalarFamilyScore": 0,
+        "centerBias": 0.6815877481160398,
+        "trajectoryScore": 1,
+        "exactPriorScore": 1,
+        "familyPriorScore": 0.9351832110307372,
+        "sameTeamDistance": 11536.213034802395,
+        "oppositeTeamDistance": 9732.384238382727
+      },
+      "entityQuality": 0.7166933181172634,
+      "sourceMetrics": {
+        "avgAxisCorrelation": 0.5055137333913587,
+        "avgPathCorrelation": 0.4406342720911227,
+        "avgNormalizedDistanceRmse": 0.24726318698087027,
+        "avgValidatorScore": 0.7886163622415131
+      },
+      "trajectoryStats": {
+        "pointCount": 17,
+        "uniquePointRatio": 1,
+        "displacement": 9015.614059669468,
+        "pathLength": 28003.13451838101,
+        "xRange": 9016.78274142258,
+        "yRange": 3939.9830151005226,
+        "movementQuality": 1
+      },
+      "aliasEntityKeys": [
+        "61897-0x00-h9|20|3|8|normal"
+      ],
+      "trajectory": [
+        {
+          "timestamp": 0,
+          "x": 5218.805663253992,
+          "y": 11171.227243297608
+        },
+        {
+          "timestamp": 83612,
+          "x": 5218.805663253992,
+          "y": 10460.331915216695
+        },
+        {
+          "timestamp": 167224,
+          "x": 5218.805663253992,
+          "y": 10410.709482276812
+        },
+        {
+          "timestamp": 250836,
+          "x": 5218.805663253992,
+          "y": 9732.898112215298
+        },
+        {
+          "timestamp": 334448,
+          "x": 5218.7897846946225,
+          "y": 8333.654837585465
+        },
+        {
+          "timestamp": 418060,
+          "x": 5218.805663253992,
+          "y": 9039.986388012105
+        },
+        {
+          "timestamp": 501672,
+          "x": 5218.5102164392165,
+          "y": 8551.574853254055
+        },
+        {
+          "timestamp": 585284,
+          "x": 5209.369195255103,
+          "y": 9874.676236606869
+        },
+        {
+          "timestamp": 668897,
+          "x": 5218.805663253992,
+          "y": 7730.567998623954
+        },
+        {
+          "timestamp": 752509,
+          "x": 5218.805663253992,
+          "y": 8476.223735613092
+        },
+        {
+          "timestamp": 836121,
+          "x": 5218.805663253992,
+          "y": 10727.047217547872
+        },
+        {
+          "timestamp": 919733,
+          "x": 5218.805663253992,
+          "y": 8657.310445679825
+        },
+        {
+          "timestamp": 1003345,
+          "x": 5218.805663253992,
+          "y": 8617.805547367576
+        },
+        {
+          "timestamp": 1086957,
+          "x": 5218.805663253992,
+          "y": 7231.244228197085
+        },
+        {
+          "timestamp": 1170569,
+          "x": 6323.12232883161,
+          "y": 9306.118684430823
+        },
+        {
+          "timestamp": 1254181,
+          "x": 5218.804184518327,
+          "y": 7536.837261459937
+        },
+        {
+          "timestamp": 1337793,
+          "x": 14226.151936677683,
+          "y": 10785.2091303157
+        }
+      ]
+    },
+    {
+      "rosterIndex": 2,
+      "champion": "Malzahar",
+      "team": 100,
+      "teamPosition": "MIDDLE",
+      "entityKey": "50715-0xF1-h11|18|1|2|normal",
+      "entityGroupKey": "50715-0xF1-h11|18",
+      "familyKey": "50715-0xF1-h11",
+      "patternKey": "50715-0xF1-h11|1|f32|2|u32|normal",
+      "slotIndex": 18,
+      "score": 0.6032544678736409,
+      "scoreComponents": {
+        "entityQuality": 0.7265768009328791,
+        "teamScore": 0.23714088302821829,
+        "roleScore": 0.6320787049301048,
+        "scalarFamilyScore": 0,
+        "centerBias": 0.7990626907234548,
+        "trajectoryScore": 0.9733333333333334,
+        "exactPriorScore": 1,
+        "familyPriorScore": 1,
+        "sameTeamDistance": 5750.2400423460285,
+        "oppositeTeamDistance": 14485.844459402708
+      },
+      "entityQuality": 0.7265768009328791,
+      "sourceMetrics": {
+        "avgAxisCorrelation": 0.452926942722129,
+        "avgPathCorrelation": 0.523568929976635,
+        "avgNormalizedDistanceRmse": 0.22922097242393077,
+        "avgValidatorScore": 0.8105751736296039
+      },
+      "trajectoryStats": {
+        "pointCount": 15,
+        "uniquePointRatio": 0.9333333333333333,
+        "displacement": 6583.342007531952,
+        "pathLength": 19845.41094059443,
+        "xRange": 6251.0845637591265,
+        "yRange": 2809.0072544994264,
+        "movementQuality": 0.9866666666666667
+      },
+      "aliasEntityKeys": [
+        "50715-0xF1-h11|18|1|2|normal"
+      ],
+      "trajectory": [
+        {
+          "timestamp": 0,
+          "x": 2606.220359465544,
+          "y": 5988.909018889222
+        },
+        {
+          "timestamp": 95557,
+          "x": 8857.304923224661,
+          "y": 6015.149375059844
+        },
+        {
+          "timestamp": 191113,
+          "x": 8857.304923224661,
+          "y": 7220.690788697137
+        },
+        {
+          "timestamp": 286670,
+          "x": 8857.304923224652,
+          "y": 7025.815453046336
+        },
+        {
+          "timestamp": 382227,
+          "x": 8857.304802159611,
+          "y": 5848.366477320539
+        },
+        {
+          "timestamp": 477783,
+          "x": 8857.304923224661,
+          "y": 8657.373731819966
+        },
+        {
+          "timestamp": 573340,
+          "x": 8857.304923224661,
+          "y": 7902.18761383566
+        },
+        {
+          "timestamp": 668897,
+          "x": 8857.304923224661,
+          "y": 5931.070025061441
+        },
+        {
+          "timestamp": 764453,
+          "x": 8857.30492322467,
+          "y": 5853.657535323449
+        },
+        {
+          "timestamp": 860010,
+          "x": 8857.304923224661,
+          "y": 6544.176119855649
+        },
+        {
+          "timestamp": 955566,
+          "x": 8857.304923224661,
+          "y": 7450.0897200891295
+        },
+        {
+          "timestamp": 1051123,
+          "x": 8857.304692174423,
+          "y": 5848.387566386604
+        },
+        {
+          "timestamp": 1146680,
+          "x": 8857.304923224661,
+          "y": 7513.834612462386
+        },
+        {
+          "timestamp": 1242236,
+          "x": 8857.304923224661,
+          "y": 7971.867519010944
+        },
+        {
+          "timestamp": 1337793,
+          "x": 8857.304923224661,
+          "y": 8053.935354040257
+        }
+      ]
+    },
+    {
+      "rosterIndex": 3,
+      "champion": "Aphelios",
+      "team": 100,
+      "teamPosition": "BOTTOM",
+      "entityKey": "51483-0xF1-h11|12|12|7|swapped",
+      "entityGroupKey": "51483-0xF1-h11|12",
+      "familyKey": "51483-0xF1-h11",
+      "patternKey": "51483-0xF1-h11|12|f32|7|f32|swapped",
+      "slotIndex": 12,
+      "score": 0.5119192146808086,
+      "scoreComponents": {
+        "entityQuality": 0.7835046911813743,
+        "teamScore": 0.19545555373141235,
+        "roleScore": 0.45138852531894985,
+        "scalarFamilyScore": 0,
+        "centerBias": 0.7620303558579412,
+        "trajectoryScore": 0.7090909090909092,
+        "exactPriorScore": 0.9149280041959074,
+        "familyPriorScore": 0.8202673532376985,
+        "sameTeamDistance": 6569.515776199656,
+        "oppositeTeamDistance": 13487.17007341582
+      },
+      "entityQuality": 0.7835046911813743,
+      "sourceMetrics": {
+        "avgAxisCorrelation": 0.6044058591493252,
+        "avgPathCorrelation": 0.545745054400498,
+        "avgNormalizedDistanceRmse": 0.21336569220125318,
+        "avgValidatorScore": 0.9243735652235905
+      },
+      "trajectoryStats": {
+        "pointCount": 11,
+        "uniquePointRatio": 0.2727272727272727,
+        "displacement": 9017.318476070634,
+        "pathLength": 12752.193930422887,
+        "xRange": 6338.630446360758,
+        "yRange": 6413.563484028484,
+        "movementQuality": 0.8545454545454546
+      },
+      "aliasEntityKeys": [
+        "51483-0xF1-h11|12|12|7|swapped",
+        "51483-0xF1-h11|12|7|8|normal"
+      ],
+      "trajectory": [
+        {
+          "timestamp": 0,
+          "x": 3457.4837799943525,
+          "y": 6515.515529588723
+        },
+        {
+          "timestamp": 133779,
+          "x": 9796.114226329051,
+          "y": 6515.515529588723
+        },
+        {
+          "timestamp": 267559,
+          "x": 9796.114226329051,
+          "y": 6515.515529588723
+        },
+        {
+          "timestamp": 401338,
+          "x": 9796.114226329051,
+          "y": 6515.5155295895765
+        },
+        {
+          "timestamp": 535117,
+          "x": 9796.114226329137,
+          "y": 6515.515529588723
+        },
+        {
+          "timestamp": 668897,
+          "x": 9796.114226332033,
+          "y": 6515.515529588723
+        },
+        {
+          "timestamp": 802676,
+          "x": 9796.114226329051,
+          "y": 6515.515529588723
+        },
+        {
+          "timestamp": 936455,
+          "x": 9796.114226329051,
+          "y": 6515.515529588723
+        },
+        {
+          "timestamp": 1070234,
+          "x": 9796.11422635511,
+          "y": 6515.515529588723
+        },
+        {
+          "timestamp": 1204014,
+          "x": 9796.114226329051,
+          "y": 6515.515529588723
+        },
+        {
+          "timestamp": 1337793,
+          "x": 9796.11422633063,
+          "y": 12929.079013617207
+        }
+      ]
+    },
+    {
+      "rosterIndex": 4,
+      "champion": "Pyke",
+      "team": 100,
+      "teamPosition": "UTILITY",
+      "entityKey": "61894-0x00-h6|17|5|7|normal",
+      "entityGroupKey": "61894-0x00-h6|17",
+      "familyKey": "61894-0x00-h6",
+      "patternKey": "61894-0x00-h6|5|f32|7|i32|normal",
+      "slotIndex": 17,
+      "score": 0.5645626917757088,
+      "scoreComponents": {
+        "entityQuality": 0.6836158808395684,
+        "teamScore": 0.07655744130612818,
+        "roleScore": 0.30821093193667176,
+        "scalarFamilyScore": 1,
+        "centerBias": 0.7512031332084814,
+        "trajectoryScore": 1,
+        "exactPriorScore": 0.9037835978731492,
+        "familyPriorScore": 0.7928170479047906,
+        "sameTeamDistance": 9474.773833226467,
+        "oppositeTeamDistance": 10526.071996570287
+      },
+      "entityQuality": 0.6836158808395684,
+      "sourceMetrics": {
+        "avgAxisCorrelation": 0.40826190751349467,
+        "avgPathCorrelation": 0.34394567759311717,
+        "avgNormalizedDistanceRmse": 0.23709989847375873,
+        "avgValidatorScore": 0.786455441563219
+      },
+      "trajectoryStats": {
+        "pointCount": 15,
+        "uniquePointRatio": 1,
+        "displacement": 8032.889910046609,
+        "pathLength": 15868.266301527248,
+        "xRange": 7803.57929923542,
+        "yRange": 2453.2048156588144,
+        "movementQuality": 1
+      },
+      "aliasEntityKeys": [
+        "61894-0x00-h6|17|5|7|normal"
+      ],
+      "trajectory": [
+        {
+          "timestamp": 0,
+          "x": 5573.995678909803,
+          "y": 8664.161839706565
+        },
+        {
+          "timestamp": 95557,
+          "x": 5573.995678909803,
+          "y": 9319.559453257994
+        },
+        {
+          "timestamp": 191113,
+          "x": 5573.995678909803,
+          "y": 8395.529749062252
+        },
+        {
+          "timestamp": 286670,
+          "x": 5573.995678909803,
+          "y": 9698.62902259777
+        },
+        {
+          "timestamp": 382227,
+          "x": 5573.995678909803,
+          "y": 9391.068696167442
+        },
+        {
+          "timestamp": 477783,
+          "x": 5573.995678909803,
+          "y": 9397.316881248635
+        },
+        {
+          "timestamp": 573340,
+          "x": 5573.995678909803,
+          "y": 9151.961132656665
+        },
+        {
+          "timestamp": 668897,
+          "x": 5573.995678909803,
+          "y": 9239.829756607569
+        },
+        {
+          "timestamp": 764453,
+          "x": 5573.995678909803,
+          "y": 9419.344156475323
+        },
+        {
+          "timestamp": 860010,
+          "x": 5573.995709390056,
+          "y": 8500.344572999807
+        },
+        {
+          "timestamp": 955566,
+          "x": 5573.995678909803,
+          "y": 8631.848354031792
+        },
+        {
+          "timestamp": 1051123,
+          "x": 5573.995678909803,
+          "y": 8755.321428591153
+        },
+        {
+          "timestamp": 1146680,
+          "x": 5573.995678909803,
+          "y": 10478.915935418194
+        },
+        {
+          "timestamp": 1242236,
+          "x": 8199.582368622781,
+          "y": 8116.598760438158
+        },
+        {
+          "timestamp": 1337793,
+          "x": 13377.574978145223,
+          "y": 10569.803576096972
+        }
+      ]
+    },
+    {
+      "rosterIndex": 6,
+      "champion": "Nunu",
+      "team": 200,
+      "teamPosition": "JUNGLE",
+      "entityKey": "51483-0xF1-h11|13|10|0|normal",
+      "entityGroupKey": "51483-0xF1-h11|13",
+      "familyKey": "51483-0xF1-h11",
+      "patternKey": "51483-0xF1-h11|10|f32|0|i32|normal",
+      "slotIndex": 13,
+      "score": 0.6163274600666105,
+      "scoreComponents": {
+        "entityQuality": 0.7477099939616433,
+        "teamScore": 0.06473320477036545,
+        "roleScore": 0.9769866995343399,
+        "scalarFamilyScore": 0,
+        "centerBias": 0.8045514922503647,
+        "trajectoryScore": 0.9673884598508273,
+        "exactPriorScore": 0.9164432952192164,
+        "familyPriorScore": 0.8130136626995796,
+        "sameTeamDistance": 9587.905453493195,
+        "oppositeTeamDistance": 9934.47619520441
+      },
+      "entityQuality": 0.7477099939616433,
+      "sourceMetrics": {
+        "avgAxisCorrelation": 0.4853421557606328,
+        "avgPathCorrelation": 0.6159665015425244,
+        "avgNormalizedDistanceRmse": 0.23521223615326298,
+        "avgValidatorScore": 0.8262554278478353
+      },
+      "trajectoryStats": {
+        "pointCount": 11,
+        "uniquePointRatio": 1,
+        "displacement": 3111.7478839377136,
+        "pathLength": 13947.122141370388,
+        "xRange": 1987.4155420929292,
+        "yRange": 3432.8237441440015,
+        "movementQuality": 0.9565179464677698
+      },
+      "aliasEntityKeys": [
+        "51483-0xF1-h11|13|10|0|normal",
+        "51483-0xF1-h11|13|3|10|normal"
+      ],
+      "trajectory": [
+        {
+          "timestamp": 0,
+          "x": 7448.175562466895,
+          "y": 7796.965245067834
+        },
+        {
+          "timestamp": 133779,
+          "x": 9435.590254663752,
+          "y": 7325.6338564252865
+        },
+        {
+          "timestamp": 267559,
+          "x": 9435.01992563897,
+          "y": 8198.139613555537
+        },
+        {
+          "timestamp": 401338,
+          "x": 9435.590254635312,
+          "y": 9850.581076678029
+        },
+        {
+          "timestamp": 535117,
+          "x": 9435.591104559824,
+          "y": 6915.73449047279
+        },
+        {
+          "timestamp": 668897,
+          "x": 9435.590254663752,
+          "y": 7091.762115765331
+        },
+        {
+          "timestamp": 802676,
+          "x": 9435.590254663752,
+          "y": 8217.516672466378
+        },
+        {
+          "timestamp": 936455,
+          "x": 9435.590254663706,
+          "y": 8343.120718133598
+        },
+        {
+          "timestamp": 1070234,
+          "x": 9435.590254663752,
+          "y": 7588.6336342230115
+        },
+        {
+          "timestamp": 1204014,
+          "x": 9435.590254663752,
+          "y": 6758.542832035831
+        },
+        {
+          "timestamp": 1337793,
+          "x": 9435.590254663752,
+          "y": 10191.366576179833
+        }
+      ]
+    },
+    {
+      "rosterIndex": 7,
+      "champion": "Yasuo",
+      "team": 200,
+      "teamPosition": "MIDDLE",
+      "entityKey": "6912-0xC9-h0|23|11|1|swapped",
+      "entityGroupKey": "6912-0xC9-h0|23",
+      "familyKey": "6912-0xC9-h0",
+      "patternKey": "6912-0xC9-h0|11|f32|1|u8|swapped",
+      "slotIndex": 23,
+      "score": 0.6580063628286953,
+      "scoreComponents": {
+        "entityQuality": 0.7161510750500542,
+        "teamScore": 0.34321790885344355,
+        "roleScore": 0.8390789768945074,
+        "scalarFamilyScore": 0,
+        "centerBias": 0.893295177444833,
+        "trajectoryScore": 0.9818181818181818,
+        "exactPriorScore": 0.9923094735327567,
+        "familyPriorScore": 1,
+        "sameTeamDistance": 3994.8382901266655,
+        "oppositeTeamDistance": 16368.555479240295
+      },
+      "entityQuality": 0.7161510750500542,
+      "sourceMetrics": {
+        "avgAxisCorrelation": 0.39569996751851416,
+        "avgPathCorrelation": 0.6261952550560012,
+        "avgNormalizedDistanceRmse": 0.23032088687414506,
+        "avgValidatorScore": 0.7617967240938794
+      },
+      "trajectoryStats": {
+        "pointCount": 22,
+        "uniquePointRatio": 0.9545454545454546,
+        "displacement": 6032.695406921135,
+        "pathLength": 26789.475566072688,
+        "xRange": 3016.7335447115747,
+        "yRange": 6049.11830670645,
+        "movementQuality": 0.990909090909091
+      },
+      "aliasEntityKeys": [
+        "6912-0xC9-h0|23|11|1|swapped"
+      ],
+      "trajectory": [
+        {
+          "timestamp": 0,
+          "x": 10475.446988852318,
+          "y": 13653.932558709468
+        },
+        {
+          "timestamp": 63704,
+          "x": 8447.601203610511,
+          "y": 7623.432301537199
+        },
+        {
+          "timestamp": 127409,
+          "x": 8047.039073192378,
+          "y": 7623.432301537199
+        },
+        {
+          "timestamp": 191113,
+          "x": 7946.898540587844,
+          "y": 7623.432301537199
+        },
+        {
+          "timestamp": 254818,
+          "x": 9749.42812746945,
+          "y": 7623.432301537199
+        },
+        {
+          "timestamp": 318522,
+          "x": 10788.386153241485,
+          "y": 7623.43243790639
+        },
+        {
+          "timestamp": 382227,
+          "x": 10600.622654607985,
+          "y": 7832.000218913021
+        },
+        {
+          "timestamp": 445931,
+          "x": 10112.437558160884,
+          "y": 7623.432301537199
+        },
+        {
+          "timestamp": 509635,
+          "x": 10062.367291858616,
+          "y": 7623.432301537199
+        },
+        {
+          "timestamp": 573340,
+          "x": 8610.329569092879,
+          "y": 7623.432301537199
+        },
+        {
+          "timestamp": 637044,
+          "x": 9774.463260620581,
+          "y": 7623.432301537199
+        },
+        {
+          "timestamp": 700749,
+          "x": 9987.261892405217,
+          "y": 7623.432301537199
+        },
+        {
+          "timestamp": 764453,
+          "x": 9649.287594864914,
+          "y": 7604.814252003018
+        },
+        {
+          "timestamp": 828158,
+          "x": 8097.109339494644,
+          "y": 7623.432301537199
+        },
+        {
+          "timestamp": 891862,
+          "x": 9223.690331295647,
+          "y": 7623.432301537199
+        },
+        {
+          "timestamp": 955566,
+          "x": 7771.65260852991,
+          "y": 7623.432301537199
+        },
+        {
+          "timestamp": 1019271,
+          "x": 8935.786300057613,
+          "y": 7623.432301537199
+        },
+        {
+          "timestamp": 1082975,
+          "x": 8635.364702244013,
+          "y": 7623.432301537199
+        },
+        {
+          "timestamp": 1146680,
+          "x": 7771.65260852991,
+          "y": 7623.432301537199
+        },
+        {
+          "timestamp": 1210384,
+          "x": 10350.271323096651,
+          "y": 7623.432301537199
+        },
+        {
+          "timestamp": 1274089,
+          "x": 8485.153903337212,
+          "y": 7623.432385815022
+        },
+        {
+          "timestamp": 1337793,
+          "x": 10638.175354334684,
+          "y": 7623.432301537199
+        }
+      ]
+    },
+    {
+      "rosterIndex": 8,
+      "champion": "Draven",
+      "team": 200,
+      "teamPosition": "BOTTOM",
+      "entityKey": "44718-0xAE-h14|11|10|4|normal",
+      "entityGroupKey": "44718-0xAE-h14|11",
+      "familyKey": "44718-0xAE-h14",
+      "patternKey": "44718-0xAE-h14|10|u32|4|f32|normal",
+      "slotIndex": 11,
+      "score": 0.5462494603930066,
+      "scoreComponents": {
+        "entityQuality": 0.7675770730761298,
+        "teamScore": 0.292790328696238,
+        "roleScore": 0.294491532869615,
+        "scalarFamilyScore": 0,
+        "centerBias": 0.6820851075314368,
+        "trajectoryScore": 1,
+        "exactPriorScore": 0.9521492928682198,
+        "familyPriorScore": 0.9860011687407861,
+        "sameTeamDistance": 4860.418207358598,
+        "oppositeTeamDistance": 16169.470077739265
+      },
+      "entityQuality": 0.7675770730761298,
+      "sourceMetrics": {
+        "avgAxisCorrelation": 0.5002689259078537,
+        "avgPathCorrelation": 0.6328489956284867,
+        "avgNormalizedDistanceRmse": 0.22932038070911762,
+        "avgValidatorScore": 0.8566466521888456
+      },
+      "trajectoryStats": {
+        "pointCount": 10,
+        "uniquePointRatio": 1,
+        "displacement": 6014.060944479072,
+        "pathLength": 15129.793282505969,
+        "xRange": 2752.2350826562906,
+        "yRange": 5984.680975490491,
+        "movementQuality": 1
+      },
+      "aliasEntityKeys": [
+        "44718-0xAE-h14|11|10|4|normal"
+      ],
+      "trajectory": [
+        {
+          "timestamp": 0,
+          "x": 9551.079574223024,
+          "y": 14065.880478113297
+        },
+        {
+          "timestamp": 148644,
+          "x": 11117.14864519217,
+          "y": 8405.40039023068
+        },
+        {
+          "timestamp": 297287,
+          "x": 11551.189797431807,
+          "y": 8405.400899380853
+        },
+        {
+          "timestamp": 445931,
+          "x": 8830.566475154275,
+          "y": 8405.40039023068
+        },
+        {
+          "timestamp": 594575,
+          "x": 9270.524053228188,
+          "y": 8405.40039023068
+        },
+        {
+          "timestamp": 743218,
+          "x": 10603.48306740933,
+          "y": 8405.40039022998
+        },
+        {
+          "timestamp": 891862,
+          "x": 9765.17892895617,
+          "y": 8081.199502622806
+        },
+        {
+          "timestamp": 1040506,
+          "x": 11391.481190971363,
+          "y": 8405.40039023068
+        },
+        {
+          "timestamp": 1189149,
+          "x": 10601.154323145853,
+          "y": 8405.400390241724
+        },
+        {
+          "timestamp": 1337793,
+          "x": 11582.801557810566,
+          "y": 8405.40039023068
+        }
+      ]
+    },
+    {
+      "rosterIndex": 9,
+      "champion": "Seraphine",
+      "team": 200,
+      "teamPosition": "UTILITY",
+      "entityKey": "6912-0xC6-h0|16|2|4|normal",
+      "entityGroupKey": "6912-0xC6-h0|16",
+      "familyKey": "6912-0xC6-h0",
+      "patternKey": "6912-0xC6-h0|2|f32|4|u16|normal",
+      "slotIndex": 16,
+      "score": 0.5913534363003246,
+      "scoreComponents": {
+        "entityQuality": 0.68629854359045,
+        "teamScore": 0.11038251426025963,
+        "roleScore": 0.6083665135960176,
+        "scalarFamilyScore": 1,
+        "centerBias": 0.6563521145185593,
+        "trajectoryScore": 1,
+        "exactPriorScore": 0.7429625582506796,
+        "familyPriorScore": 0.8609514640315775,
+        "sameTeamDistance": 8648.74137369843,
+        "oppositeTeamDistance": 11544.96138474334
+      },
+      "entityQuality": 0.68629854359045,
+      "sourceMetrics": {
+        "avgAxisCorrelation": 0.431701867709582,
+        "avgPathCorrelation": 0.37465478204433394,
+        "avgNormalizedDistanceRmse": 0.2504494254095063,
+        "avgValidatorScore": 0.7710912218443648
+      },
+      "trajectoryStats": {
+        "pointCount": 14,
+        "uniquePointRatio": 1,
+        "displacement": 5746.660056070582,
+        "pathLength": 11709.96725723426,
+        "xRange": 5698.014062786039,
+        "yRange": 1386.474342379759,
+        "movementQuality": 1
+      },
+      "aliasEntityKeys": [
+        "6912-0xC6-h0|16|2|4|normal"
+      ],
+      "trajectory": [
+        {
+          "timestamp": 0,
+          "x": 6745.920609390857,
+          "y": 10373.115840829862
+        },
+        {
+          "timestamp": 102907,
+          "x": 6745.920609390857,
+          "y": 11620.141189564954
+        },
+        {
+          "timestamp": 205814,
+          "x": 6745.920609390857,
+          "y": 10836.651780649712
+        },
+        {
+          "timestamp": 308721,
+          "x": 6745.920609390857,
+          "y": 10891.448280856168
+        },
+        {
+          "timestamp": 411629,
+          "x": 6745.920609390857,
+          "y": 11682.450563652928
+        },
+        {
+          "timestamp": 514536,
+          "x": 6745.920609390857,
+          "y": 11555.9605792314
+        },
+        {
+          "timestamp": 617443,
+          "x": 6745.920609390857,
+          "y": 11759.59018320962
+        },
+        {
+          "timestamp": 720350,
+          "x": 6745.920609390857,
+          "y": 11648.907955728384
+        },
+        {
+          "timestamp": 823257,
+          "x": 6745.920609390857,
+          "y": 10387.359579415637
+        },
+        {
+          "timestamp": 926164,
+          "x": 6745.920609390857,
+          "y": 10414.003749240796
+        },
+        {
+          "timestamp": 1029072,
+          "x": 6745.9497382796135,
+          "y": 11056.452217257667
+        },
+        {
+          "timestamp": 1131979,
+          "x": 6745.920609390857,
+          "y": 10612.410649070898
+        },
+        {
+          "timestamp": 1234886,
+          "x": 6745.920609390858,
+          "y": 10929.403654852384
+        },
+        {
+          "timestamp": 1337793,
+          "x": 12443.934672176896,
+          "y": 11119.26431153102
+        }
+      ]
+    }
+  ],
+  "unmatchedParticipants": [
+    {
+      "rosterIndex": 0,
+      "champion": "Darius",
+      "team": 100,
+      "teamPosition": "TOP"
+    },
+    {
+      "rosterIndex": 5,
+      "champion": "Veigar",
+      "team": 200,
+      "teamPosition": "TOP"
+    }
+  ],
+  "unassignedEntities": [],
+  "discardedAliases": [
+    {
+      "entityGroupKey": "51483-0xF1-h11|12",
+      "keptEntityKey": "51483-0xF1-h11|12|12|7|swapped",
+      "discardedEntityKey": "51483-0xF1-h11|12|7|8|normal",
+      "keptPatternKey": "51483-0xF1-h11|12|f32|7|f32|swapped",
+      "discardedPatternKey": "51483-0xF1-h11|7|f32|8|i32|normal"
+    },
+    {
+      "entityGroupKey": "51483-0xF1-h11|13",
+      "keptEntityKey": "51483-0xF1-h11|13|10|0|normal",
+      "discardedEntityKey": "51483-0xF1-h11|13|3|10|normal",
+      "keptPatternKey": "51483-0xF1-h11|10|f32|0|i32|normal",
+      "discardedPatternKey": "51483-0xF1-h11|3|f32|10|f32|normal"
+    }
+  ],
+  "normalization": {
+    "versionGroup": "16.6",
+    "rawEntityCount": 10,
+    "canonicalEntityCount": 8,
+    "discardedAliasCount": 2,
+    "minimumAssignmentScore": 0.38
+  }
+}

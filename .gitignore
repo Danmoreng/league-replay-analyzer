@@ -2,6 +2,8 @@ node_modules/
 dist/
 build/
 build-wasm/
+artifacts/
+artifacts-keyframes/
 .vite/
 .cache/
 .vs/
@@ -20,3 +22,7 @@ CMakeUserPresets.json
 tools/emsdk/
 apps/web/src/generated/wasm/
 thirdparty/reference/
+.env
+replays/
+apps/web/public/riot-api-fixtures/
+tmp/

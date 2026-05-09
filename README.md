@@ -106,3 +106,6 @@ The next parser layer is lower-level chunk parsing and timeline extraction so th
 - Read [docs/setup/windows.md](/C:/Development/league-replay-analyzer/docs/setup/windows.md) for this machine's current setup.
 - Read [docs/chat.md](/C:/Development/league-replay-analyzer/docs/chat.md) for the original product and architecture discussion.
 - Read [AGENTS.md](/C:/Development/league-replay-analyzer/AGENTS.md) for repo-specific working instructions.
+- Read [program.md](/C:/Development/league-replay-analyzer/program.md) and [docs/autonomous-decoder-research.md](/C:/Development/league-replay-analyzer/docs/autonomous-decoder-research.md) if you want to run autonomous overnight decoder research.
+- Start the repo-local supervisor with `pwsh -File .\scripts\run_autoresearch.ps1 -Tag <tag>`.
+- Stop it with `pwsh -File .\scripts\stop_autoresearch.ps1 -Tag <tag>`. This prevents new iterations, but it does not forcibly kill a `codex exec` child that is already running.

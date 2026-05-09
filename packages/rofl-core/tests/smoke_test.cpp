@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <cstdint>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -332,6 +333,24 @@ bool test_footer_zstd_fixture() {
            inspect.find("ASCII runs: \"startup:hello\"") != std::string::npos;
 }
 
+bool test_keyframe_state_candidates_unsupported_fixture() {
+    const std::string path = "rofl_core_smoke_keyframe_state_fixture.rofl";
+    {
+        std::ofstream file(path, std::ios::binary);
+        const auto bytes = build_footer_zstd_fixture();
+        file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    }
+
+    const std::string json = rofl::core::export_keyframe_state_candidates_json(path);
+    std::remove(path.c_str());
+    return json.find("\"schema\":\"keyframe-state-timeline.v1\"") != std::string::npos &&
+           json.find("\"schemaId\":\"keyframe-state-schema.v1\"") != std::string::npos &&
+           json.find("\"versionGroup\":\"16.5\"") != std::string::npos &&
+           json.find("\"supported\":false") != std::string::npos &&
+           json.find("\"calibration\":\"none\"") != std::string::npos &&
+           json.find("\"participantIdentity\":\"unassigned\"") != std::string::npos;
+}
+
 }  // namespace
 
 int main() {
@@ -344,6 +363,10 @@ int main() {
     }
 
     if (!test_footer_zstd_fixture()) {
+        return EXIT_FAILURE;
+    }
+
+    if (!test_keyframe_state_candidates_unsupported_fixture()) {
         return EXIT_FAILURE;
     }
 

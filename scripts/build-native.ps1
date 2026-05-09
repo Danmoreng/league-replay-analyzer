@@ -67,6 +67,14 @@ function Resolve-BuiltExecutable {
     return Join-Path $Dir "$Name.exe"
 }
 
+function Assert-LastExitCode {
+    param([string]$Step)
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Step failed with exit code $LASTEXITCODE."
+    }
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $resolvedBuildDir = Join-Path $repoRoot $BuildDir
 
@@ -102,9 +110,11 @@ if ($generator -eq "Ninja") {
     $configureArgs += "-DCMAKE_BUILD_TYPE=$Configuration"
 }
 cmake @configureArgs
+Assert-LastExitCode "CMake configure"
 
 Write-Host "Building target $Target ($Configuration)..." -ForegroundColor Cyan
 cmake --build $resolvedBuildDir --config $Configuration --target $Target
+Assert-LastExitCode "CMake build"
 
 if ($RunSmokeTest) {
     $exePath = Resolve-BuiltExecutable -Dir $resolvedBuildDir -Name $Target
@@ -115,4 +125,5 @@ if ($RunSmokeTest) {
 
     Write-Host "Running smoke test..." -ForegroundColor Cyan
     & $exePath --version
+    Assert-LastExitCode "Smoke test"
 }

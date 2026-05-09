@@ -404,7 +404,11 @@ function parseFooterZstdContainer(
 ): ReplayContainerSummary | null {
   const records: FooterZstdRecord[] = [];
 
-  for (let payloadOffset = footerRecordHeaderLength; payloadOffset + 4 <= metadataOffset; payloadOffset += 1) {
+  for (
+    let payloadOffset = footerRecordHeaderLength;
+    payloadOffset + 4 <= metadataOffset;
+    payloadOffset += 1
+  ) {
     if (!isZstdMagic(bytes, payloadOffset)) {
       continue;
     }

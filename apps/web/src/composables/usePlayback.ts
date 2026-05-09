@@ -4,12 +4,16 @@ export interface PlayerPosition {
   x: number;
   y: number;
   timestamp: number;
+  source?: "frame" | "event";
 }
 
 export interface PlayerMovementData {
   champion: string;
   team: number;
   positions: PlayerPosition[];
+  playerName?: string;
+  championIconSrc?: string;
+  roleLabel?: string;
 }
 
 const currentTime = ref(0);

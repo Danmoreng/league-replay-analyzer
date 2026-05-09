@@ -94,8 +94,59 @@ struct ReplaySummary {
 [[nodiscard]] std::string inspect_replay_bytes(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] std::string inspect_replay_file(const std::string& path);
 [[nodiscard]] std::string replay_summary_to_json(const ReplaySummary& summary);
+[[nodiscard]] std::string scan_replay_families_json(const std::vector<std::uint8_t>& bytes, std::size_t minimum_length, std::size_t minimum_records, std::size_t top_families, std::string_view segment_type = "chunk");
+[[nodiscard]] std::string scan_replay_families_file_json(const std::string& path, std::size_t minimum_length, std::size_t minimum_records, std::size_t top_families, std::string_view segment_type = "chunk");
+[[nodiscard]] std::string analyze_sparse_family_json(const std::vector<std::uint8_t>& bytes, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots, float move_epsilon, float smooth_threshold, std::string_view segment_type = "chunk");
+[[nodiscard]] std::string analyze_scalar_family_json(const std::vector<std::uint8_t>& bytes, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots, std::string_view segment_type = "chunk");
+[[nodiscard]] std::string analyze_scalar_family_file_json(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots, std::string_view segment_type = "chunk");
+[[nodiscard]] std::string analyze_entity_slab_json(const std::vector<std::uint8_t>& bytes, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots, std::string_view segment_type = "chunk");
+[[nodiscard]] std::string analyze_entity_slab_file_json(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots, std::string_view segment_type = "chunk");
+[[nodiscard]] std::string analyze_row_offsets_json(const std::vector<std::uint8_t>& bytes, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, const std::vector<std::size_t>& slot_indices, std::size_t top_fields, std::string_view segment_type = "chunk", std::size_t min_active_samples = 4);
+[[nodiscard]] std::string analyze_row_offsets_file_json(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, const std::vector<std::size_t>& slot_indices, std::size_t top_fields, std::string_view segment_type = "chunk", std::size_t min_active_samples = 4);
+[[nodiscard]] std::string analyze_clean_row_offsets_json(const std::vector<std::uint8_t>& bytes, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, const std::vector<std::size_t>& slot_indices, std::size_t top_fields, std::string_view segment_type = "chunk", std::size_t min_active_samples = 4);
+[[nodiscard]] std::string analyze_clean_row_offsets_file_json(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, const std::vector<std::size_t>& slot_indices, std::size_t top_fields, std::string_view segment_type = "chunk", std::size_t min_active_samples = 4);
+[[nodiscard]] std::string analyze_handle_links_json(const std::vector<std::uint8_t>& bytes, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, const std::vector<std::size_t>& slot_indices, std::size_t top_links, std::size_t top_families, std::string_view segment_type = "chunk");
+[[nodiscard]] std::string analyze_handle_links_file_json(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, const std::vector<std::size_t>& slot_indices, std::size_t top_links, std::size_t top_families, std::string_view segment_type = "chunk");
+[[nodiscard]] std::string analyze_token_bitfields_json(const std::vector<std::uint8_t>& bytes, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, const std::vector<std::size_t>& slot_indices, std::size_t top_slices, std::size_t top_families, std::string_view segment_type = "chunk");
+[[nodiscard]] std::string analyze_token_bitfields_file_json(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, const std::vector<std::size_t>& slot_indices, std::size_t top_slices, std::size_t top_families, std::string_view segment_type = "chunk");
+[[nodiscard]] std::string analyze_table_descriptors_json(const std::vector<std::uint8_t>& bytes, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, const std::vector<std::size_t>& slot_indices, std::size_t top_matches, std::string_view segment_type = "chunk");
+[[nodiscard]] std::string analyze_table_descriptors_file_json(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, const std::vector<std::size_t>& slot_indices, std::size_t top_matches, std::string_view segment_type = "chunk");
+[[nodiscard]] std::string analyze_bitfield_schema_json(const std::vector<std::uint8_t>& bytes, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, const std::vector<std::size_t>& slot_indices, std::size_t top_windows, std::string_view segment_type = "chunk");
+[[nodiscard]] std::string analyze_bitfield_schema_file_json(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, const std::vector<std::size_t>& slot_indices, std::size_t top_windows, std::string_view segment_type = "chunk");
+[[nodiscard]] std::string analyze_artifact_bundle_file_json(const std::string& path, std::size_t minimum_length, std::size_t minimum_records, std::size_t top_families, std::size_t top_entity_slots, std::size_t top_scalar_slots, std::size_t dynamic_slot_count, std::size_t mixed_slot_count, std::size_t handle_slot_count, std::size_t top_windows, std::size_t top_fields, bool skip_scalar, std::string_view segment_type = "chunk");
+[[nodiscard]] std::string dump_chunk_subrecords(const std::string& path, int chunk_id);
+[[nodiscard]] std::string summarize_subrecord_families(const std::string& path, std::size_t minimum_length, std::size_t minimum_records, std::size_t top_families);
+[[nodiscard]] std::string dump_subrecord_family(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte);
+[[nodiscard]] std::string dump_subrecord_family_json(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::string_view segment_type = "chunk", std::size_t max_records = 16);
+[[nodiscard]] std::string compare_subrecord_family(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t prefix_bytes);
+[[nodiscard]] std::string guess_stride(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size);
+[[nodiscard]] std::string analyze_sparse_family(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_elements);
+[[nodiscard]] std::string trace_sparse_slot(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t slot_index, std::size_t max_records);
+[[nodiscard]] std::string profile_position_slots(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots, float move_epsilon, float smooth_threshold);
+[[nodiscard]] std::string compare_position_classes(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots, std::size_t top_classes, float move_epsilon, float smooth_threshold);
+[[nodiscard]] std::string export_positions_json(const std::string& path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, const std::vector<std::size_t>& slots);
+[[nodiscard]] std::string export_keyframe_state_candidates_json(const std::string& path);
+[[nodiscard]] std::string scan_keyframe_handle_graph_json(
+    const std::string& path,
+    std::size_t minimum_length = 4096,
+    std::size_t top_families = 32,
+    std::size_t max_records_per_family = 0,
+    std::string_view focus_family_key = {},
+    const std::vector<std::size_t>& focus_slots = {},
+    std::size_t focus_neighbor_radius = 0
+);
+[[nodiscard]] std::string compare_positions_with_api(const std::string& replay_path, const std::string& api_positions_path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots, float move_epsilon, float smooth_threshold, int chunk_time_millis, int chunk_base_id, int max_time_offsets);
+[[nodiscard]] std::string compare_raw_positions_with_api(const std::string& replay_path, const std::string& api_positions_path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, std::size_t top_slots, float move_epsilon, float smooth_threshold, int chunk_time_millis, int chunk_base_id, int max_time_offsets);
+[[nodiscard]] std::string match_event_window(const std::string& replay_path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, double event_x, double event_y, int timestamp_millis, int chunk_time_millis, int chunk_base_id, int chunk_radius, std::size_t top_slots, float move_epsilon, float smooth_threshold);
 
 }  // namespace rofl::core
+
+
+
+
+
+
+
 
 
 

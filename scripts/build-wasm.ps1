@@ -16,11 +16,9 @@ $resolvedBuildDir = Join-Path $repoRoot $BuildDir
 $resolvedEmsdkRoot = Join-Path $repoRoot $EmsdkRoot
 $resolvedPublishDir = Join-Path $repoRoot $PublishDir
 
-if (-not (Get-Command emcmake -ErrorAction SilentlyContinue)) {
-    $envScript = Join-Path $resolvedEmsdkRoot "emsdk_env.ps1"
-    if (Test-Path $envScript) {
-        & $envScript | Out-Null
-    }
+$envScript = Join-Path $resolvedEmsdkRoot "emsdk_env.ps1"
+if (Test-Path $envScript) {
+    & $envScript | Out-Null
 }
 
 if (-not (Get-Command emcmake -ErrorAction SilentlyContinue)) {
@@ -66,3 +64,4 @@ try {
 } finally {
     Pop-Location
 }
+

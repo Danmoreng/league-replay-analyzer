@@ -1,19 +1,87 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
+import DataBrowser from "./components/DataBrowser.vue";
+import ReplayInspector from "./components/ReplayInspector.vue";
 import Minimap from "./components/Minimap.vue";
 import Timeline from "./components/Timeline.vue";
-import { usePlayback } from "./composables/usePlayback";
+import Sidebar from "./components/Sidebar.vue";
+import { usePlayback, type PlayerMovementData } from "./composables/usePlayback";
+import { buildReplayBrowserModel, type ReplayBrowserModel } from "./replayBrowser";
+import {
+  deriveRiotMatchIdFromReplayName,
+  loadRiotFixtureBundle,
+  type RiotFixtureBundle,
+  type RiotMatchParticipant,
+} from "./riotApiFixtures";
+import {
+  loadReplayMovementFixture,
+  type LoadedReplayMovementFixture,
+} from "./replayMovementFixtures";
 import { type PlayerSummary, type ReplaySummary } from "./replayParser";
 import { parseReplayBufferWithWasm } from "./wasmReplayParser";
 
 const { seek, setDuration } = usePlayback();
 const summary = ref<ReplaySummary | null>(null);
+const browserModel = ref<ReplayBrowserModel | null>(null);
+const riotBundle = ref<RiotFixtureBundle | null>(null);
+const apiMovement = ref<PlayerMovementData[]>([]);
+const replayMovement = ref<PlayerMovementData[]>([]);
+const riotFixtureStatus = ref("No Riot fixture loaded yet.");
+const replayMovementStatus = ref("No replay-derived movement fixture loaded yet.");
 const parserEngine = ref("C++/Wasm");
+const replayBuffer = ref<ArrayBuffer | null>(null);
 const loadedReplayName = ref("");
 const status = ref("Pick a replay file to parse it with the C++/Wasm replay parser.");
 const errorMessage = ref("");
 const isLoading = ref(false);
+const activePage = ref<"summary" | "browser" | "inspector">("summary");
+function toDdragonVersion(version: string): string {
+  const match = version.match(/^(\d+)\.(\d+)/);
+  if (!match) {
+    return "16.5.1";
+  }
+
+  return `${match[1]}.${match[2]}.1`;
+}
+
+function getChampionIconSrc(champion: string, version: string): string {
+  return `https://ddragon.leagueoflegends.com/cdn/${toDdragonVersion(version)}/img/champion/${encodeURIComponent(champion)}.png`;
+}
+
+function getPlayerDisplayName(gameName?: string, tagline?: string): string {
+  if (!gameName) {
+    return "Unknown Player";
+  }
+
+  return tagline ? `${gameName}#${tagline}` : gameName;
+}
+
+function getRoleLabel(primary?: string, secondary?: string): string {
+  const value = primary || secondary || "";
+  if (!value) {
+    return "Unknown";
+  }
+
+  return value
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function normalizeRoleLabel(value?: string): string {
+  return getRoleLabel(value).toLowerCase();
+}
+
+function getRoleRank(roleLabel?: string): number {
+  const normalized = normalizeRoleLabel(roleLabel);
+  if (normalized.includes("top")) return 0;
+  if (normalized.includes("jungle")) return 1;
+  if (normalized.includes("mid")) return 2;
+  if (normalized.includes("bottom") || normalized.includes("bot") || normalized.includes("adc")) return 3;
+  if (normalized.includes("support") || normalized.includes("utility")) return 4;
+  return 5;
+}
 
 const teams = computed(() => {
   const players = summary.value?.players ?? [];
@@ -38,6 +106,356 @@ const teams = computed(() => {
   });
 });
 
+
+const eventAnchoredTypes = new Set(["CHAMPION_KILL", "ELITE_MONSTER_KILL", "BUILDING_KILL"]);
+
+function createMovementPlayer(participantId: number, bundle: RiotFixtureBundle): PlayerMovementData {
+  const participant = bundle.match.info.participants.find((entry) => entry.participantId === participantId);
+  return {
+    champion: participant?.championName ?? `P${participantId}`,
+    team: participant?.teamId ?? 100,
+    playerName: getPlayerDisplayName(participant?.riotIdGameName, participant?.riotIdTagline),
+    championIconSrc: getChampionIconSrc(participant?.championName ?? `P${participantId}`, bundle.match.info.gameVersion),
+    roleLabel: getRoleLabel(participant?.lane, participant?.role),
+    positions: [],
+  };
+}
+
+function appendMovementPoint(
+  movement: Map<number, PlayerMovementData>,
+  participantId: number | undefined,
+  x: number,
+  y: number,
+  timestamp: number,
+  source: "frame" | "event",
+): void {
+  if (!participantId || participantId <= 0) {
+    return;
+  }
+
+  const player = movement.get(participantId);
+  if (!player) {
+    return;
+  }
+
+  player.positions.push({ x, y, timestamp, source });
+}
+
+function normalizeMovementPositions(positions: PlayerMovementData["positions"]): PlayerMovementData["positions"] {
+  const sourceRank = { frame: 0, event: 1 } as const;
+  const sorted = [...positions].sort(
+    (left, right) =>
+      left.timestamp - right.timestamp ||
+      sourceRank[left.source ?? "frame"] - sourceRank[right.source ?? "frame"],
+  );
+  const deduped: PlayerMovementData["positions"] = [];
+
+  for (const position of sorted) {
+    const previous = deduped[deduped.length - 1];
+    if (!previous) {
+      deduped.push(position);
+      continue;
+    }
+
+    if (previous.timestamp !== position.timestamp) {
+      if (previous.x !== position.x || previous.y !== position.y) {
+        deduped.push(position);
+      }
+      continue;
+    }
+
+    if (previous.x === position.x && previous.y === position.y) {
+      continue;
+    }
+
+    if ((previous.source ?? "frame") === "frame" && position.source === "event") {
+      deduped[deduped.length - 1] = position;
+    }
+  }
+
+  return deduped;
+}
+
+function buildApiMovementFromBundle(bundle: RiotFixtureBundle): PlayerMovementData[] {
+  const movement = new Map<number, PlayerMovementData>(
+    bundle.match.info.participants.map((participant) => [
+      participant.participantId,
+      createMovementPlayer(participant.participantId, bundle),
+    ]),
+  );
+
+  for (const frame of bundle.timeline.info.frames) {
+    const participantFrames = frame.participantFrames as Record<string, { position?: { x: number; y: number } }>;
+    for (const [rawParticipantId, participantFrame] of Object.entries(participantFrames)) {
+      if (!participantFrame.position) {
+        continue;
+      }
+
+      appendMovementPoint(
+        movement,
+        Number(rawParticipantId),
+        participantFrame.position.x,
+        participantFrame.position.y,
+        frame.timestamp,
+        "frame",
+      );
+    }
+
+    for (const event of frame.events) {
+      if (!eventAnchoredTypes.has(event.type) || !event.position) {
+        continue;
+      }
+
+      const anchoredParticipants = new Set<number>();
+      if (event.participantId && event.participantId > 0) {
+        anchoredParticipants.add(event.participantId);
+      }
+      if (event.killerId && event.killerId > 0) {
+        anchoredParticipants.add(event.killerId);
+      }
+      if (event.victimId && event.victimId > 0) {
+        anchoredParticipants.add(event.victimId);
+      }
+      for (const assistingParticipantId of event.assistingParticipantIds ?? []) {
+        if (assistingParticipantId > 0) {
+          anchoredParticipants.add(assistingParticipantId);
+        }
+      }
+
+      for (const participantId of anchoredParticipants) {
+        appendMovementPoint(
+          movement,
+          participantId,
+          event.position.x,
+          event.position.y,
+          event.timestamp,
+          "event",
+        );
+      }
+    }
+  }
+
+  return Array.from(movement.values())
+    .map((player) => ({
+      ...player,
+      positions: normalizeMovementPositions(player.positions),
+    }))
+    .filter((player) => player.positions.length > 0)
+    .sort((left, right) => {
+      if (left.team !== right.team) {
+        return left.team - right.team;
+      }
+      return left.champion.localeCompare(right.champion);
+    });
+}
+
+function findBundleParticipantForReplayAssignment(
+  assignment: LoadedReplayMovementFixture["movement"]["assignments"][number],
+  validation: LoadedReplayMovementFixture["validation"],
+  bundle: RiotFixtureBundle | null,
+): RiotMatchParticipant | null {
+  if (!bundle) {
+    return null;
+  }
+
+  const matchedParticipantId = validation?.assignments?.find(
+    (entry) => entry.rosterIndex === assignment.rosterIndex,
+  )?.matchedParticipantId;
+
+  if (matchedParticipantId != null) {
+    return bundle.match.info.participants.find(
+      (participant) => participant.participantId === matchedParticipantId,
+    ) ?? null;
+  }
+
+  let best: { participant: RiotMatchParticipant; score: number } | null = null;
+  for (const participant of bundle.match.info.participants) {
+    let score = 0;
+    if (participant.championName === assignment.champion) {
+      score += 5;
+    }
+    if (participant.teamId === assignment.team) {
+      score += 3;
+    }
+    if (normalizeRoleLabel(participant.lane) === normalizeRoleLabel(assignment.teamPosition)) {
+      score += 2;
+    }
+    if (normalizeRoleLabel(participant.role) === normalizeRoleLabel(assignment.teamPosition)) {
+      score += 1;
+    }
+    if (!best || score > best.score) {
+      best = { participant, score };
+    }
+  }
+
+  return best && best.score >= 5 ? best.participant : null;
+}
+
+function buildReplayMovementFromFixture(
+  fixture: LoadedReplayMovementFixture,
+  bundle: RiotFixtureBundle | null,
+  parsedSummary: ReplaySummary | null,
+): PlayerMovementData[] {
+  const summaryPlayers = parsedSummary?.players ?? [];
+  const gameVersion = parsedSummary?.gameVersion ?? bundle?.match.info.gameVersion ?? "16.6.1";
+
+  return fixture.movement.assignments
+    .filter((assignment) => assignment.trajectory.length > 0)
+    .map((assignment) => {
+      const bundleParticipant = findBundleParticipantForReplayAssignment(
+        assignment,
+        fixture.validation,
+        bundle,
+      );
+      const summaryPlayer = summaryPlayers[assignment.rosterIndex] ?? null;
+      const champion = assignment.champion || bundleParticipant?.championName || summaryPlayer?.champion || `P${assignment.rosterIndex + 1}`;
+
+      return {
+        champion,
+        team: assignment.team,
+        playerName: getPlayerDisplayName(
+          bundleParticipant?.riotIdGameName ?? summaryPlayer?.riotIdGameName,
+          bundleParticipant?.riotIdTagline ?? summaryPlayer?.riotIdTagLine,
+        ),
+        championIconSrc: getChampionIconSrc(champion, gameVersion),
+        roleLabel: getRoleLabel(assignment.teamPosition, bundleParticipant?.lane ?? summaryPlayer?.teamPosition),
+        positions: normalizeMovementPositions(
+          assignment.trajectory.map((position) => ({
+            x: position.x,
+            y: position.y,
+            timestamp: position.timestamp,
+          })),
+        ),
+      };
+    })
+    .sort((left, right) => {
+      if (left.team !== right.team) {
+        return left.team - right.team;
+      }
+      return left.champion.localeCompare(right.champion);
+    });
+}
+
+function summarizeReplayMovementFixture(fixture: LoadedReplayMovementFixture | null, playerCount: number): string {
+  if (!fixture) {
+    return "(No replay-derived movement fixture published for this replay yet)";
+  }
+
+  const assigned = fixture.validation?.summary?.assignmentCount ?? fixture.movement.assignments.length;
+  const passing = fixture.validation?.summary?.passingAssignmentCount ?? 0;
+  if (playerCount <= 0) {
+    return "(Replay-derived movement fixture loaded, but it had no assigned participant tracks)";
+  }
+
+  if (fixture.validation?.summary) {
+    return `(Loaded replay-derived movement for ${playerCount} participants, ${passing}/${assigned} current validation passes)`;
+  }
+
+  return `(Loaded replay-derived movement for ${playerCount} participants)`;
+}
+
+const hasApiMovement = computed(() => apiMovement.value.some((player) => player.positions.length > 0));
+const hasReplayMovement = computed(() => replayMovement.value.some((player) => player.positions.length > 0));
+const apiMovementCount = computed(() => apiMovement.value.filter((player) => player.positions.length > 0).length);
+const replayMovementCount = computed(() => replayMovement.value.filter((player) => player.positions.length > 0).length);
+const hasDualMovement = computed(() => hasApiMovement.value && hasReplayMovement.value);
+const movementRosterPlayers = computed(() =>
+  (summary.value?.players ?? [])
+    .map((player) => ({
+      champion: player.champion,
+      team: Number(player.team ?? 100),
+      playerName: getPlayerDisplayName(player.riotIdGameName, player.riotIdTagLine),
+      championIconSrc: getChampionIconSrc(player.champion ?? "Unknown", summary.value?.gameVersion ?? "16.5.1"),
+      roleLabel: getRoleLabel(player.teamPosition),
+    }))
+    .sort((left, right) =>
+      left.team - right.team ||
+      getRoleRank(left.roleLabel) - getRoleRank(right.roleLabel) ||
+      left.champion.localeCompare(right.champion),
+    ),
+);
+const movementBlueRoster = computed(() => movementRosterPlayers.value.filter((player) => player.team === 100));
+const movementRedRoster = computed(() => movementRosterPlayers.value.filter((player) => player.team === 200));
+const apiMinimapEmptyMessage = computed(() =>
+  hasReplayMovement.value
+    ? "No Riot timeline movement fixture is available for this replay."
+    : "No Riot or replay-derived movement fixture is available for this replay.",
+);
+const replayMinimapEmptyMessage = computed(() =>
+  hasApiMovement.value
+    ? "No replay-derived participant movement fixture is available for this replay."
+    : "No Riot or replay-derived movement fixture is available for this replay.",
+);
+
+async function loadMovementData(matchId: string | null): Promise<string> {
+  apiMovement.value = [];
+  replayMovement.value = [];
+  replayMovementStatus.value = "No replay-derived movement fixture loaded yet.";
+
+  let apiStatus = "(No API movement fixture available)";
+  if (riotBundle.value) {
+    apiMovement.value = buildApiMovementFromBundle(riotBundle.value);
+    const apiValid = apiMovement.value.filter((player) => player.positions.length > 0).length;
+    apiStatus = apiValid > 0
+      ? `(Loaded Riot timeline movement plus event anchors for ${apiValid} players)`
+      : "(Riot timeline fixture did not contain participant positions)";
+  } else {
+    try {
+      const apiRes = await fetch(`api-positions.json?t=${Date.now()}`);
+      if (!apiRes.ok) {
+        apiStatus = `(No API movement fixture available: ${apiRes.status})`;
+      } else {
+        const apiRaw = await apiRes.json();
+        const players = summary.value?.players ?? [];
+        apiMovement.value = apiRaw.map((player: any) => {
+          const summaryPlayer = players[player.participantId - 1];
+          return {
+            champion: summaryPlayer?.champion ?? `P${player.participantId}`,
+            team: Number(summaryPlayer?.team ?? 100),
+            playerName: getPlayerDisplayName(summaryPlayer?.riotIdGameName, summaryPlayer?.riotIdTagLine),
+            championIconSrc: getChampionIconSrc(summaryPlayer?.champion ?? `P${player.participantId}`, summary.value?.gameVersion ?? "16.5.1"),
+            roleLabel: getRoleLabel(summaryPlayer?.teamPosition),
+            positions: player.positions.map((position: any) => ({
+              x: position.x,
+              y: position.y,
+              timestamp: position.timestamp,
+            })),
+          };
+        });
+
+        const apiValid = apiMovement.value.filter((player) => player.positions.length > 0).length;
+        apiStatus = apiValid > 0
+          ? `(Loaded fallback API movement for ${apiValid} players)`
+          : "(Fallback API movement fixture had no positions)";
+      }
+    } catch (error) {
+      apiMovement.value = [];
+      apiStatus = `(API movement unavailable: ${error instanceof Error ? error.message : String(error)})`;
+    }
+  }
+
+  let replayStatus = "(No replay-derived movement fixture available)";
+  if (matchId) {
+    try {
+      const replayFixture = await loadReplayMovementFixture(matchId);
+      replayMovement.value = replayFixture
+        ? buildReplayMovementFromFixture(replayFixture, riotBundle.value, summary.value)
+        : [];
+      replayMovementStatus.value = summarizeReplayMovementFixture(replayFixture, replayMovementCount.value);
+      replayStatus = replayMovementStatus.value;
+    } catch (error) {
+      replayMovement.value = [];
+      replayMovementStatus.value = `(Replay-derived movement unavailable: ${error instanceof Error ? error.message : String(error)})`;
+      replayStatus = replayMovementStatus.value;
+    }
+  } else {
+    replayMovementStatus.value = "(Replay filename did not map to a published replay movement fixture)";
+    replayStatus = replayMovementStatus.value;
+  }
+
+  return `${apiStatus} ${replayStatus}`;
+}
+
 const maxGold = computed(() =>
   Math.max(1, ...(summary.value?.players ?? []).map((player) => Number(player.goldEarned ?? 0))),
 );
@@ -59,12 +477,10 @@ const overviewMetrics = computed(() => {
   }
 
   return [
-    { label: "Replay", value: loadedReplayName.value || "Loaded" },
-    { label: "Patch", value: summary.value.gameVersion },
-    { label: "Duration", value: durationLabel.value },
-    { label: "File Size", value: formatFileSize(summary.value.fileSize) },
-    { label: "Metadata Source", value: summary.value.container.metadataSource },
-    { label: "Container", value: summary.value.container.format },
+    { label: "Patch", value: summary.value.gameVersion, icon: 'bi-patch-check' },
+    { label: "Duration", value: durationLabel.value, icon: 'bi-clock' },
+    { label: "File Size", value: formatFileSize(summary.value.fileSize), icon: 'bi-hdd' },
+    { label: "Container", value: summary.value.container.format, icon: 'bi-box' },
   ];
 });
 
@@ -91,24 +507,9 @@ const capabilityItems = computed(() => {
       detail: "Classic 288-byte ROFL header",
     },
     {
-      label: "Payload Header",
-      available: capabilities.payloadHeaderAvailable,
-      detail: "Classic payload header fields",
-    },
-    {
-      label: "Segment Index",
-      available: capabilities.segmentTableAvailable,
-      detail: "Classic table or footer-style zstd record index",
-    },
-    {
       label: "Payload Decode",
       available: capabilities.payloadDecodingAvailable,
       detail: "Decryption + decompression",
-    },
-    {
-      label: "Movement Timeline",
-      available: capabilities.movementTimelineAvailable,
-      detail: "Decoded position frames",
     },
   ];
 });
@@ -122,31 +523,14 @@ const containerRows = computed(() => {
   return [
     { label: "Metadata Offset", value: formatNumber(container.metadataOffset) },
     { label: "Metadata Size", value: formatNumber(container.metadataSize) },
-    { label: "Payload Header Offset", value: formatOptionalNumber(container.payloadHeaderOffset) },
-    { label: "Payload Header Size", value: formatOptionalNumber(container.payloadHeaderSize) },
     { label: "Payload Offset", value: formatOptionalNumber(container.payloadOffset) },
     { label: "Match ID", value: formatOptionalNumber(container.matchId) },
     { label: "Chunk Count", value: formatOptionalNumber(container.chunkCount) },
     { label: "Keyframe Count", value: formatOptionalNumber(container.keyframeCount) },
-    {
-      label: "Startup Chunk End",
-      value: formatOptionalNumber(container.startupChunkEndId),
-    },
-    {
-      label: "Game Start Chunk",
-      value: formatOptionalNumber(container.gameStartChunkId),
-    },
-    {
-      label: "Keyframe Interval",
-      value:
-        container.keyframeIntervalMillis > 0
-          ? `${formatNumber(container.keyframeIntervalMillis)} ms`
-          : "Not available",
-    },
   ];
 });
 
-const segmentPreview = computed(() => summary.value?.container.segments.slice(0, 12) ?? []);
+const segmentPreview = computed(() => summary.value?.container.segments.slice(0, 10) ?? []);
 
 function formatRiotId(player: PlayerSummary): string {
   return player.riotIdTagLine
@@ -170,7 +554,7 @@ function formatNumber(value: number): string {
 }
 
 function formatOptionalNumber(value: number): string {
-  return value > 0 ? formatNumber(value) : "Not available";
+  return value > 0 ? formatNumber(value) : "N/A";
 }
 
 function formatFileSize(bytes: number): string {
@@ -191,16 +575,39 @@ async function loadReplay(file: File): Promise<void> {
   isLoading.value = true;
   errorMessage.value = "";
   loadedReplayName.value = file.name;
-  status.value = `Parsing ${file.name} with ${parserEngine.value}...`;
+  status.value = `Parsing ${file.name}...`;
 
   try {
     const buffer = await file.arrayBuffer();
-    summary.value = await parseReplayBufferWithWasm(buffer);
-    setDuration(summary.value.gameLengthMillis);
+    replayBuffer.value = buffer;
+    const bytes = new Uint8Array(buffer);
+    const parsedSummary = await parseReplayBufferWithWasm(buffer);
+    const derivedMatchId = deriveRiotMatchIdFromReplayName(file.name);
+
+    summary.value = parsedSummary;
+    browserModel.value = buildReplayBrowserModel(bytes, parsedSummary);
+    riotBundle.value = null;
+    if (derivedMatchId) {
+      try {
+        riotBundle.value = await loadRiotFixtureBundle(derivedMatchId);
+        riotFixtureStatus.value = riotBundle.value
+          ? `Loaded Riot fixture bundle for ${derivedMatchId}.`
+          : `No published Riot fixture bundle found for ${derivedMatchId}.`;
+      } catch (fixtureError) {
+        riotFixtureStatus.value =
+          fixtureError instanceof Error ? fixtureError.message : String(fixtureError);
+      }
+    }
+
+    setDuration(parsedSummary.gameLengthMillis);
     seek(0);
-    status.value = `Parsed ${file.name}. Metadata source: ${summary.value.container.metadataSource}. Player stats: ${summary.value.playerCount}. Indexed segments: ${summary.value.container.segments.length}.`;
+    const movementStatus = await loadMovementData(derivedMatchId);
+    status.value = `Parsed ${file.name} successfully. ${movementStatus}`;
   } catch (error) {
     summary.value = null;
+    browserModel.value = null;
+    riotBundle.value = null;
+    replayBuffer.value = null;
     errorMessage.value = error instanceof Error ? error.message : String(error);
     status.value = "Replay parsing failed.";
   } finally {
@@ -218,468 +625,491 @@ function onFileChange(event: Event): void {
 </script>
 
 <template>
-  <main class="shell">
-    <header class="hero">
-      <div>
-        <p class="eyebrow">League Replay Analyzer</p>
-        <h1>Current parser output, directly from the replay file.</h1>
-        <p class="lede">
-          This view is limited to what the parser actually extracts today: metadata, player stat
-          summaries, container details, and parser capability state. Movement, wards, and event
-          frames are intentionally shown as unavailable until payload decoding exists.
-        </p>
-      </div>
-      <div class="hero-controls">
-        <div class="engine-pill">{{ parserEngine }}</div>
-        <label class="picker">
-          <span>Load replay</span>
-          <input type="file" accept=".rofl" @change="onFileChange" />
-        </label>
-      </div>
-      <p class="status" :class="{ error: errorMessage }">{{ errorMessage || status }}</p>
-    </header>
+  <div id="app" class="d-flex vh-100 overflow-hidden" data-bs-theme="dark">
+    <!-- Sidebar -->
+    <aside class="sidebar island m-2">
+      <Sidebar v-model:activePage="activePage" :is-loaded="!!summary" />
+    </aside>
 
-    <template v-if="summary">
-      <section class="summary-grid extended-grid">
-        <article v-for="metric in overviewMetrics" :key="metric.label" class="metric">
-          <span>{{ metric.label }}</span>
-          <strong>{{ metric.value }}</strong>
-        </article>
-      </section>
-
-      <div class="analyzer-layout">
-        <div class="visual-pane">
-          <section class="note visual-card">
-            <div class="visual-header">
-              <div>
-                <h2>Timeline Surface</h2>
-                <p>
-                  The scrubber currently reflects match duration from metadata only. No decoded
-                  movement frames are available yet.
-                </p>
-              </div>
-              <div class="availability-pill unavailable">Movement unavailable</div>
-            </div>
-            <Minimap
-              :player-data="[]"
-              label="Movement Map"
-              empty-message="Current parser output does not include champion coordinates yet."
-            />
-            <Timeline class="main-timeline" />
-            <p class="visual-note">
-              Once payload packets are decoded, this pane will switch from a duration-only shell to
-              a real movement timeline.
-            </p>
-          </section>
-
-          <section v-if="summary.warnings.length > 0" class="note warning-card">
-            <h2>Parser Warnings</h2>
-            <ul class="warning-list">
-              <li v-for="warning in summary.warnings" :key="warning">{{ warning }}</li>
-            </ul>
-          </section>
-
-          <section v-if="segmentPreview.length > 0" class="note">
-            <div class="section-head">
-              <h2>Segment Preview</h2>
-              <p>First {{ segmentPreview.length }} segment headers currently available.</p>
-            </div>
-            <div class="segment-table-wrap">
-              <table class="segment-table">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Type</th>
-                    <th>Codec</th>
-                    <th>Compressed</th>
-                    <th>Uncompressed</th>
-                    <th>Chunk ID</th>
-                    <th>Header Offset</th>
-                    <th>Payload Offset</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="segment in segmentPreview" :key="`${segment.id}-${segment.headerOffset}`">
-                    <td>{{ segment.id }}</td>
-                    <td>{{ segment.type }}</td>
-                    <td>{{ segment.codec || "unknown" }}</td>
-                    <td>{{ formatNumber(segment.length) }}</td>
-                    <td>{{ formatOptionalNumber(segment.uncompressedLength) }}</td>
-                    <td>{{ formatNumber(segment.chunkId) }}</td>
-                    <td>{{ formatNumber(segment.headerOffset) }}</td>
-                    <td>{{ formatNumber(segment.payloadOffset) }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
+    <!-- Content Area -->
+    <main class="main-content flex-grow-1 overflow-auto p-2 d-flex flex-column">
+      
+      <!-- Top Action Bar -->
+      <header class="island p-3 mb-2 d-flex justify-content-between align-items-center flex-shrink-0">
+        <div>
+          <h1 class="fs-4 mb-0" v-if="loadedReplayName">{{ loadedReplayName }}</h1>
+          <h1 class="fs-4 mb-0" v-else>League Replay Analyzer</h1>
+          <p class="text-muted small mb-0" :class="{ 'text-danger': errorMessage }">
+            {{ errorMessage || status }}
+          </p>
         </div>
+        <div class="d-flex gap-2 align-items-center">
+          <span class="badge bg-secondary opacity-75 d-none d-md-inline-block">{{ parserEngine }}</span>
+          <label class="btn btn-primary btn-sm px-3">
+            <i class="bi bi-file-earmark-arrow-up me-1"></i>
+            Load Replay
+            <input type="file" accept=".rofl" @change="onFileChange" class="d-none" />
+          </label>
+        </div>
+      </header>
 
-        <aside class="sidebar">
-          <section class="note">
-            <div class="section-head">
-              <h2>Parser Capabilities</h2>
-              <p>Live status of what the replay parser can currently prove or extract.</p>
-            </div>
-            <div class="capability-grid">
-              <article
-                v-for="item in capabilityItems"
-                :key="item.label"
-                class="capability-card"
-                :class="item.available ? 'available' : 'unavailable'"
-              >
-                <div class="capability-state">
-                  {{ item.available ? "Available" : "Unavailable" }}
-                </div>
-                <h3>{{ item.label }}</h3>
-                <p>{{ item.detail }}</p>
-              </article>
-            </div>
-          </section>
-
-          <section class="note">
-            <div class="section-head">
-              <h2>Container Details</h2>
-              <p>
-                Everything the current parser can describe about file layout and metadata placement.
-              </p>
-            </div>
-            <dl class="detail-grid">
-              <template v-for="row in containerRows" :key="row.label">
-                <dt>{{ row.label }}</dt>
-                <dd>{{ row.value }}</dd>
-              </template>
-            </dl>
-          </section>
-
-          <section class="note raw-note">
-            <div class="section-head">
-              <h2>Metadata JSON</h2>
-              <p>The full embedded metadata block extracted from the replay.</p>
-            </div>
-            <details class="json-details">
-              <summary>Show extracted metadata JSON</summary>
-              <pre>{{ summary.metadataJson }}</pre>
-            </details>
-          </section>
-        </aside>
-      </div>
-
-      <section class="team-grid player-section">
-        <article
-          v-for="team in teams"
-          :key="team.id"
-          class="team-panel"
-          :class="{ winner: team.winner }"
-        >
-          <header class="team-header">
-            <div>
-              <p class="team-label">Team {{ team.id }}</p>
-              <h2>{{ team.winner ? "Winner" : "Defeat" }}</h2>
-            </div>
-            <div class="team-totals">
-              <span>{{ team.totalGold.toLocaleString() }} gold</span>
-              <span>{{ team.totalDamage.toLocaleString() }} damage</span>
-              <span>{{ team.totalVision.toLocaleString() }} vision</span>
-            </div>
-          </header>
-
-          <div class="player-list">
-            <article
-              v-for="player in team.members"
-              :key="`${team.id}-${player.teamPosition}-${player.riotIdGameName}`"
-              class="player-card"
-            >
-              <div class="player-main">
-                <div>
-                  <p class="player-role">{{ player.teamPosition || "UNKNOWN" }}</p>
-                  <h3>{{ player.champion || "Unknown Champion" }}</h3>
-                  <p class="player-id">{{ formatRiotId(player) || "Unknown Riot ID" }}</p>
-                </div>
-                <p class="player-kda">
-                  {{ player.kills }}/{{ player.deaths }}/{{ player.assists }}
-                </p>
+      <!-- Main Section -->
+      <div v-if="summary" class="flex-grow-1 d-flex flex-column gap-2">
+        
+        <!-- Summary View -->
+        <div v-if="activePage === 'summary'" class="d-flex flex-column gap-2">
+          
+          <!-- Metrics Row -->
+          <div class="row g-2 flex-shrink-0">
+            <div v-for="metric in overviewMetrics" :key="metric.label" class="col-6 col-md-3">
+              <div class="island p-3 text-center">
+                <i :class="metric.icon" class="fs-3 text-primary mb-2 d-block"></i>
+                <div class="text-muted x-small text-uppercase fw-bold">{{ metric.label }}</div>
+                <div class="fs-5 fw-bold">{{ metric.value }}</div>
               </div>
-
-              <div class="stat-row">
-                <span>Gold</span>
-                <div class="bar-track">
-                  <div
-                    class="bar-fill gold"
-                    :style="{ width: percentage(player.goldEarned, maxGold) }"
-                  ></div>
-                </div>
-                <strong>{{ player.goldEarned.toLocaleString() }}</strong>
-              </div>
-
-              <div class="stat-row">
-                <span>Damage</span>
-                <div class="bar-track">
-                  <div
-                    class="bar-fill damage"
-                    :style="{ width: percentage(player.totalDamageToChampions, maxDamage) }"
-                  ></div>
-                </div>
-                <strong>{{ player.totalDamageToChampions.toLocaleString() }}</strong>
-              </div>
-
-              <div class="stat-row">
-                <span>Vision</span>
-                <div class="bar-track">
-                  <div
-                    class="bar-fill vision"
-                    :style="{ width: percentage(player.visionScore, maxVision) }"
-                  ></div>
-                </div>
-                <strong>{{ player.visionScore.toLocaleString() }}</strong>
-              </div>
-            </article>
+            </div>
           </div>
-        </article>
-      </section>
 
-      <section class="note raw-note">
-        <div class="section-head">
-          <h2>Normalized Replay Summary</h2>
-          <p>The JSON payload returned by the parser after normalization in the web app.</p>
+          <div class="island p-3 d-flex flex-column gap-3">
+            <div class="d-flex justify-content-between align-items-start">
+              <div>
+                <h2 class="fs-5 mb-1">Match Timeline</h2>
+                <p class="text-muted small" v-if="hasDualMovement">Riot API and replay-derived positions are rendered side by side with the same playback timeline.</p>
+                <p class="text-muted small" v-else-if="hasReplayMovement">Showing replay-derived participant positions from the decoder artifacts.</p>
+                <p class="text-muted small" v-else-if="hasApiMovement">Riot timeline frame positions plus combat and objective event anchors rendered on the original Summoner&apos;s Rift minimap.</p>
+                <p class="text-muted small" v-else>No decoded movement frames are available yet.</p>
+              </div>
+              <div class="d-flex flex-wrap gap-2 justify-content-end align-items-center">
+                <span v-if="hasApiMovement" class="badge bg-success-subtle text-success-emphasis">API {{ apiMovementCount }}</span>
+                <span v-else class="badge bg-secondary-subtle text-secondary-emphasis">API Missing</span>
+                <span v-if="hasReplayMovement" class="badge bg-info-subtle text-info-emphasis">Replay {{ replayMovementCount }}</span>
+                <span v-else class="badge bg-secondary-subtle text-secondary-emphasis">Replay Missing</span>
+              </div>
+            </div>
+            <div class="d-flex flex-column flex-lg-row justify-content-between align-items-start align-items-lg-center gap-2">
+              <div class="d-flex flex-column gap-1">
+                <span class="text-muted x-small">{{ riotFixtureStatus }}</span>
+                <span class="text-muted x-small">{{ replayMovementStatus }}</span>
+              </div>
+              <span v-if="hasDualMovement" class="badge bg-primary-subtle text-primary-emphasis">Synced Timeline</span>
+            </div>
+
+            <div v-if="hasDualMovement" class="movement-compare-shell">
+              <div class="movement-roster-column movement-roster-column-left">
+                <div
+                  v-for="player in movementBlueRoster"
+                  :key="`${player.team}-${player.champion}-left`"
+                  class="movement-roster-item"
+                >
+                  <img v-if="player.championIconSrc" :src="player.championIconSrc" :alt="player.champion" class="movement-roster-icon blue-team" />
+                  <div v-else class="movement-roster-icon movement-roster-fallback blue-team"></div>
+                  <div class="movement-roster-copy">
+                    <div class="movement-roster-role">{{ player.roleLabel }}</div>
+                    <div class="movement-roster-champion">{{ player.champion }}</div>
+                    <div class="movement-roster-player">{{ player.playerName }}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="movement-map-panel">
+                <div class="movement-map-panel-header">
+                  <div>
+                    <h3 class="fs-6 mb-1">Riot API</h3>
+                    <p class="text-muted x-small mb-0">Timeline frames plus event anchors.</p>
+                  </div>
+                  <span class="badge bg-success-subtle text-success-emphasis">{{ apiMovementCount }} players</span>
+                </div>
+                <div class="movement-map-frame d-flex justify-content-center bg-black bg-opacity-25 rounded-3 p-2 p-xl-3 border border-secondary border-opacity-10">
+                  <Minimap
+                    class="movement-map"
+                    :player-data="apiMovement"
+                    :empty-message="apiMinimapEmptyMessage"
+                    :show-side-columns="false"
+                  />
+                </div>
+              </div>
+
+              <div class="movement-map-panel">
+                <div class="movement-map-panel-header">
+                  <div>
+                    <h3 class="fs-6 mb-1">Replay Decoder</h3>
+                    <p class="text-muted x-small mb-0">Participant-labelled `timestamp, x, y` from artifacts.</p>
+                  </div>
+                  <span class="badge bg-info-subtle text-info-emphasis">{{ replayMovementCount }} players</span>
+                </div>
+                <div class="movement-map-frame d-flex justify-content-center bg-black bg-opacity-25 rounded-3 p-2 p-xl-3 border border-secondary border-opacity-10">
+                  <Minimap
+                    class="movement-map"
+                    :player-data="replayMovement"
+                    :empty-message="replayMinimapEmptyMessage"
+                    :show-side-columns="false"
+                  />
+                </div>
+              </div>
+
+              <div class="movement-roster-column movement-roster-column-right">
+                <div
+                  v-for="player in movementRedRoster"
+                  :key="`${player.team}-${player.champion}-right`"
+                  class="movement-roster-item movement-roster-item-right"
+                >
+                  <div class="movement-roster-copy movement-roster-copy-right">
+                    <div class="movement-roster-role">{{ player.roleLabel }}</div>
+                    <div class="movement-roster-champion">{{ player.champion }}</div>
+                    <div class="movement-roster-player">{{ player.playerName }}</div>
+                  </div>
+                  <img v-if="player.championIconSrc" :src="player.championIconSrc" :alt="player.champion" class="movement-roster-icon red-team" />
+                  <div v-else class="movement-roster-icon movement-roster-fallback red-team"></div>
+                </div>
+              </div>
+            </div>
+
+            <div v-else class="movement-map-grid">
+              <div class="movement-map-panel">
+                <div class="movement-map-panel-header">
+                  <div>
+                    <h3 class="fs-6 mb-1">{{ hasReplayMovement ? "Replay Decoder" : "Riot API" }}</h3>
+                    <p class="text-muted x-small mb-0">
+                      {{ hasReplayMovement ? "Participant-labelled `timestamp, x, y` from artifacts." : "Timeline frames plus event anchors." }}
+                    </p>
+                  </div>
+                  <span
+                    class="badge"
+                    :class="hasReplayMovement ? 'bg-info-subtle text-info-emphasis' : 'bg-success-subtle text-success-emphasis'"
+                  >
+                    {{ hasReplayMovement ? replayMovementCount : apiMovementCount }} players
+                  </span>
+                </div>
+                <div class="movement-map-frame d-flex justify-content-center bg-black bg-opacity-25 rounded-3 p-2 p-xl-3 border border-secondary border-opacity-10">
+                  <Minimap
+                    class="movement-map"
+                    :player-data="hasReplayMovement ? replayMovement : apiMovement"
+                    :empty-message="hasReplayMovement ? replayMinimapEmptyMessage : apiMinimapEmptyMessage"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <Timeline class="main-timeline" />
+          </div>
+
+          <div class="row g-2">
+            <div class="col-lg-8 d-flex flex-column gap-2">
+              <div class="island p-3">
+                <h2 class="fs-5 mb-3">Segment Preview (First 10)</h2>
+                <div class="table-responsive">
+                  <table class="table table-sm table-hover align-middle mb-0">
+                    <thead class="text-muted x-small text-uppercase sticky-top bg-body">
+                      <tr>
+                        <th>ID</th>
+                        <th>Type</th>
+                        <th>Codec</th>
+                        <th>Size</th>
+                        <th>Uncompressed</th>
+                        <th>Offset</th>
+                      </tr>
+                    </thead>
+                    <tbody class="small">
+                      <tr v-for="segment in segmentPreview" :key="segment.id">
+                        <td>{{ segment.id }}</td>
+                        <td><span class="badge bg-secondary-subtle text-secondary-emphasis">{{ segment.type }}</span></td>
+                        <td><code>{{ segment.codec || 'none' }}</code></td>
+                        <td>{{ formatNumber(segment.length) }}</td>
+                        <td>{{ formatOptionalNumber(segment.uncompressedLength) }}</td>
+                        <td><span class="text-muted">{{ formatNumber(segment.payloadOffset) }}</span></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-4 d-flex flex-column gap-2">
+              <div class="island p-3">
+                <h2 class="fs-5 mb-3">Parser Capabilities</h2>
+                <div class="row g-2">
+                  <div v-for="item in capabilityItems" :key="item.label" class="col-12">
+                    <div class="p-2 rounded-2 border border-opacity-10 d-flex align-items-center gap-2"
+                         :class="item.available ? 'border-success bg-success-subtle bg-opacity-10' : 'border-danger bg-danger-subtle bg-opacity-10'">
+                      <i class="bi" :class="item.available ? 'bi-check-circle-fill text-success' : 'bi-x-circle-fill text-danger'"></i>
+                      <div>
+                        <div class="fw-bold small">{{ item.label }}</div>
+                        <div class="x-small text-muted">{{ item.detail }}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="island p-3">
+                <h2 class="fs-5 mb-3">Container Layout</h2>
+                <dl class="row g-2 mb-0 small">
+                  <template v-for="row in containerRows" :key="row.label">
+                    <dt class="col-7 text-muted fw-normal">{{ row.label }}</dt>
+                    <dd class="col-5 text-end fw-bold mb-0">{{ row.value }}</dd>
+                  </template>
+                </dl>
+              </div>
+
+              <div class="island p-3">
+                <h2 class="fs-5 mb-2">Metadata JSON</h2>
+                <details class="small">
+                  <summary class="text-muted cursor-pointer py-1">Expand raw metadata</summary>
+                  <pre class="bg-dark p-2 rounded text-info mt-2 mb-0 overflow-auto" style="max-height: 300px; font-size: 0.75rem;"><code>{{ summary.metadataJson }}</code></pre>
+                </details>
+              </div>
+            </div>
+          </div>
+
+          <!-- Teams Section -->
+          <div class="row g-2 flex-shrink-0 mb-3">
+            <div v-for="team in teams" :key="team.id" class="col-12 col-xl-6">
+              <div class="island p-3 border-top border-4" :class="team.winner ? 'border-success' : 'border-secondary'">
+                <div class="d-flex justify-content-between align-items-end mb-3">
+                  <div>
+                    <div class="x-small text-uppercase text-muted fw-bold">Team {{ team.id }}</div>
+                    <h3 class="fs-4 mb-0">{{ team.winner ? 'Victory' : 'Defeat' }}</h3>
+                  </div>
+                  <div class="text-end x-small text-muted">
+                    <span class="mx-1">{{ team.totalGold.toLocaleString() }} gold</span>
+                    <span class="mx-1">{{ team.totalDamage.toLocaleString() }} dmg</span>
+                  </div>
+                </div>
+
+                <div class="d-flex flex-column gap-2">
+                  <div v-for="player in team.members" :key="player.riotIdGameName" class="p-2 border rounded-2 bg-body-tertiary bg-opacity-25">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                      <div>
+                        <div class="x-small text-primary fw-bold text-uppercase">{{ player.teamPosition }}</div>
+                        <div class="fw-bold">{{ player.champion }}</div>
+                        <div class="x-small text-muted">{{ formatRiotId(player) }}</div>
+                      </div>
+                      <div class="text-end">
+                        <div class="fw-bold text-primary">{{ player.kills }}/{{ player.deaths }}/{{ player.assists }}</div>
+                      </div>
+                    </div>
+                    
+                    <div class="d-flex flex-column gap-1">
+                      <div class="progress" style="height: 4px;">
+                        <div class="progress-bar bg-warning" :style="{ width: percentage(player.goldEarned, maxGold) }"></div>
+                      </div>
+                      <div class="progress" style="height: 4px;">
+                        <div class="progress-bar bg-danger" :style="{ width: percentage(player.totalDamageToChampions, maxDamage) }"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-        <details class="json-details">
-          <summary>Show normalized replay summary</summary>
-          <pre>{{ JSON.stringify(summary, null, 2) }}</pre>
-        </details>
-      </section>
-    </template>
 
-    <section v-else-if="!isLoading" class="welcome-hint">
-      <div class="hint-card">
-        <h3>Ready to inspect parser output</h3>
-        <p>
-          Load a `.rofl` file to see extracted metadata, player stats, container details, and parser
-          capabilities.
-        </p>
+        <!-- Data Browser View -->
+        <DataBrowser
+          v-else-if="activePage === 'browser'"
+          class="flex-grow-1"
+          :browser="browserModel"
+          :replay-name="loadedReplayName"
+          :riot-bundle="riotBundle"
+          :riot-fixture-status="riotFixtureStatus"
+        />
+
+        <ReplayInspector
+          v-else
+          class="flex-grow-1"
+          :replay-buffer="replayBuffer"
+          :summary="summary"
+          :riot-bundle="riotBundle"
+        />
+
       </div>
-    </section>
 
-    <section v-if="isLoading" class="loading-overlay">
-      <div class="spinner"></div>
-      <p>Parsing replay bytes...</p>
-    </section>
-  </main>
+      <!-- Welcome State -->
+      <div v-else-if="!isLoading" class="flex-grow-1 d-flex align-items-center justify-content-center">
+        <div class="island p-5 text-center" style="max-width: 500px;">
+          <i class="bi bi-file-earmark-bar-graph fs-1 text-primary mb-3 d-block"></i>
+          <h2 class="fs-3">No Replay Loaded</h2>
+          <p class="text-muted">Load a <code>.rofl</code> file to begin analyzing match metadata, player stats, and record structure.</p>
+          <label class="btn btn-primary px-4 mt-3">
+            <i class="bi bi-plus-lg me-1"></i>
+            Select File
+            <input type="file" accept=".rofl" @change="onFileChange" class="d-none" />
+          </label>
+        </div>
+      </div>
+
+      <!-- Loading State -->
+      <div v-if="isLoading" class="flex-grow-1 d-flex align-items-center justify-content-center">
+        <div class="text-center">
+          <div class="spinner-border text-primary mb-3" role="status" style="width: 3rem; height: 3rem;">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+          <p class="text-muted">Parsing replay bytes...</p>
+        </div>
+      </div>
+
+    </main>
+  </div>
 </template>
 
 <style>
-.analyzer-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
-  gap: 24px;
-  margin-top: 24px;
-}
-
-.visual-pane,
+/* Dashboard Layout */
 .sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
+  width: 240px;
+  flex-shrink: 0;
 }
 
-.visual-card {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
+.main-content {
+  min-width: 0;
 }
 
-.visual-header,
-.section-head {
+.x-small {
+  font-size: 0.7rem;
+  letter-spacing: 0.05rem;
+}
+
+/* Custom transitions and scrollbar */
+.island {
+  transition: box-shadow 0.2s;
+}
+
+pre {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.movement-map-frame {
+  width: 100%;
+}
+
+.movement-map {
+  width: 100%;
+}
+
+.movement-map-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.movement-map-panel {
   display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.movement-map-panel-header {
+  display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  align-items: start;
+  gap: 12px;
 }
 
-.visual-note {
-  font-size: 0.94rem;
-  color: var(--text-muted);
+.movement-compare-shell {
+  display: grid;
+  grid-template-columns: minmax(148px, 176px) minmax(0, 1fr) minmax(0, 1fr) minmax(148px, 176px);
+  gap: 12px;
+  align-items: stretch;
 }
 
-.availability-pill {
-  display: inline-flex;
+.movement-roster-column {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+}
+
+.movement-roster-item {
+  display: flex;
   align-items: center;
-  padding: 8px 12px;
+  gap: 10px;
+  min-height: 74px;
+  padding: 10px 11px;
+  background: rgba(8, 13, 20, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+}
+
+.movement-roster-item-right {
+  justify-content: flex-end;
+}
+
+.movement-roster-icon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: block;
+  object-fit: cover;
   border-radius: 999px;
-  font-size: 0.78rem;
+  background: rgba(8, 11, 18, 0.92);
+}
+
+.movement-roster-fallback {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.movement-roster-copy {
+  min-width: 0;
+}
+
+.movement-roster-copy-right {
+  text-align: right;
+}
+
+.movement-roster-role {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.availability-pill.unavailable {
-  color: var(--bad);
-  background: rgba(179, 79, 67, 0.12);
-  border: 1px solid rgba(179, 79, 67, 0.24);
+.movement-roster-champion {
+  color: white;
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1.15;
 }
 
-.extended-grid {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+.movement-roster-player {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.74rem;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.capability-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+code {
+  color: var(--island-accent);
 }
 
-.capability-card {
-  padding: 14px;
-  border-radius: 16px;
-  border: 1px solid var(--border);
-  background: #fff;
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 
-.capability-card.available {
-  border-color: rgba(77, 125, 87, 0.3);
-  background: rgba(77, 125, 87, 0.08);
-}
-
-.capability-card.unavailable {
-  border-color: rgba(179, 79, 67, 0.2);
-  background: rgba(179, 79, 67, 0.05);
-}
-
-.capability-state {
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--text-muted);
-}
-
-.capability-card h3 {
-  margin-top: 6px;
-  margin-bottom: 4px;
-  font-size: 1rem;
-}
-
-.capability-card p {
-  font-size: 0.9rem;
-}
-
-.detail-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px 16px;
-  margin: 0;
-}
-
-.detail-grid dt {
-  color: var(--text-muted);
-}
-
-.detail-grid dd {
-  margin: 0;
-  text-align: right;
-  color: #17202a;
-  font-weight: 600;
-}
-
-.warning-card {
-  border-top: 4px solid var(--bad);
-}
-
-.warning-list {
-  margin: 0;
-  padding-left: 18px;
-  color: var(--text-muted);
-}
-
-.warning-list li + li {
-  margin-top: 8px;
-}
-
-.segment-table-wrap {
-  overflow: auto;
-}
-
-.segment-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.92rem;
-}
-
-.segment-table th,
-.segment-table td {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-}
-
-.segment-table th {
-  color: var(--text-muted);
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.player-section {
-  margin-top: 22px;
-}
-
-.raw-note {
-  margin-top: 22px;
-}
-
-.welcome-hint {
-  margin-top: 48px;
-  display: flex;
-  justify-content: center;
-}
-
-.hint-card {
-  padding: 48px;
-  text-align: center;
-  border: 2px dashed var(--border);
-  border-radius: 32px;
-  max-width: 440px;
-  background: rgba(255, 253, 249, 0.92);
-}
-
-.hint-card h3 {
-  font-size: 1.5rem;
-  margin-bottom: 12px;
-}
-
-.loading-overlay {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 64px;
-  gap: 16px;
-}
-
-.spinner {
-  width: 48px;
-  height: 48px;
-  border: 4px solid var(--surface-strong);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (max-width: 1100px) {
-  .analyzer-layout,
-  .extended-grid,
-  .capability-grid {
+@media (max-width: 1400px) {
+  .movement-compare-shell {
     grid-template-columns: 1fr;
-  }
-
-  .visual-header,
-  .section-head {
-    flex-direction: column;
   }
 }
 </style>
+
+
+
+
+
+

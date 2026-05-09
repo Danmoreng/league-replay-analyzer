@@ -1,0 +1,255 @@
+{
+  "replayId": "EUW1-7596620123",
+  "generatedAtUtc": "2026-03-21T18:38:53.738Z",
+  "movementPath": "C:\\Development\\league-replay-analyzer\\artifacts\\EUW1-7596620123\\extracted-movement.json",
+  "statsPath": "C:\\Development\\league-replay-analyzer\\artifacts\\EUW1-7596620123\\extracted-stats.json",
+  "priorsPath": "C:\\Development\\league-replay-analyzer\\artifacts\\movement-identity-priors.json",
+  "assignments": [
+    {
+      "rosterIndex": 2,
+      "champion": "Malzahar",
+      "team": 100,
+      "teamPosition": "MIDDLE",
+      "entityKey": "61894-0x00-h6|10|1|5|normal",
+      "entityGroupKey": "61894-0x00-h6|10",
+      "familyKey": "61894-0x00-h6",
+      "patternKey": "61894-0x00-h6|1|i16|5|i16|normal",
+      "slotIndex": 10,
+      "score": 0.5643646561495071,
+      "scoreComponents": {
+        "entityQuality": 0.7975536040678678,
+        "teamScore": 0.07363881434464645,
+        "roleScore": 0.5283068329154564,
+        "scalarFamilyScore": 0,
+        "centerBias": 0.7297384256065428,
+        "trajectoryScore": 1,
+        "exactPriorScore": 0.9531372831559057,
+        "familyPriorScore": 0.9062362939445558,
+        "sameTeamDistance": 10220.908343715413,
+        "oppositeTeamDistance": 11411.49877952245
+      },
+      "entityQuality": 0.7975536040678678,
+      "sourceMetrics": {
+        "avgAxisCorrelation": 0.6551050261026529,
+        "avgPathCorrelation": 0.4835152767791095,
+        "avgNormalizedDistanceRmse": 0.19321558680992884,
+        "avgValidatorScore": 0.9099588178398669
+      },
+      "trajectoryStats": {
+        "pointCount": 8,
+        "uniquePointRatio": 1,
+        "displacement": 5418.651826872559,
+        "pathLength": 16226.371026197912,
+        "xRange": 1743.3696888440827,
+        "yRange": 7927.958401154664,
+        "movementQuality": 1
+      },
+      "aliasEntityKeys": [
+        "61894-0x00-h6|10|1|5|normal",
+        "61894-0x00-h6|10|3|1|swapped"
+      ],
+      "trajectory": [
+        {
+          "timestamp": 0,
+          "x": 10326.534719982274,
+          "y": 3740.3008950752983
+        },
+        {
+          "timestamp": 291859,
+          "x": 10156.594172231162,
+          "y": 6188.1757809310475
+        },
+        {
+          "timestamp": 583718,
+          "x": 10446.084733166128,
+          "y": 11668.259296229962
+        },
+        {
+          "timestamp": 875577,
+          "x": 9340.927145420155,
+          "y": 8440.67361994597
+        },
+        {
+          "timestamp": 1167437,
+          "x": 8702.715044322045,
+          "y": 8713.338734994299
+        },
+        {
+          "timestamp": 1459296,
+          "x": 10134.697070840262,
+          "y": 10039.99741276075
+        },
+        {
+          "timestamp": 1751155,
+          "x": 8750.623454042196,
+          "y": 8651.32854073479
+        },
+        {
+          "timestamp": 2043014,
+          "x": 8724.204125190132,
+          "y": 8916.62432834938
+        }
+      ]
+    },
+    {
+      "rosterIndex": 6,
+      "champion": "Khazix",
+      "team": 200,
+      "teamPosition": "JUNGLE",
+      "entityKey": "61894-0x00-h6|9|1|5|normal",
+      "entityGroupKey": "61894-0x00-h6|9",
+      "familyKey": "61894-0x00-h6",
+      "patternKey": "61894-0x00-h6|1|i16|5|i16|normal",
+      "slotIndex": 9,
+      "score": 0.6043907568783956,
+      "scoreComponents": {
+        "entityQuality": 0.7875509109750407,
+        "teamScore": 0.16133693316067108,
+        "roleScore": 0.7433342946865021,
+        "scalarFamilyScore": 0,
+        "centerBias": 0.7771642726908459,
+        "trajectoryScore": 0.9249798018037969,
+        "exactPriorScore": 0.9049863650569328,
+        "familyPriorScore": 0.9795162273555926,
+        "sameTeamDistance": 7262.001412633422,
+        "oppositeTeamDistance": 12508.48420273078
+      },
+      "entityQuality": 0.7875509109750407,
+      "sourceMetrics": {
+        "avgAxisCorrelation": 0.6551050261026529,
+        "avgPathCorrelation": 0.4835152767791095,
+        "avgNormalizedDistanceRmse": 0.19321558680992884,
+        "avgValidatorScore": 0.9099588178398669
+      },
+      "trajectoryStats": {
+        "pointCount": 8,
+        "uniquePointRatio": 1,
+        "displacement": 3670.895044380355,
+        "pathLength": 7883.968232510073,
+        "xRange": 1899.6755507912349,
+        "yRange": 3345.3151755303024,
+        "movementQuality": 0.8999730690717291
+      },
+      "aliasEntityKeys": [
+        "61894-0x00-h6|9|1|5|normal",
+        "61894-0x00-h6|9|3|1|swapped"
+      ],
+      "trajectory": [
+        {
+          "timestamp": 0,
+          "x": 10455.53720861127,
+          "y": 8302.633535333502
+        },
+        {
+          "timestamp": 291859,
+          "x": 9384.075315707503,
+          "y": 6191.590835107658
+        },
+        {
+          "timestamp": 583718,
+          "x": 9429.025576637268,
+          "y": 5203.56173990617
+        },
+        {
+          "timestamp": 875577,
+          "x": 9091.286588879808,
+          "y": 4957.318359803199
+        },
+        {
+          "timestamp": 1167437,
+          "x": 9489.68462769529,
+          "y": 5934.203594007326
+        },
+        {
+          "timestamp": 1459296,
+          "x": 8836.171756991735,
+          "y": 6944.160931816522
+        },
+        {
+          "timestamp": 1751155,
+          "x": 8743.789110285099,
+          "y": 6901.023405375126
+        },
+        {
+          "timestamp": 2043014,
+          "x": 8555.861657820034,
+          "y": 5161.502651625809
+        }
+      ]
+    }
+  ],
+  "unmatchedParticipants": [
+    {
+      "rosterIndex": 0,
+      "champion": "Yorick",
+      "team": 100,
+      "teamPosition": "TOP"
+    },
+    {
+      "rosterIndex": 1,
+      "champion": "Diana",
+      "team": 100,
+      "teamPosition": "JUNGLE"
+    },
+    {
+      "rosterIndex": 3,
+      "champion": "Corki",
+      "team": 100,
+      "teamPosition": "BOTTOM"
+    },
+    {
+      "rosterIndex": 4,
+      "champion": "Pyke",
+      "team": 100,
+      "teamPosition": "UTILITY"
+    },
+    {
+      "rosterIndex": 5,
+      "champion": "Gwen",
+      "team": 200,
+      "teamPosition": "TOP"
+    },
+    {
+      "rosterIndex": 7,
+      "champion": "Jayce",
+      "team": 200,
+      "teamPosition": "MIDDLE"
+    },
+    {
+      "rosterIndex": 8,
+      "champion": "Yunara",
+      "team": 200,
+      "teamPosition": "BOTTOM"
+    },
+    {
+      "rosterIndex": 9,
+      "champion": "Thresh",
+      "team": 200,
+      "teamPosition": "UTILITY"
+    }
+  ],
+  "unassignedEntities": [],
+  "discardedAliases": [
+    {
+      "entityGroupKey": "61894-0x00-h6|9",
+      "keptEntityKey": "61894-0x00-h6|9|1|5|normal",
+      "discardedEntityKey": "61894-0x00-h6|9|3|1|swapped",
+      "keptPatternKey": "61894-0x00-h6|1|i16|5|i16|normal",
+      "discardedPatternKey": "61894-0x00-h6|3|i32|1|i16|swapped"
+    },
+    {
+      "entityGroupKey": "61894-0x00-h6|10",
+      "keptEntityKey": "61894-0x00-h6|10|1|5|normal",
+      "discardedEntityKey": "61894-0x00-h6|10|3|1|swapped",
+      "keptPatternKey": "61894-0x00-h6|1|i16|5|i16|normal",
+      "discardedPatternKey": "61894-0x00-h6|3|i32|1|i16|swapped"
+    }
+  ],
+  "normalization": {
+    "versionGroup": "15.22",
+    "rawEntityCount": 4,
+    "canonicalEntityCount": 2,
+    "discardedAliasCount": 2,
+    "minimumAssignmentScore": 0.38
+  }
+}
