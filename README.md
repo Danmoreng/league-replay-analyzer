@@ -81,30 +81,52 @@ pwsh -File .\scripts\build-wasm.ps1 -Configuration Release
 
 ## Current MVP
 
-The current vertical slice is working end-to-end in the browser.
+The browser vertical slice is still working end-to-end, but the decoder work has moved well beyond the original metadata-only MVP.
 
-The parser currently extracts the embedded match metadata block already present inside the replay file. That currently gives us:
+The parser and research tooling currently cover:
 
-- game version
-- game length
-- last chunk/keyframe ids
-- per-player stats from the embedded `statsJson` payload
+- embedded replay metadata and per-player `statsJson`
+- replay-derived final participant/team metric export shaped toward Riot match API parity
+- keyframe/chunk reconstruction diagnostics
+- replay-only movement candidate extraction and assignment diagnostics
+- offline validation reports against local Riot fixtures and saved replay corpus artifacts
 
-The web app can load a local `.rofl` file, parse it through the real C++ Wasm module, and render a basic match summary plus raw parsed JSON.
+The web app can load a local `.rofl` file, parse it through the real C++ Wasm module, and inspect replay-derived outputs. The decoder research loop is currently driven mostly by native/scripted corpus artifacts in `artifacts-keyframes` and `artifacts`.
 
 ## Next Focus
 
-The next parser layer is lower-level chunk parsing and timeline extraction so the UI can move beyond metadata cards into:
+The active decoder direction is API/timeline parity from `.rofl` files without using Riot API data at runtime. Current focused gaps are:
 
-- timeline scrubbing
-- player movement on a 2D map
-- wards and objective events
-- richer state snapshots over time
+- stable replay-only participant identity for timeline rows and movement entities
+- alias-aware movement entity grouping for `participantFrames.position`
+- fuller timeline/event reconstruction from chunk/keyframe records
+- preserving and calibrating validation-passing movement candidates through extraction
+
+The latest movement checkpoint is intentionally not promoted to runtime `participantFrames.position`: strict replay-only current max128 assignment reaches high coverage only diagnostically, and the movement promotion audit remains `not_complete`. See `docs/rofl-api-parity.md` for current numbers and blockers.
+
+## Decoder Checkpoints
+
+The main replay/API parity checkpoint is:
+
+```powershell
+npm run verify:rofl-api-parity -- --replay-id EUW1-7840220945 --version-group 16.9 --allow-validation-mismatch --skip-incomplete-gate
+```
+
+Focused movement diagnostics:
+
+```powershell
+npm run summarize:movement-diagnostics -- --version-group 16.9 --output-path artifacts-keyframes/movement-diagnostics-summary-16.9.json
+npm run verify:movement-diagnostics -- --version-group 16.9
+npm run audit:movement-position-goal -- --version-group 16.9
+```
+
+The movement audit is a negative gate. `npm run audit:movement-position-goal -- --require-complete` should fail until replay-only position output has stable 10-player participant mapping across the 16.9 corpus.
 
 ## Setup Notes
 
 - Read [docs/setup/windows.md](/C:/Development/league-replay-analyzer/docs/setup/windows.md) for this machine's current setup.
 - Read [docs/chat.md](/C:/Development/league-replay-analyzer/docs/chat.md) for the original product and architecture discussion.
+- Read [docs/rofl-api-parity.md](/C:/Development/league-replay-analyzer/docs/rofl-api-parity.md) for the current decoder state, verifier commands, movement blockers, and parity artifact policy.
 - Read [AGENTS.md](/C:/Development/league-replay-analyzer/AGENTS.md) for repo-specific working instructions.
 - Read [program.md](/C:/Development/league-replay-analyzer/program.md) and [docs/autonomous-decoder-research.md](/C:/Development/league-replay-analyzer/docs/autonomous-decoder-research.md) if you want to run autonomous overnight decoder research.
 - Start the repo-local supervisor with `pwsh -File .\scripts\run_autoresearch.ps1 -Tag <tag>`.
