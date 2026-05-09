@@ -129,6 +129,9 @@ function buildAudit(artifact, inputPath) {
   const challengeGap = readOptionalJson(challengeGapPath);
   const timelineReconstructionPath = path.join(path.dirname(inputPath), "timeline-reconstruction-model.json");
   const timelineReconstruction = readOptionalJson(timelineReconstructionPath);
+  const corpusValidationPath = path.join(process.cwd(), "artifacts-keyframes", "rofl-api-parity-corpus-validation-16.9.json");
+  const corpusValidation = readOptionalJson(corpusValidationPath);
+  const corpusRuntimeProofSummary = corpusValidation?.runtimeProofSummary ?? {};
   const reconstructionTargetDossier02Path = path.join(process.cwd(), "artifacts-keyframes", "reconstruction-target-dossier-241-0x02-16.9.json");
   const reconstructionTargetDossier04Path = path.join(process.cwd(), "artifacts-keyframes", "reconstruction-target-dossier-241-0x04-16.9.json");
   const reconstructionTargetNeighborhood02Path = path.join(process.cwd(), "artifacts-keyframes", "reconstruction-target-neighborhood-241-0x02-16.9.json");
@@ -156,6 +159,7 @@ function buildAudit(artifact, inputPath) {
   const shapeGapRelativePath = path.relative(process.cwd(), shapeGapPath).replaceAll("\\", "/");
   const challengeGapRelativePath = path.relative(process.cwd(), challengeGapPath).replaceAll("\\", "/");
   const timelineReconstructionRelativePath = path.relative(process.cwd(), timelineReconstructionPath).replaceAll("\\", "/");
+  const corpusValidationRelativePath = path.relative(process.cwd(), corpusValidationPath).replaceAll("\\", "/");
   const reconstructionTargetDossier02RelativePath = path.relative(process.cwd(), reconstructionTargetDossier02Path).replaceAll("\\", "/");
   const reconstructionTargetDossier04RelativePath = path.relative(process.cwd(), reconstructionTargetDossier04Path).replaceAll("\\", "/");
   const reconstructionTargetNeighborhood02RelativePath = path.relative(process.cwd(), reconstructionTargetNeighborhood02Path).replaceAll("\\", "/");
@@ -679,6 +683,18 @@ function buildAudit(artifact, inputPath) {
           (challengeGap?.totals?.corpusReplayCount ?? 0) >= 20 &&
           (challengeGap?.totals?.fuzzyAllZeroOnlyCount ?? 0) > 0 &&
           (challengeGap?.totals?.fuzzyValidatedNonZeroCount ?? 0) === 0 &&
+          corpusValidation?.corpusValidationSchema === "rofl-api-parity-corpus-validation/v1" &&
+          corpusValidation?.mode === "offline-validation-only" &&
+          corpusValidation?.runtimeInput === false &&
+          corpusValidation?.versionGroup === "16.9" &&
+          corpusValidation?.replayCount === 20 &&
+          corpusRuntimeProofSummary.roflOnlyRuntimeInputCount === 20 &&
+          corpusRuntimeProofSummary.allParticipantProofCount === 20 &&
+          corpusRuntimeProofSummary.allParticipantsHaveFinalMetricsCount === 20 &&
+          corpusRuntimeProofSummary.allTimelineFramesHaveEventsArrayCount === 20 &&
+          corpusRuntimeProofSummary.zeroRuntimeEventEmissionCount === 20 &&
+          corpusRuntimeProofSummary.allRequiredGapsPresentCount === 20 &&
+          corpusRuntimeProofSummary.fullApiShapeParityCount === 0 &&
           (challengeGap?.candidates ?? []).some((entry) => entry.challengeKey === "turretTakedowns" && entry.promotionStatus === "promoted_validated_exact") &&
           (challengeGap?.candidates ?? []).some((entry) => entry.challengeKey === "turretTakedowns" && entry.corpusSupport?.supportedStatKeys?.[0]?.evidenceStrength === "validated_nonzero") &&
           (challengeGap?.candidates ?? []).some((entry) => entry.challengeKey === "killingSprees" && entry.promotionStatus === "rejected_value_mismatch") &&
@@ -720,6 +736,12 @@ function buildAudit(artifact, inputPath) {
           `challengeGap fuzzyValidatedNonZero=${challengeGap?.totals?.fuzzyValidatedNonZeroCount ?? null}`,
           `challengeGap fuzzy=${challengeGap?.totals?.fuzzyCandidateCount ?? null}`,
           `challengeGap missing=${challengeGap?.totals?.notFoundCount ?? null}`,
+          `corpusValidationPath=${corpusValidationPath}`,
+          `corpusValidation.schema=${corpusValidation?.corpusValidationSchema ?? null}`,
+          `corpusValidation.mode=${corpusValidation?.mode ?? null}`,
+          `corpusValidation.runtimeInput=${corpusValidation?.runtimeInput ?? null}`,
+          `corpusValidation.replayCount=${corpusValidation?.replayCount ?? null}`,
+          `corpusValidation.runtimeProofSummary=${JSON.stringify(corpusRuntimeProofSummary)}`,
           `challengeGap turretTakedowns promotion=${(challengeGap?.candidates ?? []).find((entry) => entry.challengeKey === "turretTakedowns")?.promotionStatus ?? null}`,
           `challengeGap turretTakedowns corpusEvidence=${(challengeGap?.candidates ?? []).find((entry) => entry.challengeKey === "turretTakedowns")?.corpusSupport?.supportedStatKeys?.[0]?.evidenceStrength ?? null}`,
           `challengeGap killingSprees promotion=${(challengeGap?.candidates ?? []).find((entry) => entry.challengeKey === "killingSprees")?.promotionStatus ?? null}`,
@@ -747,6 +769,18 @@ function buildAudit(artifact, inputPath) {
           ...(challengeGap && (challengeGap.totals?.corpusReplayCount ?? 0) < 20 ? ["challenge gap report has insufficient patch-corpus support"] : []),
           ...(challengeGap && (challengeGap.totals?.fuzzyAllZeroOnlyCount ?? 0) <= 0 ? ["challenge gap report does not identify all-zero-only fuzzy candidates"] : []),
           ...(challengeGap && (challengeGap.totals?.fuzzyValidatedNonZeroCount ?? 0) !== 0 ? ["challenge gap report has unreviewed non-zero fuzzy candidates"] : []),
+          ...(!corpusValidation ? ["corpus validation report missing"] : []),
+          ...(corpusValidation?.corpusValidationSchema !== "rofl-api-parity-corpus-validation/v1" ? ["corpus validation schema mismatch"] : []),
+          ...(corpusValidation?.mode !== "offline-validation-only" ? ["corpus validation mode must be offline-validation-only"] : []),
+          ...(corpusValidation?.runtimeInput !== false ? ["corpus validation must be non-runtime"] : []),
+          ...(corpusValidation?.replayCount !== 20 ? ["corpus validation must cover 20 patch 16.9 replays"] : []),
+          ...(corpusRuntimeProofSummary.roflOnlyRuntimeInputCount !== 20 ? ["corpus runtime proof missing 20 replay-only runtime input proofs"] : []),
+          ...(corpusRuntimeProofSummary.allParticipantProofCount !== 20 ? ["corpus runtime proof missing all 10-participant proofs"] : []),
+          ...(corpusRuntimeProofSummary.allParticipantsHaveFinalMetricsCount !== 20 ? ["corpus runtime proof missing final metric proofs"] : []),
+          ...(corpusRuntimeProofSummary.allTimelineFramesHaveEventsArrayCount !== 20 ? ["corpus runtime proof missing timeline events-array coverage"] : []),
+          ...(corpusRuntimeProofSummary.zeroRuntimeEventEmissionCount !== 20 ? ["corpus runtime proof must keep runtime events empty"] : []),
+          ...(corpusRuntimeProofSummary.allRequiredGapsPresentCount !== 20 ? ["corpus runtime proof missing required remaining gap coverage"] : []),
+          ...(corpusRuntimeProofSummary.fullApiShapeParityCount !== 0 ? ["corpus runtime proof must not claim full API shape parity"] : []),
           ...(validation && validation.validationSchema !== "rofl-api-metrics-riot-validation/v1" ? ["validation schema marker is not rofl-api-metrics-riot-validation/v1"] : []),
           ...(validation && validation.mode !== "offline-validation-only" ? ["validation mode is not offline-validation-only"] : []),
           ...(validation && validation.replayId !== artifact.source?.replayId ? ["validation replay id does not match runtime artifact"] : []),
@@ -1014,6 +1048,7 @@ function buildAudit(artifact, inputPath) {
           docsText.includes(shapeGapRelativePath) &&
           docsText.includes(challengeGapRelativePath) &&
           docsText.includes(timelineReconstructionRelativePath) &&
+          docsText.includes(corpusValidationRelativePath) &&
           docsText.includes(reconstructionTargetDossier02RelativePath) &&
           docsText.includes(reconstructionTargetDossier04RelativePath) &&
           docsText.includes(reconstructionTargetNeighborhood02RelativePath) &&
@@ -1063,7 +1098,9 @@ function buildAudit(artifact, inputPath) {
           docsText.includes("not promotable for participant identity") &&
           docsText.includes("offline validation labels only") &&
           docsText.includes("keyframes as baseline snapshots") &&
-          docsText.includes("chunk/subrecord updates between keyframes"),
+          docsText.includes("chunk/subrecord updates between keyframes") &&
+          docsText.includes("runtimeProofSummary") &&
+          docsText.includes("full API-shape parity"),
         [
           "docs/rofl-api-parity.md",
           `docs exists=${fs.existsSync(docsPath)}`,
@@ -1071,6 +1108,7 @@ function buildAudit(artifact, inputPath) {
           `docs name ${auditRelativePath}`,
           `docs name ${shapeGapRelativePath}`,
           `docs name ${challengeGapRelativePath}`,
+          `docs name ${corpusValidationRelativePath}`,
           "docs name npm run audit:rofl-api-shape-gap",
           "docs name npm run audit:rofl-challenge-gaps",
           "docs name npm run verify:rofl-api-parity",
