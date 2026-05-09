@@ -1077,6 +1077,7 @@ function buildIdentityLinkageSummary(rosterParticipants, emittedTimelineParticip
       metricSet: nonFinalScalarIdentity.assignmentArtifact?.metricSet ?? null,
       assignmentCount: nonFinalScalarIdentity.assignmentArtifact?.assignmentCount ?? null,
       canonicalCandidateCount: nonFinalScalarIdentity.assignmentArtifact?.canonicalCandidateCount ?? null,
+      startupRosterTokenScan: nonFinalScalarIdentity.startupRosterTokenScan ?? { exists: false },
       supportBelowMetricScoreCount: nonFinalScalarIdentity.assignmentArtifact?.diagnostics?.supportBelowMetricScoreCount ?? null,
       ambiguousFinalTargetSupportCountsByMetric:
         nonFinalScalarIdentity.assignmentArtifact?.diagnostics?.ambiguousFinalTargetSupportCountsByMetric ?? {},
@@ -2224,9 +2225,68 @@ function summarizeIdentityAssignments(roflStatAssignments) {
     .slice(0, 10);
 }
 
+function summarizeStartupRosterTokenScan(startupRosterTokenScan, versionGroup) {
+  if (!startupRosterTokenScan) {
+    return {
+      exists: false,
+    };
+  }
+  const replayOnlyKinds = new Set([
+    "participantId",
+    "rosterIndex",
+    "rosterOrdinal",
+    "teamId",
+    "summonerIdLow32",
+    "championNameAscii",
+    "riotNameAscii",
+    "puuidAscii",
+  ]);
+  const versionCandidates = (startupRosterTokenScan.candidates ?? [])
+    .filter((candidate) => candidate.versionGroup === versionGroup && replayOnlyKinds.has(candidate.kind));
+  const fullCorpusCandidates = versionCandidates.filter((candidate) =>
+    (candidate.replayCount ?? 0) === 20 &&
+    ["participantId", "rosterIndex", "rosterOrdinal", "teamId"].includes(candidate.kind),
+  );
+  return {
+    exists: true,
+    status: "diagnostic_only_not_runtime_api_data",
+    reason: "startup records contain replay-only roster/order-like token hits, but these hits are not yet linked to non-final keyframe state rows",
+    runtimeInput: false,
+    runtimeApiData: false,
+    generatedAtUtc: startupRosterTokenScan.generatedAtUtc ?? null,
+    versionGroup,
+    scannedReplayCount: (startupRosterTokenScan.replaySummaries ?? [])
+      .filter((summary) => summary.versionGroup === versionGroup).length,
+    replayOnlyCandidateCount: versionCandidates.length,
+    fullCorpusRosterOrderCandidateCount: fullCorpusCandidates.length,
+    topReplayOnlyCandidates: versionCandidates
+      .sort((left, right) =>
+        (right.replayCount ?? 0) - (left.replayCount ?? 0) ||
+        (right.hitCount ?? 0) - (left.hitCount ?? 0) ||
+        (left.offset ?? 0) - (right.offset ?? 0),
+      )
+      .slice(0, 8)
+      .map((candidate) => ({
+        kind: candidate.kind,
+        width: candidate.width,
+        offset: candidate.offset,
+        replayCount: candidate.replayCount ?? null,
+        hitCount: candidate.hitCount ?? null,
+        participantOrdinalDelta: candidate.participantOrdinalDelta ?? null,
+        examples: (candidate.examples ?? []).slice(0, 3).map((example) => ({
+          replayId: example.replayId,
+          participantId: example.participantId,
+          champion: example.champion,
+          value: example.value,
+        })),
+      })),
+  };
+}
+
 function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
   const roflStatAssignmentsPath = path.join(root, "artifacts-keyframes", `keyframe-rofl-stat-slot-assignments-${versionGroup}.json`);
   const roflStatComparisonPath = path.join(root, "artifacts-keyframes", `keyframe-rofl-stat-supervised-comparison-${versionGroup}.json`);
+  const startupRosterTokenScanPath = path.join(root, "artifacts-keyframes", "startup-roster-token-scan.json");
   const rowIdentity02Path = path.join(root, "artifacts-keyframes", `reconstruction-row-identity-241-0x02-${versionGroup}.json`);
   const rowIdentity04Path = path.join(root, "artifacts-keyframes", `reconstruction-row-identity-241-0x04-${versionGroup}.json`);
   const rowGridCandidatesPath = path.join(root, "artifacts-keyframes", `reconstruction-row-grid-candidates-${versionGroup}.json`);
@@ -2239,6 +2299,7 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
   const extractedStatsPath = path.join(root, "artifacts", replayId, "extracted-stats.json");
   const roflStatAssignments = readOptionalJson(roflStatAssignmentsPath);
   const roflStatComparison = readOptionalJson(roflStatComparisonPath);
+  const startupRosterTokenScan = readOptionalJson(startupRosterTokenScanPath);
   const rowIdentity02 = readOptionalJson(rowIdentity02Path);
   const rowIdentity04 = readOptionalJson(rowIdentity04Path);
   const rowGridCandidates = readOptionalJson(rowGridCandidatesPath);
@@ -2350,10 +2411,12 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
             : {
                 exists: false,
               },
+          startupRosterTokenScan: summarizeStartupRosterTokenScan(startupRosterTokenScan, versionGroup),
         }
       : {
           status: "not_found",
           reason: "no replay-only keyframe scalar identity assignment artifact found",
+          startupRosterTokenScan: summarizeStartupRosterTokenScan(startupRosterTokenScan, versionGroup),
         },
     reconstructionRowIdentity: {
       status: "not_promoted",
@@ -3030,6 +3093,12 @@ function main() {
         {
           path: path.join(root, "artifacts", args.replayId, "assigned-movement-no-priors-validation-report.json"),
           role: "offline-no-priors-position-validation-diagnostic",
+          runtimeInput: false,
+          runtimeApiData: false,
+        },
+        {
+          path: path.join(root, "artifacts-keyframes", "startup-roster-token-scan.json"),
+          role: "replay-only-startup-roster-token-diagnostic",
           runtimeInput: false,
           runtimeApiData: false,
         },

@@ -264,6 +264,8 @@ Current verified output:
 - `rejectedCandidateArtifacts.nonFinalScalarIdentity` that records why non-final keyframe scalar identity is not accepted
 - `rejectedCandidateArtifacts.reconstructionRowIdentity` that records why the 241-family row identity gates are not accepted
 - non-final scalar identity diagnostics include the conservative replay-only metric set, acceptance thresholds, aggregate scoring diagnostics, rejection-reason counts, and the strongest replay candidates
+- `rejectedCandidateArtifacts.nonFinalScalarIdentity.startupRosterTokenScan` summarizes `artifacts-keyframes/startup-roster-token-scan.json` as diagnostic-only evidence: for patch 16.9 it scans 20 replays and finds full-corpus replay-only roster/order token hits, but those startup tokens are still not linked to non-final keyframe state rows
+- `artifactManifest.decoderDiagnostics` includes `replay-only-startup-roster-token-diagnostic` and marks it `runtimeInput:false` / `runtimeApiData:false`
 - scalar identity diagnostics also break evidence down by metric: observed slot values, roster comparisons, positive scores, and accepted edge support
 - replay-only scalar identity scoring deduplicates repeated offsets of the same metric before accepting support, so duplicate currentGold/CS candidates cannot masquerade as independent evidence
 - replay-only scalar identity scoring requires each accepted support metric to pass a minimum per-metric quality score before it can form an edge

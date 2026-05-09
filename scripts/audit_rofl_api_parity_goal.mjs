@@ -257,6 +257,7 @@ function buildAudit(artifact, inputPath) {
           artifact.artifactManifest?.replayDerivedSummary?.runtimeInput === true &&
           artifact.artifactManifest?.primaryRuntimeArtifact?.runtimeInput === false &&
           (artifact.artifactManifest?.decoderDiagnostics ?? []).some((entry) => entry.role === "replay-only-no-priors-position-diagnostic" && entry.runtimeInput === false && entry.runtimeApiData === false) &&
+          (artifact.artifactManifest?.decoderDiagnostics ?? []).some((entry) => entry.role === "replay-only-startup-roster-token-diagnostic" && entry.runtimeInput === false && entry.runtimeApiData === false) &&
           (artifact.artifactManifest?.offlineValidationReports ?? []).length >= 3 &&
           (artifact.artifactManifest?.offlineValidationReports ?? []).every((entry) => entry.runtimeInput === false) &&
           artifact.source?.roflOnlyInputs?.runtimeRiotApiFiles === false &&
@@ -406,6 +407,10 @@ function buildAudit(artifact, inputPath) {
         `identity corpus rejectionSummary.status=${identityCorpus?.totals?.rejectionSummary?.status ?? null}`,
         `identity corpus rejectionSummary.primaryBlockers=${(identityCorpus?.totals?.rejectionSummary?.primaryBlockers ?? []).join(",")}`,
         `identity corpus rejectionSummary.metrics=${Object.keys(identityCorpus?.totals?.rejectionSummary?.byMetric ?? {}).join(",")}`,
+        `startup roster token scan status=${nonFinalIdentity?.startupRosterTokenScan?.status ?? null}`,
+        `startup roster token scan replay count=${nonFinalIdentity?.startupRosterTokenScan?.scannedReplayCount ?? null}`,
+        `startup roster token scan full-corpus roster/order candidates=${nonFinalIdentity?.startupRosterTokenScan?.fullCorpusRosterOrderCandidateCount ?? null}`,
+        `startup roster token scan top candidates=${JSON.stringify((nonFinalIdentity?.startupRosterTokenScan?.topReplayOnlyCandidates ?? []).slice(0, 3))}`,
         `identity threshold sweep path=${identityThresholdSweepPath}`,
         `identity threshold sweep schema=${identityThresholdSweep?.sweepSchema ?? null}`,
         `identity threshold sweep rows=${(identityThresholdSweep?.rows ?? []).length}`,
@@ -446,6 +451,12 @@ function buildAudit(artifact, inputPath) {
         ] : []),
         ...(identityThresholdSweep?.sweepSchema === "rofl-keyframe-stat-support-threshold-sweep/v1" ? [] : ["identity threshold sweep schema missing or unsupported"]),
         ...((identityThresholdSweep?.negativeControlRows ?? []).some((row) => row.name === "unsafe-single-metric" && (row.assignmentCount ?? 0) > 0 && (row.comparisonCounts?.conflict ?? 0) > 0) ? [] : ["identity threshold sweep missing unsafe single-metric negative control conflicts"]),
+        ...(nonFinalIdentity?.startupRosterTokenScan?.status === "diagnostic_only_not_runtime_api_data" &&
+          nonFinalIdentity?.startupRosterTokenScan?.runtimeApiData === false &&
+          nonFinalIdentity?.startupRosterTokenScan?.scannedReplayCount === 20 &&
+          (nonFinalIdentity?.startupRosterTokenScan?.fullCorpusRosterOrderCandidateCount ?? 0) > 0
+          ? []
+          : ["startup roster token diagnostic missing or not marked as non-runtime evidence"]),
       ],
     },
     {
@@ -803,6 +814,7 @@ function buildAudit(artifact, inputPath) {
           (remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("rejectedCandidateArtifacts.positions.noPriorsDiagnostic") &&
           (remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("fieldCoverage.positions.noPriorsDiagnostic") &&
           (remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("artifactManifest.decoderDiagnostics.replay-only-no-priors-position-diagnostic") &&
+          (remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("artifactManifest.decoderDiagnostics.offline-no-priors-position-validation-diagnostic") &&
           remainingGapByKey.get("nonFinalParticipantIdentity")?.runtimeApiData === false &&
           remainingGapByKey.get("damageTimeline")?.runtimeApiData === false &&
           roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.status === "not_promoted" &&
@@ -986,6 +998,9 @@ function buildAudit(artifact, inputPath) {
           docsText.includes("7/8 assigned tracks") &&
           docsText.includes("Vayne TOP") &&
           docsText.includes("Malphite TOP") &&
+          docsText.includes("startup-roster-token-scan.json") &&
+          docsText.includes("replay-only-startup-roster-token-diagnostic") &&
+          docsText.includes("20 replays") &&
           docsText.includes("roflDerivedFieldMap.timeline[\"info.frames[].participantFrames[].nonFinalParticipantIdentity\"]") &&
           docsText.includes("nearest-row index stability") &&
           docsText.includes("row-discriminator") &&
@@ -1012,6 +1027,8 @@ function buildAudit(artifact, inputPath) {
           "docs name npm run validate:assigned-movement",
           "docs name fieldCoverage.positions.noPriorsDiagnostic",
           "docs name roflDerivedFieldMap.timeline position noPriorsDiagnostic",
+          "docs name startup-roster-token-scan.json",
+          "docs name replay-only-startup-roster-token-diagnostic",
           `fullParityGaps=${[...fullParityGaps].join(",")}`,
           `fieldCoverage.matchMetadataGaps.status=${matchMetadataGaps.status ?? null}`,
           `fieldCoverage.matchMetadataGaps.fields=${matchMetadataGapFields.join(",")}`,
@@ -1170,6 +1187,7 @@ function buildAudit(artifact, inputPath) {
           ...(!(remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("rejectedCandidateArtifacts.positions.noPriorsDiagnostic") ? ["remainingParityGaps positions missing rejected no-priors evidence ref"] : []),
           ...(!(remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("fieldCoverage.positions.noPriorsDiagnostic") ? ["remainingParityGaps positions missing fieldCoverage no-priors evidence ref"] : []),
           ...(!(remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("artifactManifest.decoderDiagnostics.replay-only-no-priors-position-diagnostic") ? ["remainingParityGaps positions missing manifest no-priors evidence ref"] : []),
+          ...(!(remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("artifactManifest.decoderDiagnostics.offline-no-priors-position-validation-diagnostic") ? ["remainingParityGaps positions missing manifest no-priors validation evidence ref"] : []),
           ...(remainingGapByKey.get("nonFinalParticipantIdentity")?.runtimeApiData !== false ? ["remainingParityGaps nonFinalParticipantIdentity must be non-runtime"] : []),
           ...(remainingGapByKey.get("damageTimeline")?.runtimeApiData !== false ? ["remainingParityGaps damageTimeline must be non-runtime"] : []),
           ...(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.status !== "not_promoted" ? ["roflDerivedFieldMap timeline position missing not_promoted status"] : []),
@@ -1351,6 +1369,9 @@ function buildAudit(artifact, inputPath) {
           ...(!docsText.includes("7/8 assigned tracks") ? ["docs missing no-priors 7/8 validation result"] : []),
           ...(!docsText.includes("Vayne TOP") ? ["docs missing Vayne TOP no-priors unmatched participant"] : []),
           ...(!docsText.includes("Malphite TOP") ? ["docs missing Malphite TOP no-priors unmatched participant"] : []),
+          ...(!docsText.includes("startup-roster-token-scan.json") ? ["docs missing startup roster token scan artifact"] : []),
+          ...(!docsText.includes("replay-only-startup-roster-token-diagnostic") ? ["docs missing startup roster diagnostic manifest role"] : []),
+          ...(!docsText.includes("20 replays") ? ["docs missing startup roster scan 16.9 replay count"] : []),
           ...(!docsText.includes("npm run verify:rofl-api-parity") ? ["docs missing full checkpoint command"] : []),
           ...(!docsText.includes("npm run analyze:reconstruction-target-table") ? ["docs missing target table analysis command"] : []),
           ...(!docsText.includes("npm run infer:reconstruction-row-identity") ? ["docs missing row identity gate command"] : []),
