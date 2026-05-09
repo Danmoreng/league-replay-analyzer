@@ -1457,6 +1457,10 @@ function buildRoflDerivedFieldMap(rejectedCandidateArtifacts = {}) {
         source: "movement-candidates-rejected-for-runtime",
         perParticipantCoverage: rejectedCandidateArtifacts.positions?.perParticipantCoverage ?? [],
         noPriorsDiagnostic: rejectedCandidateArtifacts.positions?.noPriorsDiagnostic ?? null,
+        strictReplayOnlyDiagnostic: rejectedCandidateArtifacts.positions?.strictReplayOnlyDiagnostic ?? null,
+        oracleCoverageDiagnostic: rejectedCandidateArtifacts.positions?.oracleCoverageDiagnostic ?? null,
+        assignmentOracleGapDiagnostic: rejectedCandidateArtifacts.positions?.assignmentOracleGapDiagnostic ?? null,
+        movementPositionGoalAudit: rejectedCandidateArtifacts.positions?.movementPositionGoalAudit ?? null,
         statusCounts: countMetricStatuses(Object.fromEntries((rejectedCandidateArtifacts.positions?.perParticipantCoverage ?? []).map((entry) => [
           entry.participantId,
           entry,
@@ -1829,6 +1833,10 @@ function buildFieldCoverage(rejectedCandidateArtifacts = {}) {
       source: "state-reconstruction-not-extracted-for-16.9",
       perParticipantCoverage: rejectedCandidateArtifacts.positions?.perParticipantCoverage ?? [],
       noPriorsDiagnostic: rejectedCandidateArtifacts.positions?.noPriorsDiagnostic ?? null,
+      strictReplayOnlyDiagnostic: rejectedCandidateArtifacts.positions?.strictReplayOnlyDiagnostic ?? null,
+      oracleCoverageDiagnostic: rejectedCandidateArtifacts.positions?.oracleCoverageDiagnostic ?? null,
+      assignmentOracleGapDiagnostic: rejectedCandidateArtifacts.positions?.assignmentOracleGapDiagnostic ?? null,
+      movementPositionGoalAudit: rejectedCandidateArtifacts.positions?.movementPositionGoalAudit ?? null,
       statusCounts: countMetricStatuses(Object.fromEntries((rejectedCandidateArtifacts.positions?.perParticipantCoverage ?? []).map((entry) => [
         entry.participantId,
         entry,
@@ -2041,6 +2049,7 @@ function buildRemainingParityGaps(rejectedCandidateArtifacts) {
         `startupKeyframeRowLink=${scalarIdentity.startupKeyframeRowLink?.assessment?.directStartupToKeyframeRowLink ?? null}`,
         `handleGraphLink=${scalarIdentity.handleGraphRowLinkCandidates?.status ?? null}`,
         `noPriorsPositionAssignment=${positions.qualityGateSummary?.noPriorsAssignedParticipantCount ?? null}/10`,
+        `strictReplayOnlyPositionAssignment=${positions.qualityGateSummary?.strictReplayOnlyAssignedParticipantCount ?? null}/10`,
       ],
       evidenceRefs: [
         "rejectedCandidateArtifacts.nonFinalScalarIdentity",
@@ -2066,11 +2075,21 @@ function buildRemainingParityGaps(rejectedCandidateArtifacts) {
       evidenceRefs: [
         "rejectedCandidateArtifacts.positions",
         "rejectedCandidateArtifacts.positions.noPriorsDiagnostic",
+        "rejectedCandidateArtifacts.positions.strictReplayOnlyDiagnostic",
+        "rejectedCandidateArtifacts.positions.oracleCoverageDiagnostic",
+        "rejectedCandidateArtifacts.positions.assignmentOracleGapDiagnostic",
+        "rejectedCandidateArtifacts.positions.movementPositionGoalAudit",
         "fieldCoverage.positions",
         "fieldCoverage.positions.noPriorsDiagnostic",
+        "fieldCoverage.positions.strictReplayOnlyDiagnostic",
+        "fieldCoverage.positions.oracleCoverageDiagnostic",
+        "fieldCoverage.positions.assignmentOracleGapDiagnostic",
+        "fieldCoverage.positions.movementPositionGoalAudit",
         "roflDerivedFieldMap.timeline.info.frames[].participantFrames[].position",
         "artifactManifest.decoderDiagnostics.replay-only-no-priors-position-diagnostic",
         "artifactManifest.decoderDiagnostics.offline-no-priors-position-validation-diagnostic",
+        "artifactManifest.decoderDiagnostics.strict-replay-only-position-diagnostic",
+        "artifactManifest.decoderDiagnostics.offline-strict-replay-only-position-validation-diagnostic",
       ],
       nextDecoderStep: "replace prior-dependent 9/10 movement assignment with 10/10 ROFL-only identity and quality gates",
     },
@@ -2266,6 +2285,10 @@ function buildRoflOnlyExtractionProof(rosterParticipants, frames, rejectedCandid
         offlinePassingAssignmentCount: rejectedCandidateArtifacts.positions?.qualityGateSummary?.offlinePassingAssignmentCount ?? null,
         noPriorsAssignedParticipantCount: rejectedCandidateArtifacts.positions?.qualityGateSummary?.noPriorsAssignedParticipantCount ?? null,
         noPriorsOfflinePassingAssignmentCount: rejectedCandidateArtifacts.positions?.qualityGateSummary?.noPriorsOfflinePassingAssignmentCount ?? null,
+        strictReplayOnlyAssignedParticipantCount: rejectedCandidateArtifacts.positions?.qualityGateSummary?.strictReplayOnlyAssignedParticipantCount ?? null,
+        strictReplayOnlyOfflinePassingAssignmentCount: rejectedCandidateArtifacts.positions?.qualityGateSummary?.strictReplayOnlyOfflinePassingAssignmentCount ?? null,
+        strictReplayOnlyUsesIdentityPriors: rejectedCandidateArtifacts.positions?.strictReplayOnlyDiagnostic?.usesIdentityPriors ?? null,
+        strictReplayOnlyUsesSupportHypotheses: rejectedCandidateArtifacts.positions?.strictReplayOnlyDiagnostic?.usesSupportHypotheses ?? null,
       },
       {
         surface: "timeline events",
@@ -2454,6 +2477,7 @@ function summarizeHandleGraphCandidateScores(handleGraphScores) {
     confidenceCounts: handleGraphScores.confidenceCounts ?? {},
     topScore: topCandidate?.score ?? null,
     topConfidence: topCandidate?.confidence ?? null,
+    nearMissSummary: handleGraphScores.nearMissSummary ?? null,
     topCandidate: topCandidate
       ? {
           sourceFamilyKey: topCandidate.sourceFamilyKey,
@@ -2464,6 +2488,7 @@ function summarizeHandleGraphCandidateScores(handleGraphScores) {
           assignedSourceRowReplayCount: topCandidate.assignedSourceRowReplayCount,
           assignedRowCount: topCandidate.assignedRowCount,
           components: topCandidate.components ?? null,
+          promotionBlockers: topCandidate.promotionBlockers ?? [],
         }
       : null,
     topCandidates: candidates.slice(0, 5).map((candidate) => ({
@@ -2476,6 +2501,7 @@ function summarizeHandleGraphCandidateScores(handleGraphScores) {
       replayCount: candidate.replayCount,
       assignedSourceRowReplayCount: candidate.assignedSourceRowReplayCount,
       assignedRowCount: candidate.assignedRowCount,
+      promotionBlockers: candidate.promotionBlockers ?? [],
     })),
   };
 }
@@ -2615,6 +2641,11 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
   const movementValidationPath = path.join(root, "artifacts", replayId, "assigned-movement-validation-report.json");
   const movementNoPriorsPath = path.join(root, "artifacts", replayId, "participant-movement-no-priors.json");
   const movementNoPriorsValidationPath = path.join(root, "artifacts", replayId, "assigned-movement-no-priors-validation-report.json");
+  const movementStrictReplayOnlyPath = path.join(root, "artifacts", replayId, "participant-movement-strict-replay-only-probe.json");
+  const movementStrictReplayOnlyValidationPath = path.join(root, "artifacts", replayId, "assigned-movement-strict-replay-only-probe-validation-report.json");
+  const movementOracleCoveragePath = path.join(root, "artifacts-keyframes", `movement-oracle-coverage-summary-${versionGroup}.json`);
+  const movementAssignmentOracleGapPath = path.join(root, "artifacts-keyframes", `movement-assignment-oracle-gap-${versionGroup}-current-max128-reduced-role.json`);
+  const movementPositionGoalAuditPath = path.join(root, "artifacts-keyframes", `movement-position-goal-audit-${versionGroup}.json`);
   const itemEventCandidatesPath = path.join(root, "artifacts", replayId, "item-event-candidates.json");
   const eventFamilyCorrelationPath = path.join(root, "artifacts-keyframes", `reconstruction-family-event-correlation-${versionGroup}.json`);
   const extractedStatsPath = path.join(root, "artifacts", replayId, "extracted-stats.json");
@@ -2631,6 +2662,11 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
   const movementValidation = readOptionalJson(movementValidationPath);
   const movementNoPriors = readOptionalJson(movementNoPriorsPath);
   const movementNoPriorsValidation = readOptionalJson(movementNoPriorsValidationPath);
+  const movementStrictReplayOnly = readOptionalJson(movementStrictReplayOnlyPath);
+  const movementStrictReplayOnlyValidation = readOptionalJson(movementStrictReplayOnlyValidationPath);
+  const movementOracleCoverage = readOptionalJson(movementOracleCoveragePath);
+  const movementAssignmentOracleGap = readOptionalJson(movementAssignmentOracleGapPath);
+  const movementPositionGoalAudit = readOptionalJson(movementPositionGoalAuditPath);
   const itemEventCandidates = readOptionalJson(itemEventCandidatesPath);
   const eventFamilyCorrelation = readOptionalJson(eventFamilyCorrelationPath);
   const extractedStats = readOptionalJson(extractedStatsPath);
@@ -2862,6 +2898,18 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
             ...(movementNoPriors && (movementNoPriors.assignments?.length ?? 0) < (movement?.assignments?.length ?? 0)
               ? [`ROFL-only no-priors movement assignment drops to ${movementNoPriors.assignments?.length ?? 0}/10 participants`]
               : []),
+            ...(movementNoPriors?.normalization?.useSupportHypotheses !== false
+              ? ["no-priors movement diagnostic still uses validation-derived support hypotheses"]
+              : []),
+            ...(movementStrictReplayOnly && (movementStrictReplayOnly.assignments?.length ?? 0) < 10
+              ? [`strict replay-only movement assignment without priors/support hypotheses reaches ${movementStrictReplayOnly.assignments?.length ?? 0}/10 participants`]
+              : []),
+            ...(movementOracleCoverage?.totals && (movementOracleCoverage.totals.passingOracleParticipantCount ?? 0) < (movementOracleCoverage.totals.expectedParticipantCount ?? 0)
+              ? [`offline movement oracle has validation-passing candidates for ${movementOracleCoverage.totals.passingOracleParticipantCount ?? null}/${movementOracleCoverage.totals.expectedParticipantCount ?? null} corpus participants`]
+              : []),
+            ...(movementAssignmentOracleGap?.totals && (movementAssignmentOracleGap.totals.statusCounts?.passing_oracle_available_wrong_entity_assigned ?? 0) > 0
+              ? [`strict replay-only assignment picks the wrong entity for ${movementAssignmentOracleGap.totals.statusCounts.passing_oracle_available_wrong_entity_assigned} corpus participants with passing oracle candidates`]
+              : []),
           ],
           qualityGateSummary: {
             assignedParticipantCount: movement?.assignments?.length ?? null,
@@ -2884,6 +2932,18 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
             noPriorsUnmatchedParticipantCount: movementNoPriors?.unmatchedParticipants?.length ?? null,
             noPriorsOfflineAssignmentCount: movementNoPriorsValidation?.summary?.assignmentCount ?? null,
             noPriorsOfflinePassingAssignmentCount: movementNoPriorsValidation?.summary?.passingAssignmentCount ?? null,
+            strictReplayOnlyAssignedParticipantCount: movementStrictReplayOnly?.assignments?.length ?? null,
+            strictReplayOnlyUnmatchedParticipantCount: movementStrictReplayOnly?.unmatchedParticipants?.length ?? null,
+            strictReplayOnlyOfflineAssignmentCount: movementStrictReplayOnlyValidation?.summary?.assignmentCount ?? null,
+            strictReplayOnlyOfflinePassingAssignmentCount: movementStrictReplayOnlyValidation?.summary?.passingAssignmentCount ?? null,
+            oracleExpectedParticipantCount: movementOracleCoverage?.totals?.expectedParticipantCount ?? null,
+            oraclePassingParticipantCount: movementOracleCoverage?.totals?.passingOracleParticipantCount ?? null,
+            oracleCompleteReplayCount: movementOracleCoverage?.totals?.completeOracleReplayCount ?? null,
+            assignmentOracleGapAssignedCount: movementAssignmentOracleGap?.totals?.assignedCount ?? null,
+            assignmentOracleGapPassingAssignedCount: movementAssignmentOracleGap?.totals?.passingAssignedCount ?? null,
+            assignmentOracleGapPassingOracleCount: movementAssignmentOracleGap?.totals?.passingOracleCount ?? null,
+            assignmentOracleGapWrongEntityCount: movementAssignmentOracleGap?.totals?.statusCounts?.passing_oracle_available_wrong_entity_assigned ?? null,
+            assignmentOracleGapUnassignedPassingOracleCount: movementAssignmentOracleGap?.totals?.statusCounts?.passing_oracle_unassigned ?? null,
             runtimeInput: false,
           },
           participantMovementArtifact: movement
@@ -2950,6 +3010,7 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
                 unmatchedParticipantCount: movementNoPriors?.unmatchedParticipants?.length ?? null,
                 unassignedEntityCount: movementNoPriors?.unassignedEntities?.length ?? null,
                 usesIdentityPriors: movementNoPriors?.priorsPath != null,
+                usesSupportHypotheses: movementNoPriors?.normalization?.useSupportHypotheses ?? null,
                 unmatchedParticipants: (movementNoPriors?.unmatchedParticipants ?? []).map((participant) => ({
                   rosterIndex: participant.rosterIndex ?? null,
                   champion: participant.champion ?? null,
@@ -2978,6 +3039,101 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
                   : {
                       exists: false,
                     },
+              }
+            : {
+                exists: false,
+              },
+          strictReplayOnlyDiagnostic: movementStrictReplayOnly || movementStrictReplayOnlyValidation
+            ? {
+                exists: true,
+                status: "diagnostic_only_not_runtime_api_data",
+                reason: "strict diagnostic disables identity priors and validation-derived support hypotheses to measure runtime-promotable replay-only movement strength",
+                runtimeInput: false,
+                runtimeApiData: false,
+                assignmentCount: movementStrictReplayOnly?.assignments?.length ?? null,
+                unmatchedParticipantCount: movementStrictReplayOnly?.unmatchedParticipants?.length ?? null,
+                unassignedEntityCount: movementStrictReplayOnly?.unassignedEntities?.length ?? null,
+                usesIdentityPriors: movementStrictReplayOnly?.priorsPath != null,
+                usesSupportHypotheses: movementStrictReplayOnly?.normalization?.useSupportHypotheses ?? null,
+                offlineValidation: movementStrictReplayOnlyValidation
+                  ? {
+                      exists: true,
+                      assignmentCount: movementStrictReplayOnlyValidation.summary?.assignmentCount ?? null,
+                      passingAssignmentCount: movementStrictReplayOnlyValidation.summary?.passingAssignmentCount ?? null,
+                      matchedAssignmentCount: movementStrictReplayOnlyValidation.summary?.matchedAssignmentCount ?? null,
+                      averageAxisCorrelation: movementStrictReplayOnlyValidation.summary?.averageAxisCorrelation ?? null,
+                      averagePathCorrelation: movementStrictReplayOnlyValidation.summary?.averagePathCorrelation ?? null,
+                      averageNormalizedDistanceRmse: movementStrictReplayOnlyValidation.summary?.averageNormalizedDistanceRmse ?? null,
+                      runtimeInput: false,
+                    }
+                  : {
+                      exists: false,
+                    },
+              }
+            : {
+                exists: false,
+              },
+          oracleCoverageDiagnostic: movementOracleCoverage
+            ? {
+                exists: true,
+                status: "diagnostic_only_not_runtime_api_data",
+                reason: "offline oracle uses validation-derived support hypotheses to measure movement candidate availability; it is not replay-only runtime identity",
+                runtimeInput: false,
+                runtimeApiData: false,
+                schema: movementOracleCoverage.schema ?? null,
+                replayCount: movementOracleCoverage.replayCount ?? null,
+                expectedParticipantCount: movementOracleCoverage.totals?.expectedParticipantCount ?? null,
+                oracleCandidateParticipantCount: movementOracleCoverage.totals?.oracleCandidateParticipantCount ?? null,
+                passingOracleParticipantCount: movementOracleCoverage.totals?.passingOracleParticipantCount ?? null,
+                completeOracleReplayCount: movementOracleCoverage.totals?.completeOracleReplayCount ?? null,
+                perfectOracleReplayCount: movementOracleCoverage.totals?.perfectOracleReplayCount ?? null,
+                passingOracleByRole: movementOracleCoverage.totals?.passingOracleByRole ?? {},
+                failingOracleParticipantCount: movementOracleCoverage.totals?.failingOracleParticipantCount ?? null,
+                oracleFailureReasons: movementOracleCoverage.totals?.oracleFailureReasons ?? {},
+                oracleFailureReasonsByRole: movementOracleCoverage.totals?.oracleFailureReasonsByRole ?? {},
+                topFailingOracleFamilies: movementOracleCoverage.totals?.topFailingOracleFamilies ?? {},
+              }
+            : {
+                exists: false,
+              },
+          assignmentOracleGapDiagnostic: movementAssignmentOracleGap
+            ? {
+                exists: true,
+                status: "diagnostic_only_not_runtime_api_data",
+                reason: "offline diagnostic compares replay-only movement assignments to validation-labelled oracle candidates; it is not runtime identity",
+                runtimeInput: false,
+                runtimeApiData: false,
+                schema: movementAssignmentOracleGap.schema ?? null,
+                replayCount: movementAssignmentOracleGap.replayCount ?? null,
+                expectedParticipantCount: movementAssignmentOracleGap.totals?.expectedParticipantCount ?? null,
+                assignedCount: movementAssignmentOracleGap.totals?.assignedCount ?? null,
+                passingAssignedCount: movementAssignmentOracleGap.totals?.passingAssignedCount ?? null,
+                passingOracleCount: movementAssignmentOracleGap.totals?.passingOracleCount ?? null,
+                statusCounts: movementAssignmentOracleGap.totals?.statusCounts ?? {},
+                statusByRole: movementAssignmentOracleGap.totals?.statusByRole ?? {},
+                wrongEntityBreakdown: movementAssignmentOracleGap.totals?.wrongEntityBreakdown ?? {},
+              }
+            : {
+                exists: false,
+              },
+          movementPositionGoalAudit: movementPositionGoalAudit
+            ? {
+                exists: true,
+                status: movementPositionGoalAudit.status ?? null,
+                runtimeInput: false,
+                runtimeApiData: false,
+                schema: movementPositionGoalAudit.auditSchema ?? null,
+                expectedReplayCount: movementPositionGoalAudit.expectedReplayCount ?? null,
+                expectedParticipantCount: movementPositionGoalAudit.expectedParticipantCount ?? null,
+                passedChecks: movementPositionGoalAudit.passedChecks ?? null,
+                totalChecks: movementPositionGoalAudit.totalChecks ?? null,
+                openChecks: movementPositionGoalAudit.openChecks ?? [],
+                checks: (movementPositionGoalAudit.checks ?? []).map((entry) => ({
+                  name: entry.name ?? null,
+                  passed: entry.passed === true,
+                  evidence: entry.evidence ?? null,
+                  blocker: entry.blocker ?? null,
+                })),
               }
             : {
                 exists: false,
@@ -3441,6 +3597,18 @@ function main() {
         {
           path: path.join(root, "artifacts", args.replayId, "assigned-movement-no-priors-validation-report.json"),
           role: "offline-no-priors-position-validation-diagnostic",
+          runtimeInput: false,
+          runtimeApiData: false,
+        },
+        {
+          path: path.join(root, "artifacts", args.replayId, "participant-movement-strict-replay-only-probe.json"),
+          role: "strict-replay-only-position-diagnostic",
+          runtimeInput: false,
+          runtimeApiData: false,
+        },
+        {
+          path: path.join(root, "artifacts", args.replayId, "assigned-movement-strict-replay-only-probe-validation-report.json"),
+          role: "offline-strict-replay-only-position-validation-diagnostic",
           runtimeInput: false,
           runtimeApiData: false,
         },

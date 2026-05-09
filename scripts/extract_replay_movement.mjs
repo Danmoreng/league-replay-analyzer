@@ -13,7 +13,10 @@ function parseArgs(argv) {
     artifactDir: null,
     outputPath: null,
     schemaPath: null,
+    candidateMatchesPath: null,
     maxPatterns: 10,
+    maxRawCandidatesPerPattern: 14,
+    maxCandidateMatchSupplementPatterns: 0,
   };
 
   for (let index = 2; index < argv.length; index += 1) {
@@ -24,8 +27,14 @@ function parseArgs(argv) {
       args.outputPath = argv[++index];
     } else if (arg === "--schema-path" && index + 1 < argv.length) {
       args.schemaPath = argv[++index];
+    } else if (arg === "--candidate-matches-path" && index + 1 < argv.length) {
+      args.candidateMatchesPath = argv[++index];
     } else if (arg === "--max-patterns" && index + 1 < argv.length) {
       args.maxPatterns = Number.parseInt(argv[++index], 10);
+    } else if (arg === "--max-raw-candidates-per-pattern" && index + 1 < argv.length) {
+      args.maxRawCandidatesPerPattern = Number.parseInt(argv[++index], 10);
+    } else if (arg === "--max-candidate-match-supplement-patterns" && index + 1 < argv.length) {
+      args.maxCandidateMatchSupplementPatterns = Number.parseInt(argv[++index], 10);
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -42,7 +51,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log("Usage: node ./scripts/extract_replay_movement.mjs --artifact-dir <path> [--schema-path <path>] [--output-path <path>]");
+  console.log("Usage: node ./scripts/extract_replay_movement.mjs --artifact-dir <path> [--schema-path <path>] [--candidate-matches-path <path>] [--output-path <path>] [--max-patterns <n>] [--max-raw-candidates-per-pattern <n>] [--max-candidate-match-supplement-patterns <n>]");
 }
 
 function buildFieldIndex(cleanedJson) {
@@ -232,6 +241,159 @@ function selectFallbackPatterns(rankedPatterns, maxPatterns) {
   return selected;
 }
 
+function selectExtractionPatterns(promotedPatterns, rankedPatterns, maxPatterns, candidateMatchSupplementPatterns = []) {
+  const selected = [];
+  const selectedKeys = new Set();
+  for (const pattern of promotedPatterns ?? []) {
+    if (!pattern?.patternKey || selectedKeys.has(pattern.patternKey)) {
+      continue;
+    }
+    selected.push(pattern);
+    selectedKeys.add(pattern.patternKey);
+    if (selected.length >= maxPatterns) {
+      return selected;
+    }
+  }
+
+  for (const pattern of selectFallbackPatterns(rankedPatterns ?? [], maxPatterns)) {
+    if (!pattern?.patternKey || selectedKeys.has(pattern.patternKey)) {
+      continue;
+    }
+    selected.push(pattern);
+    selectedKeys.add(pattern.patternKey);
+    if (selected.length >= maxPatterns) {
+      return selected;
+    }
+  }
+
+  for (const pattern of candidateMatchSupplementPatterns ?? []) {
+    if (!pattern?.patternKey || selectedKeys.has(pattern.patternKey)) {
+      continue;
+    }
+    selected.push(pattern);
+    selectedKeys.add(pattern.patternKey);
+    if (selected.length >= maxPatterns) {
+      return selected;
+    }
+  }
+
+  return selected;
+}
+
+function buildCandidateMatchSupplementPatterns(candidateMatches, maxPatterns) {
+  if (!Number.isFinite(maxPatterns) || maxPatterns <= 0) {
+    return [];
+  }
+
+  const rawPairs = [...(candidateMatches?.rawPairCandidates ?? [])]
+    .filter((candidate) =>
+      candidate.familyKey != null &&
+      Number.isFinite(candidate.slotIndex) &&
+      Number.isFinite(candidate.leftOffset) &&
+      candidate.leftDecodeLabel != null &&
+      Number.isFinite(candidate.rightOffset) &&
+      candidate.rightDecodeLabel != null &&
+      candidate.mapping != null &&
+      (candidate.supportMatches ?? []).length > 0 &&
+      (candidate.passCount ?? 0) > 0
+    )
+    .sort((left, right) =>
+      (right.passCount ?? 0) - (left.passCount ?? 0)
+      || (right.aggregateScore ?? 0) - (left.aggregateScore ?? 0)
+      || (left.rawPairKey ?? "").localeCompare(right.rawPairKey ?? ""),
+    );
+
+  const byPattern = new Map();
+  for (const candidate of rawPairs) {
+    const patternKey = [
+      candidate.familyKey,
+      candidate.leftOffset,
+      candidate.leftDecodeLabel,
+      candidate.rightOffset,
+      candidate.rightDecodeLabel,
+      candidate.mapping,
+    ].join("|");
+    const list = byPattern.get(patternKey) ?? [];
+    list.push(candidate);
+    byPattern.set(patternKey, list);
+  }
+
+  return [...byPattern.entries()]
+    .map(([patternKey, candidates]) => {
+      const exemplar = candidates[0];
+      const supportMatches = candidates.flatMap((candidate) => candidate.supportMatches ?? []);
+      const participantIds = new Set(supportMatches.map((match) => match.participantId).filter(Boolean));
+      const slotIndices = candidates.map((candidate) => candidate.slotIndex);
+      const average = (key) => {
+        const values = supportMatches.map((match) => match[key]).filter(Number.isFinite);
+        return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+      };
+      const avgAxisCorrelation = supportMatches.length
+        ? supportMatches.reduce((sum, match) => sum + (((match.xCorrelation ?? 0) + (match.yCorrelation ?? 0)) / 2), 0) / supportMatches.length
+        : 0;
+      const passCount = supportMatches.filter((match) => match.passesValidation === true).length;
+      const confidence = (
+        (Math.min(1, passCount / 4) * 0.35) +
+        (Math.min(1, (candidates[0]?.aggregateScore ?? 0) / 0.65) * 0.35) +
+        (Math.min(1, participantIds.size / 5) * 0.15) +
+        (Math.min(1, candidates.length / 4) * 0.15)
+      );
+      return {
+        patternKey,
+        familyKey: exemplar.familyKey,
+        family: `${exemplar.familyLength} / 0x${Number(exemplar.familyFirstByte ?? 0).toString(16).toUpperCase().padStart(2, "0")}`,
+        familyLength: exemplar.familyLength,
+        familyFirstByte: exemplar.familyFirstByte,
+        rowArchetype: exemplar.rowArchetype,
+        rowBand: [Math.min(...slotIndices), Math.max(...slotIndices)],
+        xField: {
+          offset: exemplar.leftOffset,
+          decode: exemplar.leftDecodeLabel,
+        },
+        yField: {
+          offset: exemplar.rightOffset,
+          decode: exemplar.rightDecodeLabel,
+        },
+        mapping: exemplar.mapping,
+        confidence,
+        support: {
+          replays: 1,
+          participants: participantIds.size,
+          rows: new Set(slotIndices).size,
+          avgAxisCorrelation,
+          avgMinAxisCorrelation: average("minAxisCorrelation"),
+          avgPathCorrelation: average("pathCorrelation"),
+          avgNormalizedDistanceRmse: average("normalizedDistanceRmse"),
+          avgRangeRatio: average("rangeRatio"),
+          avgValidatorScore: average("validatorScore"),
+          avgEffectiveScore: average("effectiveScore"),
+        },
+        source: "candidate-match-supplement-diagnostic",
+        rawPairCandidates: candidates.map((candidate) => ({
+          slotIndex: candidate.slotIndex,
+          rawPairKey: candidate.rawPairKey,
+          participantIds: candidate.participantIds,
+          champions: candidate.champions,
+          aggregateScore: candidate.aggregateScore,
+          averageAxisCorrelation: candidate.averageAxisCorrelation,
+          averageMinAxisCorrelation: candidate.averageMinAxisCorrelation,
+          averagePathCorrelation: candidate.averagePathCorrelation,
+          averageNormalizedDistanceRmse: candidate.averageNormalizedDistanceRmse,
+          averageRangeRatio: candidate.averageRangeRatio,
+          transformX: candidate.transformX,
+          transformY: candidate.transformY,
+          supportMatches: candidate.supportMatches ?? [],
+        })),
+      };
+    })
+    .sort((left, right) =>
+      right.confidence - left.confidence
+      || (right.support?.avgEffectiveScore ?? 0) - (left.support?.avgEffectiveScore ?? 0)
+      || left.patternKey.localeCompare(right.patternKey),
+    )
+    .slice(0, maxPatterns);
+}
+
 function pointInBounds(point) {
   return (
     point.x >= summonersRiftBounds.minX &&
@@ -337,6 +499,9 @@ function main() {
   const schemaPath = args.schemaPath
     ? resolveAbsolute(repoRoot, args.schemaPath)
     : path.join(artifactDir, "movement-provisional-schema.json");
+  const candidateMatchesPath = args.candidateMatchesPath
+    ? resolveAbsolute(repoRoot, args.candidateMatchesPath)
+    : path.join(artifactDir, "movement-candidate-matches.json");
   const outputPath = args.outputPath
     ? resolveAbsolute(repoRoot, args.outputPath)
     : path.join(artifactDir, "extracted-movement.json");
@@ -352,9 +517,11 @@ function main() {
   const runManifest = readJson(runManifestPath);
   const schema = readJson(schemaPath);
   const promotedPatterns = schema.promotedPatterns ?? [];
-  const rankedFallback = selectFallbackPatterns(schema.rankedPatterns ?? [], args.maxPatterns);
-  const patterns = (promotedPatterns.length ? promotedPatterns : rankedFallback)
-    .slice(0, args.maxPatterns);
+  const candidateMatches = args.maxCandidateMatchSupplementPatterns > 0 && fs.existsSync(candidateMatchesPath)
+    ? readJson(candidateMatchesPath)
+    : null;
+  const candidateMatchSupplementPatterns = buildCandidateMatchSupplementPatterns(candidateMatches, args.maxCandidateMatchSupplementPatterns);
+  const patterns = selectExtractionPatterns(promotedPatterns, schema.rankedPatterns ?? [], args.maxPatterns, candidateMatchSupplementPatterns);
 
   const familyFieldIndexes = new Map();
   for (const family of runManifest.families ?? []) {
@@ -373,7 +540,7 @@ function main() {
       continue;
     }
 
-    const rawCandidates = (pattern.rawPairCandidates ?? []).slice(0, 14);
+    const rawCandidates = (pattern.rawPairCandidates ?? []).slice(0, args.maxRawCandidatesPerPattern);
     const entityKeys = [];
     for (const candidate of rawCandidates) {
       const xField = fieldIndex.get(`${candidate.slotIndex}|${pattern.xField.offset}|${pattern.xField.decode}`);
@@ -468,6 +635,7 @@ function main() {
       xField: pattern.xField,
       yField: pattern.yField,
       mapping: pattern.mapping,
+      source: pattern.source ?? null,
       entityKeys,
     });
   }
@@ -476,6 +644,9 @@ function main() {
     replayId: runManifest.replayId,
     generatedAtUtc: new Date().toISOString(),
     schemaPath,
+    candidateMatchesPath: candidateMatches ? candidateMatchesPath : null,
+    candidateMatchSupplementPatternCount: candidateMatchSupplementPatterns.length,
+    extractionMode: candidateMatches ? "diagnostic_candidate_match_supplement" : "schema_only",
     patterns: extractedPatterns,
     entities,
   };

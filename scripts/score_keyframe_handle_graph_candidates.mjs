@@ -94,6 +94,53 @@ function confidenceLabel(entry) {
   return "weak";
 }
 
+function promotionBlockers(entry) {
+  const blockers = [];
+  if (entry.score < 0.62) blockers.push(`strongScoreBelowThreshold=${entry.score.toFixed(3)}/0.62`);
+  if (entry.score < 0.35) blockers.push(`investigateScoreBelowThreshold=${entry.score.toFixed(3)}/0.35`);
+  if (entry.components.assignedRowSpecificity < 0.75) blockers.push(`assignedRowSpecificityBelowThreshold=${entry.components.assignedRowSpecificity.toFixed(3)}/0.75`);
+  if (entry.assignedSourceRowReplayCount < 4) blockers.push(`strongAssignedReplaySupportBelowThreshold=${entry.assignedSourceRowReplayCount}/4`);
+  if (entry.assignedSourceRowReplayCount < 2) blockers.push(`investigateAssignedReplaySupportBelowThreshold=${entry.assignedSourceRowReplayCount}/2`);
+  if (entry.components.assignedEntropy > 0.5) blockers.push(`assignedRowEntropyHigh=${entry.components.assignedEntropy.toFixed(3)}`);
+  return blockers;
+}
+
+function buildNearMissSummary(scored) {
+  const top = scored[0] ?? null;
+  const highCoverage = scored
+    .filter((entry) => entry.components.assignedCoverage >= 0.5)
+    .slice(0, 5)
+    .map((entry) => ({
+      score: entry.score,
+      sourceFamilyKey: entry.sourceFamilyKey,
+      sourceOffset: entry.sourceOffset,
+      targetFamilyKey: entry.targetFamilyKey,
+      assignedSourceRowReplayCount: entry.assignedSourceRowReplayCount,
+      assignedRowCount: entry.assignedRowCount,
+      blockers: entry.promotionBlockers,
+    }));
+  return {
+    status: "no_promotable_handle_graph_candidate",
+    runtimeApiData: false,
+    topCandidate: top
+      ? {
+          score: top.score,
+          confidence: top.confidence,
+          sourceFamilyKey: top.sourceFamilyKey,
+          sourceOffset: top.sourceOffset,
+          targetFamilyKey: top.targetFamilyKey,
+          replayCount: top.replayCount,
+          assignedSourceRowReplayCount: top.assignedSourceRowReplayCount,
+          assignedRowCount: top.assignedRowCount,
+          blockers: top.promotionBlockers,
+        }
+      : null,
+    closestInvestigateScoreGap: top ? Math.max(0, 0.35 - top.score) : null,
+    closestStrongScoreGap: top ? Math.max(0, 0.62 - top.score) : null,
+    highCoverageButDiffuseCandidates: highCoverage,
+  };
+}
+
 function main() {
   const root = process.cwd();
   const args = parseArgs(process.argv);
@@ -148,6 +195,7 @@ function main() {
 
   for (const entry of scored) {
     entry.confidence = confidenceLabel(entry);
+    entry.promotionBlockers = promotionBlockers(entry);
   }
 
   const output = {
@@ -166,6 +214,7 @@ function main() {
       counts[entry.confidence] = (counts[entry.confidence] ?? 0) + 1;
       return counts;
     }, {}),
+    nearMissSummary: buildNearMissSummary(scored),
     candidates: scored.slice(0, args.topCandidates),
   };
 

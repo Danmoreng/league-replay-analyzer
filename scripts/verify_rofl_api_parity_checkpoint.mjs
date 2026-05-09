@@ -220,6 +220,8 @@ function verifyRuntimeArtifactOutput(replayId, artifactRoot) {
     "offline-position-validation-diagnostic",
     "replay-only-no-priors-position-diagnostic",
     "offline-no-priors-position-validation-diagnostic",
+    "strict-replay-only-position-diagnostic",
+    "offline-strict-replay-only-position-validation-diagnostic",
     "replay-only-startup-roster-token-diagnostic",
     "offline-handle-graph-row-link-diagnostic",
     "offline-startup-keyframe-row-link-diagnostic",
@@ -335,6 +337,37 @@ function verifyAssignedMovementNoPriorsValidationOutput(replayId) {
   }
   if (validation.summary?.assignmentCount !== 8 || validation.summary?.passingAssignmentCount !== 7) {
     throw new Error(`No-priors movement validation must preserve 7/8 quality evidence: ${JSON.stringify(validation.summary)}`);
+  }
+}
+
+function verifyParticipantMovementStrictReplayOnlyOutput(replayId) {
+  const movementPath = path.resolve(process.cwd(), "artifacts", replayId, "participant-movement-strict-replay-only-probe.json");
+  const movement = JSON.parse(fs.readFileSync(movementPath, "utf8"));
+  if (movement.replayId !== replayId) {
+    throw new Error(`Strict replay-only participant movement replay id mismatch: ${movement.replayId ?? "missing"}.`);
+  }
+  if (movement.priorsPath !== null) {
+    throw new Error(`Strict replay-only participant movement must disable identity priors: ${movement.priorsPath}.`);
+  }
+  if (movement.normalization?.useSupportHypotheses !== false) {
+    throw new Error(`Strict replay-only participant movement must disable support hypotheses: ${JSON.stringify(movement.normalization ?? null)}`);
+  }
+  if ((movement.assignments ?? []).length !== 4 || (movement.unmatchedParticipants ?? []).length !== 6) {
+    throw new Error(`Strict replay-only movement diagnostic must preserve the 4/10 runtime-promotion blocker: ${JSON.stringify({
+      assignments: movement.assignments?.length ?? null,
+      unmatchedParticipants: movement.unmatchedParticipants?.length ?? null,
+    })}`);
+  }
+}
+
+function verifyAssignedMovementStrictReplayOnlyValidationOutput(replayId) {
+  const validationPath = path.resolve(process.cwd(), "artifacts", replayId, "assigned-movement-strict-replay-only-probe-validation-report.json");
+  const validation = JSON.parse(fs.readFileSync(validationPath, "utf8"));
+  if (validation.replayId !== replayId) {
+    throw new Error(`Strict replay-only movement validation replay id mismatch: ${validation.replayId ?? "missing"}.`);
+  }
+  if (validation.summary?.assignmentCount !== 4 || validation.summary?.passingAssignmentCount !== 3) {
+    throw new Error(`Strict replay-only movement validation must preserve 3/4 quality evidence: ${JSON.stringify(validation.summary)}`);
   }
 }
 
@@ -524,6 +557,19 @@ function main() {
   const timelineReconstructionScript = path.join("scripts", "audit_timeline_reconstruction_model.mjs");
   const assignMovementScript = path.join("scripts", "assign_replay_movement.mjs");
   const validateAssignedMovementScript = path.join("scripts", "validate_assigned_movement.mjs");
+  const summarizeMovementOracleScript = path.join("scripts", "summarize_movement_oracle_coverage.mjs");
+  const verifyMovementOracleScript = path.join("scripts", "verify_movement_oracle_coverage.mjs");
+  const summarizeMovementAssignmentOracleGapScript = path.join("scripts", "summarize_movement_assignment_oracle_gap.mjs");
+  const verifyMovementAssignmentOracleGapScript = path.join("scripts", "verify_movement_assignment_oracle_gap.mjs");
+  const summarizeMovementIdentitySignalsScript = path.join("scripts", "summarize_movement_identity_signal_candidates.mjs");
+  const verifyMovementIdentitySignalsScript = path.join("scripts", "verify_movement_identity_signal_candidates.mjs");
+  const summarizeMovementScoreGapsScript = path.join("scripts", "summarize_movement_score_component_gaps.mjs");
+  const verifyMovementScoreGapsScript = path.join("scripts", "verify_movement_score_component_gaps.mjs");
+  const summarizeMovementHiddenOraclesScript = path.join("scripts", "summarize_movement_hidden_oracle_sources.mjs");
+  const verifyMovementHiddenOraclesScript = path.join("scripts", "verify_movement_hidden_oracle_sources.mjs");
+  const compareMovementCandidateExtractionScript = path.join("scripts", "compare_movement_candidate_to_extracted_oracle.mjs");
+  const verifyMovementCandidateExtractionScript = path.join("scripts", "verify_movement_candidate_to_extracted_oracle.mjs");
+  const auditMovementPositionGoalScript = path.join("scripts", "audit_movement_position_goal.mjs");
   const summarizeReconstructionChunksScript = path.join("scripts", "summarize_reconstruction_chunk_targets.mjs");
   const verifyReconstructionChunksScript = path.join("scripts", "verify_reconstruction_chunk_targets.mjs");
   const compareReconstructionChunksScript = path.join("scripts", "compare_reconstruction_chunk_families.mjs");
@@ -553,6 +599,7 @@ function main() {
   const compareIdentityScript = path.join("scripts", "compare_rofl_stat_assignments_to_supervised.mjs");
   const sweepIdentitySupportScript = path.join("scripts", "sweep_rofl_identity_support_thresholds.mjs");
   const scanKeyframeIdentifierTokensScript = path.join("scripts", "scan_keyframe_identifier_tokens.mjs");
+  const verifyHandleGraphScoresScript = path.join("scripts", "verify_keyframe_handle_graph_scores.mjs");
   const analyzeStartupKeyframeRowLinksScript = path.join("scripts", "analyze_startup_keyframe_row_links.mjs");
   const sharedArgs = [
     "--replay-id",
@@ -602,6 +649,11 @@ function main() {
     path.join(args.artifactRoot, `keyframe-identifier-token-scan-relaxed-${args.versionGroup}.json`),
   ]);
   verifyRelaxedKeyframeIdentifierTokenScanOutput(args.artifactRoot, args.versionGroup);
+
+  runStep("verify-keyframe-handle-graph-scores", verifyHandleGraphScoresScript, [
+    "--artifact-root",
+    args.artifactRoot,
+  ]);
 
   runStep("offline-timeline-reconstruction-audit", timelineReconstructionScript, sharedArgs);
   verifyTimelineReconstructionOutput(args.replayId, args.artifactRoot);
@@ -749,6 +801,7 @@ function main() {
   const movementArtifactDir = path.join("artifacts", args.replayId);
   const participantMovementPath = path.join(movementArtifactDir, "participant-movement.json");
   const participantMovementNoPriorsPath = path.join(movementArtifactDir, "participant-movement-no-priors.json");
+  const participantMovementStrictReplayOnlyPath = path.join(movementArtifactDir, "participant-movement-strict-replay-only-probe.json");
   runStep("assign-movement", assignMovementScript, [
     "--artifact-dir",
     movementArtifactDir,
@@ -775,6 +828,116 @@ function main() {
     path.join(movementArtifactDir, "assigned-movement-no-priors-validation-report.json"),
   ]);
   verifyAssignedMovementNoPriorsValidationOutput(args.replayId);
+  runStep("assign-movement-strict-replay-only-diagnostic", assignMovementScript, [
+    "--artifact-dir",
+    movementArtifactDir,
+    "--priors-path",
+    path.join(movementArtifactDir, "no-priors.json"),
+    "--output-path",
+    participantMovementStrictReplayOnlyPath,
+    "--ignore-support-hypotheses",
+  ]);
+  verifyParticipantMovementStrictReplayOnlyOutput(args.replayId);
+  runStep("validate-assigned-movement-strict-replay-only-diagnostic", validateAssignedMovementScript, [
+    "--participant-movement-path",
+    participantMovementStrictReplayOnlyPath,
+    "--output-path",
+    path.join(movementArtifactDir, "assigned-movement-strict-replay-only-probe-validation-report.json"),
+  ]);
+  verifyAssignedMovementStrictReplayOnlyValidationOutput(args.replayId);
+  runStep("summarize-movement-oracle-coverage", summarizeMovementOracleScript, [
+    "--artifact-root",
+    "artifacts",
+    "--version-group",
+    args.versionGroup,
+  ]);
+  runStep("verify-movement-oracle-coverage", verifyMovementOracleScript, [
+    "--version-group",
+    args.versionGroup,
+  ]);
+  runStep("summarize-movement-assignment-oracle-gap", summarizeMovementAssignmentOracleGapScript, [
+    "--artifact-root",
+    "artifacts",
+    "--version-group",
+    args.versionGroup,
+    "--movement-file",
+    "extracted-movement-current-max128.json",
+    "--assignment-file",
+    "participant-movement-strict-min0.44-current-max128-reduced-role-probe.json",
+    "--validation-file",
+    "assigned-movement-strict-min0.44-current-max128-reduced-role-probe-validation-report.json",
+    "--output-path",
+    path.join(args.artifactRoot, `movement-assignment-oracle-gap-${args.versionGroup}-current-max128-reduced-role.json`),
+  ]);
+  runStep("verify-movement-assignment-oracle-gap", verifyMovementAssignmentOracleGapScript, [
+    "--version-group",
+    args.versionGroup,
+    "--input-path",
+    path.join(args.artifactRoot, `movement-assignment-oracle-gap-${args.versionGroup}-current-max128-reduced-role.json`),
+  ]);
+  runStep("summarize-movement-identity-signals", summarizeMovementIdentitySignalsScript, [
+    "--version-group",
+    args.versionGroup,
+  ]);
+  runStep("verify-movement-identity-signals", verifyMovementIdentitySignalsScript, [
+    "--version-group",
+    args.versionGroup,
+  ]);
+  runStep("summarize-movement-score-gaps", summarizeMovementScoreGapsScript, [
+    "--version-group",
+    args.versionGroup,
+    "--gap-path",
+    path.join(args.artifactRoot, `movement-assignment-oracle-gap-${args.versionGroup}-current-max128-reduced-role.json`),
+    "--output-path",
+    path.join(args.artifactRoot, `movement-score-component-gaps-${args.versionGroup}-current-max128-reduced-role.json`),
+  ]);
+  runStep("verify-movement-score-gaps", verifyMovementScoreGapsScript, [
+    "--version-group",
+    args.versionGroup,
+    "--input-path",
+    path.join(args.artifactRoot, `movement-score-component-gaps-${args.versionGroup}-current-max128-reduced-role.json`),
+    "--expected-wrong-assignment-count",
+    "61",
+  ]);
+  runStep("summarize-movement-hidden-oracles", summarizeMovementHiddenOraclesScript, [
+    "--version-group",
+    args.versionGroup,
+    "--gap-path",
+    path.join(args.artifactRoot, `movement-assignment-oracle-gap-${args.versionGroup}-current-max128-reduced-role.json`),
+    "--output-path",
+    path.join(args.artifactRoot, `movement-hidden-oracle-sources-${args.versionGroup}.json`),
+  ]);
+  runStep("verify-movement-hidden-oracles", verifyMovementHiddenOraclesScript, [
+    "--version-group",
+    args.versionGroup,
+    "--input-path",
+    path.join(args.artifactRoot, `movement-hidden-oracle-sources-${args.versionGroup}.json`),
+  ]);
+  runStep("compare-movement-candidate-extraction", compareMovementCandidateExtractionScript, [
+    "--version-group",
+    args.versionGroup,
+    "--movement-file",
+    "extracted-movement-current-max128.json",
+    "--output-path",
+    path.join(args.artifactRoot, `movement-candidate-to-extracted-oracle-comparison-${args.versionGroup}-current-max128.json`),
+  ]);
+  runStep("verify-movement-candidate-extraction", verifyMovementCandidateExtractionScript, [
+    "--input-path",
+    path.join(args.artifactRoot, `movement-candidate-to-extracted-oracle-comparison-${args.versionGroup}-current-max128.json`),
+    "--version-group",
+    args.versionGroup,
+  ]);
+  runStep("movement-position-goal-audit", auditMovementPositionGoalScript, [
+    "--version-group",
+    args.versionGroup,
+  ]);
+  runStep("movement-position-goal-audit-require-complete-negative-gate", auditMovementPositionGoalScript, [
+    "--version-group",
+    args.versionGroup,
+    "--require-complete",
+  ], {
+    expectedStatus: 2,
+  });
   runStep("export", exportScript, [
     ...sharedArgs,
     "--version-group",

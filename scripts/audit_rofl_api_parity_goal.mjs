@@ -175,6 +175,10 @@ function buildAudit(artifact, inputPath) {
   const identityCorpus = readOptionalJson(identityCorpusPath);
   const identityThresholdSweepPath = path.join(process.cwd(), "artifacts-keyframes", "keyframe-rofl-stat-support-threshold-sweep-16.9.json");
   const identityThresholdSweep = readOptionalJson(identityThresholdSweepPath);
+  const movementPositionGoalAuditPath = path.join(process.cwd(), "artifacts-keyframes", "movement-position-goal-audit-16.9.json");
+  const movementPositionGoalAuditFromFile = readOptionalJson(movementPositionGoalAuditPath);
+  const movementAssignmentOracleGapPath = path.join(process.cwd(), "artifacts-keyframes", "movement-assignment-oracle-gap-16.9-current-max128-reduced-role.json");
+  const movementAssignmentOracleGapFromFile = readOptionalJson(movementAssignmentOracleGapPath);
   const rowIdentityStatusAllowed = (row) =>
     (row.status === "unstable_identity" || row.status === "duplicate_rejected") &&
     row.participantId === null &&
@@ -202,6 +206,8 @@ function buildAudit(artifact, inputPath) {
   const extractionProof = artifact.roflOnlyExtractionProof ?? {};
   const extractionProofBySurface = new Map((extractionProof.decodedFromRoflOnly ?? []).map((entry) => [entry.surface, entry]));
   const proofPositionCandidate = (extractionProof.notPromotedRuntimeCandidates ?? []).find((entry) => entry.surface === "position x/y movement tracks");
+  const movementPositionGoalAudit = rejectedCandidates.positions?.movementPositionGoalAudit ?? movementPositionGoalAuditFromFile ?? {};
+  const movementAssignmentOracleGap = rejectedCandidates.positions?.assignmentOracleGapDiagnostic ?? movementAssignmentOracleGapFromFile ?? {};
   const matchMetadataGaps = fieldCoverage.matchMetadataGaps ?? {};
   const matchParticipantGaps = fieldCoverage.matchParticipantGaps ?? {};
   const matchTeamGaps = fieldCoverage.matchTeamGaps ?? {};
@@ -433,6 +439,7 @@ function buildAudit(artifact, inputPath) {
         `handle graph row-link candidate count=${nonFinalIdentity?.handleGraphRowLinkCandidates?.candidateCount ?? null}`,
         `handle graph row-link confidence counts=${JSON.stringify(nonFinalIdentity?.handleGraphRowLinkCandidates?.confidenceCounts ?? {})}`,
         `handle graph row-link top=${nonFinalIdentity?.handleGraphRowLinkCandidates?.topConfidence ?? null}:${nonFinalIdentity?.handleGraphRowLinkCandidates?.topScore ?? null}`,
+        `handle graph near miss=${JSON.stringify(nonFinalIdentity?.handleGraphRowLinkCandidates?.nearMissSummary ?? null)}`,
         `identity threshold sweep path=${identityThresholdSweepPath}`,
         `identity threshold sweep schema=${identityThresholdSweep?.sweepSchema ?? null}`,
         `identity threshold sweep rows=${(identityThresholdSweep?.rows ?? []).length}`,
@@ -462,9 +469,27 @@ function buildAudit(artifact, inputPath) {
         `row grid field top candidate=${reconstructionRowGridFieldAnalysis?.candidates?.[0]?.familyKey ?? null}:${reconstructionRowGridFieldAnalysis?.candidates?.[0]?.fieldPromotionAssessment?.status ?? null}`,
         `runtime reconstruction row identity status=${runtimeReconstructionRowIdentity.status ?? null}`,
         `runtime reconstruction row identity artifacts=${(runtimeReconstructionRowIdentity.rowIdentityArtifacts ?? []).map((entry) => `${entry.familyKey}:${entry.promotionStatus}:${JSON.stringify(entry.rowStatusCounts ?? {})}`).join(";")}`,
+        `movement position goal audit path=${movementPositionGoalAuditPath}`,
+        `movement position goal audit status=${movementPositionGoalAudit.status ?? null}`,
+        `movement position goal audit checks=${movementPositionGoalAudit.passedChecks ?? null}/${movementPositionGoalAudit.totalChecks ?? null}`,
+        `movement position goal audit openChecks=${JSON.stringify(movementPositionGoalAudit.openChecks ?? [])}`,
+        `movement assignment/oracle gap path=${movementAssignmentOracleGapPath}`,
+        `movement assignment/oracle gap assigned=${movementAssignmentOracleGap.assignedCount ?? null}/${movementAssignmentOracleGap.expectedParticipantCount ?? null}`,
+        `movement assignment/oracle gap passingAssigned=${movementAssignmentOracleGap.passingAssignedCount ?? null}`,
+        `movement assignment/oracle gap passingOracle=${movementAssignmentOracleGap.passingOracleCount ?? null}`,
+        `movement assignment/oracle gap wrongEntity=${movementAssignmentOracleGap.statusCounts?.passing_oracle_available_wrong_entity_assigned ?? null}`,
+        `movement assignment/oracle gap unassignedPassingOracle=${movementAssignmentOracleGap.statusCounts?.passing_oracle_unassigned ?? null}`,
       ],
       gaps: [
         "accepted replay-only non-final keyframe participant identity is not available yet",
+        ...(movementPositionGoalAudit.status === "not_complete" && (movementPositionGoalAudit.openChecks ?? []).includes("assignment/oracle identity gap closed")
+          ? ["movement position goal audit still blocks participantFrames.position runtime promotion"]
+          : ["movement position goal audit missing or no longer reports the identity-gap blocker"]),
+        ...(movementAssignmentOracleGap.schema === "movement-assignment-oracle-gap-summary/v1" &&
+          movementAssignmentOracleGap.runtimeApiData === false &&
+          (movementAssignmentOracleGap.statusCounts?.passing_oracle_available_wrong_entity_assigned ?? 0) > 0
+          ? ["passing movement candidates still map to wrong replay entities without a replay-native identity signal"]
+          : ["movement assignment/oracle gap diagnostic missing wrong-entity evidence"]),
         ...((reconstructionTargetTable02?.promotionAssessment?.status === "not_promoted" &&
           reconstructionTargetTable04?.promotionAssessment?.status === "not_promoted" &&
           reconstructionRowIdentity02?.promotionAssessment?.status === "not_promoted" &&
@@ -489,9 +514,15 @@ function buildAudit(artifact, inputPath) {
         ...(nonFinalIdentity?.handleGraphRowLinkCandidates?.status === "not_promoted" &&
           nonFinalIdentity?.handleGraphRowLinkCandidates?.runtimeApiData === false &&
           nonFinalIdentity?.handleGraphRowLinkCandidates?.candidateCount > 0 &&
-          nonFinalIdentity?.handleGraphRowLinkCandidates?.topConfidence === "weak"
+          nonFinalIdentity?.handleGraphRowLinkCandidates?.topConfidence === "weak" &&
+          nonFinalIdentity?.handleGraphRowLinkCandidates?.nearMissSummary?.status === "no_promotable_handle_graph_candidate" &&
+          nonFinalIdentity?.handleGraphRowLinkCandidates?.nearMissSummary?.runtimeApiData === false &&
+          (nonFinalIdentity?.handleGraphRowLinkCandidates?.nearMissSummary?.topCandidate?.blockers ?? []).some((blocker) => String(blocker).includes("investigateAssignedReplaySupportBelowThreshold")) &&
+          (nonFinalIdentity?.handleGraphRowLinkCandidates?.nearMissSummary?.highCoverageButDiffuseCandidates ?? []).some((candidate) =>
+            (candidate.blockers ?? []).some((blocker) => String(blocker).includes("assignedRowEntropyHigh"))
+          )
           ? []
-          : ["handle graph row-link diagnostic missing or not rejected as weak evidence"]),
+          : ["handle graph row-link diagnostic missing near-miss blockers or not rejected as weak evidence"]),
         ...(["ROFL metadata/statsJson roster", "roster order", "team/champion metadata", "cross-metric final stats consistency", "startup roster/order tokens", "startup-to-keyframe row link", "keyframe row identity gates", "handle graph row links"].every((evidenceClass) =>
           identityEvidenceMatrix.some((entry) => entry.evidenceClass === evidenceClass && (entry.evidenceRefs ?? []).length > 0)
         ) ? [] : ["identityLinkage evidence matrix missing one or more replay-only evidence classes"]),
@@ -521,21 +552,60 @@ function buildAudit(artifact, inputPath) {
           (rejectedCandidates.positions?.promotionBlockers ?? []).some((blocker) => blocker.includes("identity priors")) &&
           (rejectedCandidates.positions?.promotionBlockers ?? []).some((blocker) => blocker.includes("7/9")) &&
           (rejectedCandidates.positions?.promotionBlockers ?? []).some((blocker) => blocker.includes("no-priors") && blocker.includes("8/10")) &&
+          (rejectedCandidates.positions?.promotionBlockers ?? []).some((blocker) => blocker.includes("offline movement oracle") && blocker.includes("80/200")) &&
           rejectedCandidates.positions?.qualityGateSummary?.assignedParticipantCount === 9 &&
           rejectedCandidates.positions?.qualityGateSummary?.expectedParticipantCount === 10 &&
           rejectedCandidates.positions?.qualityGateSummary?.offlinePassingAssignmentCount === 7 &&
           rejectedCandidates.positions?.qualityGateSummary?.noPriorsAssignedParticipantCount === 8 &&
           rejectedCandidates.positions?.qualityGateSummary?.noPriorsOfflinePassingAssignmentCount === 7 &&
+          rejectedCandidates.positions?.qualityGateSummary?.strictReplayOnlyAssignedParticipantCount === 4 &&
+          rejectedCandidates.positions?.qualityGateSummary?.strictReplayOnlyOfflinePassingAssignmentCount === 3 &&
+          rejectedCandidates.positions?.qualityGateSummary?.oracleExpectedParticipantCount === 200 &&
+          rejectedCandidates.positions?.qualityGateSummary?.oraclePassingParticipantCount === 80 &&
+          rejectedCandidates.positions?.qualityGateSummary?.oracleCompleteReplayCount === 1 &&
+          movementPositionGoalAudit.schema === "movement-position-goal-audit/v1" &&
+          movementPositionGoalAudit.status === "not_complete" &&
+          movementPositionGoalAudit.runtimeApiData === false &&
+          movementPositionGoalAudit.expectedParticipantCount === 200 &&
+          movementPositionGoalAudit.passedChecks < movementPositionGoalAudit.totalChecks &&
+          (movementPositionGoalAudit.openChecks ?? []).includes("assignment/oracle identity gap closed") &&
+          movementAssignmentOracleGap.schema === "movement-assignment-oracle-gap-summary/v1" &&
+          movementAssignmentOracleGap.runtimeApiData === false &&
+          movementAssignmentOracleGap.assignedCount === 136 &&
+          movementAssignmentOracleGap.passingAssignedCount === 41 &&
+          movementAssignmentOracleGap.passingOracleCount === 119 &&
+          movementAssignmentOracleGap.statusCounts?.passing_oracle_available_wrong_entity_assigned === 59 &&
+          movementAssignmentOracleGap.statusCounts?.passing_oracle_unassigned === 25 &&
           proofPositionCandidate?.runtimeApiData === false &&
           proofPositionCandidate?.assignedParticipantCount === 9 &&
           proofPositionCandidate?.expectedParticipantCount === 10 &&
           proofPositionCandidate?.offlinePassingAssignmentCount === 7 &&
           proofPositionCandidate?.noPriorsAssignedParticipantCount === 8 &&
           proofPositionCandidate?.noPriorsOfflinePassingAssignmentCount === 7 &&
+          proofPositionCandidate?.strictReplayOnlyAssignedParticipantCount === 4 &&
+          proofPositionCandidate?.strictReplayOnlyOfflinePassingAssignmentCount === 3 &&
+          proofPositionCandidate?.strictReplayOnlyUsesIdentityPriors === false &&
+          proofPositionCandidate?.strictReplayOnlyUsesSupportHypotheses === false &&
           rejectedCandidates.positions?.qualityGateSummary?.runtimeInput === false &&
           rejectedCandidates.positions?.noPriorsDiagnostic?.status === "diagnostic_only_not_runtime_api_data" &&
           rejectedCandidates.positions?.noPriorsDiagnostic?.runtimeInput === false &&
           rejectedCandidates.positions?.noPriorsDiagnostic?.usesIdentityPriors === false &&
+          rejectedCandidates.positions?.strictReplayOnlyDiagnostic?.status === "diagnostic_only_not_runtime_api_data" &&
+          rejectedCandidates.positions?.strictReplayOnlyDiagnostic?.runtimeInput === false &&
+          rejectedCandidates.positions?.strictReplayOnlyDiagnostic?.runtimeApiData === false &&
+          rejectedCandidates.positions?.strictReplayOnlyDiagnostic?.usesIdentityPriors === false &&
+          rejectedCandidates.positions?.strictReplayOnlyDiagnostic?.usesSupportHypotheses === false &&
+          rejectedCandidates.positions?.strictReplayOnlyDiagnostic?.assignmentCount === 4 &&
+          rejectedCandidates.positions?.strictReplayOnlyDiagnostic?.offlineValidation?.passingAssignmentCount === 3 &&
+          rejectedCandidates.positions?.oracleCoverageDiagnostic?.status === "diagnostic_only_not_runtime_api_data" &&
+          rejectedCandidates.positions?.oracleCoverageDiagnostic?.runtimeInput === false &&
+          rejectedCandidates.positions?.oracleCoverageDiagnostic?.runtimeApiData === false &&
+          rejectedCandidates.positions?.oracleCoverageDiagnostic?.expectedParticipantCount === 200 &&
+          rejectedCandidates.positions?.oracleCoverageDiagnostic?.passingOracleParticipantCount === 80 &&
+          rejectedCandidates.positions?.oracleCoverageDiagnostic?.completeOracleReplayCount === 1 &&
+          rejectedCandidates.positions?.oracleCoverageDiagnostic?.oracleFailureReasons?.["rmse_above_0.18"] === 103 &&
+          rejectedCandidates.positions?.oracleCoverageDiagnostic?.oracleFailureReasons?.["axis_below_0.55"] === 55 &&
+          rejectedCandidates.positions?.oracleCoverageDiagnostic?.topFailingOracleFamilies?.["50944-0x19-h0"] === 24 &&
           (rejectedCandidates.positions?.noPriorsDiagnostic?.unmatchedParticipants ?? []).length === 2 &&
           (rejectedCandidates.positions?.noPriorsDiagnostic?.unmatchedParticipants ?? []).some((participant) => participant.champion === "Vayne" && participant.teamPosition === "TOP") &&
           (rejectedCandidates.positions?.noPriorsDiagnostic?.unmatchedParticipants ?? []).some((participant) => participant.champion === "Malphite" && participant.teamPosition === "TOP") &&
@@ -571,6 +641,10 @@ function buildAudit(artifact, inputPath) {
           `positions.offlinePassingAssignments=${rejectedCandidates.positions?.offlineValidation?.passingAssignmentCount ?? null}`,
           `positions.offlineValidation.runtimeInput=${rejectedCandidates.positions?.offlineValidation?.runtimeInput ?? null}`,
           `positions.noPriorsDiagnostic=${JSON.stringify(rejectedCandidates.positions?.noPriorsDiagnostic ?? {})}`,
+          `positions.strictReplayOnlyDiagnostic=${JSON.stringify(rejectedCandidates.positions?.strictReplayOnlyDiagnostic ?? {})}`,
+          `positions.oracleCoverageDiagnostic=${JSON.stringify(rejectedCandidates.positions?.oracleCoverageDiagnostic ?? {})}`,
+          `positions.movementPositionGoalAudit=${JSON.stringify(movementPositionGoalAudit ?? {})}`,
+          `positions.assignmentOracleGapDiagnostic=${JSON.stringify(movementAssignmentOracleGap ?? {})}`,
           `roflOnlyExtractionProof.positionCandidate=${JSON.stringify(proofPositionCandidate ?? null)}`,
           `positions.promotionBlockers=${JSON.stringify(rejectedCandidates.positions?.promotionBlockers ?? [])}`,
           `positions.qualityGateSummary=${JSON.stringify(rejectedCandidates.positions?.qualityGateSummary ?? {})}`,
@@ -602,21 +676,60 @@ function buildAudit(artifact, inputPath) {
           ...(!(rejectedCandidates.positions?.promotionBlockers ?? []).some((blocker) => blocker.includes("identity priors")) ? ["position promotion blockers missing identity-prior evidence"] : []),
           ...(!(rejectedCandidates.positions?.promotionBlockers ?? []).some((blocker) => blocker.includes("7/9")) ? ["position promotion blockers missing 7/9 offline-quality evidence"] : []),
           ...(!(rejectedCandidates.positions?.promotionBlockers ?? []).some((blocker) => blocker.includes("no-priors") && blocker.includes("8/10")) ? ["position promotion blockers missing no-priors replay-only assignment evidence"] : []),
+          ...(!(rejectedCandidates.positions?.promotionBlockers ?? []).some((blocker) => blocker.includes("offline movement oracle") && blocker.includes("80/200")) ? ["position promotion blockers missing oracle candidate-coverage evidence"] : []),
           ...(rejectedCandidates.positions?.qualityGateSummary?.assignedParticipantCount !== 9 ? ["position quality gate missing assigned participant count"] : []),
           ...(rejectedCandidates.positions?.qualityGateSummary?.expectedParticipantCount !== 10 ? ["position quality gate missing expected participant count"] : []),
           ...(rejectedCandidates.positions?.qualityGateSummary?.offlinePassingAssignmentCount !== 7 ? ["position quality gate missing offline passing assignment count"] : []),
           ...(rejectedCandidates.positions?.qualityGateSummary?.noPriorsAssignedParticipantCount !== 8 ? ["position quality gate missing no-priors assigned participant count"] : []),
           ...(rejectedCandidates.positions?.qualityGateSummary?.noPriorsOfflinePassingAssignmentCount !== 7 ? ["position quality gate missing no-priors offline passing count"] : []),
+          ...(rejectedCandidates.positions?.qualityGateSummary?.strictReplayOnlyAssignedParticipantCount !== 4 ? ["position quality gate missing strict replay-only assigned participant count"] : []),
+          ...(rejectedCandidates.positions?.qualityGateSummary?.strictReplayOnlyOfflinePassingAssignmentCount !== 3 ? ["position quality gate missing strict replay-only offline passing count"] : []),
+          ...(rejectedCandidates.positions?.qualityGateSummary?.oracleExpectedParticipantCount !== 200 ? ["position quality gate missing oracle expected participant count"] : []),
+          ...(rejectedCandidates.positions?.qualityGateSummary?.oraclePassingParticipantCount !== 80 ? ["position quality gate missing oracle passing participant count"] : []),
+          ...(rejectedCandidates.positions?.qualityGateSummary?.oracleCompleteReplayCount !== 1 ? ["position quality gate missing oracle complete replay count"] : []),
+          ...(movementPositionGoalAudit.schema !== "movement-position-goal-audit/v1" ? ["movement position goal audit missing or schema mismatch"] : []),
+          ...(movementPositionGoalAudit.status !== "not_complete" ? ["movement position goal audit should remain not_complete until runtime promotion is valid"] : []),
+          ...(movementPositionGoalAudit.runtimeApiData !== false ? ["movement position goal audit must be non-runtime API data"] : []),
+          ...(movementPositionGoalAudit.expectedParticipantCount !== 200 ? ["movement position goal audit missing expected participant count"] : []),
+          (!(movementPositionGoalAudit.passedChecks < movementPositionGoalAudit.totalChecks) ? ["movement position goal audit should report open checks"] : []),
+          ...(!(movementPositionGoalAudit.openChecks ?? []).includes("assignment/oracle identity gap closed") ? ["movement position goal audit missing assignment/oracle identity blocker"] : []),
+          ...(movementAssignmentOracleGap.schema !== "movement-assignment-oracle-gap-summary/v1" ? ["movement assignment/oracle gap diagnostic missing or schema mismatch"] : []),
+          ...(movementAssignmentOracleGap.runtimeApiData !== false ? ["movement assignment/oracle gap diagnostic must be non-runtime API data"] : []),
+          ...(movementAssignmentOracleGap.assignedCount !== 136 ? ["movement assignment/oracle gap missing strict max50 supplemented assignment count"] : []),
+          ...(movementAssignmentOracleGap.passingAssignedCount !== 41 ? ["movement assignment/oracle gap missing passing assignment count"] : []),
+          ...(movementAssignmentOracleGap.passingOracleCount !== 119 ? ["movement assignment/oracle gap missing passing oracle count"] : []),
+          ...(movementAssignmentOracleGap.statusCounts?.passing_oracle_available_wrong_entity_assigned !== 59 ? ["movement assignment/oracle gap missing wrong-entity count"] : []),
+          ...(movementAssignmentOracleGap.statusCounts?.passing_oracle_unassigned !== 25 ? ["movement assignment/oracle gap missing unassigned passing-oracle count"] : []),
           ...(proofPositionCandidate?.runtimeApiData !== false ? ["roflOnlyExtractionProof position candidate must be non-runtime API data"] : []),
           ...(proofPositionCandidate?.assignedParticipantCount !== 9 ? ["roflOnlyExtractionProof position candidate missing 9 assigned participants"] : []),
           ...(proofPositionCandidate?.expectedParticipantCount !== 10 ? ["roflOnlyExtractionProof position candidate missing expected participant count"] : []),
           ...(proofPositionCandidate?.offlinePassingAssignmentCount !== 7 ? ["roflOnlyExtractionProof position candidate missing 7 offline passing assignments"] : []),
           ...(proofPositionCandidate?.noPriorsAssignedParticipantCount !== 8 ? ["roflOnlyExtractionProof position candidate missing no-priors assigned count"] : []),
           ...(proofPositionCandidate?.noPriorsOfflinePassingAssignmentCount !== 7 ? ["roflOnlyExtractionProof position candidate missing no-priors passing count"] : []),
+          ...(proofPositionCandidate?.strictReplayOnlyAssignedParticipantCount !== 4 ? ["roflOnlyExtractionProof position candidate missing strict replay-only assigned count"] : []),
+          ...(proofPositionCandidate?.strictReplayOnlyOfflinePassingAssignmentCount !== 3 ? ["roflOnlyExtractionProof position candidate missing strict replay-only passing count"] : []),
+          ...(proofPositionCandidate?.strictReplayOnlyUsesIdentityPriors !== false ? ["roflOnlyExtractionProof position candidate must disable strict replay-only identity priors"] : []),
+          ...(proofPositionCandidate?.strictReplayOnlyUsesSupportHypotheses !== false ? ["roflOnlyExtractionProof position candidate must disable strict replay-only support hypotheses"] : []),
           ...(rejectedCandidates.positions?.qualityGateSummary?.runtimeInput !== false ? ["position quality gate must be non-runtime"] : []),
           ...(rejectedCandidates.positions?.noPriorsDiagnostic?.status !== "diagnostic_only_not_runtime_api_data" ? ["position evidence missing no-priors diagnostic status"] : []),
           ...(rejectedCandidates.positions?.noPriorsDiagnostic?.runtimeInput !== false ? ["position no-priors diagnostic must be non-runtime"] : []),
           ...(rejectedCandidates.positions?.noPriorsDiagnostic?.usesIdentityPriors !== false ? ["position no-priors diagnostic must disable identity priors"] : []),
+          ...(rejectedCandidates.positions?.strictReplayOnlyDiagnostic?.status !== "diagnostic_only_not_runtime_api_data" ? ["position evidence missing strict replay-only diagnostic status"] : []),
+          ...(rejectedCandidates.positions?.strictReplayOnlyDiagnostic?.runtimeInput !== false ? ["position strict replay-only diagnostic must be non-runtime"] : []),
+          ...(rejectedCandidates.positions?.strictReplayOnlyDiagnostic?.runtimeApiData !== false ? ["position strict replay-only diagnostic must be non-runtime API data"] : []),
+          ...(rejectedCandidates.positions?.strictReplayOnlyDiagnostic?.usesIdentityPriors !== false ? ["position strict replay-only diagnostic must disable identity priors"] : []),
+          ...(rejectedCandidates.positions?.strictReplayOnlyDiagnostic?.usesSupportHypotheses !== false ? ["position strict replay-only diagnostic must disable support hypotheses"] : []),
+          ...(rejectedCandidates.positions?.strictReplayOnlyDiagnostic?.assignmentCount !== 4 ? ["position strict replay-only diagnostic missing 4 assignments"] : []),
+          ...(rejectedCandidates.positions?.strictReplayOnlyDiagnostic?.offlineValidation?.passingAssignmentCount !== 3 ? ["position strict replay-only diagnostic missing 3 passing assignments"] : []),
+          ...(rejectedCandidates.positions?.oracleCoverageDiagnostic?.status !== "diagnostic_only_not_runtime_api_data" ? ["position evidence missing oracle coverage diagnostic status"] : []),
+          ...(rejectedCandidates.positions?.oracleCoverageDiagnostic?.runtimeInput !== false ? ["position oracle coverage diagnostic must be non-runtime"] : []),
+          ...(rejectedCandidates.positions?.oracleCoverageDiagnostic?.runtimeApiData !== false ? ["position oracle coverage diagnostic must be non-runtime API data"] : []),
+          ...(rejectedCandidates.positions?.oracleCoverageDiagnostic?.expectedParticipantCount !== 200 ? ["position oracle coverage diagnostic missing expected participant count"] : []),
+          ...(rejectedCandidates.positions?.oracleCoverageDiagnostic?.passingOracleParticipantCount !== 80 ? ["position oracle coverage diagnostic missing passing participant count"] : []),
+          ...(rejectedCandidates.positions?.oracleCoverageDiagnostic?.completeOracleReplayCount !== 1 ? ["position oracle coverage diagnostic missing complete replay count"] : []),
+          ...(rejectedCandidates.positions?.oracleCoverageDiagnostic?.oracleFailureReasons?.["rmse_above_0.18"] !== 103 ? ["position oracle coverage diagnostic missing high-RMSE failure count"] : []),
+          ...(rejectedCandidates.positions?.oracleCoverageDiagnostic?.oracleFailureReasons?.["axis_below_0.55"] !== 55 ? ["position oracle coverage diagnostic missing low-axis failure count"] : []),
+          ...(rejectedCandidates.positions?.oracleCoverageDiagnostic?.topFailingOracleFamilies?.["50944-0x19-h0"] !== 24 ? ["position oracle coverage diagnostic missing top failing family count"] : []),
           ...((rejectedCandidates.positions?.noPriorsDiagnostic?.unmatchedParticipants ?? []).length !== 2 ? ["position no-priors diagnostic missing two unmatched participants"] : []),
           ...(!(rejectedCandidates.positions?.noPriorsDiagnostic?.unmatchedParticipants ?? []).some((participant) => participant.champion === "Vayne" && participant.teamPosition === "TOP") ? ["position no-priors diagnostic missing Vayne TOP unmatched participant"] : []),
           ...(!(rejectedCandidates.positions?.noPriorsDiagnostic?.unmatchedParticipants ?? []).some((participant) => participant.champion === "Malphite" && participant.teamPosition === "TOP") ? ["position no-priors diagnostic missing Malphite TOP unmatched participant"] : []),
@@ -889,13 +1002,21 @@ function buildAudit(artifact, inputPath) {
           (artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []).length === 10 &&
           JSON.stringify(artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []) === JSON.stringify(rejectedCandidates.positions?.perParticipantCoverage ?? []) &&
           JSON.stringify(artifact.fieldCoverage?.positions?.noPriorsDiagnostic ?? null) === JSON.stringify(rejectedCandidates.positions?.noPriorsDiagnostic ?? null) &&
+          JSON.stringify(artifact.fieldCoverage?.positions?.strictReplayOnlyDiagnostic ?? null) === JSON.stringify(rejectedCandidates.positions?.strictReplayOnlyDiagnostic ?? null) &&
+          JSON.stringify(artifact.fieldCoverage?.positions?.oracleCoverageDiagnostic ?? null) === JSON.stringify(rejectedCandidates.positions?.oracleCoverageDiagnostic ?? null) &&
           remainingGapByKey.get("positions")?.runtimeApiData === false &&
           (remainingGapByKey.get("positions")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("9/10")) &&
           (remainingGapByKey.get("positions")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("no-priors") && String(blocker).includes("8/10")) &&
           (remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("rejectedCandidateArtifacts.positions.noPriorsDiagnostic") &&
+          (remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("rejectedCandidateArtifacts.positions.strictReplayOnlyDiagnostic") &&
+          (remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("rejectedCandidateArtifacts.positions.oracleCoverageDiagnostic") &&
           (remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("fieldCoverage.positions.noPriorsDiagnostic") &&
+          (remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("fieldCoverage.positions.strictReplayOnlyDiagnostic") &&
+          (remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("fieldCoverage.positions.oracleCoverageDiagnostic") &&
           (remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("artifactManifest.decoderDiagnostics.replay-only-no-priors-position-diagnostic") &&
           (remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("artifactManifest.decoderDiagnostics.offline-no-priors-position-validation-diagnostic") &&
+          (remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("artifactManifest.decoderDiagnostics.strict-replay-only-position-diagnostic") &&
+          (remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("artifactManifest.decoderDiagnostics.offline-strict-replay-only-position-validation-diagnostic") &&
           remainingGapByKey.get("nonFinalParticipantIdentity")?.runtimeApiData === false &&
           (remainingGapByKey.get("nonFinalParticipantIdentity")?.blockerSummary ?? []).includes("runtimePromotionGate=blocked") &&
           (remainingGapByKey.get("nonFinalParticipantIdentity")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("startupKeyframeRowLink=not_found")) &&
@@ -908,6 +1029,8 @@ function buildAudit(artifact, inputPath) {
           roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.status === "not_promoted" &&
           JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.perParticipantCoverage ?? []) === JSON.stringify(artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []) &&
           JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.noPriorsDiagnostic ?? null) === JSON.stringify(artifact.fieldCoverage?.positions?.noPriorsDiagnostic ?? null) &&
+          JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.strictReplayOnlyDiagnostic ?? null) === JSON.stringify(artifact.fieldCoverage?.positions?.strictReplayOnlyDiagnostic ?? null) &&
+          JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.oracleCoverageDiagnostic ?? null) === JSON.stringify(artifact.fieldCoverage?.positions?.oracleCoverageDiagnostic ?? null) &&
           JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.statusCounts ?? {}) === JSON.stringify(artifact.fieldCoverage?.positions?.statusCounts ?? {}) &&
           JSON.stringify((artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []).reduce((counts, entry) => {
             counts[entry.status] = (counts[entry.status] ?? 0) + 1;
@@ -1288,13 +1411,21 @@ function buildAudit(artifact, inputPath) {
           ...((artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []).length !== 10 ? ["fieldCoverage.positions missing per-participant movement coverage"] : []),
           ...(JSON.stringify(artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []) !== JSON.stringify(rejectedCandidates.positions?.perParticipantCoverage ?? []) ? ["fieldCoverage.positions per-participant coverage does not match rejected position evidence"] : []),
           ...(JSON.stringify(artifact.fieldCoverage?.positions?.noPriorsDiagnostic ?? null) !== JSON.stringify(rejectedCandidates.positions?.noPriorsDiagnostic ?? null) ? ["fieldCoverage.positions no-priors diagnostic does not match rejected position evidence"] : []),
+          ...(JSON.stringify(artifact.fieldCoverage?.positions?.strictReplayOnlyDiagnostic ?? null) !== JSON.stringify(rejectedCandidates.positions?.strictReplayOnlyDiagnostic ?? null) ? ["fieldCoverage.positions strict replay-only diagnostic does not match rejected position evidence"] : []),
+          ...(JSON.stringify(artifact.fieldCoverage?.positions?.oracleCoverageDiagnostic ?? null) !== JSON.stringify(rejectedCandidates.positions?.oracleCoverageDiagnostic ?? null) ? ["fieldCoverage.positions oracle coverage diagnostic does not match rejected position evidence"] : []),
           ...(remainingGapByKey.get("positions")?.runtimeApiData !== false ? ["remainingParityGaps positions must be non-runtime"] : []),
           ...(!(remainingGapByKey.get("positions")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("9/10")) ? ["remainingParityGaps positions missing 9/10 blocker"] : []),
           ...(!(remainingGapByKey.get("positions")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("no-priors") && String(blocker).includes("8/10")) ? ["remainingParityGaps positions missing no-priors 8/10 blocker"] : []),
           ...(!(remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("rejectedCandidateArtifacts.positions.noPriorsDiagnostic") ? ["remainingParityGaps positions missing rejected no-priors evidence ref"] : []),
+          ...(!(remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("rejectedCandidateArtifacts.positions.strictReplayOnlyDiagnostic") ? ["remainingParityGaps positions missing strict replay-only evidence ref"] : []),
+          ...(!(remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("rejectedCandidateArtifacts.positions.oracleCoverageDiagnostic") ? ["remainingParityGaps positions missing oracle coverage evidence ref"] : []),
           ...(!(remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("fieldCoverage.positions.noPriorsDiagnostic") ? ["remainingParityGaps positions missing fieldCoverage no-priors evidence ref"] : []),
+          ...(!(remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("fieldCoverage.positions.strictReplayOnlyDiagnostic") ? ["remainingParityGaps positions missing fieldCoverage strict replay-only evidence ref"] : []),
+          ...(!(remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("fieldCoverage.positions.oracleCoverageDiagnostic") ? ["remainingParityGaps positions missing fieldCoverage oracle coverage evidence ref"] : []),
           ...(!(remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("artifactManifest.decoderDiagnostics.replay-only-no-priors-position-diagnostic") ? ["remainingParityGaps positions missing manifest no-priors evidence ref"] : []),
           ...(!(remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("artifactManifest.decoderDiagnostics.offline-no-priors-position-validation-diagnostic") ? ["remainingParityGaps positions missing manifest no-priors validation evidence ref"] : []),
+          ...(!(remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("artifactManifest.decoderDiagnostics.strict-replay-only-position-diagnostic") ? ["remainingParityGaps positions missing manifest strict replay-only evidence ref"] : []),
+          ...(!(remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("artifactManifest.decoderDiagnostics.offline-strict-replay-only-position-validation-diagnostic") ? ["remainingParityGaps positions missing manifest strict replay-only validation evidence ref"] : []),
           ...(remainingGapByKey.get("nonFinalParticipantIdentity")?.runtimeApiData !== false ? ["remainingParityGaps nonFinalParticipantIdentity must be non-runtime"] : []),
           ...(!(remainingGapByKey.get("nonFinalParticipantIdentity")?.blockerSummary ?? []).includes("runtimePromotionGate=blocked") ? ["remainingParityGaps nonFinalParticipantIdentity missing runtime promotion gate blocker"] : []),
           ...(!(remainingGapByKey.get("nonFinalParticipantIdentity")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("startupKeyframeRowLink=not_found")) ? ["remainingParityGaps nonFinalParticipantIdentity missing startup-keyframe row-link blocker"] : []),
@@ -1307,6 +1438,8 @@ function buildAudit(artifact, inputPath) {
           ...(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.status !== "not_promoted" ? ["roflDerivedFieldMap timeline position missing not_promoted status"] : []),
           ...(JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.perParticipantCoverage ?? []) !== JSON.stringify(artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []) ? ["roflDerivedFieldMap timeline position per-participant coverage does not match fieldCoverage.positions"] : []),
           ...(JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.noPriorsDiagnostic ?? null) !== JSON.stringify(artifact.fieldCoverage?.positions?.noPriorsDiagnostic ?? null) ? ["roflDerivedFieldMap timeline position no-priors diagnostic does not match fieldCoverage.positions"] : []),
+          ...(JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.strictReplayOnlyDiagnostic ?? null) !== JSON.stringify(artifact.fieldCoverage?.positions?.strictReplayOnlyDiagnostic ?? null) ? ["roflDerivedFieldMap timeline position strict replay-only diagnostic does not match fieldCoverage.positions"] : []),
+          ...(JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.oracleCoverageDiagnostic ?? null) !== JSON.stringify(artifact.fieldCoverage?.positions?.oracleCoverageDiagnostic ?? null) ? ["roflDerivedFieldMap timeline position oracle coverage diagnostic does not match fieldCoverage.positions"] : []),
           ...(JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.statusCounts ?? {}) !== JSON.stringify(artifact.fieldCoverage?.positions?.statusCounts ?? {}) ? ["roflDerivedFieldMap timeline position statusCounts do not match fieldCoverage.positions"] : []),
           ...(JSON.stringify((artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []).reduce((counts, entry) => {
             counts[entry.status] = (counts[entry.status] ?? 0) + 1;
@@ -1498,6 +1631,9 @@ function buildAudit(artifact, inputPath) {
           ...(!docsText.includes("offline-handle-graph-row-link-diagnostic") ? ["docs missing handle graph manifest role"] : []),
           ...(!docsText.includes("260 row-link candidates") ? ["docs missing handle graph candidate count"] : []),
           ...(!docsText.includes("top score 0.333") ? ["docs missing handle graph top score"] : []),
+          ...(!docsText.includes("nearMissSummary") ? ["docs missing handle graph near-miss summary wording"] : []),
+          ...(!docsText.includes("assigned replay support") ? ["docs missing handle graph assigned replay support blocker wording"] : []),
+          ...(!docsText.includes("30+ assigned rows") ? ["docs missing handle graph diffuse-row blocker wording"] : []),
           ...(!docsText.includes("npm run verify:rofl-api-parity") ? ["docs missing full checkpoint command"] : []),
           ...(!docsText.includes("npm run analyze:reconstruction-target-table") ? ["docs missing target table analysis command"] : []),
           ...(!docsText.includes("npm run infer:reconstruction-row-identity") ? ["docs missing row identity gate command"] : []),

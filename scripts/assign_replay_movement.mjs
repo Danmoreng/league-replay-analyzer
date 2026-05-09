@@ -20,7 +20,8 @@ const blueRoleAnchors = {
   UNKNOWN: { x: 7200, y: 7200 },
 };
 // Keep assignment precision above raw coverage: weaker tracks stay unassigned.
-const minimumAssignmentScore = 0.5;
+const defaultMinimumAssignmentScore = 0.5;
+const defaultDiagnosticAlternativeLimit = 64;
 
 function parseArgs(argv) {
   const args = {
@@ -29,6 +30,13 @@ function parseArgs(argv) {
     statsPath: null,
     priorsPath: null,
     outputPath: null,
+    minimumAssignmentScore: defaultMinimumAssignmentScore,
+    useSupportHypotheses: true,
+    preferTopEntityOwner: false,
+    allowDuplicateEntities: false,
+    scoreProfile: "default",
+    diagnosticAlternativeLimit: defaultDiagnosticAlternativeLimit,
+    keepAliasEntities: false,
   };
 
   for (let index = 2; index < argv.length; index += 1) {
@@ -43,6 +51,20 @@ function parseArgs(argv) {
       args.priorsPath = argv[++index];
     } else if (arg === "--output-path" && index + 1 < argv.length) {
       args.outputPath = argv[++index];
+    } else if (arg === "--min-assignment-score" && index + 1 < argv.length) {
+      args.minimumAssignmentScore = Number(argv[++index]);
+    } else if (arg === "--ignore-support-hypotheses") {
+      args.useSupportHypotheses = false;
+    } else if (arg === "--prefer-top-entity-owner") {
+      args.preferTopEntityOwner = true;
+    } else if (arg === "--allow-duplicate-entities") {
+      args.allowDuplicateEntities = true;
+    } else if (arg === "--keep-alias-entities") {
+      args.keepAliasEntities = true;
+    } else if (arg === "--score-profile" && index + 1 < argv.length) {
+      args.scoreProfile = argv[++index];
+    } else if (arg === "--diagnostic-alternative-limit" && index + 1 < argv.length) {
+      args.diagnosticAlternativeLimit = Number.parseInt(argv[++index], 10);
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -54,12 +76,21 @@ function parseArgs(argv) {
   if (!args.artifactDir) {
     throw new Error("Missing required --artifact-dir <path> argument.");
   }
+  if (!Number.isFinite(args.minimumAssignmentScore) || args.minimumAssignmentScore < 0 || args.minimumAssignmentScore > 1) {
+    throw new Error(`Invalid --min-assignment-score value: ${args.minimumAssignmentScore}`);
+  }
+  if (!["default", "reduced-role-anchor"].includes(args.scoreProfile)) {
+    throw new Error(`Invalid --score-profile value: ${args.scoreProfile}`);
+  }
+  if (!Number.isInteger(args.diagnosticAlternativeLimit) || args.diagnosticAlternativeLimit < 1 || args.diagnosticAlternativeLimit > 2048) {
+    throw new Error(`Invalid --diagnostic-alternative-limit value: ${args.diagnosticAlternativeLimit}`);
+  }
 
   return args;
 }
 
 function printHelp() {
-  console.log("Usage: node ./scripts/assign_replay_movement.mjs --artifact-dir <path> [--movement-path <path>] [--stats-path <path>] [--priors-path <path>] [--output-path <path>]");
+  console.log("Usage: node ./scripts/assign_replay_movement.mjs --artifact-dir <path> [--movement-path <path>] [--stats-path <path>] [--priors-path <path>] [--output-path <path>] [--min-assignment-score <0..1>] [--ignore-support-hypotheses] [--prefer-top-entity-owner] [--allow-duplicate-entities] [--keep-alias-entities] [--score-profile default|reduced-role-anchor] [--diagnostic-alternative-limit 64]");
 }
 
 function mirroredAnchor(anchor) {
@@ -290,8 +321,8 @@ function findSupportHypothesis(entity, participant) {
   return best.hypothesis;
 }
 
-function resolveEntityProjection(entity, participant) {
-  const exactHypothesis = findSupportHypothesis(entity, participant);
+function resolveEntityProjection(entity, participant, useSupportHypotheses) {
+  const exactHypothesis = useSupportHypotheses ? findSupportHypothesis(entity, participant) : null;
   if (exactHypothesis) {
     return {
       trajectory: exactHypothesis.trajectory ?? entity.trajectory ?? [],
@@ -357,7 +388,26 @@ function mergeSupportHypotheses(group) {
   );
 }
 
-function canonicalizeEntities(entities) {
+function canonicalizeEntities(entities, keepAliasEntities = false) {
+  if (keepAliasEntities) {
+    return {
+      keptEntities: (entities ?? []).map((entity) => {
+        const trajectoryStats = entity.trajectoryStats ?? computeTrajectoryStats(entity.trajectory ?? []);
+        return {
+          ...entity,
+          trajectoryStats,
+          entityQuality: computeEntityQuality({
+            ...entity,
+            trajectoryStats,
+          }),
+          aliasEntityKeys: [entity.entityKey],
+          entityGroupKey: `${entity.familyKey}|${entity.slotIndex}`,
+        };
+      }),
+      discardedAliases: [],
+    };
+  }
+
   const groups = new Map();
   for (const entity of entities) {
     const trajectoryStats = entity.trajectoryStats ?? computeTrajectoryStats(entity.trajectory ?? []);
@@ -425,8 +475,39 @@ function lookupPriorScore(priors, versionGroup, entity, participant) {
   };
 }
 
-function scoreEntityForParticipant(entity, participant, scalarSlotsByFamily, priors, versionGroup) {
-  const projection = resolveEntityProjection(entity, participant);
+function scoreWeightsForProfile(scoreProfile) {
+  if (scoreProfile === "reduced-role-anchor") {
+    return {
+      teamScore: 0.18,
+      roleScore: 0.08,
+      scalarFamilyScore: 0.1,
+      centerBias: 0.08,
+      trajectoryScore: 0.16,
+      minAxisScore: 0.14,
+      rangeScore: 0.12,
+      directSupportScore: 0.1,
+      directValidatorScore: 0.05,
+      exactPriorScore: 0.1,
+      familyPriorScore: 0.05,
+    };
+  }
+  return {
+    teamScore: 0.14,
+    roleScore: 0.18,
+    scalarFamilyScore: 0.1,
+    centerBias: 0.08,
+    trajectoryScore: 0.12,
+    minAxisScore: 0.12,
+    rangeScore: 0.11,
+    directSupportScore: 0.1,
+    directValidatorScore: 0.05,
+    exactPriorScore: 0.1,
+    familyPriorScore: 0.05,
+  };
+}
+
+function scoreEntityForParticipant(entity, participant, scalarSlotsByFamily, priors, versionGroup, useSupportHypotheses, scoreProfile) {
+  const projection = resolveEntityProjection(entity, participant, useSupportHypotheses);
   const trajectory = projection.trajectory;
   if (!trajectory.length) {
     return {
@@ -491,18 +572,19 @@ function scoreEntityForParticipant(entity, participant, scalarSlotsByFamily, pri
     1,
   );
 
+  const weights = scoreWeightsForProfile(scoreProfile);
   const rawScore =
-    (0.14 * teamScore) +
-    (0.18 * roleScore) +
-    (0.1 * scalarFamilyScore) +
-    (0.08 * centerBias) +
-    (0.12 * trajectoryScore) +
-    (0.12 * minAxisScore) +
-    (0.11 * rangeScore) +
-    (0.1 * directSupportScore) +
-    (0.05 * directValidatorScore) +
-    (0.1 * exactPriorScore) +
-    (0.05 * familyPriorScore);
+    (weights.teamScore * teamScore) +
+    (weights.roleScore * roleScore) +
+    (weights.scalarFamilyScore * scalarFamilyScore) +
+    (weights.centerBias * centerBias) +
+    (weights.trajectoryScore * trajectoryScore) +
+    (weights.minAxisScore * minAxisScore) +
+    (weights.rangeScore * rangeScore) +
+    (weights.directSupportScore * directSupportScore) +
+    (weights.directValidatorScore * directValidatorScore) +
+    (weights.exactPriorScore * exactPriorScore) +
+    (weights.familyPriorScore * familyPriorScore);
 
   let evidenceGate = 1;
   if (entityQuality < 0.55) {
@@ -544,66 +626,125 @@ function scoreEntityForParticipant(entity, participant, scalarSlotsByFamily, pri
       familyPriorScore,
       sameTeamDistance,
       oppositeTeamDistance,
+      scoreProfile,
     },
     resolved: projection,
   };
 }
 
-function solveAssignments(participants, entities, scoreMatrix) {
+function buildTopEntityOwnerOffsets(scoreMatrix) {
+  const entityCount = scoreMatrix[0]?.length ?? 0;
+  const topOwnerOffsets = new Map();
+  for (let entityOffset = 0; entityOffset < entityCount; entityOffset += 1) {
+    let bestParticipantOffset = null;
+    let bestScore = -Infinity;
+    for (let participantOffset = 0; participantOffset < scoreMatrix.length; participantOffset += 1) {
+      const score = scoreMatrix[participantOffset]?.[entityOffset]?.score;
+      if (Number.isFinite(score) && score > bestScore) {
+        bestParticipantOffset = participantOffset;
+        bestScore = score;
+      }
+    }
+    if (bestParticipantOffset != null) {
+      topOwnerOffsets.set(entityOffset, bestParticipantOffset);
+    }
+  }
+  return topOwnerOffsets;
+}
+
+function assignmentSolveScore(scoreEntry, participantOffset, entityOffset, topOwnerOffsets, preferTopEntityOwner) {
+  if (!preferTopEntityOwner) {
+    return scoreEntry.score;
+  }
+  const topOwnerOffset = topOwnerOffsets.get(entityOffset);
+  const ownerMultiplier = topOwnerOffset === participantOffset ? 1.08 : 0.88;
+  return scoreEntry.score * ownerMultiplier;
+}
+
+function solveAssignments(participants, entities, scoreMatrix, minimumAssignmentScore, preferTopEntityOwner) {
   const participantCount = participants.length;
   const entityCount = entities.length;
   if (participantCount === 0 || entityCount === 0) {
     return [];
   }
 
-  const memo = new Map();
-  function search(participantOffset, usedMask) {
-    if (participantOffset >= participantCount) {
-      return { score: 0, assignments: [] };
-    }
+  const topOwnerOffsets = buildTopEntityOwnerOffsets(scoreMatrix);
+  let states = new Map([[0, { score: 0, assignments: [] }]]);
+  const fullMask = (1 << participantCount) - 1;
 
-    const memoKey = `${participantOffset}|${usedMask}`;
-    if (memo.has(memoKey)) {
-      return memo.get(memoKey);
-    }
-
-    let best = search(participantOffset + 1, usedMask);
-    for (let entityOffset = 0; entityOffset < entityCount; entityOffset += 1) {
-      const bitMask = (1 << entityOffset);
-      if ((usedMask & bitMask) !== 0) {
+  for (let entityOffset = 0; entityOffset < entityCount; entityOffset += 1) {
+    const nextStates = new Map(states);
+    for (const [mask, state] of states.entries()) {
+      if (mask === fullMask) {
         continue;
       }
+      for (let participantOffset = 0; participantOffset < participantCount; participantOffset += 1) {
+        const participantBit = 1 << participantOffset;
+        if ((mask & participantBit) !== 0) {
+          continue;
+        }
 
-      const scoreEntry = scoreMatrix[participantOffset][entityOffset];
+        const scoreEntry = scoreMatrix[participantOffset]?.[entityOffset];
+        if (!scoreEntry || scoreEntry.score < minimumAssignmentScore) {
+          continue;
+        }
+
+        const nextMask = mask | participantBit;
+        const score = state.score + assignmentSolveScore(scoreEntry, participantOffset, entityOffset, topOwnerOffsets, preferTopEntityOwner);
+        const current = nextStates.get(nextMask);
+        if (!current || score > current.score) {
+          nextStates.set(nextMask, {
+            score,
+            assignments: [
+              ...state.assignments,
+              {
+                participantOffset,
+                entityOffset,
+                scoreEntry,
+              },
+            ],
+          });
+        }
+      }
+    }
+    states = nextStates;
+  }
+
+  return [...states.values()]
+    .sort((left, right) =>
+      right.score - left.score ||
+      right.assignments.length - left.assignments.length
+    )[0]?.assignments ?? [];
+}
+
+function solveDuplicateEntityAssignments(participants, entities, scoreMatrix, minimumAssignmentScore, preferTopEntityOwner) {
+  const topOwnerOffsets = buildTopEntityOwnerOffsets(scoreMatrix);
+  const assignments = [];
+  for (let participantOffset = 0; participantOffset < participants.length; participantOffset += 1) {
+    let best = null;
+    for (let entityOffset = 0; entityOffset < entities.length; entityOffset += 1) {
+      const scoreEntry = scoreMatrix[participantOffset]?.[entityOffset];
       if (!scoreEntry || scoreEntry.score < minimumAssignmentScore) {
         continue;
       }
-
-      const suffix = search(participantOffset + 1, usedMask | bitMask);
-      const score = scoreEntry.score + suffix.score;
-      if (score > best.score) {
+      const solveScore = assignmentSolveScore(scoreEntry, participantOffset, entityOffset, topOwnerOffsets, preferTopEntityOwner);
+      if (!best || solveScore > best.solveScore) {
         best = {
-          score,
-          assignments: [
-            {
-              participantOffset,
-              entityOffset,
-              scoreEntry,
-            },
-            ...suffix.assignments,
-          ],
+          participantOffset,
+          entityOffset,
+          scoreEntry,
+          solveScore,
         };
       }
     }
-
-    memo.set(memoKey, best);
-    return best;
+    if (best) {
+      assignments.push(best);
+    }
   }
-
-  return search(0, 0).assignments;
+  return assignments;
 }
 
-function summarizeParticipantCandidateScores(participantOffset, participants, entities, scoreMatrix, assignedEntityKeys) {
+function summarizeParticipantCandidateScores(participantOffset, participants, entities, scoreMatrix, assignedEntityKeys, minimumAssignmentScore, diagnosticAlternativeLimit) {
   const participant = participants[participantOffset];
   return (scoreMatrix[participantOffset] ?? [])
     .map((scoreEntry, entityOffset) => {
@@ -628,10 +769,10 @@ function summarizeParticipantCandidateScores(participantOffset, participants, en
       };
     })
     .sort((left, right) => (right.score ?? -Infinity) - (left.score ?? -Infinity))
-    .slice(0, 5);
+    .slice(0, diagnosticAlternativeLimit);
 }
 
-function summarizeEntityCandidateScores(entityOffset, participants, entities, scoreMatrix, assignedRoster) {
+function summarizeEntityCandidateScores(entityOffset, participants, entities, scoreMatrix, assignedRoster, minimumAssignmentScore, diagnosticAlternativeLimit) {
   const entity = entities[entityOffset];
   return participants
     .map((participant, participantOffset) => {
@@ -648,7 +789,7 @@ function summarizeEntityCandidateScores(entityOffset, participants, entities, sc
       };
     })
     .sort((left, right) => (right.score ?? -Infinity) - (left.score ?? -Infinity))
-    .slice(0, 5)
+    .slice(0, diagnosticAlternativeLimit)
     .map((candidate) => ({
       ...candidate,
       entityKey: entity.entityKey,
@@ -657,6 +798,77 @@ function summarizeEntityCandidateScores(entityOffset, participants, entities, sc
       patternKey: entity.patternKey ?? null,
       slotIndex: entity.slotIndex,
     }));
+}
+
+function summarizeAssignmentConfidence(assignment, participants, entities, scoreMatrix, minimumAssignmentScore, diagnosticAlternativeLimit) {
+  const participantAlternatives = (scoreMatrix[assignment.participantOffset] ?? [])
+    .map((scoreEntry, entityOffset) => ({
+      entityOffset,
+      entityKey: entities[entityOffset]?.entityKey ?? null,
+      entityGroupKey: entities[entityOffset]?.entityGroupKey ?? null,
+      familyKey: entities[entityOffset]?.familyKey ?? null,
+      slotIndex: entities[entityOffset]?.slotIndex ?? null,
+      score: scoreEntry?.score ?? null,
+      belowMinimumAssignmentScore: (scoreEntry?.score ?? 0) < minimumAssignmentScore,
+      scoreComponents: scoreEntry?.components ?? null,
+    }))
+    .filter((candidate) => candidate.entityOffset !== assignment.entityOffset)
+    .sort((left, right) => (right.score ?? -Infinity) - (left.score ?? -Infinity))
+    .slice(0, diagnosticAlternativeLimit);
+
+  const entityAlternatives = participants
+    .map((participant, participantOffset) => {
+      const scoreEntry = scoreMatrix[participantOffset]?.[assignment.entityOffset];
+      return {
+        participantOffset,
+        rosterIndex: participant.rosterIndex,
+        champion: participant.champion,
+        team: participant.team,
+        teamPosition: participant.teamPosition,
+        score: scoreEntry?.score ?? null,
+        belowMinimumAssignmentScore: (scoreEntry?.score ?? 0) < minimumAssignmentScore,
+        scoreComponents: scoreEntry?.components ?? null,
+      };
+    })
+    .filter((candidate) => candidate.participantOffset !== assignment.participantOffset)
+    .sort((left, right) => (right.score ?? -Infinity) - (left.score ?? -Infinity))
+  const ownerRanking = [
+    {
+      participantOffset: assignment.participantOffset,
+      rosterIndex: participants[assignment.participantOffset]?.rosterIndex ?? null,
+      champion: participants[assignment.participantOffset]?.champion ?? null,
+      team: participants[assignment.participantOffset]?.team ?? null,
+      teamPosition: participants[assignment.participantOffset]?.teamPosition ?? null,
+      score: assignment.scoreEntry.score,
+      scoreComponents: assignment.scoreEntry.components ?? null,
+      assignedOwner: true,
+      belowMinimumAssignmentScore: assignment.scoreEntry.score < minimumAssignmentScore,
+    },
+    ...entityAlternatives.map((candidate) => ({
+      ...candidate,
+      assignedOwner: false,
+    })),
+  ].sort((left, right) => (right.score ?? -Infinity) - (left.score ?? -Infinity));
+  const assignedOwnerRank = ownerRanking.findIndex((candidate) => candidate.assignedOwner) + 1;
+  const entityAlternativesForOutput = entityAlternatives.slice(0, diagnosticAlternativeLimit);
+
+  const bestEntityAlternativeScore = participantAlternatives[0]?.score ?? null;
+  const bestParticipantAlternativeScore = entityAlternativesForOutput[0]?.score ?? null;
+  return {
+    assignedScore: assignment.scoreEntry.score,
+    bestEntityAlternativeScore,
+    bestParticipantAlternativeScore,
+    assignedOwnerRank,
+    assignedOwnerIsTopEntityParticipant: assignedOwnerRank === 1,
+    entityScoreMargin: Number.isFinite(bestEntityAlternativeScore)
+      ? assignment.scoreEntry.score - bestEntityAlternativeScore
+      : null,
+    participantScoreMargin: Number.isFinite(bestParticipantAlternativeScore)
+      ? assignment.scoreEntry.score - bestParticipantAlternativeScore
+      : null,
+    topEntityAlternatives: participantAlternatives,
+    topParticipantAlternatives: entityAlternativesForOutput,
+  };
 }
 
 function main() {
@@ -701,16 +913,18 @@ function main() {
     };
   });
 
-  const { keptEntities: entities, discardedAliases } = canonicalizeEntities(movement.entities ?? []);
+  const { keptEntities: entities, discardedAliases } = canonicalizeEntities(movement.entities ?? [], args.keepAliasEntities);
   const participantsWithScores = participants.map((participant) => ({
     ...participant,
     scalarSlotsByFamily: buildScalarIndex(participant),
   }));
   const scoreMatrix = participantsWithScores.map((participant) =>
-    entities.map((entity) => scoreEntityForParticipant(entity, participant, participant.scalarSlotsByFamily, priors, versionGroup)),
+    entities.map((entity) => scoreEntityForParticipant(entity, participant, participant.scalarSlotsByFamily, priors, versionGroup, args.useSupportHypotheses, args.scoreProfile)),
   );
 
-  const assignments = solveAssignments(participantsWithScores, entities, scoreMatrix);
+  const assignments = args.allowDuplicateEntities
+    ? solveDuplicateEntityAssignments(participantsWithScores, entities, scoreMatrix, args.minimumAssignmentScore, args.preferTopEntityOwner)
+    : solveAssignments(participantsWithScores, entities, scoreMatrix, args.minimumAssignmentScore, args.preferTopEntityOwner);
   const assignedEntityKeys = new Set(assignments.map((assignment) => entities[assignment.entityOffset].entityKey));
   const assignedRoster = new Set(assignments.map((assignment) => participantsWithScores[assignment.participantOffset].rosterIndex));
 
@@ -738,6 +952,14 @@ function main() {
         entityQuality: entity.entityQuality,
         sourceMetrics: assignment.scoreEntry.resolved?.sourceMetrics ?? entity.sourceMetrics ?? {},
         trajectoryStats: assignment.scoreEntry.resolved?.trajectoryStats ?? entity.trajectoryStats ?? computeTrajectoryStats(entity.trajectory ?? []),
+        assignmentConfidence: summarizeAssignmentConfidence(
+          assignment,
+          participantsWithScores,
+          entities,
+          scoreMatrix,
+          args.minimumAssignmentScore,
+          args.diagnosticAlternativeLimit,
+        ),
         aliasEntityKeys: entity.aliasEntityKeys ?? [entity.entityKey],
         directSupport: assignment.scoreEntry.resolved?.directSupport ?? null,
         trajectory: assignment.scoreEntry.resolved?.trajectory ?? entity.trajectory,
@@ -756,6 +978,8 @@ function main() {
           entities,
           scoreMatrix,
           assignedEntityKeys,
+          args.minimumAssignmentScore,
+          args.diagnosticAlternativeLimit,
         ),
       })),
     unassignedEntities: entities
@@ -773,6 +997,8 @@ function main() {
           entities,
           scoreMatrix,
           assignedRoster,
+          args.minimumAssignmentScore,
+          args.diagnosticAlternativeLimit,
         ),
       })),
     discardedAliases,
@@ -781,7 +1007,13 @@ function main() {
       rawEntityCount: movement.entities?.length ?? 0,
       canonicalEntityCount: entities.length,
       discardedAliasCount: discardedAliases.length,
-      minimumAssignmentScore,
+      minimumAssignmentScore: args.minimumAssignmentScore,
+      useSupportHypotheses: args.useSupportHypotheses,
+      preferTopEntityOwner: args.preferTopEntityOwner,
+      allowDuplicateEntities: args.allowDuplicateEntities,
+      keepAliasEntities: args.keepAliasEntities,
+      scoreProfile: args.scoreProfile,
+      diagnosticAlternativeLimit: args.diagnosticAlternativeLimit,
     },
   };
 

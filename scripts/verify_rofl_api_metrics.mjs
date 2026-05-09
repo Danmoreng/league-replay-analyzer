@@ -449,6 +449,22 @@ function verifyFieldCoverage(artifact) {
     fieldCoverage: fieldCoverage.positions,
     rejectedPositions: artifact.rejectedCandidateArtifacts?.positions,
   });
+  assert(JSON.stringify(fieldCoverage.positions?.strictReplayOnlyDiagnostic ?? null) === JSON.stringify(artifact.rejectedCandidateArtifacts?.positions?.strictReplayOnlyDiagnostic ?? null), "Position field coverage must mirror strict replay-only diagnostic evidence", {
+    fieldCoverage: fieldCoverage.positions,
+    rejectedPositions: artifact.rejectedCandidateArtifacts?.positions,
+  });
+  assert(JSON.stringify(fieldCoverage.positions?.oracleCoverageDiagnostic ?? null) === JSON.stringify(artifact.rejectedCandidateArtifacts?.positions?.oracleCoverageDiagnostic ?? null), "Position field coverage must mirror oracle coverage diagnostic evidence", {
+    fieldCoverage: fieldCoverage.positions,
+    rejectedPositions: artifact.rejectedCandidateArtifacts?.positions,
+  });
+  assert(JSON.stringify(fieldCoverage.positions?.assignmentOracleGapDiagnostic ?? null) === JSON.stringify(artifact.rejectedCandidateArtifacts?.positions?.assignmentOracleGapDiagnostic ?? null), "Position field coverage must mirror assignment/oracle gap diagnostic evidence", {
+    fieldCoverage: fieldCoverage.positions,
+    rejectedPositions: artifact.rejectedCandidateArtifacts?.positions,
+  });
+  assert(JSON.stringify(fieldCoverage.positions?.movementPositionGoalAudit ?? null) === JSON.stringify(artifact.rejectedCandidateArtifacts?.positions?.movementPositionGoalAudit ?? null), "Position field coverage must mirror movement position goal audit evidence", {
+    fieldCoverage: fieldCoverage.positions,
+    rejectedPositions: artifact.rejectedCandidateArtifacts?.positions,
+  });
   for (const field of [
     "info.frames[].participantFrames[].championStats.*",
     "info.frames[].participantFrames[].currentGold",
@@ -589,9 +605,15 @@ function verifyParityChecklist(artifact) {
   }
   for (const evidenceRef of [
     "rejectedCandidateArtifacts.positions.noPriorsDiagnostic",
+    "rejectedCandidateArtifacts.positions.strictReplayOnlyDiagnostic",
+    "rejectedCandidateArtifacts.positions.oracleCoverageDiagnostic",
     "fieldCoverage.positions.noPriorsDiagnostic",
+    "fieldCoverage.positions.strictReplayOnlyDiagnostic",
+    "fieldCoverage.positions.oracleCoverageDiagnostic",
     "artifactManifest.decoderDiagnostics.replay-only-no-priors-position-diagnostic",
     "artifactManifest.decoderDiagnostics.offline-no-priors-position-validation-diagnostic",
+    "artifactManifest.decoderDiagnostics.strict-replay-only-position-diagnostic",
+    "artifactManifest.decoderDiagnostics.offline-strict-replay-only-position-validation-diagnostic",
   ]) {
     assert((remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes(evidenceRef), `remainingParityGaps.positions must reference ${evidenceRef}`, {
       positions: remainingGapByKey.get("positions"),
@@ -684,6 +706,16 @@ function verifyParityChecklist(artifact) {
     (proofPositionCandidate.noPriorsOfflinePassingAssignmentCount == null || (
       Number.isInteger(proofPositionCandidate.noPriorsOfflinePassingAssignmentCount) &&
       proofPositionCandidate.noPriorsOfflinePassingAssignmentCount <= proofPositionCandidate.noPriorsAssignedParticipantCount
+    )) &&
+    (proofPositionCandidate.strictReplayOnlyAssignedParticipantCount == null || (
+      Number.isInteger(proofPositionCandidate.strictReplayOnlyAssignedParticipantCount) &&
+      proofPositionCandidate.strictReplayOnlyAssignedParticipantCount <= proofPositionCandidate.expectedParticipantCount &&
+      proofPositionCandidate.strictReplayOnlyUsesIdentityPriors === false &&
+      proofPositionCandidate.strictReplayOnlyUsesSupportHypotheses === false
+    )) &&
+    (proofPositionCandidate.strictReplayOnlyOfflinePassingAssignmentCount == null || (
+      Number.isInteger(proofPositionCandidate.strictReplayOnlyOfflinePassingAssignmentCount) &&
+      proofPositionCandidate.strictReplayOnlyOfflinePassingAssignmentCount <= proofPositionCandidate.strictReplayOnlyAssignedParticipantCount
     )),
     "ROFL-only extraction proof must summarize rejected position candidate counts", {
       proofPositionCandidate,
@@ -830,7 +862,10 @@ function verifyRejectedCandidateArtifacts(artifact) {
       nonFinalScalarIdentity.handleGraphRowLinkCandidates?.replayCount === 20 &&
       nonFinalScalarIdentity.handleGraphRowLinkCandidates?.candidateCount > 0 &&
       nonFinalScalarIdentity.handleGraphRowLinkCandidates?.confidenceCounts?.weak === nonFinalScalarIdentity.handleGraphRowLinkCandidates?.candidateCount &&
-      nonFinalScalarIdentity.handleGraphRowLinkCandidates?.topConfidence === "weak",
+      nonFinalScalarIdentity.handleGraphRowLinkCandidates?.topConfidence === "weak" &&
+      nonFinalScalarIdentity.handleGraphRowLinkCandidates?.nearMissSummary?.status === "no_promotable_handle_graph_candidate" &&
+      nonFinalScalarIdentity.handleGraphRowLinkCandidates?.nearMissSummary?.runtimeApiData === false &&
+      nonFinalScalarIdentity.handleGraphRowLinkCandidates?.nearMissSummary?.topCandidate?.blockers?.length > 0,
       "Non-final identity evidence must include handle-graph row-link candidates as not-promoted diagnostics", {
         handleGraphRowLinkCandidates: nonFinalScalarIdentity.handleGraphRowLinkCandidates,
       });
@@ -1047,6 +1082,113 @@ function verifyRejectedCandidateArtifacts(artifact) {
           noPriorsDiagnostic: positions.noPriorsDiagnostic,
         });
     }
+    if (positions.strictReplayOnlyDiagnostic?.exists !== false) {
+      assert(positions.strictReplayOnlyDiagnostic?.status === "diagnostic_only_not_runtime_api_data" &&
+        positions.strictReplayOnlyDiagnostic?.runtimeInput === false &&
+        positions.strictReplayOnlyDiagnostic?.runtimeApiData === false &&
+        positions.strictReplayOnlyDiagnostic?.usesIdentityPriors === false &&
+        positions.strictReplayOnlyDiagnostic?.usesSupportHypotheses === false &&
+        positions.strictReplayOnlyDiagnostic?.assignmentCount + positions.strictReplayOnlyDiagnostic?.unmatchedParticipantCount === 10 &&
+        positions.strictReplayOnlyDiagnostic?.offlineValidation?.assignmentCount === positions.strictReplayOnlyDiagnostic?.assignmentCount &&
+        positions.strictReplayOnlyDiagnostic?.offlineValidation?.passingAssignmentCount <= positions.strictReplayOnlyDiagnostic?.offlineValidation?.assignmentCount &&
+        positions.strictReplayOnlyDiagnostic?.offlineValidation?.runtimeInput === false,
+        "Position evidence must include the strict replay-only diagnostic without promoting it", {
+          strictReplayOnlyDiagnostic: positions.strictReplayOnlyDiagnostic,
+        });
+    }
+    if (positions.oracleCoverageDiagnostic?.exists !== false) {
+      assert(positions.oracleCoverageDiagnostic?.status === "diagnostic_only_not_runtime_api_data" &&
+        positions.oracleCoverageDiagnostic?.runtimeInput === false &&
+        positions.oracleCoverageDiagnostic?.runtimeApiData === false &&
+        positions.oracleCoverageDiagnostic?.schema === "movement-oracle-coverage-summary/v1" &&
+        positions.oracleCoverageDiagnostic?.replayCount === 20 &&
+        Number.isInteger(positions.oracleCoverageDiagnostic?.expectedParticipantCount) &&
+        Number.isInteger(positions.oracleCoverageDiagnostic?.passingOracleParticipantCount) &&
+        positions.oracleCoverageDiagnostic.passingOracleParticipantCount < positions.oracleCoverageDiagnostic.expectedParticipantCount &&
+        positions.oracleCoverageDiagnostic.completeOracleReplayCount < positions.oracleCoverageDiagnostic.replayCount,
+        "Position evidence must include the offline oracle coverage blocker without promoting it", {
+          oracleCoverageDiagnostic: positions.oracleCoverageDiagnostic,
+        });
+      assert((positions.oracleCoverageDiagnostic?.oracleFailureReasons?.["rmse_above_0.18"] ?? 0) > 0 &&
+        (positions.oracleCoverageDiagnostic?.oracleFailureReasons?.["axis_below_0.55"] ?? 0) > 0 &&
+        Object.keys(positions.oracleCoverageDiagnostic?.topFailingOracleFamilies ?? {}).length > 0,
+        "Position oracle diagnostic must preserve candidate extraction failure buckets", {
+          oracleCoverageDiagnostic: positions.oracleCoverageDiagnostic,
+        });
+      assert(positions.qualityGateSummary?.oracleExpectedParticipantCount === positions.oracleCoverageDiagnostic.expectedParticipantCount &&
+        positions.qualityGateSummary?.oraclePassingParticipantCount === positions.oracleCoverageDiagnostic.passingOracleParticipantCount &&
+        positions.qualityGateSummary?.oracleCompleteReplayCount === positions.oracleCoverageDiagnostic.completeOracleReplayCount,
+        "Position quality gate summary must mirror movement oracle coverage blockers", {
+          qualityGateSummary: positions.qualityGateSummary,
+          oracleCoverageDiagnostic: positions.oracleCoverageDiagnostic,
+        });
+      assert((positions.promotionBlockers ?? []).some((blocker) =>
+        blocker.includes("offline movement oracle") &&
+        blocker.includes(`${positions.oracleCoverageDiagnostic.passingOracleParticipantCount}/${positions.oracleCoverageDiagnostic.expectedParticipantCount}`)
+      ), "Position blockers must preserve offline oracle candidate-coverage evidence", {
+        blockers: positions.promotionBlockers,
+        oracleCoverageDiagnostic: positions.oracleCoverageDiagnostic,
+      });
+    }
+    if (positions.assignmentOracleGapDiagnostic?.exists !== false) {
+      assert(positions.assignmentOracleGapDiagnostic?.status === "diagnostic_only_not_runtime_api_data" &&
+        positions.assignmentOracleGapDiagnostic?.runtimeInput === false &&
+        positions.assignmentOracleGapDiagnostic?.runtimeApiData === false &&
+        positions.assignmentOracleGapDiagnostic?.schema === "movement-assignment-oracle-gap-summary/v1" &&
+        positions.assignmentOracleGapDiagnostic?.replayCount === 20 &&
+        Number.isInteger(positions.assignmentOracleGapDiagnostic?.expectedParticipantCount) &&
+        Number.isInteger(positions.assignmentOracleGapDiagnostic?.passingAssignedCount) &&
+        Number.isInteger(positions.assignmentOracleGapDiagnostic?.passingOracleCount) &&
+        positions.assignmentOracleGapDiagnostic.passingOracleCount > positions.assignmentOracleGapDiagnostic.passingAssignedCount,
+        "Position evidence must include the offline assignment/oracle identity gap without promoting it", {
+          assignmentOracleGapDiagnostic: positions.assignmentOracleGapDiagnostic,
+        });
+      assert((positions.assignmentOracleGapDiagnostic?.statusCounts?.passing_oracle_available_wrong_entity_assigned ?? 0) > 0 &&
+        (positions.assignmentOracleGapDiagnostic?.statusCounts?.passing_oracle_unassigned ?? 0) > 0,
+        "Position assignment/oracle diagnostic must preserve wrong-entity and unassigned oracle gap buckets", {
+          assignmentOracleGapDiagnostic: positions.assignmentOracleGapDiagnostic,
+        });
+      assert((positions.assignmentOracleGapDiagnostic?.wrongEntityBreakdown?.shapeCounts?.different_family ?? 0) > 0 &&
+        Object.keys(positions.assignmentOracleGapDiagnostic?.wrongEntityBreakdown?.topAssignedToOracleFamilyPairs ?? {}).length > 0,
+        "Position assignment/oracle diagnostic must preserve cross-family wrong-entity evidence", {
+          assignmentOracleGapDiagnostic: positions.assignmentOracleGapDiagnostic,
+        });
+      assert(positions.qualityGateSummary?.assignmentOracleGapPassingAssignedCount === positions.assignmentOracleGapDiagnostic.passingAssignedCount &&
+        positions.qualityGateSummary?.assignmentOracleGapPassingOracleCount === positions.assignmentOracleGapDiagnostic.passingOracleCount &&
+        positions.qualityGateSummary?.assignmentOracleGapWrongEntityCount === positions.assignmentOracleGapDiagnostic.statusCounts.passing_oracle_available_wrong_entity_assigned,
+        "Position quality gate summary must mirror assignment/oracle identity gap blockers", {
+          qualityGateSummary: positions.qualityGateSummary,
+          assignmentOracleGapDiagnostic: positions.assignmentOracleGapDiagnostic,
+        });
+      assert((positions.promotionBlockers ?? []).some((blocker) =>
+        blocker.includes("wrong entity") &&
+        blocker.includes(String(positions.assignmentOracleGapDiagnostic.statusCounts.passing_oracle_available_wrong_entity_assigned))
+      ), "Position blockers must preserve assignment/oracle wrong-entity evidence", {
+        blockers: positions.promotionBlockers,
+        assignmentOracleGapDiagnostic: positions.assignmentOracleGapDiagnostic,
+      });
+    }
+    if (positions.movementPositionGoalAudit?.exists !== false) {
+      assert(positions.movementPositionGoalAudit?.status === "not_complete" &&
+        positions.movementPositionGoalAudit?.runtimeInput === false &&
+        positions.movementPositionGoalAudit?.runtimeApiData === false &&
+        positions.movementPositionGoalAudit?.schema === "movement-position-goal-audit/v1" &&
+        positions.movementPositionGoalAudit?.expectedReplayCount === 20 &&
+        positions.movementPositionGoalAudit?.expectedParticipantCount === 200 &&
+        positions.movementPositionGoalAudit?.passedChecks < positions.movementPositionGoalAudit?.totalChecks &&
+        (positions.movementPositionGoalAudit?.openChecks ?? []).includes("assignment/oracle identity gap closed"),
+        "Position evidence must include the movement-specific goal audit as not complete", {
+          movementPositionGoalAudit: positions.movementPositionGoalAudit,
+        });
+      assert((positions.movementPositionGoalAudit?.checks ?? []).some((entry) =>
+        entry.name === "all 16.9 corpus participants assigned" &&
+        entry.passed === false &&
+        entry.evidence?.assignmentCount === positions.qualityGateSummary?.assignmentOracleGapAssignedCount
+      ), "Movement position goal audit must preserve corpus assignment coverage blocker", {
+        movementPositionGoalAudit: positions.movementPositionGoalAudit,
+        qualityGateSummary: positions.qualityGateSummary,
+      });
+    }
     const unmatchedPositionCoverage = (positions.perParticipantCoverage ?? []).find((entry) => entry.status === "not_found");
     assert((positions.participantMovementArtifact?.unmatchedParticipants ?? []).length === unmatchedParticipantCount,
       "Position movement artifact must preserve top rejected candidates for the unmatched participant", {
@@ -1223,7 +1365,8 @@ function verifyIdentityLinkage(artifact) {
     });
   assert(identityLinkage.nonFinalScalarIdentity?.handleGraphRowLinkCandidates?.status === "not_promoted" &&
     identityLinkage.nonFinalScalarIdentity?.handleGraphRowLinkCandidates?.runtimeApiData === false &&
-    identityLinkage.nonFinalScalarIdentity?.handleGraphRowLinkCandidates?.topConfidence === "weak",
+    identityLinkage.nonFinalScalarIdentity?.handleGraphRowLinkCandidates?.topConfidence === "weak" &&
+    identityLinkage.nonFinalScalarIdentity?.handleGraphRowLinkCandidates?.nearMissSummary?.status === "no_promotable_handle_graph_candidate",
     "Identity linkage summary must surface handle-graph row-link candidates as not-promoted evidence", {
       identityLinkage,
     });
@@ -1322,6 +1465,22 @@ function verifyRoflDerivedFieldMap(artifact) {
     positions: fieldCoverage.positions,
   });
   assert(JSON.stringify(fieldMap.timeline?.["info.frames[].participantFrames[].position"]?.noPriorsDiagnostic ?? null) === JSON.stringify(fieldCoverage.positions?.noPriorsDiagnostic ?? null), "Position field map must mirror no-priors position coverage", {
+    fieldMap: fieldMap.timeline?.["info.frames[].participantFrames[].position"],
+    positions: fieldCoverage.positions,
+  });
+  assert(JSON.stringify(fieldMap.timeline?.["info.frames[].participantFrames[].position"]?.strictReplayOnlyDiagnostic ?? null) === JSON.stringify(fieldCoverage.positions?.strictReplayOnlyDiagnostic ?? null), "Position field map must mirror strict replay-only position coverage", {
+    fieldMap: fieldMap.timeline?.["info.frames[].participantFrames[].position"],
+    positions: fieldCoverage.positions,
+  });
+  assert(JSON.stringify(fieldMap.timeline?.["info.frames[].participantFrames[].position"]?.oracleCoverageDiagnostic ?? null) === JSON.stringify(fieldCoverage.positions?.oracleCoverageDiagnostic ?? null), "Position field map must mirror oracle position coverage", {
+    fieldMap: fieldMap.timeline?.["info.frames[].participantFrames[].position"],
+    positions: fieldCoverage.positions,
+  });
+  assert(JSON.stringify(fieldMap.timeline?.["info.frames[].participantFrames[].position"]?.assignmentOracleGapDiagnostic ?? null) === JSON.stringify(fieldCoverage.positions?.assignmentOracleGapDiagnostic ?? null), "Position field map must mirror assignment/oracle position gap", {
+    fieldMap: fieldMap.timeline?.["info.frames[].participantFrames[].position"],
+    positions: fieldCoverage.positions,
+  });
+  assert(JSON.stringify(fieldMap.timeline?.["info.frames[].participantFrames[].position"]?.movementPositionGoalAudit ?? null) === JSON.stringify(fieldCoverage.positions?.movementPositionGoalAudit ?? null), "Position field map must mirror movement position goal audit", {
     fieldMap: fieldMap.timeline?.["info.frames[].participantFrames[].position"],
     positions: fieldCoverage.positions,
   });
