@@ -144,6 +144,32 @@ Run the offline patch-corpus stability audit:
 npm run validate:rofl-api-parity-corpus -- --version-group 16.9 --allow-validation-mismatch
 ```
 
+Latest corpus sanity check, run after generalizing the runtime verifier away from the single focus replay:
+
+```powershell
+# export + runtime-verify every non-skipped replay from keyframe-rofl-stat-slot-assignments-16.9.json
+$ids = (node -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync('artifacts-keyframes/keyframe-rofl-stat-slot-assignments-16.9.json','utf8')); console.log((j.replays||[]).filter(r=>!r.skipped).map(r=>r.replayId).join('\n'))").Split("`n") | Where-Object { $_ }
+foreach ($id in $ids) {
+  npm run --silent export:rofl-api-metrics -- --replay-id $id
+  npm run --silent verify:rofl-api-metrics -- --replay-id $id
+}
+```
+
+Result on the current `16.9` corpus: all `20 / 20` replay exports verified. Each replay emitted all 10 ROFL metadata/`statsJson` participants, 50 ROFL-only final metric series, and 50 final metric points. This caught and fixed verifier assumptions that were overfit to `EUW1-7840220945`, including fixed movement blocker counts, fixed item-event candidate counts, and focus-replay-only rejected movement candidate details.
+
+The dedicated corpus validator also passed:
+
+- command: `npm run validate:rofl-api-parity-corpus -- --version-group 16.9 --allow-validation-mismatch`
+- replay count: `20`
+- participant final-stat parity: `30598 / 30600`
+- team final-stat parity: `335 / 360`
+- final timeline scalar/damage parity: `3400 / 3400`
+- metadata parity: `140 / 140`
+- ROFL-only runtime proof: `20 / 20`
+- participant proof count: `20 / 20`
+- remaining gap coverage: `20 / 20`
+- timeline reconstruction frame/keyframe formula: `20 / 20`
+
 The full checkpoint regenerates `keyframe-rofl-stat-slot-assignments-16.9.json` and the offline supervised comparison before export, so identity blocker evidence cannot go stale.
 The regenerated identity assignment artifact has schema `rofl-keyframe-stat-slot-assignments/v1`, which the checkpoint verifies before export.
 The regenerated offline identity comparison artifact has schema `rofl-keyframe-stat-supervised-comparison/v1`, which the checkpoint verifies before export.
@@ -491,7 +517,7 @@ Current `16.9` replay-only scalar identity evidence is not strong enough to emit
 
 The API-shaped artifact also records the 241-family row identity gate under `rejectedCandidateArtifacts.reconstructionRowIdentity`. That summary keeps the candidate evidence visible to runtime consumers without promoting it: both `241-0x02` and `241-0x04` have `promotionStatus=not_promoted`, `runtimeApiData=false`, `participantIdentity=false`, `minCoherence=0.75`, `strongestRows` with per-row blocker reasons, and row status counts that sum to 10 rejected or unstable rows.
 
-The same non-promoted identity path is mirrored in `fieldCoverage.timelineNonFinalParticipantIdentity`, `roflDerivedFieldMap.timeline["info.frames[].participantFrames[].nonFinalParticipantIdentity"]`, and `remainingParityGaps.nonFinalParticipantIdentity`, so consumers can see that the chunk-row evidence was considered but remains `not_promoted` with `participantIdentity=not-established`. The remaining-gap row also links the broader `identityLinkage.evidenceMatrix`, blocked `identityLinkage.nonFinalScalarIdentity.runtimePromotionGate`, `rejectedCandidateArtifacts.nonFinalScalarIdentity.startupKeyframeRowLink`, and `rejectedCandidateArtifacts.reconstructionRowIdentity.blockerMatrix`.
+The same non-promoted identity path is mirrored in `fieldCoverage.timelineNonFinalParticipantIdentity`, `roflDerivedFieldMap.timeline["info.frames[].participantFrames[].nonFinalParticipantIdentity"]`, and `remainingParityGaps.nonFinalParticipantIdentity`, so consumers can see that the chunk-row evidence was considered but remains `not_promoted` with `participantIdentity=not-established`. The remaining-gap row also links the broader `identityLinkage.evidenceMatrix`, blocked `identityLinkage.nonFinalScalarIdentity.runtimePromotionGate`, `rejectedCandidateArtifacts.nonFinalScalarIdentity.startupKeyframeRowLink`, and `rejectedCandidateArtifacts.reconstructionRowIdentity.blockerMatrix`. The startup/keyframe diagnostic now also records `relaxedKeyframeIdentifierTokenScan` as offline-only evidence from an all-assignments, low-threshold token scan; this gives decoder research weak-candidate visibility without letting those candidates become runtime API data.
 
 A probe with `--metric-set all` considered volatile ROFL final anchors such as health, power, and movement speed. It increased slot metric observations from 52 to 228 but, after duplicate same-metric support is collapsed and weak per-metric support is filtered, still produced no accepted assignments and 0 canonical candidates, so the default path remains conservative.
 

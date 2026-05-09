@@ -134,6 +134,7 @@ function main() {
 
   const startupScanPath = path.join(artifactRoot, "startup-roster-token-scan.json");
   const keyframeIdentifierTokenScanPath = path.join(artifactRoot, "keyframe-identifier-token-scan.json");
+  const relaxedKeyframeIdentifierTokenScanPath = path.join(artifactRoot, `keyframe-identifier-token-scan-relaxed-${args.versionGroup}.json`);
   const handleGraphPath = path.join(artifactRoot, "keyframe-handle-graph-candidate-scores.json");
   const rowIdentityPaths = [
     path.join(artifactRoot, `reconstruction-row-identity-241-0x02-${args.versionGroup}.json`),
@@ -142,11 +143,13 @@ function main() {
 
   const startupScan = readOptionalJson(startupScanPath);
   const keyframeIdentifierTokenScan = readOptionalJson(keyframeIdentifierTokenScanPath);
+  const relaxedKeyframeIdentifierTokenScan = readOptionalJson(relaxedKeyframeIdentifierTokenScanPath);
   const handleGraph = readOptionalJson(handleGraphPath);
   const rowIdentityArtifacts = rowIdentityPaths.map(readOptionalJson).filter(Boolean);
   const startupCandidates = summarizeStartupCandidates(startupScan, args.versionGroup);
   const handleSummary = summarizeHandleGraph(handleGraph);
   const keyframeIdentifierSummary = summarizeKeyframeIdentifierTokens(keyframeIdentifierTokenScan, args.versionGroup);
+  const relaxedKeyframeIdentifierSummary = summarizeKeyframeIdentifierTokens(relaxedKeyframeIdentifierTokenScan, args.versionGroup);
   const rowSummaries = rowIdentitySummary(rowIdentityArtifacts);
   const fullCorpusStartupCandidateCount = startupCandidates.filter((candidate) =>
     candidate.replayCount === 20 &&
@@ -173,6 +176,7 @@ function main() {
     inputPaths: {
       startupRosterTokenScan: startupScanPath,
       keyframeIdentifierTokenScan: keyframeIdentifierTokenScanPath,
+      relaxedKeyframeIdentifierTokenScan: relaxedKeyframeIdentifierTokenScanPath,
       handleGraphCandidateScores: handleGraphPath,
       rowIdentityArtifacts: rowIdentityPaths,
     },
@@ -181,12 +185,19 @@ function main() {
       `startupRosterOrderCandidateCount=${startupCandidates.length}`,
       `fullCorpusStartupRosterOrderCandidateCount=${fullCorpusStartupCandidateCount}`,
       `keyframeRosterOrderTokenCandidateCount=${keyframeIdentifierSummary.rosterOrderCandidateCount}`,
+      `relaxedKeyframeRosterOrderTokenCandidateCount=${relaxedKeyframeIdentifierSummary.rosterOrderCandidateCount}`,
       "directStartupToKeyframeRowLink=not_found",
       `rowIdentityGate=${assessment.rowIdentityGate}`,
       `handleGraphGate=${assessment.handleGraphGate}`,
     ],
     startupRosterOrderCandidates: startupCandidates,
     keyframeIdentifierTokenScan: keyframeIdentifierSummary,
+    relaxedKeyframeIdentifierTokenScan: {
+      ...relaxedKeyframeIdentifierSummary,
+      status: "relaxed_diagnostic_only_not_runtime_api_data",
+      runtimeInput: false,
+      runtimeApiData: false,
+    },
     keyframeRowIdentity: rowSummaries,
     handleGraphRowLinks: handleSummary,
     nextDecoderStep: "Find a replay-only record edge that carries startup roster/order tokens into a keyframe row family with stable 10-row participant identity.",

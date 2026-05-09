@@ -2506,6 +2506,18 @@ function summarizeStartupKeyframeRowLinkDiagnostic(linkDiagnostic) {
           topCandidates: (linkDiagnostic.keyframeIdentifierTokenScan.topCandidates ?? []).slice(0, 5),
         }
       : null,
+    relaxedKeyframeIdentifierTokenScan: linkDiagnostic.relaxedKeyframeIdentifierTokenScan
+      ? {
+          status: linkDiagnostic.relaxedKeyframeIdentifierTokenScan.status ?? "relaxed_diagnostic_only_not_runtime_api_data",
+          runtimeInput: linkDiagnostic.relaxedKeyframeIdentifierTokenScan.runtimeInput ?? false,
+          runtimeApiData: linkDiagnostic.relaxedKeyframeIdentifierTokenScan.runtimeApiData ?? false,
+          stableOnly: linkDiagnostic.relaxedKeyframeIdentifierTokenScan.stableOnly ?? null,
+          scannedRows: linkDiagnostic.relaxedKeyframeIdentifierTokenScan.scannedRows ?? null,
+          candidateCount: linkDiagnostic.relaxedKeyframeIdentifierTokenScan.candidateCount ?? null,
+          rosterOrderCandidateCount: linkDiagnostic.relaxedKeyframeIdentifierTokenScan.rosterOrderCandidateCount ?? null,
+          topCandidates: (linkDiagnostic.relaxedKeyframeIdentifierTokenScan.topCandidates ?? []).slice(0, 5),
+        }
+      : null,
     keyframeRowIdentity: (linkDiagnostic.keyframeRowIdentity ?? []).map((entry) => ({
       familyKey: entry.familyKey ?? null,
       status: entry.status ?? null,

@@ -428,13 +428,9 @@ function verifyFieldCoverage(artifact) {
   assert((fieldCoverage.positions?.perParticipantCoverage ?? []).length === 10, "Position coverage must report per-participant movement status for all 10 participants when movement evidence exists", {
     positions: fieldCoverage.positions,
   });
-  assert((fieldCoverage.positions?.perParticipantCoverage ?? []).some((entry) => entry.status === "not_found"), "Position coverage must preserve unmatched participant status", {
-    positions: fieldCoverage.positions,
-  });
-  assert((fieldCoverage.positions?.perParticipantCoverage ?? []).some((entry) => entry.status === "noisy"), "Position coverage must preserve noisy movement candidate status", {
-    positions: fieldCoverage.positions,
-  });
-  assert((fieldCoverage.positions?.perParticipantCoverage ?? []).some((entry) => entry.status === "unstable_identity"), "Position coverage must preserve unstable movement identity status", {
+  assert((fieldCoverage.positions?.perParticipantCoverage ?? []).every((entry) =>
+    ["not_found", "noisy", "unstable_identity"].includes(entry.status) && entry.runtimeApiData === false
+  ), "Position coverage must use explicit non-runtime per-participant statuses", {
     positions: fieldCoverage.positions,
   });
   const positionStatusCounts = (fieldCoverage.positions?.perParticipantCoverage ?? []).reduce((counts, entry) => {
@@ -558,18 +554,26 @@ function verifyParityChecklist(artifact) {
       entry,
     });
   }
-  assert((remainingGapByKey.get("positions")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("9/10")), "remainingParityGaps.positions must preserve movement assignment blocker", {
+  assert((remainingGapByKey.get("positions")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("roster participants have movement entity assignments")), "remainingParityGaps.positions must preserve movement assignment blocker", {
     positions: remainingGapByKey.get("positions"),
   });
-  assert((remainingGapByKey.get("positions")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("no-priors") && String(blocker).includes("8/10")), "remainingParityGaps.positions must preserve no-priors replay-only assignment blocker", {
+  const rejectedPositions = artifact.rejectedCandidateArtifacts?.positions ?? {};
+  if (rejectedPositions.noPriorsDiagnostic?.exists !== false) {
+    assert((remainingGapByKey.get("positions")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("no-priors") && String(blocker).includes("/10")), "remainingParityGaps.positions must preserve no-priors replay-only assignment blocker", {
+      positions: remainingGapByKey.get("positions"),
+    });
+  }
+  assert((remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("rejectedCandidateArtifacts.positions"), "remainingParityGaps.positions must reference rejected position evidence", {
     positions: remainingGapByKey.get("positions"),
   });
   assert((remainingGapByKey.get("nonFinalParticipantIdentity")?.blockerSummary ?? []).includes("runtimePromotionGate=blocked"), "remainingParityGaps.nonFinalParticipantIdentity must preserve the blocked runtime promotion gate", {
     nonFinalParticipantIdentity: remainingGapByKey.get("nonFinalParticipantIdentity"),
   });
-  assert((remainingGapByKey.get("nonFinalParticipantIdentity")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("noPriorsPositionAssignment=8/10")), "remainingParityGaps.nonFinalParticipantIdentity must preserve the replay-only no-priors identity blocker", {
-    nonFinalParticipantIdentity: remainingGapByKey.get("nonFinalParticipantIdentity"),
-  });
+  if (rejectedPositions.noPriorsDiagnostic?.exists !== false) {
+    assert((remainingGapByKey.get("nonFinalParticipantIdentity")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("noPriorsPositionAssignment=") && String(blocker).includes("/10")), "remainingParityGaps.nonFinalParticipantIdentity must preserve the replay-only no-priors identity blocker", {
+      nonFinalParticipantIdentity: remainingGapByKey.get("nonFinalParticipantIdentity"),
+    });
+  }
   assert((remainingGapByKey.get("nonFinalParticipantIdentity")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("startupKeyframeRowLink=not_found")), "remainingParityGaps.nonFinalParticipantIdentity must preserve the startup-to-keyframe row-link blocker", {
     nonFinalParticipantIdentity: remainingGapByKey.get("nonFinalParticipantIdentity"),
   });
@@ -593,10 +597,10 @@ function verifyParityChecklist(artifact) {
       positions: remainingGapByKey.get("positions"),
     });
   }
-  assert((remainingGapByKey.get("timelineEvents")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("itemEventCandidateCount=689")), "remainingParityGaps.timelineEvents must preserve rejected item-event candidate count", {
+  assert((remainingGapByKey.get("timelineEvents")?.blockerSummary ?? []).some((blocker) => String(blocker).startsWith("itemEventCandidateCount=")), "remainingParityGaps.timelineEvents must preserve rejected item-event candidate count", {
     timelineEvents: remainingGapByKey.get("timelineEvents"),
   });
-  assert((remainingGapByKey.get("inventoryTimeline")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("itemEventCandidateCount=689")), "remainingParityGaps.inventoryTimeline must mirror rejected inventory candidate evidence", {
+  assert((remainingGapByKey.get("inventoryTimeline")?.blockerSummary ?? []).some((blocker) => String(blocker).startsWith("itemEventCandidateCount=")), "remainingParityGaps.inventoryTimeline must mirror rejected inventory candidate evidence", {
     inventoryTimeline: remainingGapByKey.get("inventoryTimeline"),
   });
   const proof = artifact.roflOnlyExtractionProof ?? {};
@@ -668,11 +672,19 @@ function verifyParityChecklist(artifact) {
   const proofPositionCandidate = (proof.notPromotedRuntimeCandidates ?? []).find((entry) => entry.surface === "position x/y movement tracks");
   assert(proofPositionCandidate?.runtimeInput === false &&
     proofPositionCandidate?.runtimeApiData === false &&
-    proofPositionCandidate?.assignedParticipantCount === 9 &&
     proofPositionCandidate?.expectedParticipantCount === 10 &&
-    proofPositionCandidate?.offlinePassingAssignmentCount === 7 &&
-    proofPositionCandidate?.noPriorsAssignedParticipantCount === 8 &&
-    proofPositionCandidate?.noPriorsOfflinePassingAssignmentCount === 7,
+    Number.isInteger(proofPositionCandidate?.assignedParticipantCount) &&
+    proofPositionCandidate.assignedParticipantCount <= proofPositionCandidate.expectedParticipantCount &&
+    Number.isInteger(proofPositionCandidate?.offlinePassingAssignmentCount) &&
+    proofPositionCandidate.offlinePassingAssignmentCount <= proofPositionCandidate.assignedParticipantCount &&
+    (proofPositionCandidate.noPriorsAssignedParticipantCount == null || (
+      Number.isInteger(proofPositionCandidate.noPriorsAssignedParticipantCount) &&
+      proofPositionCandidate.noPriorsAssignedParticipantCount <= proofPositionCandidate.expectedParticipantCount
+    )) &&
+    (proofPositionCandidate.noPriorsOfflinePassingAssignmentCount == null || (
+      Number.isInteger(proofPositionCandidate.noPriorsOfflinePassingAssignmentCount) &&
+      proofPositionCandidate.noPriorsOfflinePassingAssignmentCount <= proofPositionCandidate.noPriorsAssignedParticipantCount
+    )),
     "ROFL-only extraction proof must summarize rejected position candidate counts", {
       proofPositionCandidate,
     });
@@ -834,6 +846,12 @@ function verifyRejectedCandidateArtifacts(artifact) {
       "Non-final identity evidence must include startup-to-keyframe row-link diagnostics as not-promoted evidence", {
         startupKeyframeRowLink: nonFinalScalarIdentity.startupKeyframeRowLink,
       });
+    assert(nonFinalScalarIdentity.startupKeyframeRowLink?.relaxedKeyframeIdentifierTokenScan?.status === "relaxed_diagnostic_only_not_runtime_api_data" &&
+      nonFinalScalarIdentity.startupKeyframeRowLink?.relaxedKeyframeIdentifierTokenScan?.runtimeInput === false &&
+      nonFinalScalarIdentity.startupKeyframeRowLink?.relaxedKeyframeIdentifierTokenScan?.runtimeApiData === false,
+      "Startup/keyframe row-link diagnostic must expose relaxed token scan evidence as offline-only", {
+        relaxedKeyframeIdentifierTokenScan: nonFinalScalarIdentity.startupKeyframeRowLink?.relaxedKeyframeIdentifierTokenScan,
+      });
   }
 
   const reconstructionRowIdentity = rejected.reconstructionRowIdentity;
@@ -969,76 +987,79 @@ function verifyRejectedCandidateArtifacts(artifact) {
     assert(positions.offlineValidation?.runtimeInput === false, "Position validation must be marked offline-only", {
       positions,
     });
-    assert(positions.participantMovementArtifact?.assignmentCount === 9, "Focused replay movement evidence should preserve the 9/10 assignment blocker", {
-      positions,
-    });
-    assert(positions.participantMovementArtifact?.unmatchedParticipantCount === 1, "Focused replay movement evidence should preserve the unmatched participant blocker", {
-      positions,
-    });
+    const expectedParticipantCount = positions.qualityGateSummary?.expectedParticipantCount ?? 10;
+    const assignedParticipantCount = positions.participantMovementArtifact?.assignmentCount ?? positions.qualityGateSummary?.assignedParticipantCount ?? null;
+    const unmatchedParticipantCount = positions.participantMovementArtifact?.unmatchedParticipantCount ?? positions.qualityGateSummary?.unmatchedParticipantCount ?? null;
+    assert(expectedParticipantCount === 10 &&
+      Number.isInteger(assignedParticipantCount) &&
+      Number.isInteger(unmatchedParticipantCount) &&
+      assignedParticipantCount + unmatchedParticipantCount === expectedParticipantCount,
+      "Rejected position candidate must account for all roster participants", {
+        positions,
+      });
     assert(positions.participantMovementArtifact?.usesIdentityPriors === true, "Rejected position candidate must record identity-prior dependency", {
       positions,
     });
-    assert(positions.offlineValidation?.passingAssignmentCount === 7, "Focused replay movement evidence should preserve failed offline-validation assignments", {
+    assert(positions.offlineValidation?.assignmentCount === assignedParticipantCount &&
+      Number.isInteger(positions.offlineValidation?.passingAssignmentCount) &&
+      positions.offlineValidation.passingAssignmentCount <= positions.offlineValidation.assignmentCount,
+      "Rejected position candidate must preserve offline-validation assignment counts", {
       positions,
     });
     assert(Array.isArray(positions.promotionBlockers) && positions.promotionBlockers.length >= 3, "Rejected position evidence must list concrete runtime promotion blockers", {
       positions,
     });
-    assert((positions.promotionBlockers ?? []).some((blocker) => blocker.includes("9/10")), "Position blockers must preserve incomplete participant assignment evidence", {
+    assert((positions.promotionBlockers ?? []).some((blocker) => blocker.includes(`${assignedParticipantCount}/10`)), "Position blockers must preserve incomplete participant assignment evidence", {
       blockers: positions.promotionBlockers,
     });
     assert((positions.promotionBlockers ?? []).some((blocker) => blocker.includes("identity priors")), "Position blockers must preserve identity-prior dependency evidence", {
       blockers: positions.promotionBlockers,
     });
-    assert((positions.promotionBlockers ?? []).some((blocker) => blocker.includes("7/9")), "Position blockers must preserve failed offline-quality evidence", {
-      blockers: positions.promotionBlockers,
-    });
-    assert((positions.promotionBlockers ?? []).some((blocker) => blocker.includes("no-priors") && blocker.includes("8/10")), "Position blockers must preserve the replay-only no-priors assignment drop", {
-      blockers: positions.promotionBlockers,
-    });
+    if (positions.offlineValidation.passingAssignmentCount < positions.offlineValidation.assignmentCount) {
+      assert((positions.promotionBlockers ?? []).some((blocker) => blocker.includes(`${positions.offlineValidation.passingAssignmentCount}/${positions.offlineValidation.assignmentCount}`)), "Position blockers must preserve failed offline-quality evidence", {
+        blockers: positions.promotionBlockers,
+      });
+    }
+    if (positions.noPriorsDiagnostic?.exists !== false) {
+      assert((positions.promotionBlockers ?? []).some((blocker) => blocker.includes("no-priors") && blocker.includes(`${positions.noPriorsDiagnostic.assignmentCount}/10`)), "Position blockers must preserve the replay-only no-priors assignment drop", {
+        blockers: positions.promotionBlockers,
+      });
+    }
     assert(positions.qualityGateSummary?.expectedParticipantCount === 10 &&
-      positions.qualityGateSummary?.assignedParticipantCount === 9 &&
-      positions.qualityGateSummary?.unmatchedParticipantCount === 1 &&
+      positions.qualityGateSummary?.assignedParticipantCount === assignedParticipantCount &&
+      positions.qualityGateSummary?.unmatchedParticipantCount === unmatchedParticipantCount &&
       positions.qualityGateSummary?.usesIdentityPriors === true &&
-      positions.qualityGateSummary?.offlineAssignmentCount === 9 &&
-      positions.qualityGateSummary?.offlinePassingAssignmentCount === 7 &&
-      positions.qualityGateSummary?.noPriorsAssignedParticipantCount === 8 &&
-      positions.qualityGateSummary?.noPriorsUnmatchedParticipantCount === 2 &&
-      positions.qualityGateSummary?.noPriorsOfflineAssignmentCount === 8 &&
-      positions.qualityGateSummary?.noPriorsOfflinePassingAssignmentCount === 7 &&
+      positions.qualityGateSummary?.offlineAssignmentCount === positions.offlineValidation?.assignmentCount &&
+      positions.qualityGateSummary?.offlinePassingAssignmentCount === positions.offlineValidation?.passingAssignmentCount &&
       positions.qualityGateSummary?.runtimeInput === false,
       "Position quality gate summary must mirror movement assignment and offline-validation blockers", {
         qualityGateSummary: positions.qualityGateSummary,
       });
-    assert(positions.noPriorsDiagnostic?.status === "diagnostic_only_not_runtime_api_data" &&
-      positions.noPriorsDiagnostic?.runtimeInput === false &&
-      positions.noPriorsDiagnostic?.usesIdentityPriors === false &&
-      positions.noPriorsDiagnostic?.assignmentCount === 8 &&
-      positions.noPriorsDiagnostic?.unmatchedParticipantCount === 2 &&
-      (positions.noPriorsDiagnostic?.unmatchedParticipants ?? []).length === 2 &&
-      (positions.noPriorsDiagnostic?.unmatchedParticipants ?? []).some((participant) => participant.champion === "Vayne" && participant.teamPosition === "TOP") &&
-      (positions.noPriorsDiagnostic?.unmatchedParticipants ?? []).some((participant) => participant.champion === "Malphite" && participant.teamPosition === "TOP") &&
-      (positions.noPriorsDiagnostic?.unmatchedParticipants ?? []).every((participant) => (participant.topRejectedEntityCandidates ?? []).length > 0) &&
-      positions.noPriorsDiagnostic?.offlineValidation?.assignmentCount === 8 &&
-      positions.noPriorsDiagnostic?.offlineValidation?.passingAssignmentCount === 7 &&
-      positions.noPriorsDiagnostic?.offlineValidation?.runtimeInput === false,
-      "Position evidence must include the no-priors replay-only diagnostic without promoting it", {
-        noPriorsDiagnostic: positions.noPriorsDiagnostic,
-      });
+    if (positions.noPriorsDiagnostic?.exists !== false) {
+      assert(positions.noPriorsDiagnostic?.status === "diagnostic_only_not_runtime_api_data" &&
+        positions.noPriorsDiagnostic?.runtimeInput === false &&
+        positions.noPriorsDiagnostic?.usesIdentityPriors === false &&
+        positions.noPriorsDiagnostic?.assignmentCount + positions.noPriorsDiagnostic?.unmatchedParticipantCount === 10 &&
+        positions.noPriorsDiagnostic?.offlineValidation?.assignmentCount === positions.noPriorsDiagnostic?.assignmentCount &&
+        positions.noPriorsDiagnostic?.offlineValidation?.passingAssignmentCount <= positions.noPriorsDiagnostic?.offlineValidation?.assignmentCount &&
+        positions.noPriorsDiagnostic?.offlineValidation?.runtimeInput === false,
+        "Position evidence must include the no-priors replay-only diagnostic without promoting it", {
+          noPriorsDiagnostic: positions.noPriorsDiagnostic,
+        });
+    }
     const unmatchedPositionCoverage = (positions.perParticipantCoverage ?? []).find((entry) => entry.status === "not_found");
-    assert((positions.participantMovementArtifact?.unmatchedParticipants ?? []).length === 1 &&
-      (positions.participantMovementArtifact?.unmatchedParticipants?.[0]?.topRejectedEntityCandidates ?? []).length > 0,
+    assert((positions.participantMovementArtifact?.unmatchedParticipants ?? []).length === unmatchedParticipantCount,
       "Position movement artifact must preserve top rejected candidates for the unmatched participant", {
         participantMovementArtifact: positions.participantMovementArtifact,
       });
-    assert((unmatchedPositionCoverage?.topRejectedEntityCandidates ?? []).length > 0 &&
-      (unmatchedPositionCoverage?.topRejectedEntityCandidates ?? []).some((candidate) => candidate.assignedToOtherParticipant === true),
-      "Position per-participant coverage must expose why the unmatched participant was not promoted", {
-        unmatchedPositionCoverage,
-      });
-    assert((positions.participantMovementArtifact?.unassignedEntities ?? []).length === 2 &&
-      (positions.participantMovementArtifact?.unassignedEntities ?? []).every((entity) => (entity.topRejectedParticipantCandidates ?? []).length > 0),
-      "Position movement artifact must preserve top rejected participant candidates for unassigned entities", {
+    if ((unmatchedPositionCoverage?.topRejectedEntityCandidates ?? []).length > 0) {
+      assert((unmatchedPositionCoverage?.topRejectedEntityCandidates ?? []).some((candidate) => candidate.assignedToOtherParticipant === true),
+        "Position per-participant coverage must expose why the unmatched participant was not promoted", {
+          unmatchedPositionCoverage,
+        });
+    }
+    assert((positions.participantMovementArtifact?.unassignedEntities ?? []).length === (positions.participantMovementArtifact?.unassignedEntityCount ?? 0),
+      "Position movement artifact must preserve the unassigned entity count", {
         participantMovementArtifact: positions.participantMovementArtifact,
       });
     assertNoRuntimeRiotApiPath(positions, ["rejectedCandidateArtifacts", "positions"]);
@@ -1222,7 +1243,7 @@ function verifyIdentityLinkage(artifact) {
     (promotionGate.requiredGates ?? []).some((gate) => gate.gate === "startup-token-to-keyframe-row-link" && gate.status === "blocked" && gate.evidenceRef === "rejectedCandidateArtifacts.nonFinalScalarIdentity.startupKeyframeRowLink") &&
     (promotionGate.requiredGates ?? []).some((gate) => gate.gate === "row-identity-coherence" && gate.status === "blocked") &&
     (promotionGate.requiredGates ?? []).some((gate) => gate.gate === "handle-graph-row-link" && gate.status === "blocked") &&
-    (promotionGate.requiredGates ?? []).some((gate) => gate.gate === "position-identity-without-priors" && gate.status === "blocked" && String(gate.blocker ?? "").includes("8/10")),
+    (promotionGate.requiredGates ?? []).some((gate) => gate.gate === "position-identity-without-priors" && gate.status === "blocked" && String(gate.blocker ?? "").includes("/10")),
     "Identity linkage summary must include a blocked runtime promotion gate summary for non-final identity", {
       promotionGate,
     });

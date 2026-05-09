@@ -426,6 +426,26 @@ function verifyKeyframeIdentifierTokenScanOutput(artifactRoot, versionGroup) {
   }
 }
 
+function verifyRelaxedKeyframeIdentifierTokenScanOutput(artifactRoot, versionGroup) {
+  const scanPath = path.resolve(process.cwd(), artifactRoot, `keyframe-identifier-token-scan-relaxed-${versionGroup}.json`);
+  const scan = JSON.parse(fs.readFileSync(scanPath, "utf8"));
+  if (scan.stableOnly !== false) {
+    throw new Error(`Relaxed keyframe identifier token scan must use all assignments: ${JSON.stringify(scan)}`);
+  }
+  if ((scan.scannedRows ?? 0) <= 0 || (scan.rawCandidateCount ?? 0) <= 0) {
+    throw new Error(`Relaxed keyframe identifier token scan must inspect candidate rows: ${JSON.stringify(scan)}`);
+  }
+  if (scan.thresholds?.minSupportRows !== 1 || scan.thresholds?.minHitRate !== 0.25) {
+    throw new Error(`Relaxed keyframe identifier token scan thresholds changed unexpectedly: ${JSON.stringify(scan.thresholds ?? null)}`);
+  }
+  const rosterOrderKinds = new Set(["participantId", "rosterIndex", "rosterOrdinal", "teamId", "championId"]);
+  const rosterOrderCandidates = (scan.candidates ?? [])
+    .filter((candidate) => candidate.versionGroup === versionGroup && rosterOrderKinds.has(candidate.tokenKind));
+  if (rosterOrderCandidates.some((candidate) => (candidate.hitRate ?? 0) >= 0.75 && (candidate.hitRows ?? 0) >= 3)) {
+    throw new Error(`Relaxed keyframe identifier token scan produced a strict-quality roster/order candidate that needs promotion review: ${JSON.stringify(rosterOrderCandidates)}`);
+  }
+}
+
 function verifyStartupKeyframeRowLinkOutput(artifactRoot, versionGroup) {
   const diagnosticPath = path.resolve(process.cwd(), artifactRoot, `startup-keyframe-row-link-diagnostic-${versionGroup}.json`);
   const diagnostic = JSON.parse(fs.readFileSync(diagnosticPath, "utf8"));
@@ -447,6 +467,11 @@ function verifyStartupKeyframeRowLinkOutput(artifactRoot, versionGroup) {
   if ((diagnostic.startupRosterOrderCandidates ?? []).length === 0 ||
     !(diagnostic.blockerSummary ?? []).some((blocker) => String(blocker).includes("directStartupToKeyframeRowLink=not_found"))) {
     throw new Error(`Startup/keyframe row-link diagnostic must include startup candidates and the direct-link blocker: ${JSON.stringify(diagnostic)}`);
+  }
+  if (diagnostic.relaxedKeyframeIdentifierTokenScan?.status !== "relaxed_diagnostic_only_not_runtime_api_data" ||
+    diagnostic.relaxedKeyframeIdentifierTokenScan?.runtimeInput !== false ||
+    diagnostic.relaxedKeyframeIdentifierTokenScan?.runtimeApiData !== false) {
+    throw new Error(`Startup/keyframe row-link diagnostic must include the relaxed token scan as offline-only evidence: ${JSON.stringify(diagnostic.relaxedKeyframeIdentifierTokenScan ?? null)}`);
   }
 }
 
@@ -565,6 +590,18 @@ function main() {
     args.artifactRoot,
   ]);
   verifyKeyframeIdentifierTokenScanOutput(args.artifactRoot, args.versionGroup);
+  runStep("scan-keyframe-identifier-tokens-relaxed", scanKeyframeIdentifierTokensScript, [
+    "--artifact-root",
+    args.artifactRoot,
+    "--all-assignments",
+    "--min-support-rows",
+    "1",
+    "--min-hit-rate",
+    "0.25",
+    "--output-path",
+    path.join(args.artifactRoot, `keyframe-identifier-token-scan-relaxed-${args.versionGroup}.json`),
+  ]);
+  verifyRelaxedKeyframeIdentifierTokenScanOutput(args.artifactRoot, args.versionGroup);
 
   runStep("offline-timeline-reconstruction-audit", timelineReconstructionScript, sharedArgs);
   verifyTimelineReconstructionOutput(args.replayId, args.artifactRoot);
