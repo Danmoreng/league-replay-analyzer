@@ -603,6 +603,62 @@ function solveAssignments(participants, entities, scoreMatrix) {
   return search(0, 0).assignments;
 }
 
+function summarizeParticipantCandidateScores(participantOffset, participants, entities, scoreMatrix, assignedEntityKeys) {
+  const participant = participants[participantOffset];
+  return (scoreMatrix[participantOffset] ?? [])
+    .map((scoreEntry, entityOffset) => {
+      const entity = entities[entityOffset];
+      return {
+        entityKey: entity.entityKey,
+        entityGroupKey: entity.entityGroupKey,
+        familyKey: entity.familyKey,
+        patternKey: entity.patternKey ?? null,
+        slotIndex: entity.slotIndex,
+        score: scoreEntry?.score ?? null,
+        belowMinimumAssignmentScore: (scoreEntry?.score ?? 0) < minimumAssignmentScore,
+        assignedToOtherParticipant: assignedEntityKeys.has(entity.entityKey),
+        entityQuality: entity.entityQuality ?? null,
+        scoreComponents: scoreEntry?.components ?? null,
+        participant: {
+          rosterIndex: participant.rosterIndex,
+          champion: participant.champion,
+          team: participant.team,
+          teamPosition: participant.teamPosition,
+        },
+      };
+    })
+    .sort((left, right) => (right.score ?? -Infinity) - (left.score ?? -Infinity))
+    .slice(0, 5);
+}
+
+function summarizeEntityCandidateScores(entityOffset, participants, entities, scoreMatrix, assignedRoster) {
+  const entity = entities[entityOffset];
+  return participants
+    .map((participant, participantOffset) => {
+      const scoreEntry = scoreMatrix[participantOffset]?.[entityOffset];
+      return {
+        rosterIndex: participant.rosterIndex,
+        champion: participant.champion,
+        team: participant.team,
+        teamPosition: participant.teamPosition,
+        score: scoreEntry?.score ?? null,
+        belowMinimumAssignmentScore: (scoreEntry?.score ?? 0) < minimumAssignmentScore,
+        participantAlreadyAssigned: assignedRoster.has(participant.rosterIndex),
+        scoreComponents: scoreEntry?.components ?? null,
+      };
+    })
+    .sort((left, right) => (right.score ?? -Infinity) - (left.score ?? -Infinity))
+    .slice(0, 5)
+    .map((candidate) => ({
+      ...candidate,
+      entityKey: entity.entityKey,
+      entityGroupKey: entity.entityGroupKey,
+      familyKey: entity.familyKey,
+      patternKey: entity.patternKey ?? null,
+      slotIndex: entity.slotIndex,
+    }));
+}
+
 function main() {
   const repoRoot = process.cwd();
   const args = parseArgs(process.argv);
@@ -694,15 +750,30 @@ function main() {
         champion: participant.champion,
         team: participant.team,
         teamPosition: participant.teamPosition,
+        topRejectedEntityCandidates: summarizeParticipantCandidateScores(
+          participantsWithScores.indexOf(participant),
+          participantsWithScores,
+          entities,
+          scoreMatrix,
+          assignedEntityKeys,
+        ),
       })),
     unassignedEntities: entities
-      .filter((entity) => !assignedEntityKeys.has(entity.entityKey))
-      .map((entity) => ({
+      .map((entity, entityOffset) => ({ entity, entityOffset }))
+      .filter(({ entity }) => !assignedEntityKeys.has(entity.entityKey))
+      .map(({ entity, entityOffset }) => ({
         entityKey: entity.entityKey,
         entityGroupKey: entity.entityGroupKey,
         familyKey: entity.familyKey,
         slotIndex: entity.slotIndex,
         entityQuality: entity.entityQuality,
+        topRejectedParticipantCandidates: summarizeEntityCandidateScores(
+          entityOffset,
+          participantsWithScores,
+          entities,
+          scoreMatrix,
+          assignedRoster,
+        ),
       })),
     discardedAliases,
     normalization: {

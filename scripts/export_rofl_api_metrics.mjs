@@ -53,6 +53,248 @@ const defaultMaxMeanAbsErrorByMetric = new Map([
   ["movementSpeed", 25],
 ]);
 
+const riotTimelineChampionStatFields = [
+  "abilityHaste",
+  "abilityPower",
+  "armor",
+  "armorPen",
+  "armorPenPercent",
+  "attackDamage",
+  "attackSpeed",
+  "bonusArmorPenPercent",
+  "bonusMagicPenPercent",
+  "ccReduction",
+  "cooldownReduction",
+  "health",
+  "healthMax",
+  "healthRegen",
+  "lifesteal",
+  "magicPen",
+  "magicPenPercent",
+  "magicResist",
+  "movementSpeed",
+  "omnivamp",
+  "physicalVamp",
+  "power",
+  "powerMax",
+  "powerRegen",
+  "spellVamp",
+];
+
+const riotMatchChallengeFields16_9 = [
+  "12AssistStreakCount",
+  "HealFromMapSources",
+  "InfernalScalePickup",
+  "SWARM_DefeatAatrox",
+  "SWARM_DefeatBriar",
+  "SWARM_DefeatMiniBosses",
+  "SWARM_EvolveWeapon",
+  "SWARM_Have3Passives",
+  "SWARM_KillEnemy",
+  "SWARM_PickupGold",
+  "SWARM_ReachLevel50",
+  "SWARM_Survive15Min",
+  "SWARM_WinWith5EvolvedWeapons",
+  "abilityUses",
+  "acesBefore15Minutes",
+  "alliedJungleMonsterKills",
+  "baronTakedowns",
+  "blastConeOppositeOpponentCount",
+  "bountyGold",
+  "buffsStolen",
+  "completeSupportQuestInTime",
+  "controlWardsPlaced",
+  "controlWardTimeCoverageInRiverOrEnemyHalf",
+  "damagePerMinute",
+  "damageTakenOnTeamPercentage",
+  "dancedWithRiftHerald",
+  "deathsByEnemyChamps",
+  "dodgeSkillShotsSmallWindow",
+  "doubleAces",
+  "dragonTakedowns",
+  "earlyLaningPhaseGoldExpAdvantage",
+  "effectiveHealAndShielding",
+  "elderDragonKillsWithOpposingSoul",
+  "elderDragonMultikills",
+  "earliestBaron",
+  "earliestDragonTakedown",
+  "enemyChampionImmobilizations",
+  "enemyJungleMonsterKills",
+  "epicMonsterKillsNearEnemyJungler",
+  "epicMonsterKillsWithin30SecondsOfSpawn",
+  "epicMonsterSteals",
+  "epicMonsterStolenWithoutSmite",
+  "firstTurretKilled",
+  "firstTurretKilledTime",
+  "fasterSupportQuestCompletion",
+  "fastestLegendary",
+  "fistBumpParticipation",
+  "flawlessAces",
+  "fullTeamTakedown",
+  "gameLength",
+  "getTakedownsInAllLanesEarlyJungleAsLaner",
+  "goldPerMinute",
+  "hadOpenNexus",
+  "highestChampionDamage",
+  "highestCrowdControlScore",
+  "highestWardKills",
+  "immobilizeAndKillWithAlly",
+  "initialBuffCount",
+  "initialCrabCount",
+  "jungleCsBefore10Minutes",
+  "junglerTakedownsNearDamagedEpicMonster",
+  "junglerKillsEarlyJungle",
+  "kTurretsDestroyedBeforePlatesFall",
+  "kda",
+  "killAfterHiddenWithAlly",
+  "killParticipation",
+  "killedChampTookFullTeamDamageSurvived",
+  "killingSprees",
+  "killsNearEnemyTurret",
+  "killsOnOtherLanesEarlyJungleAsLaner",
+  "killsOnLanersEarlyJungleAsJungler",
+  "killsOnRecentlyHealedByAramPack",
+  "killsUnderOwnTurret",
+  "killsWithHelpFromEpicMonster",
+  "knockEnemyIntoTeamAndKill",
+  "landSkillShotsEarlyGame",
+  "laneMinionsFirst10Minutes",
+  "laningPhaseGoldExpAdvantage",
+  "legendaryCount",
+  "legendaryItemUsed",
+  "lostAnInhibitor",
+  "maxCsAdvantageOnLaneOpponent",
+  "maxKillDeficit",
+  "maxLevelLeadLaneOpponent",
+  "mejaisFullStackInTime",
+  "moreEnemyJungleThanOpponent",
+  "multiKillOneSpell",
+  "multiTurretRiftHeraldCount",
+  "multikills",
+  "multikillsAfterAggressiveFlash",
+  "outerTurretExecutesBefore10Minutes",
+  "outnumberedKills",
+  "outnumberedNexusKill",
+  "perfectDragonSoulsTaken",
+  "perfectGame",
+  "pickKillWithAlly",
+  "playedChampSelectPosition",
+  "poroExplosions",
+  "quickCleanse",
+  "quickFirstTurret",
+  "quickSoloKills",
+  "riftHeraldTakedowns",
+  "saveAllyFromDeath",
+  "scuttleCrabKills",
+  "skillshotsDodged",
+  "skillshotsHit",
+  "shortestTimeToAceFromFirstTakedown",
+  "snowballsHit",
+  "soloBaronKills",
+  "soloKills",
+  "soloTurretsLategame",
+  "stealthWardsPlaced",
+  "survivedSingleDigitHpCount",
+  "survivedThreeImmobilizesInFight",
+  "takedownOnFirstTurret",
+  "takedowns",
+  "takedownsAfterGainingLevelAdvantage",
+  "takedownsBeforeJungleMinionSpawn",
+  "takedownsFirstXMinutes",
+  "takedownsInAlcove",
+  "takedownsInEnemyFountain",
+  "teamBaronKills",
+  "teamDamagePercentage",
+  "teamElderDragonKills",
+  "teamRiftHeraldKills",
+  "tookLargeDamageSurvived",
+  "turretPlatesTaken",
+  "turretTakedowns",
+  "turretsTakenWithRiftHerald",
+  "twentyMinionsIn3SecondsCount",
+  "twoWardsOneSweeperCount",
+  "unseenRecalls",
+  "visionScoreAdvantageLaneOpponent",
+  "visionScorePerMinute",
+  "voidMonsterKill",
+  "wardTakedowns",
+  "wardTakedownsBefore20M",
+  "wardsGuarded",
+];
+
+const riotTimelineEventLeafPaths16_9 = [
+  "info.frames.[].events.[].actualStartTime",
+  "info.frames.[].events.[].afterId",
+  "info.frames.[].events.[].assistingParticipantIds.[]",
+  "info.frames.[].events.[].beforeId",
+  "info.frames.[].events.[].bounty",
+  "info.frames.[].events.[].buildingType",
+  "info.frames.[].events.[].creatorId",
+  "info.frames.[].events.[].gameId",
+  "info.frames.[].events.[].goldGain",
+  "info.frames.[].events.[].itemId",
+  "info.frames.[].events.[].killStreakLength",
+  "info.frames.[].events.[].killType",
+  "info.frames.[].events.[].killerId",
+  "info.frames.[].events.[].killerTeamId",
+  "info.frames.[].events.[].laneType",
+  "info.frames.[].events.[].level",
+  "info.frames.[].events.[].levelUpType",
+  "info.frames.[].events.[].monsterSubType",
+  "info.frames.[].events.[].monsterType",
+  "info.frames.[].events.[].multiKillLength",
+  "info.frames.[].events.[].name",
+  "info.frames.[].events.[].participantId",
+  "info.frames.[].events.[].position.x",
+  "info.frames.[].events.[].position.y",
+  "info.frames.[].events.[].realTimestamp",
+  "info.frames.[].events.[].shutdownBounty",
+  "info.frames.[].events.[].skillSlot",
+  "info.frames.[].events.[].teamId",
+  "info.frames.[].events.[].timestamp",
+  "info.frames.[].events.[].towerType",
+  "info.frames.[].events.[].type",
+  "info.frames.[].events.[].victimDamageDealt.[].basic",
+  "info.frames.[].events.[].victimDamageDealt.[].magicDamage",
+  "info.frames.[].events.[].victimDamageDealt.[].name",
+  "info.frames.[].events.[].victimDamageDealt.[].participantId",
+  "info.frames.[].events.[].victimDamageDealt.[].physicalDamage",
+  "info.frames.[].events.[].victimDamageDealt.[].spellName",
+  "info.frames.[].events.[].victimDamageDealt.[].spellSlot",
+  "info.frames.[].events.[].victimDamageDealt.[].trueDamage",
+  "info.frames.[].events.[].victimDamageDealt.[].type",
+  "info.frames.[].events.[].victimDamageReceived.[].basic",
+  "info.frames.[].events.[].victimDamageReceived.[].magicDamage",
+  "info.frames.[].events.[].victimDamageReceived.[].name",
+  "info.frames.[].events.[].victimDamageReceived.[].participantId",
+  "info.frames.[].events.[].victimDamageReceived.[].physicalDamage",
+  "info.frames.[].events.[].victimDamageReceived.[].spellName",
+  "info.frames.[].events.[].victimDamageReceived.[].spellSlot",
+  "info.frames.[].events.[].victimDamageReceived.[].trueDamage",
+  "info.frames.[].events.[].victimDamageReceived.[].type",
+  "info.frames.[].events.[].victimId",
+  "info.frames.[].events.[].victimTeamfightDamageDealt.[].basic",
+  "info.frames.[].events.[].victimTeamfightDamageDealt.[].magicDamage",
+  "info.frames.[].events.[].victimTeamfightDamageDealt.[].name",
+  "info.frames.[].events.[].victimTeamfightDamageDealt.[].participantId",
+  "info.frames.[].events.[].victimTeamfightDamageDealt.[].physicalDamage",
+  "info.frames.[].events.[].victimTeamfightDamageDealt.[].spellName",
+  "info.frames.[].events.[].victimTeamfightDamageDealt.[].spellSlot",
+  "info.frames.[].events.[].victimTeamfightDamageDealt.[].trueDamage",
+  "info.frames.[].events.[].victimTeamfightDamageDealt.[].type",
+  "info.frames.[].events.[].victimTeamfightDamageReceived.[].basic",
+  "info.frames.[].events.[].victimTeamfightDamageReceived.[].magicDamage",
+  "info.frames.[].events.[].victimTeamfightDamageReceived.[].name",
+  "info.frames.[].events.[].victimTeamfightDamageReceived.[].participantId",
+  "info.frames.[].events.[].victimTeamfightDamageReceived.[].physicalDamage",
+  "info.frames.[].events.[].victimTeamfightDamageReceived.[].spellName",
+  "info.frames.[].events.[].victimTeamfightDamageReceived.[].spellSlot",
+  "info.frames.[].events.[].victimTeamfightDamageReceived.[].trueDamage",
+  "info.frames.[].events.[].victimTeamfightDamageReceived.[].type",
+  "info.frames.[].events.[].wardType",
+  "info.frames.[].events.[].winningTeam",
+];
+
 const coverageStatusLegend = {
   decoded: "Metric was emitted from an accepted ROFL-derived source with provenance.",
   noisy: "A candidate existed but failed metric-specific quality or runtime-source gates.",
@@ -194,6 +436,18 @@ function makeParticipantFrame(participant) {
     teamPosition: participant.teamPosition,
     championStats: {},
     damageStats: {},
+  };
+}
+
+function makeApiShapedChampionStats() {
+  return Object.fromEntries(riotTimelineChampionStatFields.map((field) => [field, null]));
+}
+
+function makeApiShapedChallenges(decodedChallenges = {}) {
+  return {
+    ...Object.fromEntries(riotMatchChallengeFields16_9.map((field) => [field, null])),
+    legendaryItemUsed: [null],
+    ...decodedChallenges,
   };
 }
 
@@ -520,11 +774,20 @@ function buildMatchInfoParticipant(participant) {
     summonerName: participant.apiLikeStats?.summonerName ?? "",
     riotIdGameName: participant.riotIdGameName,
     riotIdTagline: participant.riotIdTagline,
+    championId: null,
     championName: participant.championName,
+    eligibleForProgression: null,
+    firstBloodAssist: null,
+    firstBloodKill: null,
+    firstTowerAssist: null,
+    firstTowerKill: null,
+    profileIcon: null,
+    summonerLevel: null,
     teamId: participant.teamId,
     teamPosition: participant.teamPosition,
     individualPosition: participant.teamPosition,
     ...participant.apiLikeStats,
+    challenges: makeApiShapedChallenges(participant.apiLikeStats?.challenges),
     provenance: participant.provenance,
   };
 }
@@ -558,39 +821,51 @@ function buildTeamInfo(rosterParticipants) {
 
       return {
         teamId,
+        bans: Array.from({ length: 5 }, () => ({
+          championId: null,
+          pickTurn: null,
+        })),
         win,
         objectives: {
           champion: {
+            first: null,
             kills: sum("kills"),
             provenance: "sum-participant-statsJson",
           },
           tower: {
+            first: null,
             kills: sum("turretKills"),
             takedowns: sum("turretTakedowns"),
             provenance: "sum-participant-statsJson",
           },
           inhibitor: {
+            first: null,
             kills: sum("inhibitorKills"),
             takedowns: sum("inhibitorTakedowns"),
             provenance: "sum-participant-statsJson",
           },
           dragon: {
+            first: null,
             kills: max("dragonKills"),
             provenance: "max-participant-statsJson",
           },
           baron: {
+            first: null,
             kills: max("baronKills"),
             provenance: "max-participant-statsJson",
           },
           atakhan: {
+            first: null,
             kills: max("atakhanKills"),
             provenance: "max-participant-statsJson",
           },
           horde: {
+            first: null,
             kills: max("hordeKills"),
             provenance: "max-participant-statsJson",
           },
           riftHerald: {
+            first: null,
             kills: max("riftHeraldKills"),
             provenance: "max-participant-statsJson",
           },
@@ -813,7 +1088,7 @@ function buildIdentityLinkageSummary(rosterParticipants, emittedTimelineParticip
   };
 }
 
-function buildRoflDerivedFieldMap() {
+function buildRoflDerivedFieldMap(rejectedCandidateArtifacts = {}) {
   return {
     match: {
       "metadata.matchId": {
@@ -841,6 +1116,51 @@ function buildRoflDerivedFieldMap() {
         status: "decoded",
         source: "rofl-summary",
       },
+      "info.gameCreation": {
+        status: "not_found",
+        source: "not-present-in-current-rofl-summary",
+        runtimeValue: null,
+      },
+      "info.gameEndTimestamp": {
+        status: "not_found",
+        source: "not-present-in-current-rofl-summary",
+        runtimeValue: null,
+      },
+      "info.gameMode": {
+        status: "not_found",
+        source: "not-present-in-current-rofl-summary",
+        runtimeValue: null,
+      },
+      "info.gameName": {
+        status: "not_found",
+        source: "not-present-in-current-rofl-summary",
+        runtimeValue: null,
+      },
+      "info.gameStartTimestamp": {
+        status: "not_found",
+        source: "not-present-in-current-rofl-summary",
+        runtimeValue: null,
+      },
+      "info.gameType": {
+        status: "not_found",
+        source: "not-present-in-current-rofl-summary",
+        runtimeValue: null,
+      },
+      "info.mapId": {
+        status: "not_found",
+        source: "not-present-in-current-rofl-summary",
+        runtimeValue: null,
+      },
+      "info.queueId": {
+        status: "not_found",
+        source: "not-present-in-current-rofl-summary",
+        runtimeValue: null,
+      },
+      "info.tournamentCode": {
+        status: "not_found",
+        source: "not-present-in-current-rofl-summary",
+        runtimeValue: null,
+      },
       "info.endOfGameResult": {
         status: "decoded",
         source: "rofl-metadata-statsJson",
@@ -850,14 +1170,77 @@ function buildRoflDerivedFieldMap() {
         status: "decoded",
         source: "rofl-metadata-statsJson",
       },
+      "info.participants[].championId": {
+        status: "not_promoted",
+        source: "rofl-metadata-champion-name",
+        runtimeValue: null,
+        note: "ROFL exposes champion names, but no accepted runtime champion-name-to-Riot-id mapping is currently part of the ROFL-only contract.",
+      },
+      "info.participants[].eligibleForProgression": {
+        status: "not_promoted",
+        source: "no-decoded-rofl-source",
+        runtimeValue: null,
+        note: "Constant true matches this fixture but is not promoted without a decoded ROFL source.",
+      },
+      "info.participants[].firstBloodAssist": {
+        status: "not_found",
+        source: "requires-event-order-decoder",
+        runtimeValue: null,
+      },
+      "info.participants[].firstBloodKill": {
+        status: "not_found",
+        source: "requires-event-order-decoder",
+        runtimeValue: null,
+      },
+      "info.participants[].firstTowerAssist": {
+        status: "not_found",
+        source: "requires-event-order-decoder",
+        runtimeValue: null,
+      },
+      "info.participants[].firstTowerKill": {
+        status: "not_found",
+        source: "requires-event-order-decoder",
+        runtimeValue: null,
+      },
+      "info.participants[].profileIcon": {
+        status: "not_found",
+        source: "not-present-in-current-rofl-summary",
+        runtimeValue: null,
+      },
+      "info.participants[].summonerLevel": {
+        status: "not_found",
+        source: "not-present-in-current-rofl-summary",
+        runtimeValue: null,
+      },
       "info.participants[].challenges.turretTakedowns": {
         status: "decoded",
         source: "rofl-metadata-statsJson",
         note: "Other Riot challenge fields remain gaps until their ROFL semantics are validated.",
       },
+      "info.participants[].challenges.*": {
+        status: "not_found",
+        source: "no-accepted-rofl-source",
+        runtimeValue: "null-leaf-placeholders-except-promoted-fields",
+        promotedFields: [
+          "turretTakedowns",
+        ],
+        note: "Patch 16.9 challenge leaves are API-shaped as null unless their ROFL statsJson semantics are validated.",
+      },
       "info.teams": {
         status: "decoded",
         source: "participant-final-statsJson-aggregation",
+      },
+      "info.teams[].objectives.*.first": {
+        status: "not_found",
+        source: "not-present-in-current-rofl-summary",
+        runtimeValue: null,
+        note: "API-shaped first objective fields are emitted as null because embedded ROFL final statsJson has objective counts but no event-order source for first objective takers.",
+      },
+      "info.teams[].bans": {
+        status: "not_found",
+        source: "not-present-in-current-rofl-summary",
+        runtimeValue: "array-of-null-placeholders",
+        note: "API-shaped ban entries are emitted with null championId and pickTurn because embedded ROFL metadata/statsJson does not contain pick/ban data.",
       },
     },
     timeline: {
@@ -885,7 +1268,11 @@ function buildRoflDerivedFieldMap() {
       },
       "info.frames[].events": {
         status: "not_found",
-        source: "not-extracted",
+        source: "chunk-delta-events-not-extracted",
+        apiShapedNotFoundFields: riotTimelineEventLeafPaths16_9,
+        runtimeEmission: "empty-events-arrays",
+        rejectedItemEventEvidence: rejectedCandidateArtifacts.itemEvents?.candidateArtifact ?? null,
+        note: "Runtime frames keep events empty until actual ROFL event records are decoded; no null placeholder event objects are emitted.",
       },
       "info.frames[].participantFrames[].level": {
         status: "decoded",
@@ -898,6 +1285,18 @@ function buildRoflDerivedFieldMap() {
         source: "rofl-metadata-statsJson",
         participantIdentity: "rofl-summary-roster-order",
         calibration: "GOLD_EARNED - GOLD_SPENT rejected: does not match Riot final timeline currentGold",
+        runtimeValue: null,
+      },
+      "info.frames[].participantFrames[].goldPerSecond": {
+        status: "not_found",
+        source: "not-present-in-current-rofl-summary",
+        runtimeValue: null,
+      },
+      "info.frames[].participantFrames[].nonFinalParticipantIdentity": {
+        status: "not_promoted",
+        source: "chunk-row-identity-gates",
+        participantIdentity: "not-established",
+        calibration: "241-family row gates rejected: duplicate_rejected/unstable_identity rows are not runtime API data",
       },
       "info.frames[].participantFrames[].totalGold": {
         status: "decoded",
@@ -925,13 +1324,32 @@ function buildRoflDerivedFieldMap() {
       },
       "info.frames[].participantFrames[].championStats": {
         status: "shape_only",
-        source: "api-container-empty-until-decoded",
+        source: "api-container-null-placeholders-until-decoded",
+        runtimeValue: "null-leaf-placeholder-object",
       },
       "info.frames[].participantFrames[].damageStats": {
         status: "decoded",
         source: "rofl-metadata-statsJson",
         participantIdentity: "rofl-summary-roster-order",
         calibration: "direct-final-cumulative-stat",
+      },
+      "info.frames[].participantFrames[].position": {
+        status: "not_promoted",
+        source: "movement-candidates-rejected-for-runtime",
+        perParticipantCoverage: rejectedCandidateArtifacts.positions?.perParticipantCoverage ?? [],
+        statusCounts: countMetricStatuses(Object.fromEntries((rejectedCandidateArtifacts.positions?.perParticipantCoverage ?? []).map((entry) => [
+          entry.participantId,
+          entry,
+        ]))),
+        runtimeValue: {
+          x: null,
+          y: null,
+        },
+      },
+      "info.frames[].participantFrames[].timeEnemySpentControlled": {
+        status: "not_found",
+        source: "not-present-in-current-rofl-summary",
+        runtimeValue: null,
       },
     },
   };
@@ -952,7 +1370,14 @@ function buildArtifactCaveat(includeResearchKeyframes) {
   return "Roster and final stat metrics are extracted from ROFL metadata/statsJson only. Included research keyframe timeline values are decoded from ROFL keyframe fields, but participant identity and affine field calibration still come from current decoder research artifacts; supervised Riot API fixtures are validation/calibration artifacts, not runtime inputs for this exporter.";
 }
 
-function buildFieldCoverage() {
+function buildFieldCoverage(rejectedCandidateArtifacts = {}) {
+  const reconstructionRowIdentity = rejectedCandidateArtifacts.reconstructionRowIdentity ?? {};
+  const reconstructionIdentityFamilies = (reconstructionRowIdentity.rowIdentityArtifacts ?? []).map((artifact) => ({
+    familyKey: artifact.familyKey,
+    expectedRowCount: artifact.rowCount,
+    promotionStatus: artifact.promotionStatus,
+    rowStatuses: Object.keys(artifact.rowStatusCounts ?? {}).sort(),
+  }));
   return {
     runtimeInputPolicy: {
       status: "decoded",
@@ -1005,6 +1430,17 @@ function buildFieldCoverage() {
         "statsJson",
       ],
       reason: "The current decoded ROFL metadata exposes replay duration/chunk/keyframe counters and embedded final statsJson, but not Riot queue/map/mode/type/name or game creation/start/end timestamps.",
+      apiShapedNotFoundFields: [
+        "info.gameCreation",
+        "info.gameEndTimestamp",
+        "info.gameMode",
+        "info.gameName",
+        "info.gameStartTimestamp",
+        "info.gameType",
+        "info.mapId",
+        "info.queueId",
+        "info.tournamentCode",
+      ],
       fields: [
         "info.queueId",
         "info.mapId",
@@ -1014,6 +1450,7 @@ function buildFieldCoverage() {
         "info.gameCreation",
         "info.gameStartTimestamp",
         "info.gameEndTimestamp",
+        "info.tournamentCode",
       ],
     },
     matchParticipants: {
@@ -1050,6 +1487,16 @@ function buildFieldCoverage() {
         "summary.metadataJson.statsJson",
       ],
       fields: [
+        "info.participants[].championId",
+        "info.participants[].eligibleForProgression",
+        "info.participants[].firstBloodAssist",
+        "info.participants[].firstBloodKill",
+        "info.participants[].firstTowerAssist",
+        "info.participants[].firstTowerKill",
+        "info.participants[].profileIcon",
+        "info.participants[].summonerLevel",
+      ],
+      apiShapedNotFoundFields: [
         "info.participants[].championId",
         "info.participants[].eligibleForProgression",
         "info.participants[].firstBloodAssist",
@@ -1116,6 +1563,9 @@ function buildFieldCoverage() {
       decodedFields: [
         "participants[].challenges.turretTakedowns",
       ],
+      apiShapedNotFoundFields: riotMatchChallengeFields16_9
+        .filter((field) => field !== "turretTakedowns")
+        .map((field) => `participants[].challenges.${field}`),
       gaps: [
         "most Riot participants[].challenges.* fields are derived challenge/rate/event fields and do not have accepted direct ROFL statsJson parity yet",
       ],
@@ -1162,6 +1612,11 @@ function buildFieldCoverage() {
         "info.teams[].win",
         "info.teams[].objectives.*.kills",
       ],
+      apiShapedNotFoundFields: [
+        "info.teams[].bans[].championId",
+        "info.teams[].bans[].pickTurn",
+        "info.teams[].objectives.*.first",
+      ],
       unstableDecodedFields: [
         "info.teams[].objectives.champion.kills",
         "info.teams[].objectives.tower.kills",
@@ -1205,6 +1660,14 @@ function buildFieldCoverage() {
       status: "not_found",
       source: "not-runtime-exported",
       reason: "replay-only participant identity, scalar calibration, and chunk-delta state reconstruction are not accepted yet",
+      apiShapedNotFoundFields: [
+        "info.frames[].participantFrames[].championStats.*",
+        "info.frames[].participantFrames[].currentGold",
+        "info.frames[].participantFrames[].goldPerSecond",
+        "info.frames[].participantFrames[].position.x",
+        "info.frames[].participantFrames[].position.y",
+        "info.frames[].participantFrames[].timeEnemySpentControlled",
+      ],
       reconstructionDirection: {
         status: "planned",
         model: "keyframe-baseline-plus-chunk-deltas",
@@ -1218,6 +1681,13 @@ function buildFieldCoverage() {
         ],
       },
     },
+    timelineNonFinalParticipantIdentity: {
+      status: "not_promoted",
+      source: "chunk-row-identity-gates",
+      reason: "241-family row candidates are tracked as decoder evidence but do not establish stable replay-only participant identity.",
+      runtimeInput: false,
+      candidateFamilies: reconstructionIdentityFamilies,
+    },
     timelineCurrentGold: {
       status: "not_promoted",
       source: "rofl-metadata-statsJson",
@@ -1227,16 +1697,27 @@ function buildFieldCoverage() {
     timelineEvents: {
       status: "not_found",
       source: "chunk-delta-events-not-extracted",
+      apiShapedNotFoundFields: riotTimelineEventLeafPaths16_9,
+      runtimeEmission: "empty-events-arrays",
+      rejectedItemEventEvidence: rejectedCandidateArtifacts.itemEvents?.candidateArtifact ?? null,
+      reason: "Timeline event leaf shape is tracked as not_found, but null placeholder event objects are not emitted because they would imply events that were not decoded from ROFL.",
       reconstructionDirection: "decode chunk/subrecord event deltas between keyframe baselines before emitting API-shaped timeline events",
     },
     positions: {
       status: "not_found",
       source: "state-reconstruction-not-extracted-for-16.9",
+      perParticipantCoverage: rejectedCandidateArtifacts.positions?.perParticipantCoverage ?? [],
+      statusCounts: countMetricStatuses(Object.fromEntries((rejectedCandidateArtifacts.positions?.perParticipantCoverage ?? []).map((entry) => [
+        entry.participantId,
+        entry,
+      ]))),
       reconstructionDirection: "decode and identity-link position/entity state through keyframe baselines plus chunk deltas before emitting participantFrames.position",
     },
     inventoryTimeline: {
       status: "not_found",
       source: "not-extracted",
+      rejectedCandidateEvidence: rejectedCandidateArtifacts.inventoryTimeline?.relatedCandidateArtifact ?? null,
+      runtimeInput: rejectedCandidateArtifacts.inventoryTimeline?.runtimeInput ?? false,
     },
     damageTimeline: {
       status: "not_found",
@@ -1327,6 +1808,10 @@ function buildParityChecklist() {
         "rejectedCandidateArtifacts.nonFinalScalarIdentity.assignmentArtifact.thresholds",
         "rejectedCandidateArtifacts.nonFinalScalarIdentity.assignmentArtifact.diagnostics",
         "rejectedCandidateArtifacts.nonFinalScalarIdentity.assignmentArtifact.diagnostics.duplicateFinalTargetValueCountsByMetric",
+        "rejectedCandidateArtifacts.reconstructionRowIdentity.status=not_promoted",
+        "rejectedCandidateArtifacts.reconstructionRowIdentity.rowGridCandidateScan.status=candidate_scan_only_not_runtime_api_data",
+        "rejectedCandidateArtifacts.reconstructionRowIdentity.rowGridFieldAnalysis.status=field_hypothesis_only_not_runtime_api_data",
+        "fieldCoverage.timelineNonFinalParticipantIdentity.status=not_promoted",
       ],
       gaps: [
         "accepted replay-only non-final keyframe participant identity is not available yet",
@@ -1343,6 +1828,7 @@ function buildParityChecklist() {
         "duplicate same-metric keyframe supports are collapsed before scoring",
         "weak per-metric supports are filtered by minSupportScore before edge creation",
         "duplicated final-stat anchors are rejected from accepted support by maxFinalTargetDuplicateCount",
+        "241-family row identity gates keep duplicate_rejected/unstable_identity rows out of runtime participantFrames",
       ],
     },
     {
@@ -1377,6 +1863,7 @@ function buildParityChecklist() {
         "parityGaps",
         "fieldCoverage missing entries",
         "rejectedCandidateArtifacts for scalar identity, positions, item events, inventory timeline, and damage timeline",
+        "rejectedCandidateArtifacts.reconstructionRowIdentity",
       ],
     },
     {
@@ -1387,6 +1874,7 @@ function buildParityChecklist() {
         "fieldCoverage verifier checks",
         "final frame coverage verifier checks",
         "rejected candidate artifact verifier checks",
+        "fieldCoverage.timelineNonFinalParticipantIdentity cross-checks rejectedCandidateArtifacts.reconstructionRowIdentity",
         "offline Riot validation is separate and marked validation-only",
       ],
     },
@@ -1405,6 +1893,229 @@ function buildParityChecklist() {
       ],
     },
   ];
+}
+
+function buildRemainingParityGaps(rejectedCandidateArtifacts) {
+  const positions = rejectedCandidateArtifacts.positions ?? {};
+  const itemEvents = rejectedCandidateArtifacts.itemEvents ?? {};
+  const inventoryTimeline = rejectedCandidateArtifacts.inventoryTimeline ?? {};
+  const damageTimeline = rejectedCandidateArtifacts.damageTimeline ?? {};
+  const scalarIdentity = rejectedCandidateArtifacts.nonFinalScalarIdentity ?? {};
+  const rowIdentity = rejectedCandidateArtifacts.reconstructionRowIdentity ?? {};
+
+  return [
+    {
+      key: "nonFinalParticipantIdentity",
+      apiSurface: "timeline.info.frames[].participantFrames participant linkage before final statsJson frame",
+      status: "not_promoted",
+      runtimeEmission: "final-frame-only",
+      runtimeApiData: false,
+      blockerSummary: [
+        `scalarIdentityAssignments=${scalarIdentity.assignmentArtifact?.assignmentCount ?? null}`,
+        `scalarIdentityCanonicalCandidates=${scalarIdentity.assignmentArtifact?.canonicalCandidateCount ?? null}`,
+        `rowIdentityStatus=${rowIdentity.status ?? null}`,
+      ],
+      evidenceRefs: [
+        "rejectedCandidateArtifacts.nonFinalScalarIdentity",
+        "rejectedCandidateArtifacts.reconstructionRowIdentity",
+        "fieldCoverage.timelineNonFinalParticipantIdentity",
+      ],
+      nextDecoderStep: "establish stable ROFL-only row/entity-to-participant identity across non-final frames",
+    },
+    {
+      key: "positions",
+      apiSurface: "timeline.info.frames[].participantFrames[].position",
+      status: positions.status ?? "not_found",
+      runtimeEmission: "position.x/y null",
+      runtimeApiData: false,
+      blockerSummary: positions.promotionBlockers ?? [
+        `assignmentCount=${positions.participantMovementArtifact?.assignmentCount ?? null}`,
+        `passingAssignmentCount=${positions.offlineValidation?.passingAssignmentCount ?? null}`,
+      ],
+      evidenceRefs: [
+        "rejectedCandidateArtifacts.positions",
+        "fieldCoverage.positions",
+        "roflDerivedFieldMap.timeline.info.frames[].participantFrames[].position",
+      ],
+      nextDecoderStep: "replace prior-dependent 9/10 movement assignment with 10/10 ROFL-only identity and quality gates",
+    },
+    {
+      key: "timelineEvents",
+      apiSurface: "timeline.info.frames[].events",
+      status: "not_found",
+      runtimeEmission: "empty events arrays",
+      runtimeApiData: false,
+      blockerSummary: [
+        "chunk-delta event extraction is not decoded",
+        `itemEventCandidateCount=${itemEvents.candidateArtifact?.candidateCount ?? null}`,
+        `strongItemEventCandidateCount=${itemEvents.candidateArtifact?.strongCandidateCount ?? null}`,
+      ],
+      evidenceRefs: [
+        "fieldCoverage.timelineEvents",
+        "rejectedCandidateArtifacts.itemEvents",
+        "roflDerivedFieldMap.timeline.info.frames[].events",
+      ],
+      nextDecoderStep: "decode ROFL-only event deltas without supervised Riot timeline events as runtime input",
+    },
+    {
+      key: "inventoryTimeline",
+      apiSurface: "timeline participant inventory state over frames",
+      status: inventoryTimeline.status ?? "not_found",
+      runtimeEmission: "final match item slots only",
+      runtimeApiData: false,
+      blockerSummary: [
+        `itemEventCandidateCount=${inventoryTimeline.relatedCandidateArtifact?.itemEventCandidateCount ?? null}`,
+        `globalEventCount=${inventoryTimeline.relatedCandidateArtifact?.globalEventCount ?? null}`,
+        "no accepted ROFL-only item event or slot-state timeline decoder",
+      ],
+      evidenceRefs: [
+        "rejectedCandidateArtifacts.inventoryTimeline",
+        "fieldCoverage.inventoryTimeline",
+      ],
+      nextDecoderStep: "promote item-event or item-slot timeline only after ROFL-only event identity is decoded",
+    },
+    {
+      key: "damageTimeline",
+      apiSurface: "timeline.info.frames[].participantFrames[].damageStats before final frame",
+      status: damageTimeline.status ?? "not_found",
+      runtimeEmission: "final damageStats only",
+      runtimeApiData: false,
+      blockerSummary: [
+        "non-final damage stat deltas are not extracted",
+        `candidateDamageMetricCount=${damageTimeline.extractedStatsArtifact?.damageMetricKeyCount ?? null}`,
+      ],
+      evidenceRefs: [
+        "rejectedCandidateArtifacts.damageTimeline",
+        "fieldCoverage.timelineNonFinalParticipantFrames",
+      ],
+      nextDecoderStep: "decode non-final damage counters and bind them to stable participant identity",
+    },
+  ];
+}
+
+function buildRoflOnlyExtractionProof(rosterParticipants, frames, rejectedCandidateArtifacts, remainingParityGaps) {
+  const finalFrame = frames.at(-1) ?? null;
+  const finalParticipantFrameCount = Object.keys(finalFrame?.participantFrames ?? {}).length;
+  const decodedFinalMetricKeys = ["level", "totalGold", "xp", "minionsKilled", "jungleMinionsKilled"];
+  const decodedFinalDamageKeys = [
+    "magicDamageDone",
+    "magicDamageDoneToChampions",
+    "magicDamageTaken",
+    "physicalDamageDone",
+    "physicalDamageDoneToChampions",
+    "physicalDamageTaken",
+    "totalDamageDone",
+    "totalDamageDoneToChampions",
+    "totalDamageTaken",
+    "trueDamageDone",
+    "trueDamageDoneToChampions",
+    "trueDamageTaken",
+  ];
+
+  return {
+    proofSchema: "rofl-only-extraction-proof/v1",
+    runtimeInputPolicy: {
+      riotApiRuntimeInput: false,
+      replayFileRequired: true,
+      replayDerivedSummaryRequired: true,
+      decoderDiagnosticsRequiredForRuntime: false,
+      supervisedFixtureRole: "offline-validation-only",
+    },
+    decodedFromRoflOnly: [
+      {
+        surface: "match.metadata.matchId",
+        source: "rofl-file-name",
+        participantIdentity: "not-required",
+      },
+      {
+        surface: "match.info.participants",
+        source: "rofl-metadata-statsJson",
+        participantCount: rosterParticipants.length,
+        participantIdentity: "rofl-summary-roster-order",
+      },
+      {
+        surface: "match.info.teams",
+        source: "participant-final-statsJson-aggregation",
+        teamCount: 2,
+      },
+      {
+        surface: "timeline.info.frames[-1].participantFrames final scalar metrics",
+        source: "rofl-metadata-statsJson",
+        participantCount: finalParticipantFrameCount,
+        metricKeys: decodedFinalMetricKeys,
+        metricPointCount: finalParticipantFrameCount * decodedFinalMetricKeys.length,
+      },
+      {
+        surface: "timeline.info.frames[-1].participantFrames final damageStats",
+        source: "rofl-metadata-statsJson",
+        participantCount: finalParticipantFrameCount,
+        metricKeys: decodedFinalDamageKeys,
+        metricPointCount: finalParticipantFrameCount * decodedFinalDamageKeys.length,
+      },
+    ],
+    perParticipantProof: rosterParticipants.map((participant) => ({
+      participantId: participant.participantId,
+      champion: participant.championName ?? participant.champion ?? null,
+      teamId: participant.teamId ?? participant.team ?? null,
+      participantIdentity: "rofl-summary-roster-order",
+      source: "rofl-metadata-statsJson",
+      runtimeApiData: true,
+      finalScalarMetricKeys: decodedFinalMetricKeys,
+      finalScalarMetricCount: decodedFinalMetricKeys.filter((metric) => participant.finalMetrics?.[metric] != null).length,
+      finalDamageMetricKeys: decodedFinalDamageKeys,
+      finalDamageMetricCount: decodedFinalDamageKeys.filter((metric) => {
+        const damageStats = buildTimelineDamageStats(participant.apiLikeStats ?? {});
+        return damageStats[metric] != null;
+      }).length,
+      unresolvedRuntimeFields: [
+        "currentGold",
+        "goldPerSecond",
+        "position",
+        "timeEnemySpentControlled",
+        "championStats",
+      ],
+    })),
+    offlineValidationOnly: [
+      {
+        surface: "Riot match/timeline fixture parity checks",
+        runtimeInput: false,
+        report: "rofl-api-metrics-riot-validation.json",
+      },
+      {
+        surface: "Riot API shape gap audit",
+        runtimeInput: false,
+        report: "rofl-api-shape-gap-report.json",
+      },
+      {
+        surface: "challenge candidate audit",
+        runtimeInput: false,
+        report: "rofl-challenge-gap-candidates.json",
+      },
+    ],
+    notPromotedRuntimeCandidates: [
+      {
+        surface: "non-final participant identity",
+        status: rejectedCandidateArtifacts.nonFinalScalarIdentity?.status ?? "not_found",
+        runtimeInput: false,
+      },
+      {
+        surface: "position x/y movement tracks",
+        status: rejectedCandidateArtifacts.positions?.status ?? "not_found",
+        runtimeInput: false,
+      },
+      {
+        surface: "timeline events",
+        status: rejectedCandidateArtifacts.itemEvents?.status ?? "not_found",
+        runtimeInput: false,
+      },
+      {
+        surface: "inventory timeline",
+        status: rejectedCandidateArtifacts.inventoryTimeline?.status ?? "not_found",
+        runtimeInput: false,
+      },
+    ],
+    remainingGapKeys: remainingParityGaps.map((gap) => gap.key),
+  };
 }
 
 function readOptionalJson(filePath) {
@@ -1501,15 +2212,23 @@ function summarizeIdentityAssignments(roflStatAssignments) {
     .slice(0, 10);
 }
 
-function buildRejectedCandidateArtifacts(root, replayId) {
-  const roflStatAssignmentsPath = path.join(root, "artifacts-keyframes", "keyframe-rofl-stat-slot-assignments-16.9.json");
-  const roflStatComparisonPath = path.join(root, "artifacts-keyframes", "keyframe-rofl-stat-supervised-comparison-16.9.json");
+function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
+  const roflStatAssignmentsPath = path.join(root, "artifacts-keyframes", `keyframe-rofl-stat-slot-assignments-${versionGroup}.json`);
+  const roflStatComparisonPath = path.join(root, "artifacts-keyframes", `keyframe-rofl-stat-supervised-comparison-${versionGroup}.json`);
+  const rowIdentity02Path = path.join(root, "artifacts-keyframes", `reconstruction-row-identity-241-0x02-${versionGroup}.json`);
+  const rowIdentity04Path = path.join(root, "artifacts-keyframes", `reconstruction-row-identity-241-0x04-${versionGroup}.json`);
+  const rowGridCandidatesPath = path.join(root, "artifacts-keyframes", `reconstruction-row-grid-candidates-${versionGroup}.json`);
+  const rowGridFieldAnalysisPath = path.join(root, "artifacts-keyframes", `reconstruction-row-grid-field-analysis-${versionGroup}.json`);
   const movementPath = path.join(root, "artifacts", replayId, "participant-movement.json");
   const movementValidationPath = path.join(root, "artifacts", replayId, "assigned-movement-validation-report.json");
   const itemEventCandidatesPath = path.join(root, "artifacts", replayId, "item-event-candidates.json");
   const extractedStatsPath = path.join(root, "artifacts", replayId, "extracted-stats.json");
   const roflStatAssignments = readOptionalJson(roflStatAssignmentsPath);
   const roflStatComparison = readOptionalJson(roflStatComparisonPath);
+  const rowIdentity02 = readOptionalJson(rowIdentity02Path);
+  const rowIdentity04 = readOptionalJson(rowIdentity04Path);
+  const rowGridCandidates = readOptionalJson(rowGridCandidatesPath);
+  const rowGridFieldAnalysis = readOptionalJson(rowGridFieldAnalysisPath);
   const movement = readOptionalJson(movementPath);
   const movementValidation = readOptionalJson(movementValidationPath);
   const itemEventCandidates = readOptionalJson(itemEventCandidatesPath);
@@ -1518,6 +2237,66 @@ function buildRejectedCandidateArtifacts(root, replayId) {
     (extractedStats?.participants ?? []).flatMap((participant) => Object.keys(participant.metrics ?? {})),
   );
   const damageMetricKeys = [...extractedMetricKeys].filter((metric) => metric.toLowerCase().includes("damage"));
+  const movementValidationByRosterIndex = new Map((movementValidation?.assignments ?? []).map((assignment) => [
+    assignment.rosterIndex,
+    assignment,
+  ]));
+  const movementCoverageByParticipant = new Map();
+  for (const assignment of movement?.assignments ?? []) {
+    const participantId = Number.isInteger(assignment.rosterIndex) ? assignment.rosterIndex + 1 : null;
+    const validation = movementValidationByRosterIndex.get(assignment.rosterIndex);
+    const validationPasses = validation?.validation?.passes === true;
+    movementCoverageByParticipant.set(participantId, {
+      participantId,
+      champion: assignment.champion ?? null,
+      teamId: assignment.team ?? null,
+      teamPosition: assignment.teamPosition ?? null,
+      status: validationPasses ? "unstable_identity" : "noisy",
+      reason: validationPasses
+        ? "movement candidate has offline support but runtime identity uses priors and is not 10/10 ROFL-only"
+        : "movement candidate failed offline quality validation or lacks validation support",
+      entityKey: assignment.entityKey ?? null,
+      familyKey: assignment.familyKey ?? null,
+      slotIndex: assignment.slotIndex ?? null,
+      score: assignment.score ?? null,
+      entityQuality: assignment.entityQuality ?? null,
+      pointCount: assignment.trajectoryStats?.pointCount ?? null,
+      validation: validation
+        ? {
+            status: validation.status ?? null,
+            passes: validation.validation?.passes ?? null,
+            averageAxisCorrelation: validation.validation?.averageAxisCorrelation ?? null,
+            pathCorrelation: validation.validation?.pathCorrelation ?? null,
+            normalizedDistanceRmse: validation.validation?.normalizedDistanceRmse ?? null,
+            runtimeInput: false,
+          }
+        : null,
+      runtimeApiData: false,
+    });
+  }
+  for (const participant of movement?.unmatchedParticipants ?? []) {
+    const participantId = Number.isInteger(participant.rosterIndex) ? participant.rosterIndex + 1 : null;
+    movementCoverageByParticipant.set(participantId, {
+      participantId,
+      champion: participant.champion ?? null,
+      teamId: participant.team ?? null,
+      teamPosition: participant.teamPosition ?? null,
+      status: "not_found",
+      reason: "no accepted movement entity assignment for this roster participant",
+      topRejectedEntityCandidates: (participant.topRejectedEntityCandidates ?? []).slice(0, 3).map((candidate) => ({
+        entityKey: candidate.entityKey ?? null,
+        familyKey: candidate.familyKey ?? null,
+        slotIndex: candidate.slotIndex ?? null,
+        score: candidate.score ?? null,
+        belowMinimumAssignmentScore: candidate.belowMinimumAssignmentScore ?? null,
+        assignedToOtherParticipant: candidate.assignedToOtherParticipant ?? null,
+      })),
+      runtimeApiData: false,
+    });
+  }
+  const movementParticipantCoverage = [...movementCoverageByParticipant.values()]
+    .filter((entry) => Number.isInteger(entry.participantId))
+    .sort((left, right) => left.participantId - right.participantId);
 
   return {
     nonFinalScalarIdentity: roflStatAssignments
@@ -1560,10 +2339,121 @@ function buildRejectedCandidateArtifacts(root, replayId) {
           status: "not_found",
           reason: "no replay-only keyframe scalar identity assignment artifact found",
         },
+    reconstructionRowIdentity: {
+      status: "not_promoted",
+      reason: "241-family chunk rows are structurally plausible but do not establish stable replay-only participant identity",
+      runtimeInput: false,
+      rowGridCandidateScan: rowGridCandidates
+        ? {
+            exists: true,
+            schema: rowGridCandidates.schema ?? null,
+            mode: rowGridCandidates.mode ?? null,
+            status: rowGridCandidates.status ?? null,
+            runtimeInput: rowGridCandidates.runtimeInput ?? null,
+            scannedFamilies: rowGridCandidates.scannedFamilies ?? null,
+            candidateCount: rowGridCandidates.candidateCount ?? null,
+            topCandidates: (rowGridCandidates.topCandidates ?? []).slice(0, 5).map((candidate) => ({
+              familyKey: candidate.familyKey,
+              headerBytes: candidate.hypothesis?.headerBytes ?? null,
+              rowCount: candidate.hypothesis?.rowCount ?? null,
+              rowSize: candidate.hypothesis?.rowSize ?? null,
+              score: candidate.score ?? null,
+              status: candidate.status ?? null,
+              sameRowWinRate: candidate.sameRowWinRate ?? null,
+              nearestSameIndexRate: candidate.nearestSameIndexRate ?? null,
+              duplicateRowRate: candidate.duplicateRowRate ?? null,
+              runtimeApiData: candidate.runtimeApiData ?? null,
+              participantIdentity: candidate.participantIdentity ?? null,
+            })),
+          }
+        : {
+            exists: false,
+          },
+      rowGridFieldAnalysis: rowGridFieldAnalysis
+        ? {
+            exists: true,
+            schema: rowGridFieldAnalysis.schema ?? null,
+            mode: rowGridFieldAnalysis.mode ?? null,
+            status: rowGridFieldAnalysis.status ?? null,
+            runtimeInput: rowGridFieldAnalysis.runtimeInput ?? null,
+            candidateCount: (rowGridFieldAnalysis.candidates ?? []).length,
+            topCandidates: (rowGridFieldAnalysis.candidates ?? []).slice(0, 5).map((candidate) => ({
+              familyKey: candidate.familyKey,
+              headerBytes: candidate.hypothesis?.headerBytes ?? null,
+              rowCount: candidate.hypothesis?.rowCount ?? null,
+              rowSize: candidate.hypothesis?.rowSize ?? null,
+              candidateStatus: candidate.candidateStatus ?? null,
+              promotionStatus: candidate.fieldPromotionAssessment?.status ?? null,
+              sameRowWinRate: candidate.rowContinuity?.sameRowWinRate ?? null,
+              nearestSameIndexRate: candidate.rowContinuity?.nearestSameIndexRate ?? null,
+              rowDiscriminatorColumnCount: (candidate.rowDiscriminatorColumns ?? []).length,
+              recordConstantColumnCount: (candidate.recordConstantColumns ?? []).length,
+              runtimeApiData: candidate.runtimeApiData ?? null,
+              participantIdentity: candidate.participantIdentity ?? null,
+            })),
+          }
+        : {
+            exists: false,
+          },
+      rowIdentityArtifacts: [rowIdentity02, rowIdentity04]
+        .filter(Boolean)
+        .map((artifact) => ({
+          exists: true,
+          familyKey: artifact.familyKey ?? null,
+          versionGroup: artifact.versionGroup ?? null,
+          mode: artifact.mode ?? null,
+          status: artifact.status ?? null,
+          promotionStatus: artifact.promotionAssessment?.status ?? null,
+          runtimeApiData: artifact.promotionAssessment?.runtimeApiData ?? null,
+          participantIdentity: artifact.promotionAssessment?.participantIdentity ?? null,
+          sameRowWinRate: artifact.evidence?.sameRowWinRate ?? null,
+          duplicateRejectedRowCount: artifact.evidence?.duplicateRejectedRowCount ?? null,
+          rowStatusCounts: Object.fromEntries(
+            Object.entries((artifact.rowIdentity ?? []).reduce((counts, row) => {
+              counts[row.status] = (counts[row.status] ?? 0) + 1;
+              return counts;
+            }, {})).sort(([left], [right]) => left.localeCompare(right)),
+          ),
+          rowCount: (artifact.rowIdentity ?? []).length,
+        })),
+    },
     positions: movement || movementValidation
       ? {
           status: "rejected_for_runtime",
           reason: "movement identity is incomplete and still validated with offline Riot fixture comparisons",
+          promotionBlockers: [
+            ...((movement?.assignments?.length ?? 0) < 10
+              ? [`only ${(movement?.assignments?.length ?? 0)}/10 roster participants have movement entity assignments`]
+              : []),
+            ...((movement?.unmatchedParticipants?.length ?? 0) > 0
+              ? [`${movement?.unmatchedParticipants?.length ?? 0} roster participant(s) have no accepted movement entity assignment`]
+              : []),
+            ...(movement?.priorsPath != null
+              ? ["movement identity currently depends on offline identity priors"]
+              : []),
+            ...(movementValidation && (movementValidation.summary?.passingAssignmentCount ?? 0) < (movementValidation.summary?.assignmentCount ?? 0)
+              ? [`only ${movementValidation.summary?.passingAssignmentCount ?? 0}/${movementValidation.summary?.assignmentCount ?? 0} movement assignments pass offline quality validation`]
+              : []),
+          ],
+          qualityGateSummary: {
+            assignedParticipantCount: movement?.assignments?.length ?? null,
+            expectedParticipantCount: 10,
+            unmatchedParticipantCount: movement?.unmatchedParticipants?.length ?? null,
+            unassignedEntityCount: movement?.unassignedEntities?.length ?? null,
+            usesIdentityPriors: movement?.priorsPath != null,
+            offlineAssignmentCount: movementValidation?.summary?.assignmentCount ?? null,
+            offlinePassingAssignmentCount: movementValidation?.summary?.passingAssignmentCount ?? null,
+            offlineMatchedAssignmentCount: movementValidation?.summary?.matchedAssignmentCount ?? null,
+            offlinePassRate: Number.isFinite(movementValidation?.summary?.passingAssignmentCount) &&
+              Number.isFinite(movementValidation?.summary?.assignmentCount) &&
+              movementValidation.summary.assignmentCount > 0
+              ? movementValidation.summary.passingAssignmentCount / movementValidation.summary.assignmentCount
+              : null,
+            averageAxisCorrelation: movementValidation?.summary?.averageAxisCorrelation ?? null,
+            averagePathCorrelation: movementValidation?.summary?.averagePathCorrelation ?? null,
+            averageNormalizedDistanceRmse: movementValidation?.summary?.averageNormalizedDistanceRmse ?? null,
+            runtimeInput: false,
+          },
           participantMovementArtifact: movement
             ? {
                 exists: true,
@@ -1572,6 +2462,34 @@ function buildRejectedCandidateArtifacts(root, replayId) {
                 unassignedEntityCount: movement.unassignedEntities?.length ?? 0,
                 usesIdentityPriors: movement.priorsPath != null,
                 minimumAssignmentScore: movement.normalization?.minimumAssignmentScore ?? null,
+                unmatchedParticipants: (movement.unmatchedParticipants ?? []).map((participant) => ({
+                  rosterIndex: participant.rosterIndex ?? null,
+                  champion: participant.champion ?? null,
+                  team: participant.team ?? null,
+                  teamPosition: participant.teamPosition ?? null,
+                  topRejectedEntityCandidates: (participant.topRejectedEntityCandidates ?? []).slice(0, 3).map((candidate) => ({
+                    entityKey: candidate.entityKey ?? null,
+                    familyKey: candidate.familyKey ?? null,
+                    slotIndex: candidate.slotIndex ?? null,
+                    score: candidate.score ?? null,
+                    belowMinimumAssignmentScore: candidate.belowMinimumAssignmentScore ?? null,
+                    assignedToOtherParticipant: candidate.assignedToOtherParticipant ?? null,
+                  })),
+                })),
+                unassignedEntities: (movement.unassignedEntities ?? []).slice(0, 5).map((entity) => ({
+                  entityKey: entity.entityKey ?? null,
+                  familyKey: entity.familyKey ?? null,
+                  slotIndex: entity.slotIndex ?? null,
+                  entityQuality: entity.entityQuality ?? null,
+                  topRejectedParticipantCandidates: (entity.topRejectedParticipantCandidates ?? []).slice(0, 3).map((candidate) => ({
+                    rosterIndex: candidate.rosterIndex ?? null,
+                    champion: candidate.champion ?? null,
+                    teamPosition: candidate.teamPosition ?? null,
+                    score: candidate.score ?? null,
+                    belowMinimumAssignmentScore: candidate.belowMinimumAssignmentScore ?? null,
+                    participantAlreadyAssigned: candidate.participantAlreadyAssigned ?? null,
+                  })),
+                })),
               }
             : {
                 exists: false,
@@ -1590,10 +2508,12 @@ function buildRejectedCandidateArtifacts(root, replayId) {
             : {
                 exists: false,
               },
+          perParticipantCoverage: movementParticipantCoverage,
         }
       : {
           status: "not_found",
           reason: "no participant movement artifact found for this replay",
+          perParticipantCoverage: [],
         },
     itemEvents: itemEventCandidates
       ? {
@@ -1609,6 +2529,7 @@ function buildRejectedCandidateArtifacts(root, replayId) {
           eventInventory: itemEventCandidates.eventInventory
             ? {
                 globalEventCount: itemEventCandidates.eventInventory.globalEventCount ?? null,
+                participantEventCounts: itemEventCandidates.eventInventory.participantEventCounts ?? {},
                 eventTypeCounts: itemEventCandidates.eventInventory.eventTypeCounts ?? {},
               }
             : null,
@@ -1629,6 +2550,9 @@ function buildRejectedCandidateArtifacts(root, replayId) {
           relatedCandidateArtifact: {
             itemEventCandidateCount: itemEventCandidates.summary?.candidateCount ?? null,
             strongItemEventCandidateCount: itemEventCandidates.summary?.strongCandidateCount ?? null,
+            globalEventCount: itemEventCandidates.eventInventory?.globalEventCount ?? null,
+            eventTypeCounts: itemEventCandidates.eventInventory?.eventTypeCounts ?? {},
+            participantEventCounts: itemEventCandidates.eventInventory?.participantEventCounts ?? {},
           },
           runtimeInput: false,
         }
@@ -1877,13 +2801,24 @@ function main() {
       const participantId = String(participant.participantId);
       const participantFrame = finalFrame.participantFrames[participantId] ?? {
         participantId: participant.participantId,
-        championStats: {},
+        championStats: makeApiShapedChampionStats(),
         damageStats: {},
+      };
+      participantFrame.championStats = {
+        ...makeApiShapedChampionStats(),
+        ...(participantFrame.championStats ?? {}),
       };
       participantFrame.damageStats = {
         ...(participantFrame.damageStats ?? {}),
         ...buildTimelineDamageStats(participant.apiLikeStats ?? {}),
       };
+      participantFrame.currentGold = null;
+      participantFrame.goldPerSecond = null;
+      participantFrame.position = {
+        x: null,
+        y: null,
+      };
+      participantFrame.timeEnemySpentControlled = null;
       for (const [metric, value] of Object.entries(participant.finalMetrics ?? {})) {
         if (!apiMetricPaths.has(metric) || value == null || !Number.isFinite(value)) {
           continue;
@@ -1927,7 +2862,7 @@ function main() {
   const emittedTimelineParticipantIds = new Set(
     frames.flatMap((frame) => Object.keys(frame.participantFrames ?? {}).map((participantId) => Number(participantId))),
   );
-  const rejectedCandidateArtifacts = buildRejectedCandidateArtifacts(root, args.replayId);
+  const rejectedCandidateArtifacts = buildRejectedCandidateArtifacts(root, args.replayId, args.versionGroup);
   annotateNonFinalIdentityCoverage(coverageByParticipant, rejectedCandidateArtifacts);
   const coverage = [...coverageByParticipant.values()]
     .map((entry) => ({
@@ -1946,6 +2881,7 @@ function main() {
       coverageSummary[entry.status] = (coverageSummary[entry.status] ?? 0) + 1;
     }
   }
+  const remainingParityGaps = buildRemainingParityGaps(rejectedCandidateArtifacts);
 
   const output = {
     artifactSchema: "rofl-api-parity-checkpoint/v1",
@@ -1991,6 +2927,41 @@ function main() {
     },
     shape: "riot-match-and-timeline-subset",
     caveat: buildArtifactCaveat(args.includeResearchKeyframes),
+    artifactManifest: {
+      primaryRuntimeArtifact: {
+        path: outputPath,
+        role: "api-shaped-rofl-only-runtime-output",
+        runtimeInput: false,
+      },
+      sourceReplay: {
+        path: replayPath,
+        role: "required-runtime-rofl-input",
+        runtimeInput: true,
+      },
+      replayDerivedSummary: {
+        path: summaryPath,
+        role: "required-runtime-derived-summary",
+        runtimeInput: true,
+      },
+      offlineValidationReports: [
+        {
+          path: path.join(path.dirname(outputPath), "rofl-api-metrics-riot-validation.json"),
+          role: "offline-riot-fixture-validation",
+          runtimeInput: false,
+        },
+        {
+          path: path.join(path.dirname(outputPath), "rofl-api-shape-gap-report.json"),
+          role: "offline-riot-shape-gap-audit",
+          runtimeInput: false,
+        },
+        {
+          path: path.join(path.dirname(outputPath), "rofl-challenge-gap-candidates.json"),
+          role: "offline-challenge-gap-audit",
+          runtimeInput: false,
+        },
+      ],
+      checkpointCommand: "npm run verify:rofl-api-parity -- --replay-id EUW1-7840220945 --allow-validation-mismatch",
+    },
     thresholds: {
       stableParticipantsOnly: !args.includeUnstable,
       maxNormalizedRmse: args.maxNormalizedRmse,
@@ -2019,8 +2990,10 @@ function main() {
       emittedMetricPointCount: frames.reduce(
         (sum, frame) => sum + Object.values(frame.participantFrames).reduce(
           (inner, participantFrame) => inner +
-            Object.keys(participantFrame).filter((key) => key !== "championStats" && key !== "damageStats" && key !== "participantId").length +
-            Object.keys(participantFrame.championStats ?? {}).length,
+            Object.entries(participantFrame)
+              .filter(([key, value]) => key !== "championStats" && key !== "damageStats" && key !== "participantId" && value != null && typeof value !== "object")
+              .length +
+            Object.values(participantFrame.championStats ?? {}).filter((value) => value != null).length,
           0,
         ),
         0,
@@ -2044,6 +3017,15 @@ function main() {
         gameVersion: summary.gameVersion ?? replay?.gameVersion ?? null,
         gameDuration: Number.isFinite(summary.gameLengthMillis) ? Math.round(summary.gameLengthMillis / 1000) : null,
         gameDurationMillis: summary.gameLengthMillis ?? null,
+        gameCreation: null,
+        gameEndTimestamp: null,
+        gameMode: null,
+        gameName: null,
+        gameStartTimestamp: null,
+        gameType: null,
+        mapId: null,
+        queueId: null,
+        tournamentCode: null,
         endOfGameResult: rosterParticipants.length === 10 ? "GameComplete" : null,
         participants: rosterParticipants.map(buildMatchInfoParticipant),
         teams: buildTeamInfo(rosterParticipants),
@@ -2073,10 +3055,12 @@ function main() {
       timelineDecoded: emittedTimelineParticipantIds.has(participant.participantId),
     })),
     frames,
-    fieldCoverage: buildFieldCoverage(),
-    roflDerivedFieldMap: buildRoflDerivedFieldMap(),
+    fieldCoverage: buildFieldCoverage(rejectedCandidateArtifacts),
+    roflDerivedFieldMap: buildRoflDerivedFieldMap(rejectedCandidateArtifacts),
     identityLinkage: buildIdentityLinkageSummary(rosterParticipants, emittedTimelineParticipantIds, rejectedCandidateArtifacts),
     rejectedCandidateArtifacts,
+    remainingParityGaps,
+    roflOnlyExtractionProof: buildRoflOnlyExtractionProof(rosterParticipants, frames, rejectedCandidateArtifacts, remainingParityGaps),
     matchCoverage,
     coverage,
     parityGaps: {

@@ -83,6 +83,7 @@ const requiredFieldCoverage = {
   matchTeamGaps: "not_found",
   timelineFinalParticipantFrames: "decoded",
   timelineNonFinalParticipantFrames: "not_found",
+  timelineNonFinalParticipantIdentity: "not_promoted",
   timelineEvents: "not_found",
   positions: "not_found",
   inventoryTimeline: "not_found",
@@ -145,8 +146,10 @@ function countFrameMetrics(frames) {
   return frames.reduce(
     (sum, frame) => sum + Object.values(frame.participantFrames ?? {}).reduce(
       (inner, participantFrame) => inner +
-        Object.keys(participantFrame).filter((key) => key !== "championStats" && key !== "damageStats" && key !== "participantId").length +
-        Object.keys(participantFrame.championStats ?? {}).length,
+        Object.entries(participantFrame)
+          .filter(([key, value]) => key !== "championStats" && key !== "damageStats" && key !== "participantId" && value != null && typeof value !== "object")
+          .length +
+        Object.values(participantFrame.championStats ?? {}).filter((value) => value != null).length,
       0,
     ),
     0,
@@ -187,6 +190,7 @@ function assertNoRuntimeRiotApiPath(value, pathParts = []) {
 
 function verifyFieldCoverage(artifact) {
   const fieldCoverage = artifact.fieldCoverage ?? {};
+  const rowIdentityArtifacts = artifact.rejectedCandidateArtifacts?.reconstructionRowIdentity?.rowIdentityArtifacts ?? [];
   for (const [key, status] of Object.entries(requiredFieldCoverage)) {
     assert(fieldCoverage[key]?.status === status, "Field coverage entry is missing or has unexpected status", {
       key,
@@ -212,6 +216,31 @@ function verifyFieldCoverage(artifact) {
   assert(typeof fieldCoverage.matchMetadataGaps?.reason === "string" && fieldCoverage.matchMetadataGaps.reason.includes("not Riot queue/map/mode"), "Match metadata gaps must explain why Riot metadata fields remain missing", {
     matchMetadataGaps: fieldCoverage.matchMetadataGaps,
   });
+  for (const field of [
+    "info.gameCreation",
+    "info.gameEndTimestamp",
+    "info.gameMode",
+    "info.gameName",
+    "info.gameStartTimestamp",
+    "info.gameType",
+    "info.mapId",
+    "info.queueId",
+    "info.tournamentCode",
+  ]) {
+    assert((fieldCoverage.matchMetadataGaps?.apiShapedNotFoundFields ?? []).includes(field), "Match metadata gaps must mark API-shaped unresolved fields", {
+      field,
+      matchMetadataGaps: fieldCoverage.matchMetadataGaps,
+    });
+    assert(artifact.roflDerivedFieldMap?.match?.[field]?.status === "not_found", "Field map must keep unresolved match metadata out of decoded parity", {
+      field,
+      fieldMap: artifact.roflDerivedFieldMap?.match?.[field],
+    });
+    const infoKey = field.replace("info.", "");
+    assert(Object.hasOwn(artifact.match?.info ?? {}, infoKey) && artifact.match.info[infoKey] === null, "Match info must emit unresolved metadata as API-shaped null", {
+      field,
+      value: artifact.match?.info?.[infoKey],
+    });
+  }
   assert(fieldCoverage.matchParticipants?.participantCount === 10, "Match participant field coverage must report 10 participants", {
     matchParticipants: fieldCoverage.matchParticipants,
   });
@@ -236,20 +265,92 @@ function verifyFieldCoverage(artifact) {
   assert((fieldCoverage.matchParticipantGaps?.rejectedCandidateEvidence ?? []).some((entry) => entry.field === "info.participants[].eligibleForProgression" && entry.status === "not_promoted"), "Match participant gaps must not promote eligibleForProgression without a ROFL source", {
     matchParticipantGaps: fieldCoverage.matchParticipantGaps,
   });
+  for (const field of [
+    "info.participants[].championId",
+    "info.participants[].eligibleForProgression",
+    "info.participants[].firstBloodAssist",
+    "info.participants[].firstBloodKill",
+    "info.participants[].firstTowerAssist",
+    "info.participants[].firstTowerKill",
+    "info.participants[].profileIcon",
+    "info.participants[].summonerLevel",
+  ]) {
+    assert((fieldCoverage.matchParticipantGaps?.apiShapedNotFoundFields ?? []).includes(field), "Match participant gaps must mark API-shaped unresolved fields", {
+      field,
+      matchParticipantGaps: fieldCoverage.matchParticipantGaps,
+    });
+    assert(["not_found", "not_promoted"].includes(artifact.roflDerivedFieldMap?.match?.[field]?.status), "Field map must keep unresolved participant fields out of decoded parity", {
+      field,
+      fieldMap: artifact.roflDerivedFieldMap?.match?.[field],
+    });
+  }
+  assert((artifact.match?.info?.participants ?? []).every((participant) =>
+    participant.championId === null &&
+    participant.eligibleForProgression === null &&
+    participant.firstBloodAssist === null &&
+    participant.firstBloodKill === null &&
+    participant.firstTowerAssist === null &&
+    participant.firstTowerKill === null &&
+    participant.profileIcon === null &&
+    participant.summonerLevel === null
+  ), "API-shaped unresolved match participant fields must remain null", {
+    participants: artifact.match?.info?.participants,
+  });
   assert((fieldCoverage.matchTeamGaps?.fields ?? []).includes("info.teams[].bans[].championId"), "Match team gaps must include missing pick/ban data", {
     matchTeamGaps: fieldCoverage.matchTeamGaps,
   });
   assert((fieldCoverage.matchTeamGaps?.fields ?? []).includes("info.teams[].objectives.dragon.first"), "Match team gaps must include missing first-objective fields", {
     matchTeamGaps: fieldCoverage.matchTeamGaps,
   });
+  assert((fieldCoverage.matchTeamGaps?.apiShapedNotFoundFields ?? []).includes("info.teams[].objectives.*.first"), "Match team gaps must mark API-shaped first-objective fields as not_found", {
+    matchTeamGaps: fieldCoverage.matchTeamGaps,
+  });
+  assert((fieldCoverage.matchTeamGaps?.apiShapedNotFoundFields ?? []).includes("info.teams[].bans[].championId"), "Match team gaps must mark API-shaped ban champion IDs as not_found", {
+    matchTeamGaps: fieldCoverage.matchTeamGaps,
+  });
+  assert((fieldCoverage.matchTeamGaps?.apiShapedNotFoundFields ?? []).includes("info.teams[].bans[].pickTurn"), "Match team gaps must mark API-shaped ban pick turns as not_found", {
+    matchTeamGaps: fieldCoverage.matchTeamGaps,
+  });
   assert((fieldCoverage.matchTeamGaps?.decodedTeamFields ?? []).includes("info.teams[].objectives.*.kills"), "Match team gaps must distinguish decoded objective kill counts from missing first-objective fields", {
     matchTeamGaps: fieldCoverage.matchTeamGaps,
+  });
+  assert(artifact.roflDerivedFieldMap?.match?.["info.teams[].objectives.*.first"]?.status === "not_found", "Field map must mark first-objective fields as not_found", {
+    fieldMap: artifact.roflDerivedFieldMap?.match?.["info.teams[].objectives.*.first"],
+  });
+  assert(artifact.roflDerivedFieldMap?.match?.["info.teams[].bans"]?.status === "not_found", "Field map must mark team bans as not_found", {
+    fieldMap: artifact.roflDerivedFieldMap?.match?.["info.teams[].bans"],
+  });
+  assert((artifact.match?.info?.teams ?? []).every((team) =>
+    (team.bans ?? []).length === 5 &&
+    team.bans.every((ban) => ban.championId === null && ban.pickTurn === null)
+  ), "API-shaped team bans must include null fields until ROFL pick/ban source is decoded", {
+    teams: artifact.match?.info?.teams,
+  });
+  assert((artifact.match?.info?.teams ?? []).every((team) =>
+    Object.values(team.objectives ?? {}).every((objective) => Object.hasOwn(objective, "first") && objective.first === null)
+  ), "API-shaped team objectives must include null first fields until ROFL event-order source is decoded", {
+    teams: artifact.match?.info?.teams,
   });
   assert(fieldCoverage.matchParticipantChallenges?.status === "partial", "Match challenge coverage must be explicitly partial", {
     matchParticipantChallenges: fieldCoverage.matchParticipantChallenges,
   });
   assert((fieldCoverage.matchParticipantChallenges?.decodedFields ?? []).includes("participants[].challenges.turretTakedowns"), "Match challenge coverage must name decoded ROFL challenge fields", {
     matchParticipantChallenges: fieldCoverage.matchParticipantChallenges,
+  });
+  assert((fieldCoverage.matchParticipantChallenges?.apiShapedNotFoundFields ?? []).length >= 120, "Match challenge coverage must list API-shaped unresolved challenge leaves", {
+    matchParticipantChallenges: fieldCoverage.matchParticipantChallenges,
+  });
+  assert(artifact.roflDerivedFieldMap?.match?.["info.participants[].challenges.*"]?.status === "not_found", "Field map must keep unresolved challenge leaves out of decoded parity", {
+    fieldMap: artifact.roflDerivedFieldMap?.match?.["info.participants[].challenges.*"],
+  });
+  assert((artifact.match?.info?.participants ?? []).every((participant) =>
+    participant.challenges?.turretTakedowns != null &&
+    Object.keys(participant.challenges ?? {}).length >= 126 &&
+    Object.entries(participant.challenges ?? {})
+      .filter(([key]) => key !== "turretTakedowns")
+      .every(([key, value]) => value === null || (key === "legendaryItemUsed" && Array.isArray(value) && value.every((entry) => entry === null)))
+  ), "Match participants must emit unresolved challenge leaves as API-shaped nulls while preserving promoted turretTakedowns", {
+    sample: artifact.match?.info?.participants?.[0]?.challenges,
   });
   assert((fieldCoverage.matchParticipantChallenges?.gaps ?? []).length > 0, "Match challenge coverage must describe remaining challenge gaps", {
     matchParticipantChallenges: fieldCoverage.matchParticipantChallenges,
@@ -263,11 +364,121 @@ function verifyFieldCoverage(artifact) {
   assert(fieldCoverage.timelineNonFinalParticipantFrames?.reconstructionDirection?.model === "keyframe-baseline-plus-chunk-deltas", "Non-final timeline coverage must document the keyframe plus chunk-delta reconstruction direction", {
     timelineNonFinalParticipantFrames: fieldCoverage.timelineNonFinalParticipantFrames,
   });
+  assert(fieldCoverage.timelineNonFinalParticipantIdentity?.source === "chunk-row-identity-gates", "Non-final participant identity coverage must point at chunk row identity gates", {
+    timelineNonFinalParticipantIdentity: fieldCoverage.timelineNonFinalParticipantIdentity,
+  });
+  assert(fieldCoverage.timelineNonFinalParticipantIdentity?.runtimeInput === false, "Non-final participant identity coverage must be marked non-runtime", {
+    timelineNonFinalParticipantIdentity: fieldCoverage.timelineNonFinalParticipantIdentity,
+  });
+  for (const familyKey of ["241-0x02", "241-0x04"]) {
+    const family = (fieldCoverage.timelineNonFinalParticipantIdentity?.candidateFamilies ?? []).find((entry) => entry.familyKey === familyKey);
+    const rejectedFamily = rowIdentityArtifacts.find((entry) => entry.familyKey === familyKey);
+    assert(family?.promotionStatus === "not_promoted" && family?.expectedRowCount === 10, "Non-final participant identity coverage must summarize rejected 241-family gates", {
+      familyKey,
+      timelineNonFinalParticipantIdentity: fieldCoverage.timelineNonFinalParticipantIdentity,
+    });
+    assert(rejectedFamily != null, "Rejected candidate artifacts must include row identity evidence for every coverage family", {
+      familyKey,
+      rowIdentityArtifacts,
+    });
+    assert(family.expectedRowCount === rejectedFamily.rowCount, "Non-final participant identity coverage row count must match rejected candidate evidence", {
+      family,
+      rejectedFamily,
+    });
+    assert(family.promotionStatus === rejectedFamily.promotionStatus, "Non-final participant identity coverage promotion status must match rejected candidate evidence", {
+      family,
+      rejectedFamily,
+    });
+    assert(JSON.stringify(family.rowStatuses ?? []) === JSON.stringify(Object.keys(rejectedFamily.rowStatusCounts ?? {}).sort()), "Non-final participant identity coverage row statuses must match rejected candidate evidence", {
+      family,
+      rejectedFamily,
+    });
+    assert((family.rowStatuses ?? []).includes("unstable_identity"), "Non-final participant identity coverage must preserve unstable row status evidence", {
+      familyKey,
+      family,
+    });
+  }
   assert(fieldCoverage.timelineEvents?.source === "chunk-delta-events-not-extracted", "Timeline event coverage must point at chunk-delta event extraction", {
     timelineEvents: fieldCoverage.timelineEvents,
   });
+  assert((fieldCoverage.timelineEvents?.apiShapedNotFoundFields ?? []).length === 70, "Timeline event coverage must enumerate the remaining API event leaf gap", {
+    timelineEvents: fieldCoverage.timelineEvents,
+  });
+  assert(fieldCoverage.timelineEvents?.runtimeEmission === "empty-events-arrays", "Timeline event coverage must document why fake null event objects are not emitted", {
+    timelineEvents: fieldCoverage.timelineEvents,
+  });
+  assert(fieldCoverage.timelineEvents?.rejectedItemEventEvidence?.candidateCount === artifact.rejectedCandidateArtifacts?.itemEvents?.candidateArtifact?.candidateCount, "Timeline event coverage must mirror rejected item-event candidate counts", {
+    timelineEvents: fieldCoverage.timelineEvents,
+    itemEvents: artifact.rejectedCandidateArtifacts?.itemEvents,
+  });
+  assert((artifact.timeline?.info?.frames ?? []).every((frame) => Array.isArray(frame.events) && frame.events.length === 0), "Timeline frames must keep events empty until ROFL event decoding exists", {
+    frames: artifact.timeline?.info?.frames,
+  });
   assert(fieldCoverage.positions?.source === "state-reconstruction-not-extracted-for-16.9", "Position coverage must point at state reconstruction as the missing extraction layer", {
     positions: fieldCoverage.positions,
+  });
+  assert((fieldCoverage.positions?.perParticipantCoverage ?? []).length === 10, "Position coverage must report per-participant movement status for all 10 participants when movement evidence exists", {
+    positions: fieldCoverage.positions,
+  });
+  assert((fieldCoverage.positions?.perParticipantCoverage ?? []).some((entry) => entry.status === "not_found"), "Position coverage must preserve unmatched participant status", {
+    positions: fieldCoverage.positions,
+  });
+  assert((fieldCoverage.positions?.perParticipantCoverage ?? []).some((entry) => entry.status === "noisy"), "Position coverage must preserve noisy movement candidate status", {
+    positions: fieldCoverage.positions,
+  });
+  assert((fieldCoverage.positions?.perParticipantCoverage ?? []).some((entry) => entry.status === "unstable_identity"), "Position coverage must preserve unstable movement identity status", {
+    positions: fieldCoverage.positions,
+  });
+  const positionStatusCounts = (fieldCoverage.positions?.perParticipantCoverage ?? []).reduce((counts, entry) => {
+    counts[entry.status] = (counts[entry.status] ?? 0) + 1;
+    return counts;
+  }, {});
+  assert(JSON.stringify(positionStatusCounts) === JSON.stringify(fieldCoverage.positions?.statusCounts ?? {}), "Position coverage statusCounts must match per-participant entries", {
+    computed: positionStatusCounts,
+    positions: fieldCoverage.positions,
+  });
+  assert(JSON.stringify(fieldCoverage.positions?.perParticipantCoverage ?? []) === JSON.stringify(artifact.rejectedCandidateArtifacts?.positions?.perParticipantCoverage ?? []), "Position field coverage must mirror rejected position candidate per-participant evidence", {
+    fieldCoverage: fieldCoverage.positions,
+    rejectedPositions: artifact.rejectedCandidateArtifacts?.positions,
+  });
+  for (const field of [
+    "info.frames[].participantFrames[].championStats.*",
+    "info.frames[].participantFrames[].currentGold",
+    "info.frames[].participantFrames[].goldPerSecond",
+    "info.frames[].participantFrames[].position.x",
+    "info.frames[].participantFrames[].position.y",
+    "info.frames[].participantFrames[].timeEnemySpentControlled",
+  ]) {
+    assert((fieldCoverage.timelineNonFinalParticipantFrames?.apiShapedNotFoundFields ?? []).includes(field), "Timeline participant frame gaps must mark API-shaped unresolved fields", {
+      field,
+      timelineNonFinalParticipantFrames: fieldCoverage.timelineNonFinalParticipantFrames,
+    });
+  }
+  const timelineParticipantFrames = Object.values(artifact.timeline?.info?.frames?.at(-1)?.participantFrames ?? {});
+  assert(timelineParticipantFrames.every((frame) =>
+    frame.currentGold === null &&
+    frame.goldPerSecond === null &&
+    frame.timeEnemySpentControlled === null &&
+    frame.position?.x === null &&
+    frame.position?.y === null
+  ), "Final timeline participant frames must emit unresolved scalar/position fields as API-shaped nulls", {
+    sample: timelineParticipantFrames[0],
+  });
+  assert(timelineParticipantFrames.every((frame) =>
+    Object.keys(frame.championStats ?? {}).length >= 25 &&
+    Object.values(frame.championStats ?? {}).every((value) => value === null)
+  ), "Final timeline championStats must be API-shaped null leaves until decoded", {
+    sample: timelineParticipantFrames[0]?.championStats,
+  });
+  assert(fieldCoverage.inventoryTimeline?.source === "not-extracted", "Inventory timeline coverage must remain not-extracted", {
+    inventoryTimeline: fieldCoverage.inventoryTimeline,
+  });
+  assert(JSON.stringify(fieldCoverage.inventoryTimeline?.rejectedCandidateEvidence ?? null) === JSON.stringify(artifact.rejectedCandidateArtifacts?.inventoryTimeline?.relatedCandidateArtifact ?? null), "Inventory timeline coverage must mirror rejected inventory candidate evidence", {
+    inventoryTimeline: fieldCoverage.inventoryTimeline,
+    rejectedInventoryTimeline: artifact.rejectedCandidateArtifacts?.inventoryTimeline,
+  });
+  assert(fieldCoverage.inventoryTimeline?.runtimeInput === false, "Inventory timeline coverage must be non-runtime", {
+    inventoryTimeline: fieldCoverage.inventoryTimeline,
   });
   assert(fieldCoverage.offlineRiotValidation?.runtimeInput === false, "Offline Riot validation must be marked as non-runtime input", {
     offlineRiotValidation: fieldCoverage.offlineRiotValidation,
@@ -317,6 +528,86 @@ function verifyParityChecklist(artifact) {
       fullParity,
     });
   }
+  const remainingParityGaps = artifact.remainingParityGaps ?? [];
+  assert(Array.isArray(remainingParityGaps) && remainingParityGaps.length >= 5, "Artifact must include a compact machine-readable remainingParityGaps table", {
+    remainingParityGaps,
+  });
+  const remainingGapByKey = new Map(remainingParityGaps.map((entry) => [entry.key, entry]));
+  for (const key of [
+    "nonFinalParticipantIdentity",
+    "positions",
+    "timelineEvents",
+    "inventoryTimeline",
+    "damageTimeline",
+  ]) {
+    const entry = remainingGapByKey.get(key);
+    assert(entry && entry.runtimeApiData === false && typeof entry.nextDecoderStep === "string" && entry.nextDecoderStep.length > 0, "remainingParityGaps entry must be explicit and non-runtime", {
+      key,
+      entry,
+    });
+  }
+  assert((remainingGapByKey.get("positions")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("9/10")), "remainingParityGaps.positions must preserve movement assignment blocker", {
+    positions: remainingGapByKey.get("positions"),
+  });
+  assert((remainingGapByKey.get("timelineEvents")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("itemEventCandidateCount=689")), "remainingParityGaps.timelineEvents must preserve rejected item-event candidate count", {
+    timelineEvents: remainingGapByKey.get("timelineEvents"),
+  });
+  assert((remainingGapByKey.get("inventoryTimeline")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("itemEventCandidateCount=689")), "remainingParityGaps.inventoryTimeline must mirror rejected inventory candidate evidence", {
+    inventoryTimeline: remainingGapByKey.get("inventoryTimeline"),
+  });
+  const proof = artifact.roflOnlyExtractionProof ?? {};
+  assert(proof.proofSchema === "rofl-only-extraction-proof/v1", "Artifact must include a versioned ROFL-only extraction proof", {
+    proof,
+  });
+  assert(proof.runtimeInputPolicy?.riotApiRuntimeInput === false &&
+    proof.runtimeInputPolicy?.replayFileRequired === true &&
+    proof.runtimeInputPolicy?.supervisedFixtureRole === "offline-validation-only",
+    "ROFL-only extraction proof must explicitly separate runtime replay input from offline fixtures", {
+      runtimeInputPolicy: proof.runtimeInputPolicy,
+    });
+  const proofBySurface = new Map((proof.decodedFromRoflOnly ?? []).map((entry) => [entry.surface, entry]));
+  assert(proofBySurface.get("match.info.participants")?.participantCount === 10, "ROFL-only extraction proof must cover all 10 match participants", {
+    decodedFromRoflOnly: proof.decodedFromRoflOnly,
+  });
+  assert(proofBySurface.get("timeline.info.frames[-1].participantFrames final scalar metrics")?.metricPointCount === 50, "ROFL-only extraction proof must count final scalar timeline points", {
+    decodedFromRoflOnly: proof.decodedFromRoflOnly,
+  });
+  assert(proofBySurface.get("timeline.info.frames[-1].participantFrames final damageStats")?.metricPointCount === 120, "ROFL-only extraction proof must count final damageStats points", {
+    decodedFromRoflOnly: proof.decodedFromRoflOnly,
+  });
+  assert((proof.perParticipantProof ?? []).length === 10 &&
+    (proof.perParticipantProof ?? []).every((entry) =>
+      Number.isInteger(entry.participantId) &&
+      entry.participantId >= 1 &&
+      entry.participantId <= 10 &&
+      entry.source === "rofl-metadata-statsJson" &&
+      entry.participantIdentity === "rofl-summary-roster-order" &&
+      entry.runtimeApiData === true &&
+      entry.finalScalarMetricCount === 5 &&
+      entry.finalDamageMetricCount === 12 &&
+      (entry.unresolvedRuntimeFields ?? []).includes("position") &&
+      (entry.unresolvedRuntimeFields ?? []).includes("currentGold") &&
+      (entry.unresolvedRuntimeFields ?? []).includes("goldPerSecond") &&
+      (entry.unresolvedRuntimeFields ?? []).includes("timeEnemySpentControlled") &&
+      (entry.unresolvedRuntimeFields ?? []).includes("championStats")
+    ),
+    "ROFL-only extraction proof must include per-participant decoded/gap evidence for all 10 participants", {
+      perParticipantProof: proof.perParticipantProof,
+    });
+  assert((proof.offlineValidationOnly ?? []).length >= 3 &&
+    (proof.offlineValidationOnly ?? []).every((entry) => entry.runtimeInput === false),
+    "ROFL-only extraction proof must mark validation reports offline-only", {
+      offlineValidationOnly: proof.offlineValidationOnly,
+    });
+  assert((proof.remainingGapKeys ?? []).includes("positions") &&
+    (proof.remainingGapKeys ?? []).includes("timelineEvents"),
+    "ROFL-only extraction proof must link to remaining parity gaps", {
+      remainingGapKeys: proof.remainingGapKeys,
+    });
+  assert(JSON.stringify([...(proof.remainingGapKeys ?? [])].sort()) === JSON.stringify([...remainingGapByKey.keys()].sort()), "ROFL-only extraction proof remainingGapKeys must match remainingParityGaps keys", {
+    remainingGapKeys: proof.remainingGapKeys,
+    remainingParityGapKeys: [...remainingGapByKey.keys()],
+  });
   const runtimePolicy = byRequirement.get("Runtime extraction does not use Riot API data.");
   assert(runtimePolicy?.status === "satisfied", "Parity checklist must mark runtime Riot API exclusion satisfied", {
     runtimePolicy,
@@ -337,6 +628,10 @@ function verifyParityChecklist(artifact) {
     "rejectedCandidateArtifacts.nonFinalScalarIdentity.assignmentArtifact.metricSet=conservative",
     "rejectedCandidateArtifacts.nonFinalScalarIdentity.assignmentArtifact.thresholds",
     "rejectedCandidateArtifacts.nonFinalScalarIdentity.assignmentArtifact.diagnostics",
+    "rejectedCandidateArtifacts.reconstructionRowIdentity.status=not_promoted",
+    "rejectedCandidateArtifacts.reconstructionRowIdentity.rowGridCandidateScan.status=candidate_scan_only_not_runtime_api_data",
+    "rejectedCandidateArtifacts.reconstructionRowIdentity.rowGridFieldAnalysis.status=field_hypothesis_only_not_runtime_api_data",
+    "fieldCoverage.timelineNonFinalParticipantIdentity.status=not_promoted",
   ]) {
     assert((identity.evidence ?? []).includes(evidence), "Identity checklist is missing concrete non-final scalar evidence", {
       evidence,
@@ -346,6 +641,17 @@ function verifyParityChecklist(artifact) {
   const filtering = byRequirement.get("Filter noisy candidates and avoid exposing low-confidence affine artifacts as real API data.");
   assert((filtering?.evidence ?? []).includes("weak per-metric supports are filtered by minSupportScore before edge creation"), "Filtering checklist must mention metric-specific support gates", {
     filtering,
+  });
+  assert((filtering?.evidence ?? []).includes("241-family row identity gates keep duplicate_rejected/unstable_identity rows out of runtime participantFrames"), "Filtering checklist must mention rejected 241 row identity gates", {
+    filtering,
+  });
+  const docs = byRequirement.get("Document what still does not match Riot API parity.");
+  assert((docs?.evidence ?? []).includes("rejectedCandidateArtifacts.reconstructionRowIdentity"), "Documentation checklist must mention reconstruction row identity rejection evidence", {
+    docs,
+  });
+  const verification = byRequirement.get("Add verification that proves ROFL-only fields and remaining gaps.");
+  assert((verification?.evidence ?? []).includes("fieldCoverage.timelineNonFinalParticipantIdentity cross-checks rejectedCandidateArtifacts.reconstructionRowIdentity"), "Verification checklist must mention row identity field coverage cross-checks", {
+    verification,
   });
 }
 
@@ -429,6 +735,100 @@ function verifyRejectedCandidateArtifacts(artifact) {
     });
   }
 
+  const reconstructionRowIdentity = rejected.reconstructionRowIdentity;
+  assert(reconstructionRowIdentity != null, "Artifact must include reconstruction row identity rejection evidence", {
+    rejectedCandidateArtifacts: artifact.rejectedCandidateArtifacts,
+  });
+  assert(reconstructionRowIdentity.status === "not_promoted", "Reconstruction row identity evidence must remain not_promoted", {
+    reconstructionRowIdentity,
+  });
+  assert(reconstructionRowIdentity.runtimeInput === false, "Reconstruction row identity evidence must be non-runtime", {
+    reconstructionRowIdentity,
+  });
+  assert((reconstructionRowIdentity.reason ?? "").includes("stable replay-only participant identity"), "Reconstruction row identity evidence must explain the participant identity blocker", {
+    reconstructionRowIdentity,
+  });
+  const rowGridCandidateScan = reconstructionRowIdentity.rowGridCandidateScan;
+  assert(rowGridCandidateScan?.exists === true, "Reconstruction row identity evidence must include the generic row-grid candidate scan", {
+    reconstructionRowIdentity,
+  });
+  assert(rowGridCandidateScan.schema === "rofl-reconstruction-row-grid-candidates/v1", "Row-grid candidate scan summary has unexpected schema", {
+    rowGridCandidateScan,
+  });
+  assert(rowGridCandidateScan.status === "candidate_scan_only_not_runtime_api_data", "Row-grid candidate scan must remain candidate-only", {
+    rowGridCandidateScan,
+  });
+  assert(rowGridCandidateScan.runtimeInput === false, "Row-grid candidate scan must be non-runtime", {
+    rowGridCandidateScan,
+  });
+  assert((rowGridCandidateScan.candidateCount ?? 0) > 0 && (rowGridCandidateScan.topCandidates ?? []).length > 0, "Row-grid candidate scan must summarize candidate evidence", {
+    rowGridCandidateScan,
+  });
+  assert((rowGridCandidateScan.topCandidates ?? []).every((candidate) =>
+    candidate.runtimeApiData === false &&
+    candidate.participantIdentity === false &&
+    candidate.status === "not_promoted"
+  ), "Runtime artifact must not promote row-grid shape candidates as participant identity", {
+    rowGridCandidateScan,
+  });
+  const rowGridFieldAnalysis = reconstructionRowIdentity.rowGridFieldAnalysis;
+  assert(rowGridFieldAnalysis?.exists === true, "Reconstruction row identity evidence must include row-grid field analysis", {
+    reconstructionRowIdentity,
+  });
+  assert(rowGridFieldAnalysis.schema === "rofl-reconstruction-row-grid-field-analysis/v1", "Row-grid field analysis summary has unexpected schema", {
+    rowGridFieldAnalysis,
+  });
+  assert(rowGridFieldAnalysis.status === "field_hypothesis_only_not_runtime_api_data", "Row-grid field analysis must remain hypothesis-only", {
+    rowGridFieldAnalysis,
+  });
+  assert(rowGridFieldAnalysis.runtimeInput === false, "Row-grid field analysis must be non-runtime", {
+    rowGridFieldAnalysis,
+  });
+  assert((rowGridFieldAnalysis.candidateCount ?? 0) > 0 && (rowGridFieldAnalysis.topCandidates ?? []).length > 0, "Row-grid field analysis must summarize candidate byte-column evidence", {
+    rowGridFieldAnalysis,
+  });
+  assert((rowGridFieldAnalysis.topCandidates ?? []).every((candidate) =>
+    candidate.runtimeApiData === false &&
+    candidate.participantIdentity === false &&
+    candidate.promotionStatus === "not_promoted"
+  ), "Runtime artifact must not promote row-grid field hypotheses as participant identity", {
+    rowGridFieldAnalysis,
+  });
+  const rowIdentityArtifacts = reconstructionRowIdentity.rowIdentityArtifacts ?? [];
+  assert(rowIdentityArtifacts.length >= 2, "Reconstruction row identity evidence must include both 241-family row gates", {
+    reconstructionRowIdentity,
+  });
+  for (const familyKey of ["241-0x02", "241-0x04"]) {
+    const artifactSummary = rowIdentityArtifacts.find((entry) => entry.familyKey === familyKey);
+    assert(artifactSummary != null, `Missing reconstruction row identity summary for ${familyKey}`, {
+      reconstructionRowIdentity,
+    });
+    assert(artifactSummary.status === "identity_gate_only_not_runtime_api_data", `Unexpected row identity status for ${familyKey}`, {
+      artifactSummary,
+    });
+    assert(artifactSummary.promotionStatus === "not_promoted", `Row identity gate must remain not_promoted for ${familyKey}`, {
+      artifactSummary,
+    });
+    assert(artifactSummary.runtimeApiData === false, `Row identity gate must not emit runtime API data for ${familyKey}`, {
+      artifactSummary,
+    });
+    assert(artifactSummary.participantIdentity === false, `Row identity gate must not claim participant identity for ${familyKey}`, {
+      artifactSummary,
+    });
+    assert(Number.isFinite(artifactSummary.sameRowWinRate) && artifactSummary.sameRowWinRate < 0.75, `Row identity same-row win rate must remain below promotion threshold for ${familyKey}`, {
+      artifactSummary,
+    });
+    assert(artifactSummary.rowCount === 10, `Row identity gate must summarize 10 rows for ${familyKey}`, {
+      artifactSummary,
+    });
+    const rejectedOrUnstableCount =
+      (artifactSummary.rowStatusCounts?.duplicate_rejected ?? 0) +
+      (artifactSummary.rowStatusCounts?.unstable_identity ?? 0);
+    assert(rejectedOrUnstableCount === 10, `Every row identity summary row must remain rejected or unstable for ${familyKey}`, {
+      artifactSummary,
+    });
+  }
+
   const positions = rejected.positions;
   assert(positions != null, "Artifact must include position candidate rejection evidence", {
     rejectedCandidateArtifacts: artifact.rejectedCandidateArtifacts,
@@ -446,6 +846,66 @@ function verifyRejectedCandidateArtifacts(artifact) {
     assert(positions.offlineValidation?.runtimeInput === false, "Position validation must be marked offline-only", {
       positions,
     });
+    assert(positions.participantMovementArtifact?.assignmentCount === 9, "Focused replay movement evidence should preserve the 9/10 assignment blocker", {
+      positions,
+    });
+    assert(positions.participantMovementArtifact?.unmatchedParticipantCount === 1, "Focused replay movement evidence should preserve the unmatched participant blocker", {
+      positions,
+    });
+    assert(positions.participantMovementArtifact?.usesIdentityPriors === true, "Rejected position candidate must record identity-prior dependency", {
+      positions,
+    });
+    assert(positions.offlineValidation?.passingAssignmentCount === 7, "Focused replay movement evidence should preserve failed offline-validation assignments", {
+      positions,
+    });
+    assert(Array.isArray(positions.promotionBlockers) && positions.promotionBlockers.length >= 3, "Rejected position evidence must list concrete runtime promotion blockers", {
+      positions,
+    });
+    assert((positions.promotionBlockers ?? []).some((blocker) => blocker.includes("9/10")), "Position blockers must preserve incomplete participant assignment evidence", {
+      blockers: positions.promotionBlockers,
+    });
+    assert((positions.promotionBlockers ?? []).some((blocker) => blocker.includes("identity priors")), "Position blockers must preserve identity-prior dependency evidence", {
+      blockers: positions.promotionBlockers,
+    });
+    assert((positions.promotionBlockers ?? []).some((blocker) => blocker.includes("7/9")), "Position blockers must preserve failed offline-quality evidence", {
+      blockers: positions.promotionBlockers,
+    });
+    assert(positions.qualityGateSummary?.expectedParticipantCount === 10 &&
+      positions.qualityGateSummary?.assignedParticipantCount === 9 &&
+      positions.qualityGateSummary?.unmatchedParticipantCount === 1 &&
+      positions.qualityGateSummary?.usesIdentityPriors === true &&
+      positions.qualityGateSummary?.offlineAssignmentCount === 9 &&
+      positions.qualityGateSummary?.offlinePassingAssignmentCount === 7 &&
+      positions.qualityGateSummary?.runtimeInput === false,
+      "Position quality gate summary must mirror movement assignment and offline-validation blockers", {
+        qualityGateSummary: positions.qualityGateSummary,
+      });
+    const unmatchedPositionCoverage = (positions.perParticipantCoverage ?? []).find((entry) => entry.status === "not_found");
+    assert((positions.participantMovementArtifact?.unmatchedParticipants ?? []).length === 1 &&
+      (positions.participantMovementArtifact?.unmatchedParticipants?.[0]?.topRejectedEntityCandidates ?? []).length > 0,
+      "Position movement artifact must preserve top rejected candidates for the unmatched participant", {
+        participantMovementArtifact: positions.participantMovementArtifact,
+      });
+    assert((unmatchedPositionCoverage?.topRejectedEntityCandidates ?? []).length > 0 &&
+      (unmatchedPositionCoverage?.topRejectedEntityCandidates ?? []).some((candidate) => candidate.assignedToOtherParticipant === true),
+      "Position per-participant coverage must expose why the unmatched participant was not promoted", {
+        unmatchedPositionCoverage,
+      });
+    assert((positions.participantMovementArtifact?.unassignedEntities ?? []).length === 2 &&
+      (positions.participantMovementArtifact?.unassignedEntities ?? []).every((entity) => (entity.topRejectedParticipantCandidates ?? []).length > 0),
+      "Position movement artifact must preserve top rejected participant candidates for unassigned entities", {
+        participantMovementArtifact: positions.participantMovementArtifact,
+      });
+    assertNoRuntimeRiotApiPath(positions, ["rejectedCandidateArtifacts", "positions"]);
+    assert((positions.perParticipantCoverage ?? []).length === 10, "Rejected position evidence must include per-participant coverage", {
+      positions,
+    });
+    assert((positions.perParticipantCoverage ?? []).every((entry) =>
+      ["unstable_identity", "noisy", "not_found"].includes(entry.status) &&
+      entry.runtimeApiData === false
+    ), "Position per-participant coverage must use explicit non-runtime statuses", {
+      positions,
+    });
   }
 
   const itemEvents = rejected.itemEvents;
@@ -457,6 +917,15 @@ function verifyRejectedCandidateArtifacts(artifact) {
   });
   if (itemEvents.status === "rejected_for_runtime") {
     assert((itemEvents.candidateArtifact?.candidateCount ?? 0) > 0, "Rejected item-event candidate evidence must include candidate counts", {
+      itemEvents,
+    });
+    assert(itemEvents.candidateArtifact?.candidateCount === 689 && itemEvents.candidateArtifact?.strongCandidateCount === 93, "Focused replay item-event evidence must preserve candidate blocker counts", {
+      itemEvents,
+    });
+    assert(itemEvents.eventInventory?.globalEventCount === 472, "Focused replay item-event evidence must preserve offline event inventory count", {
+      itemEvents,
+    });
+    assert(itemEvents.eventInventory?.eventTypeCounts?.ITEM_PURCHASED === 249, "Focused replay item-event evidence must preserve item purchase event count", {
       itemEvents,
     });
     assert(itemEvents.offlineValidation?.runtimeInput === false, "Item-event validation must be marked offline-only", {
@@ -474,6 +943,13 @@ function verifyRejectedCandidateArtifacts(artifact) {
   });
   if (inventoryTimeline.status === "rejected_for_runtime") {
     assert(inventoryTimeline.runtimeInput === false, "Inventory timeline rejected evidence must be marked non-runtime", {
+      inventoryTimeline,
+    });
+    assert(inventoryTimeline.relatedCandidateArtifact?.itemEventCandidateCount === itemEvents.candidateArtifact?.candidateCount, "Inventory timeline rejection must point at rejected item-event candidate count", {
+      inventoryTimeline,
+      itemEvents,
+    });
+    assert(inventoryTimeline.relatedCandidateArtifact?.eventTypeCounts?.ITEM_DESTROYED === 209, "Inventory timeline rejection must preserve item-destroyed event count", {
       inventoryTimeline,
     });
     assertNoRuntimeRiotApiPath(inventoryTimeline, ["rejectedCandidateArtifacts", "inventoryTimeline"]);
@@ -555,6 +1031,7 @@ function verifyIdentityLinkage(artifact) {
 
 function verifyRoflDerivedFieldMap(artifact) {
   const fieldMap = artifact.roflDerivedFieldMap ?? {};
+  const fieldCoverage = artifact.fieldCoverage ?? {};
   const requiredDecoded = [
     ["match", "metadata.matchId", "rofl-file-name"],
     ["match", "metadata.participants", "rofl-metadata-statsJson"],
@@ -588,8 +1065,40 @@ function verifyRoflDerivedFieldMap(artifact) {
   assert(fieldMap.timeline?.["info.frames[].events"]?.status === "not_found", "ROFL-derived field map must keep timeline events missing", {
     entry: fieldMap.timeline?.["info.frames[].events"],
   });
+  assert(fieldMap.timeline?.["info.frames[].events"]?.source === fieldCoverage.timelineEvents?.source, "Timeline event field map source must match coverage", {
+    fieldMap: fieldMap.timeline?.["info.frames[].events"],
+    timelineEvents: fieldCoverage.timelineEvents,
+  });
+  assert(JSON.stringify(fieldMap.timeline?.["info.frames[].events"]?.apiShapedNotFoundFields ?? []) === JSON.stringify(fieldCoverage.timelineEvents?.apiShapedNotFoundFields ?? []), "Timeline event field map must mirror coverage gap leaves", {
+    fieldMap: fieldMap.timeline?.["info.frames[].events"],
+    timelineEvents: fieldCoverage.timelineEvents,
+  });
+  assert(fieldMap.timeline?.["info.frames[].events"]?.runtimeEmission === "empty-events-arrays", "Timeline event field map must document empty events runtime policy", {
+    entry: fieldMap.timeline?.["info.frames[].events"],
+  });
+  assert(fieldMap.timeline?.["info.frames[].events"]?.rejectedItemEventEvidence?.candidateCount === artifact.rejectedCandidateArtifacts?.itemEvents?.candidateArtifact?.candidateCount, "Timeline event field map must mirror rejected item-event candidate counts", {
+    fieldMap: fieldMap.timeline?.["info.frames[].events"],
+    itemEvents: artifact.rejectedCandidateArtifacts?.itemEvents,
+  });
   assert(fieldMap.timeline?.["info.frames[].participantFrames[].currentGold"]?.status === "not_promoted", "ROFL-derived field map must not promote final currentGold without API parity", {
     entry: fieldMap.timeline?.["info.frames[].participantFrames[].currentGold"],
+  });
+  assert(fieldMap.timeline?.["info.frames[].participantFrames[].position"]?.status === "not_promoted", "ROFL-derived field map must not promote position candidates", {
+    entry: fieldMap.timeline?.["info.frames[].participantFrames[].position"],
+  });
+  assert(JSON.stringify(fieldMap.timeline?.["info.frames[].participantFrames[].position"]?.perParticipantCoverage ?? []) === JSON.stringify(fieldCoverage.positions?.perParticipantCoverage ?? []), "Position field map must mirror position coverage", {
+    fieldMap: fieldMap.timeline?.["info.frames[].participantFrames[].position"],
+    positions: fieldCoverage.positions,
+  });
+  assert(JSON.stringify(fieldMap.timeline?.["info.frames[].participantFrames[].position"]?.statusCounts ?? {}) === JSON.stringify(fieldCoverage.positions?.statusCounts ?? {}), "Position field map statusCounts must mirror position coverage", {
+    fieldMap: fieldMap.timeline?.["info.frames[].participantFrames[].position"],
+    positions: fieldCoverage.positions,
+  });
+  assert(fieldMap.timeline?.["info.frames[].participantFrames[].nonFinalParticipantIdentity"]?.status === "not_promoted", "ROFL-derived field map must not promote non-final participant identity", {
+    entry: fieldMap.timeline?.["info.frames[].participantFrames[].nonFinalParticipantIdentity"],
+  });
+  assert(fieldMap.timeline?.["info.frames[].participantFrames[].nonFinalParticipantIdentity"]?.source === "chunk-row-identity-gates", "ROFL-derived field map must point non-final participant identity at chunk row gates", {
+    entry: fieldMap.timeline?.["info.frames[].participantFrames[].nonFinalParticipantIdentity"],
   });
   assert(fieldMap.timeline?.["info.frames[].participantFrames[].championStats"]?.status === "shape_only", "ROFL-derived field map must mark championStats container shape-only", {
     entry: fieldMap.timeline?.["info.frames[].participantFrames[].championStats"],
@@ -659,6 +1168,19 @@ function main() {
   verifyRoflDerivedFieldMap(artifact);
   assertNoRuntimeRiotApiPath(artifact, []);
 
+  assert(artifact.artifactManifest?.sourceReplay?.runtimeInput === true &&
+    artifact.artifactManifest?.replayDerivedSummary?.runtimeInput === true &&
+    artifact.artifactManifest?.primaryRuntimeArtifact?.runtimeInput === false &&
+    (artifact.artifactManifest?.offlineValidationReports ?? []).length >= 3 &&
+    (artifact.artifactManifest?.offlineValidationReports ?? []).every((entry) => entry.runtimeInput === false),
+    "Artifact manifest must distinguish runtime ROFL inputs from offline validation reports", {
+      artifactManifest: artifact.artifactManifest,
+    });
+  assert((artifact.artifactManifest?.sourceReplay?.path ?? "").replaceAll("\\", "/").includes("/replays/") &&
+    !(artifact.artifactManifest?.sourceReplay?.path ?? "").replaceAll("\\", "/").includes("/replays/api/"),
+    "Artifact manifest source replay must point at a ROFL replay, not Riot API fixtures", {
+      sourceReplay: artifact.artifactManifest?.sourceReplay,
+    });
   assert(artifact.source?.roflOnlyInputs?.runtimeRiotApiFiles === false, "Artifact does not declare Riot API files as disabled for runtime extraction", {
     roflOnlyInputs: artifact.source?.roflOnlyInputs,
   });

@@ -151,6 +151,8 @@ The full checkpoint also regenerates `keyframe-rofl-stat-support-threshold-sweep
 The support-threshold sweep artifact has schema `rofl-keyframe-stat-support-threshold-sweep/v1`, which the checkpoint verifies.
 The checkpoint also requires the default sweep row (`minSupportScore=0.35`) to have 0 assignments and requires every swept threshold to have 0 canonical candidates.
 The sweep also includes an unsafe single-metric negative control; on the current 16.9 corpus it produces tempting assignments but offline comparison marks them mostly as conflicts, which is why one-metric identity links are not runtime-exported.
+The full checkpoint also regenerates the reconstruction chunk summary, chunk-family comparison, family samples, sample analysis, target ranking, 241 target dossiers, target neighborhoods, table analyses, row identity gates, and family/event correlation before exporting the API-shaped runtime artifact, then verifies all of them. The chunk and event-correlation steps shell out to the native `rofl_core_cli.exe` to dump chunk subrecords, so on this Windows machine it should be run outside the sandbox if a sandboxed invocation fails with `EPERM`.
+The full checkpoint also regenerates `artifacts/EUW1-7840220945/participant-movement.json` and `artifacts/EUW1-7840220945/assigned-movement-validation-report.json` before export, then asserts the focused movement blocker is still present: 9/10 participant assignments, Malphite TOP unmatched, top rejected entity candidates for the unmatched participant, two unassigned entity tracks with rejected participant candidates, and 7/9 offline movement-quality passes.
 
 The full checkpoint also runs a negative completion gate: `audit:rofl-api-parity -- --require-complete` must fail until full API parity is actually achieved.
 
@@ -165,7 +167,7 @@ Current offline validation result:
 - validation schema: `rofl-api-metrics-riot-validation/v1`
 - shape-gap output: `artifacts-keyframes/EUW1-7840220945/rofl-api-shape-gap-report.json`
 - shape-gap schema: `rofl-api-shape-gap-report/v1`
-- shape-gap result: `205 / 469` Riot API leaf paths matched, `264` missing
+- shape-gap result: `399 / 469` Riot API leaf paths matched, `70` missing
 - challenge-gap output: `artifacts-keyframes/EUW1-7840220945/rofl-challenge-gap-candidates.json`
 - challenge-gap schema: `rofl-challenge-gap-candidates/v1`
 - challenge-gap result: `2` exact normalized candidates, `29` fuzzy candidates, `95` missing across `126` Riot challenge keys
@@ -225,11 +227,11 @@ Current verified output:
 - `coverageStatusLegend` for `decoded`, `noisy`, `unstable_identity`, `duplicate_rejected`, and `not_found`
 - decoded final-stat coverage can carry `nonFinalKeyframeCandidate` annotations when a non-final keyframe candidate for that same participant/metric was rejected as noisy or duplicate evidence
 - `fieldCoverage` that states which API-shaped sections are ROFL-only decoded, validation-only, or still missing
-- `fieldCoverage.matchParticipantChallenges` marks Riot `participants[].challenges.*` parity as partial, with only `challenges.turretTakedowns` decoded from ROFL `statsJson`
+- `fieldCoverage.matchParticipantChallenges` marks Riot `participants[].challenges.*` parity as partial, with only `challenges.turretTakedowns` decoded from ROFL `statsJson`; unresolved 16.9 challenge leaves are emitted API-shaped as `null` and listed in `apiShapedNotFoundFields`
 - `roflDerivedFieldMap` that maps decoded API-shaped match/timeline fields to ROFL sources and marks shape-only/missing fields explicitly
-- `fieldCoverage.matchMetadataGaps` for Riot match metadata fields not present in the current ROFL summary, with inspected ROFL sources and decoded metadata keys recorded
+- `fieldCoverage.matchMetadataGaps` for Riot match metadata fields not present in the current ROFL summary, with inspected ROFL sources and decoded metadata keys recorded; those fields are emitted API-shaped as `null` and listed in `apiShapedNotFoundFields`, not counted as decoded ROFL data
 - `fieldCoverage.matchParticipantGaps` for remaining participant fields that are not accepted as ROFL/API parity, including rejected/gap evidence for static champion IDs, event-derived first kill/tower flags, and missing account/profile fields
-- `fieldCoverage.matchTeamGaps` for Riot team fields not present in the current ROFL summary, including bans and `objectives.*.first` event-order flags
+- `fieldCoverage.matchTeamGaps` for Riot team fields not present in the current ROFL summary, including bans and `objectives.*.first` event-order flags; those fields are emitted API-shaped as `null` and listed in `apiShapedNotFoundFields`, not counted as decoded ROFL data
 - `fieldCoverage.matchTeamGaps.unstableDecodedFields` lists decoded team objective kill fields that still need event-level or alternate ROFL evidence before they can be treated as patch-wide stable parity
 - `identityLinkage` that summarizes final roster linkage, Riot API identifier parity status, and non-final scalar identity blockers
 - `identityLinkage.roflMetadataParticipantIdentifiers` marks ROFL `statsJson` participant identifiers as internal/shape-only, not verified Riot API PUUIDs or encrypted summoner IDs
@@ -237,7 +239,7 @@ Current verified output:
 - `parityChecklist` includes concrete evidence paths for the conservative replay-only identity gate and records the true Riot API PUUID gap
 - `rofl-api-parity-goal-audit.json` maps the user objective to concrete artifact evidence and keeps completion status `not_complete` while full parity gaps remain
 - `rofl-api-shape-gap-report.json` is an offline-only comparison against Riot match/timeline fixture shape; it quantifies missing API leaf paths without being a runtime extraction input
-- `rofl-api-shape-gap-report.json` categorizes missing paths into actionable buckets such as match metadata, participant challenges, participant event flags, account/profile fields, static ID mapping, team bans, first-objective flags, timeline events, and timeline participant-frame gaps
+- `rofl-api-shape-gap-report.json` now has only the timeline-events bucket left as missing shape; match metadata, participant challenges, first-objective flags, participant event/profile/static-ID fields, team bans, and unresolved timeline participant-frame scalar/position/championStats leaves remain semantically `not_found`/`not_promoted`/`shape_only` but are present as `null` leaves for API shape
 - `rofl-challenge-gap-candidates.json` is an offline-only analysis of missing Riot `challenges.*` fields against ROFL `statsJson` keys; exact-name candidates are value-checked before promotion and fuzzy matches record patch-corpus/all-zero evidence
 - the checkpoint runner verifies the generated goal audit schema marker and `not_complete` status
 - the checkpoint runner verifies the generated ROFL API artifact schema marker and extraction mode before the deeper runtime verifier
@@ -252,6 +254,7 @@ Current verified output:
 - the goal audit reads `rofl-api-metrics-riot-validation.json` and records offline-only participant/team/metadata/identifier parity counts
 - the goal audit verifies the Riot validation report schema marker
 - `rejectedCandidateArtifacts.nonFinalScalarIdentity` that records why non-final keyframe scalar identity is not accepted
+- `rejectedCandidateArtifacts.reconstructionRowIdentity` that records why the 241-family row identity gates are not accepted
 - non-final scalar identity diagnostics include the conservative replay-only metric set, acceptance thresholds, aggregate scoring diagnostics, rejection-reason counts, and the strongest replay candidates
 - scalar identity diagnostics also break evidence down by metric: observed slot values, roster comparisons, positive scores, and accepted edge support
 - replay-only scalar identity scoring deduplicates repeated offsets of the same metric before accepting support, so duplicate currentGold/CS candidates cannot masquerade as independent evidence
@@ -259,12 +262,21 @@ Current verified output:
 - replay-only scalar identity scoring rejects duplicated final-stat anchors from accepted support by default, and diagnostics still report those anchors so low-information evidence is visible rather than promoted as participant identity
 - strongest rejected scalar identity assignments include support metrics, winner-gap data, runner-up details, and rejection reasons when any rejected assignments survive initial gates
 - `rejectedCandidateArtifacts.positions` that records existing movement evidence and why it is not emitted as runtime API data
+- `rejectedCandidateArtifacts.positions.promotionBlockers` and `qualityGateSummary` make the movement rejection machine-readable: current blockers are 9/10 assignment coverage, 1 unmatched participant, identity-prior dependency, and 7/9 offline quality passes
+- the movement rejection also preserves near-miss evidence: the unmatched Malphite participant has top rejected entity candidates, and the two unassigned entity tracks have top rejected participant candidates, so the 9/10 blocker is inspectable without promoting x/y data
+- `rejectedCandidateArtifacts.positions.perParticipantCoverage` and `fieldCoverage.positions.perParticipantCoverage` summarize all 10 participants with explicit `unstable_identity`, `noisy`, or `not_found` movement status; this keeps candidate x/y evidence visible without promoting it into `participantFrames.position`
+- `roflDerivedFieldMap.timeline["info.frames[].participantFrames[].position"]` mirrors the same per-participant movement coverage and status counts while keeping `position` `not_promoted`
 - `rejectedCandidateArtifacts.itemEvents` that records supervised item-event candidates and why they are not emitted as runtime API data
 - `rejectedCandidateArtifacts.inventoryTimeline` that records why item/inventory state over time is not emitted
 - `rejectedCandidateArtifacts.championStatsFinal` that records why final `participantFrames[].championStats` is only shape-compatible: current `statsJson` candidates are all-zero or unrelated counter collisions, not accepted API parity
 - `rejectedCandidateArtifacts.damageTimeline` that records whether any extracted-stat damage candidates exist
 - separate `matchCoverage` for ROFL-only final match data
+- `fieldCoverage.timelineNonFinalParticipantIdentity` that records the rejected 241-family chunk-row identity gates
+- `roflDerivedFieldMap.timeline["info.frames[].participantFrames[].nonFinalParticipantIdentity"]` that maps the same rejected identity path to `chunk-row-identity-gates`
 - aggregate coverage summary in `totals.coverageSummary`
+- `remainingParityGaps` provides a compact machine-readable gap table for non-final participant identity, positions, timeline events, inventory timeline, and damage timeline; every entry states the API surface, runtime emission policy, non-runtime status, blocker summary, evidence refs, and next decoder step
+- `roflOnlyExtractionProof` provides a compact proof table for runtime inputs, ROFL-only decoded surfaces, per-participant decoded scalar/damage metric counts, offline-validation-only reports, not-promoted runtime candidates, and linked remaining gap keys
+- `artifactManifest` lists the generated runtime artifact, required ROFL replay input, replay-derived summary, offline validation reports, and the full checkpoint command with explicit runtime-input roles
 - verifier rejects Riot API fixture paths anywhere in the runtime artifact
 - `source.inputClasses` classifies replay files, replay-derived summaries, decoder diagnostics, and Riot fixtures by runtime/validation role
 - the goal audit independently scans the runtime artifact for `replays/api` path references
@@ -315,9 +327,13 @@ The verifier checks:
 - remaining parity gaps are explicitly reported
 - `fieldCoverage` proves the runtime input policy and separates ROFL-only fields from validation-only Riot fixtures and missing timeline fields
 - Riot API PUUID comparison is reported as a non-blocking identifier gap, not as decoded metadata parity
-- `fieldCoverage.matchMetadataGaps` lists non-stats match metadata that is still unavailable and records the inspected ROFL sources (`summary.json`, `metadataJson`, and embedded `statsJson`)
+- `fieldCoverage.matchMetadataGaps` lists non-stats match metadata that is still unavailable, records the inspected ROFL sources (`summary.json`, `metadataJson`, and embedded `statsJson`), and verifies the API-shaped null leaves
 - `fieldCoverage.matchParticipantGaps` lists unpromoted participant fields and explains why candidate ROFL values are not exposed as API parity data
-- `fieldCoverage.matchTeamGaps` separates decoded final objective kill counts from missing bans and first-objective event-order fields
+- `fieldCoverage.matchTeamGaps` separates decoded final objective kill counts from missing bans and first-objective event-order fields, with `objectives.*.first` and `bans[]` API-shaped as null and mapped in `roflDerivedFieldMap.match`
+- `fieldCoverage.timelineNonFinalParticipantFrames.apiShapedNotFoundFields` verifies unresolved timeline frame leaves such as `currentGold`, `goldPerSecond`, `position.x/y`, `timeEnemySpentControlled`, and `championStats.*` are API-shaped as `null` without being counted as decoded metric points
+- `fieldCoverage.timelineEvents.apiShapedNotFoundFields` enumerates the remaining `70` Riot timeline event leaf paths as `not_found`; runtime frames keep `events: []` until actual ROFL event decoding exists, rather than emitting fake null event objects
+- `roflDerivedFieldMap.timeline["info.frames[].events"]` mirrors the same `70` event leaf gaps and the `empty-events-arrays` runtime policy, so field-map consumers do not need to infer event gaps from the offline shape report
+- `fieldCoverage.timelineEvents.rejectedItemEventEvidence`, `roflDerivedFieldMap.timeline["info.frames[].events"].rejectedItemEventEvidence`, and `rejectedCandidateArtifacts.inventoryTimeline.relatedCandidateArtifact` mirror the supervised item-event diagnostic counts, while keeping them offline-only and out of runtime `events`/inventory state
 - `parityChecklist` does not claim full API parity and lists known missing timeline/event/position/inventory/damage work
 - `parityChecklist` requires true Riot API PUUID parity to remain a known full-parity gap
 - `identityLinkage.riotApiIdentifierParity.status` remains `not_found` until true Riot PUUID parity is decoded from ROFL-only data
@@ -425,13 +441,13 @@ Important direction: do not treat isolated keyframe rows as complete Riot API ti
 4. sample the reconstructed state into Riot-shaped `timeline.info.frames`
 5. validate against Riot API fixtures only offline
 
-For `EUW1-7840220945`, the movement pipeline has a `participant-movement.json` diagnostic, but it is not emitted into `timeline.info.frames` because it assigns 9 of 10 participants, only 7 of 9 assignments pass offline Riot validation, and the current assignment path uses identity priors. The API-shaped artifact records this under `rejectedCandidateArtifacts.positions`.
+For `EUW1-7840220945`, the movement pipeline has a `participant-movement.json` diagnostic, but it is not emitted into `timeline.info.frames` because it assigns 9 of 10 participants, only 7 of 9 assignments pass offline Riot validation, and the current assignment path uses identity priors. The unmatched participant is Malphite TOP on team 200; its best rejected entity candidates are already assigned to other participants, while the remaining unassigned entity tracks also keep their top rejected participant candidates. The API-shaped artifact records this under `rejectedCandidateArtifacts.positions`, including explicit `promotionBlockers`, `qualityGateSummary`, near-miss candidate summaries, and per-participant movement coverage so consumers can distinguish unstable assigned candidates, noisy failed-validation candidates, and the unmatched participant.
 
 The same replay now has an offline `item-event-candidates.json` diagnostic with 689 candidates and 93 strong candidates, but it is not emitted into `timeline.info.frames[*].events` because the report is discovered against Riot API timeline item events and is not yet a ROFL-only event decoder. The API-shaped artifact records this under `rejectedCandidateArtifacts.itemEvents`.
 
 Inventory timeline parity is tracked separately under `rejectedCandidateArtifacts.inventoryTimeline`: final item slots are ROFL-only in `match.info.participants`, but item state over time is not reconstructed because there is no accepted ROFL-only item-event or slot-state timeline decoder yet.
 
-Final `championStats` parity is tracked under `rejectedCandidateArtifacts.championStatsFinal`. The artifact keeps the API-shaped `championStats` container, but does not emit values because the current `statsJson` scan only finds all-zero collisions or unrelated counters, not decoded champion stat semantics.
+Final `championStats` parity is tracked under `rejectedCandidateArtifacts.championStatsFinal`. The artifact keeps the API-shaped `championStats` leaves as `null`, but does not emit values because the current `statsJson` scan only finds all-zero collisions or unrelated counters, not decoded champion stat semantics.
 
 For damage timelines, the same artifact records `rejectedCandidateArtifacts.damageTimeline`. On `EUW1-7840220945`, no damage timeline candidate metrics are present in `extracted-stats.json`, so damage remains `not_found` for runtime parity.
 
@@ -450,6 +466,10 @@ The replay-only identity work remains a prerequisite for exposing participant-la
 
 Current `16.9` replay-only scalar identity evidence is not strong enough to emit non-final timeline metrics: `keyframe-rofl-stat-slot-assignments-16.9.json` uses the conservative metric set and has 0 assignments across 20 replays and 0 canonical candidates after duplicate same-metric support is collapsed and weak per-metric support is filtered. The API-shaped artifact records this under `rejectedCandidateArtifacts.nonFinalScalarIdentity`, including the metric set, thresholds, aggregate diagnostics, per-metric evidence counts, rejection-reason counts, strongest replay-level candidates, and strongest rejected assignment details needed to decide the next decoder iteration.
 
+The API-shaped artifact also records the 241-family row identity gate under `rejectedCandidateArtifacts.reconstructionRowIdentity`. That summary keeps the candidate evidence visible to runtime consumers without promoting it: both `241-0x02` and `241-0x04` have `promotionStatus=not_promoted`, `runtimeApiData=false`, `participantIdentity=false`, and row status counts that sum to 10 rejected or unstable rows.
+
+The same non-promoted identity path is mirrored in `fieldCoverage.timelineNonFinalParticipantIdentity` and `roflDerivedFieldMap.timeline["info.frames[].participantFrames[].nonFinalParticipantIdentity"]`, so consumers can see that the chunk-row evidence was considered but remains `not_promoted` with `participantIdentity=not-established`.
+
 A probe with `--metric-set all` considered volatile ROFL final anchors such as health, power, and movement speed. It increased slot metric observations from 52 to 228 but, after duplicate same-metric support is collapsed and weak per-metric support is filtered, still produced no accepted assignments and 0 canonical candidates, so the default path remains conservative.
 
 Sensitivity probes for `--min-support-score` show why the default remains `0.35`: thresholds `0.30` and `0.25` still produce 0 assignments, while `0.20` admits one diagnostic assignment that matches the offline supervised comparison but fails winner-gap separation (`winnerGap=0.0008828456005518515`). That candidate is therefore useful as a research clue, not runtime API data.
@@ -460,3 +480,54 @@ npm run sweep:keyframe-rofl-support -- --version-group 16.9
 ```
 
 The goal audit records the sweep rows from `keyframe-rofl-stat-support-threshold-sweep-16.9.json`.
+
+The current chunk-delta target is the fixed-length `241` family pair. The next hypothesis under test is deliberately structural, not semantic: determine whether `241-0x02` and `241-0x04` are `1` table-kind byte plus `10 * 24` bytes of fixed rows. The offline artifacts are:
+
+- `artifacts-keyframes/reconstruction-target-dossier-241-0x02-16.9.json`
+- `artifacts-keyframes/reconstruction-target-dossier-241-0x04-16.9.json`
+- `artifacts-keyframes/reconstruction-target-neighborhood-241-0x02-16.9.json`
+- `artifacts-keyframes/reconstruction-target-neighborhood-241-0x04-16.9.json`
+- `artifacts-keyframes/reconstruction-target-table-analysis-241-0x02-16.9.json`
+- `artifacts-keyframes/reconstruction-target-table-analysis-241-0x04-16.9.json`
+- `artifacts-keyframes/reconstruction-row-identity-241-0x02-16.9.json`
+- `artifacts-keyframes/reconstruction-row-identity-241-0x04-16.9.json`
+- `artifacts-keyframes/reconstruction-family-event-correlation-16.9.json`
+
+Regenerate and verify them with:
+
+```powershell
+npm run build:reconstruction-target-dossier -- --family-key 241-0x02
+npm run verify:reconstruction-target-dossier -- --family-key 241-0x02
+npm run build:reconstruction-target-neighborhood -- --family-key 241-0x02
+npm run verify:reconstruction-target-neighborhood -- --family-key 241-0x02
+npm run build:reconstruction-target-dossier -- --family-key 241-0x04
+npm run verify:reconstruction-target-dossier -- --family-key 241-0x04
+npm run build:reconstruction-target-neighborhood -- --family-key 241-0x04
+npm run verify:reconstruction-target-neighborhood -- --family-key 241-0x04
+npm run analyze:reconstruction-target-table -- --family-key 241-0x02 --row-count 10 --row-size 24
+npm run verify:reconstruction-target-table-analysis -- --family-key 241-0x02
+npm run infer:reconstruction-row-identity -- --family-key 241-0x02 --version-group 16.9
+npm run verify:reconstruction-row-identity -- --family-key 241-0x02 --version-group 16.9
+npm run analyze:reconstruction-target-table -- --family-key 241-0x04 --row-count 10 --row-size 24
+npm run verify:reconstruction-target-table-analysis -- --family-key 241-0x04
+npm run infer:reconstruction-row-identity -- --family-key 241-0x04 --version-group 16.9
+npm run verify:reconstruction-row-identity -- --family-key 241-0x04 --version-group 16.9
+npm run scan:reconstruction-row-grids -- --version-group 16.9
+npm run verify:reconstruction-row-grids -- --version-group 16.9
+npm run analyze:reconstruction-row-grid-fields -- --version-group 16.9
+npm run verify:reconstruction-row-grid-fields -- --version-group 16.9
+npm run correlate:reconstruction-families-events -- --version-group 16.9
+npm run verify:reconstruction-family-event-correlation -- --version-group 16.9
+```
+
+Early result: both families split cleanly into the proposed `1 + 10 * 24` shape, but the row-coherence scores are weak on the current sample set (`241-0x02` same-row win rate `0.3333`, `241-0x04` same-row win rate `0.1`). The table artifacts therefore set `promotionAssessment.status=not_promoted` and `runtimeApiData=false`. That means the shape is worth keeping as a decoder target, but it is not yet evidence for participant identity or runtime `participantFrames` values.
+
+For the open replay-only identity gap, these `241` table artifacts are now tracked as a tested but rejected promotion path. The current evidence says the records are structurally plausible `10`-row tables, but the row tracks are not coherent enough to map rows to participants. They are not promotable for participant identity yet. Until row continuity, field semantics, and participant identity all pass replay-only gates, these artifacts must stay out of runtime `timeline.info.frames[].participantFrames`.
+
+The companion row identity gate artifacts make that rejection explicit per row. `reconstruction-row-identity-241-0x02-16.9.json` and `reconstruction-row-identity-241-0x04-16.9.json` set `promotionAssessment.status=not_promoted`, `runtimeApiData=false`, and `participantIdentity=false`; every row keeps `participantId=null`. The gate currently uses the same-row win rate threshold `0.75` plus a duplicate-row rejection threshold `0.5`, so both families fail promotion until the decoder can prove stable row continuity and a ROFL-only row-to-participant mapping. In the current artifacts, `241-0x02` marks 4 rows as `duplicate_rejected` because the same row bytes are duplicated inside too many records, while the remaining rows stay `unstable_identity`. `241-0x04` rows remain `unstable_identity`.
+
+The generic row-grid scan in `artifacts-keyframes/reconstruction-row-grid-candidates-16.9.json` broadens that test beyond the fixed `1 + 10 * 24` hypothesis. It scans sampled reconstruction families for 5-row and 10-row grids with multiple header sizes, scores exact same-row continuity, nearest-row index stability, and duplicate-row rates, and keeps every candidate `runtimeApiData=false` and `participantIdentity=false`. Current best evidence is still `not_promoted`: the top candidate is a `241-0x04` 5-row grid with strong nearest-index stability but no exact same-row continuity, so it is useful decoder direction rather than accepted participant identity.
+
+`artifacts-keyframes/reconstruction-row-grid-field-analysis-16.9.json` then profiles byte columns inside the top row-grid candidates. It records row-discriminator and record-constant byte-column signals, but still sets `fieldPromotionAssessment.status=not_promoted`, `runtimeApiData=false`, and `participantIdentity=false`: the current byte columns are unlabeled ROFL evidence and are not mapped to roster order, team, champion, or `participantId`. The runtime artifact mirrors that result under `rejectedCandidateArtifacts.reconstructionRowIdentity.rowGridFieldAnalysis`.
+
+The first event-correlation artifact samples 40 normalized 16.9 intervals. It keeps Riot timeline events as offline validation labels only and normalizes family counts by total subrecords in each selected interval. It also sets `promotionAssessment.status=not_promoted` and `runtimeApiData=false`, and records that Spearman uses average ranks for tied values. Current tied-rank Spearman results for `241-0x02` are modest (`total` Pearson `0.2767`, Spearman `0.3647`; `championKills` Pearson `0.3545`, Spearman `0.4355`), and `241-0x04` remains mixed (`total` Pearson `0.4175`, Spearman `0.2608`; `itemEvents` Pearson `0.5567`, Spearman `0.1955`). This is useful target-ranking context, not runtime event decoding.

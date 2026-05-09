@@ -102,15 +102,7 @@ function verifyShapeGapOutput(replayId, artifactRoot) {
     (section.missingCategories ?? []).map((entry) => entry.category),
   ));
   for (const category of [
-    "match-metadata",
-    "participant-challenges",
-    "match-participant-event-flags",
-    "match-participant-account-profile",
-    "match-participant-static-id-mapping",
-    "team-bans",
-    "team-objective-first-flags",
     "timeline-events",
-    "timeline-participant-frames",
   ]) {
     if (!categories.has(category)) {
       throw new Error(`Shape gap report is missing expected category '${category}'.`);
@@ -204,6 +196,80 @@ function verifyRuntimeArtifactOutput(replayId, artifactRoot) {
   }
   if (artifact.extractionMode !== "rofl-only-final-stats") {
     throw new Error(`ROFL API artifact has unexpected extraction mode: ${artifact.extractionMode ?? "missing"}.`);
+  }
+  const proof = artifact.roflOnlyExtractionProof ?? {};
+  if (proof.proofSchema !== "rofl-only-extraction-proof/v1") {
+    throw new Error(`ROFL API artifact is missing the ROFL-only extraction proof: ${proof.proofSchema ?? "missing"}.`);
+  }
+  if (proof.runtimeInputPolicy?.riotApiRuntimeInput !== false || proof.runtimeInputPolicy?.supervisedFixtureRole !== "offline-validation-only") {
+    throw new Error(`ROFL-only extraction proof has unsafe runtime policy: ${JSON.stringify(proof.runtimeInputPolicy ?? null)}`);
+  }
+  const manifest = artifact.artifactManifest ?? {};
+  if (manifest.sourceReplay?.runtimeInput !== true || manifest.replayDerivedSummary?.runtimeInput !== true) {
+    throw new Error(`Artifact manifest must mark ROFL replay inputs as runtime inputs: ${JSON.stringify(manifest)}`);
+  }
+  if (manifest.primaryRuntimeArtifact?.runtimeInput !== false) {
+    throw new Error(`Artifact manifest must not treat the generated output as an input: ${JSON.stringify(manifest.primaryRuntimeArtifact ?? null)}`);
+  }
+  if ((manifest.offlineValidationReports ?? []).length < 3 || !(manifest.offlineValidationReports ?? []).every((entry) => entry.runtimeInput === false)) {
+    throw new Error(`Artifact manifest must mark validation reports as offline-only: ${JSON.stringify(manifest.offlineValidationReports ?? null)}`);
+  }
+  if ((proof.perParticipantProof ?? []).length !== 10) {
+    throw new Error(`ROFL-only extraction proof must include all 10 participants: ${proof.perParticipantProof?.length ?? "missing"}.`);
+  }
+  const remainingGapKeys = (artifact.remainingParityGaps ?? []).map((entry) => entry.key).sort();
+  const proofGapKeys = [...(proof.remainingGapKeys ?? [])].sort();
+  if (JSON.stringify(remainingGapKeys) !== JSON.stringify(proofGapKeys)) {
+    throw new Error(`ROFL-only extraction proof remainingGapKeys do not match remainingParityGaps: ${JSON.stringify({ proofGapKeys, remainingGapKeys })}`);
+  }
+  if (!(proof.perParticipantProof ?? []).every((entry) =>
+    entry.finalScalarMetricCount === 5 &&
+    entry.finalDamageMetricCount === 12 &&
+    (entry.unresolvedRuntimeFields ?? []).includes("position") &&
+    (entry.unresolvedRuntimeFields ?? []).includes("championStats")
+  )) {
+    throw new Error(`ROFL-only extraction proof per-participant counts/gaps are incomplete: ${JSON.stringify(proof.perParticipantProof ?? [])}`);
+  }
+}
+
+function verifyParticipantMovementOutput(replayId) {
+  const movementPath = path.resolve(process.cwd(), "artifacts", replayId, "participant-movement.json");
+  const movement = JSON.parse(fs.readFileSync(movementPath, "utf8"));
+  if (movement.replayId !== replayId) {
+    throw new Error(`Participant movement artifact replay id mismatch: ${movement.replayId ?? "missing"}.`);
+  }
+  if ((movement.assignments ?? []).length !== 9) {
+    throw new Error(`Focused movement artifact must preserve the 9/10 assignment blocker: ${movement.assignments?.length ?? "missing"}.`);
+  }
+  if ((movement.unmatchedParticipants ?? []).length !== 1) {
+    throw new Error(`Focused movement artifact must preserve exactly one unmatched participant: ${JSON.stringify(movement.unmatchedParticipants ?? [])}`);
+  }
+  const unmatched = movement.unmatchedParticipants[0];
+  if (unmatched.champion !== "Malphite" || unmatched.teamPosition !== "TOP") {
+    throw new Error(`Focused movement unmatched participant changed unexpectedly: ${JSON.stringify(unmatched)}`);
+  }
+  if ((unmatched.topRejectedEntityCandidates ?? []).length === 0) {
+    throw new Error("Focused movement unmatched participant must include top rejected entity candidates.");
+  }
+  if (!(unmatched.topRejectedEntityCandidates ?? []).some((candidate) => candidate.assignedToOtherParticipant === true)) {
+    throw new Error(`Focused movement near-miss evidence must show candidates already assigned elsewhere: ${JSON.stringify(unmatched.topRejectedEntityCandidates)}`);
+  }
+  if ((movement.unassignedEntities ?? []).length !== 2) {
+    throw new Error(`Focused movement artifact must preserve two unassigned entities: ${JSON.stringify(movement.unassignedEntities ?? [])}`);
+  }
+  if (!(movement.unassignedEntities ?? []).every((entity) => (entity.topRejectedParticipantCandidates ?? []).length > 0)) {
+    throw new Error(`Focused movement unassigned entities must include rejected participant candidates: ${JSON.stringify(movement.unassignedEntities ?? [])}`);
+  }
+}
+
+function verifyAssignedMovementValidationOutput(replayId) {
+  const validationPath = path.resolve(process.cwd(), "artifacts", replayId, "assigned-movement-validation-report.json");
+  const validation = JSON.parse(fs.readFileSync(validationPath, "utf8"));
+  if (validation.replayId !== replayId) {
+    throw new Error(`Assigned movement validation replay id mismatch: ${validation.replayId ?? "missing"}.`);
+  }
+  if (validation.summary?.assignmentCount !== 9 || validation.summary?.passingAssignmentCount !== 7) {
+    throw new Error(`Focused movement validation must preserve 7/9 quality blocker: ${JSON.stringify(validation.summary)}`);
   }
 }
 
@@ -322,11 +388,32 @@ function main() {
   const shapeGapScript = path.join("scripts", "audit_rofl_api_shape_gap.mjs");
   const challengeGapScript = path.join("scripts", "audit_rofl_challenge_gap_candidates.mjs");
   const timelineReconstructionScript = path.join("scripts", "audit_timeline_reconstruction_model.mjs");
+  const assignMovementScript = path.join("scripts", "assign_replay_movement.mjs");
+  const validateAssignedMovementScript = path.join("scripts", "validate_assigned_movement.mjs");
+  const summarizeReconstructionChunksScript = path.join("scripts", "summarize_reconstruction_chunk_targets.mjs");
+  const verifyReconstructionChunksScript = path.join("scripts", "verify_reconstruction_chunk_targets.mjs");
+  const compareReconstructionChunksScript = path.join("scripts", "compare_reconstruction_chunk_families.mjs");
   const verifyReconstructionChunkComparisonScript = path.join("scripts", "verify_reconstruction_chunk_family_comparison.mjs");
+  const exportReconstructionFamilySamplesScript = path.join("scripts", "export_reconstruction_family_samples.mjs");
   const verifyReconstructionFamilySamplesScript = path.join("scripts", "verify_reconstruction_family_samples.mjs");
+  const analyzeReconstructionFamilySamplesScript = path.join("scripts", "analyze_reconstruction_family_samples.mjs");
   const verifyReconstructionFamilySampleAnalysisScript = path.join("scripts", "verify_reconstruction_family_sample_analysis.mjs");
+  const rankReconstructionDecoderTargetsScript = path.join("scripts", "rank_reconstruction_decoder_targets.mjs");
   const verifyReconstructionDecoderTargetsScript = path.join("scripts", "verify_reconstruction_decoder_target_ranking.mjs");
+  const scanReconstructionRowGridsScript = path.join("scripts", "scan_reconstruction_row_grid_candidates.mjs");
+  const verifyReconstructionRowGridsScript = path.join("scripts", "verify_reconstruction_row_grid_candidates.mjs");
+  const analyzeReconstructionRowGridFieldsScript = path.join("scripts", "analyze_reconstruction_row_grid_fields.mjs");
+  const verifyReconstructionRowGridFieldsScript = path.join("scripts", "verify_reconstruction_row_grid_field_analysis.mjs");
+  const buildReconstructionTargetDossierScript = path.join("scripts", "build_reconstruction_target_dossier.mjs");
   const verifyReconstructionTargetDossierScript = path.join("scripts", "verify_reconstruction_target_dossier.mjs");
+  const buildReconstructionTargetNeighborhoodScript = path.join("scripts", "build_reconstruction_target_neighborhood.mjs");
+  const verifyReconstructionTargetNeighborhoodScript = path.join("scripts", "verify_reconstruction_target_neighborhood.mjs");
+  const analyzeReconstructionTargetTableScript = path.join("scripts", "analyze_reconstruction_target_table.mjs");
+  const verifyReconstructionTargetTableScript = path.join("scripts", "verify_reconstruction_target_table_analysis.mjs");
+  const inferReconstructionRowIdentityScript = path.join("scripts", "infer_reconstruction_row_identity.mjs");
+  const verifyReconstructionRowIdentityScript = path.join("scripts", "verify_reconstruction_row_identity.mjs");
+  const correlateReconstructionFamiliesEventsScript = path.join("scripts", "correlate_reconstruction_families_events.mjs");
+  const verifyReconstructionFamilyEventCorrelationScript = path.join("scripts", "verify_reconstruction_family_event_correlation.mjs");
   const auditScript = path.join("scripts", "audit_rofl_api_parity_goal.mjs");
   const assignIdentityScript = path.join("scripts", "assign_keyframe_slots_from_rofl_stats.mjs");
   const compareIdentityScript = path.join("scripts", "compare_rofl_stat_assignments_to_supervised.mjs");
@@ -363,7 +450,159 @@ function main() {
   ]);
   verifyIdentitySupportSweepOutput(args.artifactRoot, args.versionGroup);
 
-  runStep("export", exportScript, sharedArgs);
+  runStep("offline-timeline-reconstruction-audit", timelineReconstructionScript, sharedArgs);
+  verifyTimelineReconstructionOutput(args.replayId, args.artifactRoot);
+  runStep("summarize-reconstruction-chunks", summarizeReconstructionChunksScript, [
+    "--artifact-root",
+    args.artifactRoot,
+  ]);
+  runStep("verify-reconstruction-chunks", verifyReconstructionChunksScript, [
+    "--artifact-root",
+    args.artifactRoot,
+  ]);
+  runStep("compare-reconstruction-chunks", compareReconstructionChunksScript, [
+    "--artifact-root",
+    args.artifactRoot,
+  ]);
+  runStep("verify-reconstruction-chunk-family-comparison", verifyReconstructionChunkComparisonScript, [
+    "--artifact-root",
+    args.artifactRoot,
+  ]);
+  runStep("export-reconstruction-family-samples", exportReconstructionFamilySamplesScript, [
+    "--artifact-root",
+    args.artifactRoot,
+  ]);
+  runStep("verify-reconstruction-family-samples", verifyReconstructionFamilySamplesScript, [
+    "--artifact-root",
+    args.artifactRoot,
+  ]);
+  runStep("analyze-reconstruction-family-samples", analyzeReconstructionFamilySamplesScript, [
+    "--artifact-root",
+    args.artifactRoot,
+  ]);
+  runStep("verify-reconstruction-family-sample-analysis", verifyReconstructionFamilySampleAnalysisScript, [
+    "--artifact-root",
+    args.artifactRoot,
+  ]);
+  runStep("rank-reconstruction-decoder-targets", rankReconstructionDecoderTargetsScript, [
+    "--artifact-root",
+    args.artifactRoot,
+  ]);
+  runStep("verify-reconstruction-decoder-targets", verifyReconstructionDecoderTargetsScript, [
+    "--artifact-root",
+    args.artifactRoot,
+  ]);
+  runStep("scan-reconstruction-row-grids", scanReconstructionRowGridsScript, [
+    "--artifact-root",
+    args.artifactRoot,
+    "--version-group",
+    args.versionGroup,
+  ]);
+  runStep("verify-reconstruction-row-grids", verifyReconstructionRowGridsScript, [
+    "--artifact-root",
+    args.artifactRoot,
+    "--version-group",
+    args.versionGroup,
+  ]);
+  runStep("analyze-reconstruction-row-grid-fields", analyzeReconstructionRowGridFieldsScript, [
+    "--artifact-root",
+    args.artifactRoot,
+    "--version-group",
+    args.versionGroup,
+  ]);
+  runStep("verify-reconstruction-row-grid-fields", verifyReconstructionRowGridFieldsScript, [
+    "--artifact-root",
+    args.artifactRoot,
+    "--version-group",
+    args.versionGroup,
+  ]);
+  for (const familyKey of ["241-0x02", "241-0x04"]) {
+    runStep(`build-reconstruction-target-dossier-${familyKey}`, buildReconstructionTargetDossierScript, [
+      "--artifact-root",
+      args.artifactRoot,
+      "--family-key",
+      familyKey,
+    ]);
+    runStep(`verify-reconstruction-target-dossier-${familyKey}`, verifyReconstructionTargetDossierScript, [
+      "--artifact-root",
+      args.artifactRoot,
+      "--family-key",
+      familyKey,
+    ]);
+    runStep(`build-reconstruction-target-neighborhood-${familyKey}`, buildReconstructionTargetNeighborhoodScript, [
+      "--artifact-root",
+      args.artifactRoot,
+      "--family-key",
+      familyKey,
+    ]);
+    runStep(`verify-reconstruction-target-neighborhood-${familyKey}`, verifyReconstructionTargetNeighborhoodScript, [
+      "--artifact-root",
+      args.artifactRoot,
+      "--family-key",
+      familyKey,
+    ]);
+    runStep(`analyze-reconstruction-target-table-${familyKey}`, analyzeReconstructionTargetTableScript, [
+      "--artifact-root",
+      args.artifactRoot,
+      "--family-key",
+      familyKey,
+      "--row-count",
+      "10",
+      "--row-size",
+      "24",
+    ]);
+    runStep(`verify-reconstruction-target-table-${familyKey}`, verifyReconstructionTargetTableScript, [
+      "--artifact-root",
+      args.artifactRoot,
+      "--family-key",
+      familyKey,
+    ]);
+    runStep(`infer-reconstruction-row-identity-${familyKey}`, inferReconstructionRowIdentityScript, [
+      "--artifact-root",
+      args.artifactRoot,
+      "--family-key",
+      familyKey,
+      "--version-group",
+      args.versionGroup,
+    ]);
+    runStep(`verify-reconstruction-row-identity-${familyKey}`, verifyReconstructionRowIdentityScript, [
+      "--artifact-root",
+      args.artifactRoot,
+      "--family-key",
+      familyKey,
+      "--version-group",
+      args.versionGroup,
+    ]);
+  }
+  runStep("correlate-reconstruction-families-events", correlateReconstructionFamiliesEventsScript, [
+    "--artifact-root",
+    args.artifactRoot,
+    "--version-group",
+    args.versionGroup,
+  ]);
+  runStep("verify-reconstruction-family-event-correlation", verifyReconstructionFamilyEventCorrelationScript, [
+    "--artifact-root",
+    args.artifactRoot,
+    "--version-group",
+    args.versionGroup,
+  ]);
+  const movementArtifactDir = path.join("artifacts", args.replayId);
+  const participantMovementPath = path.join(movementArtifactDir, "participant-movement.json");
+  runStep("assign-movement", assignMovementScript, [
+    "--artifact-dir",
+    movementArtifactDir,
+  ]);
+  verifyParticipantMovementOutput(args.replayId);
+  runStep("validate-assigned-movement", validateAssignedMovementScript, [
+    "--participant-movement-path",
+    participantMovementPath,
+  ]);
+  verifyAssignedMovementValidationOutput(args.replayId);
+  runStep("export", exportScript, [
+    ...sharedArgs,
+    "--version-group",
+    args.versionGroup,
+  ]);
   verifyRuntimeArtifactOutput(args.replayId, args.artifactRoot);
   runStep("verify-runtime", verifyScript, sharedArgs);
   runStep(
@@ -376,30 +615,6 @@ function main() {
   verifyShapeGapOutput(args.replayId, args.artifactRoot);
   runStep("offline-challenge-gap-audit", challengeGapScript, sharedArgs);
   verifyChallengeGapOutput(args.replayId, args.artifactRoot);
-  runStep("offline-timeline-reconstruction-audit", timelineReconstructionScript, sharedArgs);
-  verifyTimelineReconstructionOutput(args.replayId, args.artifactRoot);
-  runStep("verify-reconstruction-chunk-family-comparison", verifyReconstructionChunkComparisonScript, [
-    "--artifact-root",
-    args.artifactRoot,
-  ]);
-  runStep("verify-reconstruction-family-samples", verifyReconstructionFamilySamplesScript, [
-    "--artifact-root",
-    args.artifactRoot,
-  ]);
-  runStep("verify-reconstruction-family-sample-analysis", verifyReconstructionFamilySampleAnalysisScript, [
-    "--artifact-root",
-    args.artifactRoot,
-  ]);
-  runStep("verify-reconstruction-decoder-targets", verifyReconstructionDecoderTargetsScript, [
-    "--artifact-root",
-    args.artifactRoot,
-  ]);
-  runStep("verify-reconstruction-target-dossier", verifyReconstructionTargetDossierScript, [
-    "--artifact-root",
-    args.artifactRoot,
-    "--family-key",
-    "241-0x02",
-  ]);
   runStep("goal-audit", auditScript, sharedArgs);
   verifyGoalAuditOutput(args.replayId, args.artifactRoot);
   if (args.verifyIncompleteGate) {
