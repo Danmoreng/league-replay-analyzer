@@ -258,6 +258,7 @@ function buildAudit(artifact, inputPath) {
           artifact.artifactManifest?.primaryRuntimeArtifact?.runtimeInput === false &&
           (artifact.artifactManifest?.decoderDiagnostics ?? []).some((entry) => entry.role === "replay-only-no-priors-position-diagnostic" && entry.runtimeInput === false && entry.runtimeApiData === false) &&
           (artifact.artifactManifest?.decoderDiagnostics ?? []).some((entry) => entry.role === "replay-only-startup-roster-token-diagnostic" && entry.runtimeInput === false && entry.runtimeApiData === false) &&
+          (artifact.artifactManifest?.decoderDiagnostics ?? []).some((entry) => entry.role === "offline-handle-graph-row-link-diagnostic" && entry.runtimeInput === false && entry.runtimeApiData === false) &&
           (artifact.artifactManifest?.offlineValidationReports ?? []).length >= 3 &&
           (artifact.artifactManifest?.offlineValidationReports ?? []).every((entry) => entry.runtimeInput === false) &&
           artifact.source?.roflOnlyInputs?.runtimeRiotApiFiles === false &&
@@ -411,6 +412,10 @@ function buildAudit(artifact, inputPath) {
         `startup roster token scan replay count=${nonFinalIdentity?.startupRosterTokenScan?.scannedReplayCount ?? null}`,
         `startup roster token scan full-corpus roster/order candidates=${nonFinalIdentity?.startupRosterTokenScan?.fullCorpusRosterOrderCandidateCount ?? null}`,
         `startup roster token scan top candidates=${JSON.stringify((nonFinalIdentity?.startupRosterTokenScan?.topReplayOnlyCandidates ?? []).slice(0, 3))}`,
+        `handle graph row-link status=${nonFinalIdentity?.handleGraphRowLinkCandidates?.status ?? null}`,
+        `handle graph row-link candidate count=${nonFinalIdentity?.handleGraphRowLinkCandidates?.candidateCount ?? null}`,
+        `handle graph row-link confidence counts=${JSON.stringify(nonFinalIdentity?.handleGraphRowLinkCandidates?.confidenceCounts ?? {})}`,
+        `handle graph row-link top=${nonFinalIdentity?.handleGraphRowLinkCandidates?.topConfidence ?? null}:${nonFinalIdentity?.handleGraphRowLinkCandidates?.topScore ?? null}`,
         `identity threshold sweep path=${identityThresholdSweepPath}`,
         `identity threshold sweep schema=${identityThresholdSweep?.sweepSchema ?? null}`,
         `identity threshold sweep rows=${(identityThresholdSweep?.rows ?? []).length}`,
@@ -457,6 +462,12 @@ function buildAudit(artifact, inputPath) {
           (nonFinalIdentity?.startupRosterTokenScan?.fullCorpusRosterOrderCandidateCount ?? 0) > 0
           ? []
           : ["startup roster token diagnostic missing or not marked as non-runtime evidence"]),
+        ...(nonFinalIdentity?.handleGraphRowLinkCandidates?.status === "not_promoted" &&
+          nonFinalIdentity?.handleGraphRowLinkCandidates?.runtimeApiData === false &&
+          nonFinalIdentity?.handleGraphRowLinkCandidates?.candidateCount > 0 &&
+          nonFinalIdentity?.handleGraphRowLinkCandidates?.topConfidence === "weak"
+          ? []
+          : ["handle graph row-link diagnostic missing or not rejected as weak evidence"]),
       ],
     },
     {
@@ -1001,6 +1012,10 @@ function buildAudit(artifact, inputPath) {
           docsText.includes("startup-roster-token-scan.json") &&
           docsText.includes("replay-only-startup-roster-token-diagnostic") &&
           docsText.includes("20 replays") &&
+          docsText.includes("keyframe-handle-graph-candidate-scores.json") &&
+          docsText.includes("offline-handle-graph-row-link-diagnostic") &&
+          docsText.includes("260 row-link candidates") &&
+          docsText.includes("top score 0.333") &&
           docsText.includes("roflDerivedFieldMap.timeline[\"info.frames[].participantFrames[].nonFinalParticipantIdentity\"]") &&
           docsText.includes("nearest-row index stability") &&
           docsText.includes("row-discriminator") &&
@@ -1029,6 +1044,8 @@ function buildAudit(artifact, inputPath) {
           "docs name roflDerivedFieldMap.timeline position noPriorsDiagnostic",
           "docs name startup-roster-token-scan.json",
           "docs name replay-only-startup-roster-token-diagnostic",
+          "docs name keyframe-handle-graph-candidate-scores.json",
+          "docs name offline-handle-graph-row-link-diagnostic",
           `fullParityGaps=${[...fullParityGaps].join(",")}`,
           `fieldCoverage.matchMetadataGaps.status=${matchMetadataGaps.status ?? null}`,
           `fieldCoverage.matchMetadataGaps.fields=${matchMetadataGapFields.join(",")}`,
@@ -1372,6 +1389,10 @@ function buildAudit(artifact, inputPath) {
           ...(!docsText.includes("startup-roster-token-scan.json") ? ["docs missing startup roster token scan artifact"] : []),
           ...(!docsText.includes("replay-only-startup-roster-token-diagnostic") ? ["docs missing startup roster diagnostic manifest role"] : []),
           ...(!docsText.includes("20 replays") ? ["docs missing startup roster scan 16.9 replay count"] : []),
+          ...(!docsText.includes("keyframe-handle-graph-candidate-scores.json") ? ["docs missing handle graph candidate score artifact"] : []),
+          ...(!docsText.includes("offline-handle-graph-row-link-diagnostic") ? ["docs missing handle graph manifest role"] : []),
+          ...(!docsText.includes("260 row-link candidates") ? ["docs missing handle graph candidate count"] : []),
+          ...(!docsText.includes("top score 0.333") ? ["docs missing handle graph top score"] : []),
           ...(!docsText.includes("npm run verify:rofl-api-parity") ? ["docs missing full checkpoint command"] : []),
           ...(!docsText.includes("npm run analyze:reconstruction-target-table") ? ["docs missing target table analysis command"] : []),
           ...(!docsText.includes("npm run infer:reconstruction-row-identity") ? ["docs missing row identity gate command"] : []),

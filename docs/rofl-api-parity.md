@@ -266,6 +266,8 @@ Current verified output:
 - non-final scalar identity diagnostics include the conservative replay-only metric set, acceptance thresholds, aggregate scoring diagnostics, rejection-reason counts, and the strongest replay candidates
 - `rejectedCandidateArtifacts.nonFinalScalarIdentity.startupRosterTokenScan` summarizes `artifacts-keyframes/startup-roster-token-scan.json` as diagnostic-only evidence: for patch 16.9 it scans 20 replays and finds full-corpus replay-only roster/order token hits, but those startup tokens are still not linked to non-final keyframe state rows
 - `artifactManifest.decoderDiagnostics` includes `replay-only-startup-roster-token-diagnostic` and marks it `runtimeInput:false` / `runtimeApiData:false`
+- `rejectedCandidateArtifacts.nonFinalScalarIdentity.handleGraphRowLinkCandidates` summarizes `artifacts-keyframes/keyframe-handle-graph-candidate-scores.json` as `not_promoted`: current patch 16.9 has 260 row-link candidates, all `weak`, with top score 0.333, so no handle graph link is accepted as participant identity
+- `artifactManifest.decoderDiagnostics` includes `offline-handle-graph-row-link-diagnostic` and marks it `runtimeInput:false` / `runtimeApiData:false`
 - scalar identity diagnostics also break evidence down by metric: observed slot values, roster comparisons, positive scores, and accepted edge support
 - replay-only scalar identity scoring deduplicates repeated offsets of the same metric before accepting support, so duplicate currentGold/CS candidates cannot masquerade as independent evidence
 - replay-only scalar identity scoring requires each accepted support metric to pass a minimum per-metric quality score before it can form an edge

@@ -1078,6 +1078,7 @@ function buildIdentityLinkageSummary(rosterParticipants, emittedTimelineParticip
       assignmentCount: nonFinalScalarIdentity.assignmentArtifact?.assignmentCount ?? null,
       canonicalCandidateCount: nonFinalScalarIdentity.assignmentArtifact?.canonicalCandidateCount ?? null,
       startupRosterTokenScan: nonFinalScalarIdentity.startupRosterTokenScan ?? { exists: false },
+      handleGraphRowLinkCandidates: nonFinalScalarIdentity.handleGraphRowLinkCandidates ?? { exists: false },
       supportBelowMetricScoreCount: nonFinalScalarIdentity.assignmentArtifact?.diagnostics?.supportBelowMetricScoreCount ?? null,
       ambiguousFinalTargetSupportCountsByMetric:
         nonFinalScalarIdentity.assignmentArtifact?.diagnostics?.ambiguousFinalTargetSupportCountsByMetric ?? {},
@@ -2283,10 +2284,57 @@ function summarizeStartupRosterTokenScan(startupRosterTokenScan, versionGroup) {
   };
 }
 
+function summarizeHandleGraphCandidateScores(handleGraphScores) {
+  if (!handleGraphScores) {
+    return {
+      exists: false,
+    };
+  }
+  const candidates = handleGraphScores.candidates ?? [];
+  const topCandidate = candidates[0] ?? null;
+  return {
+    exists: true,
+    status: "not_promoted",
+    reason: "handle graph row-reference candidates are not stable enough to link roster identity to non-final keyframe state rows",
+    runtimeInput: false,
+    runtimeApiData: false,
+    schema: handleGraphScores.schema ?? null,
+    replayCount: handleGraphScores.replayCount ?? null,
+    candidateCount: handleGraphScores.candidateCount ?? null,
+    confidenceCounts: handleGraphScores.confidenceCounts ?? {},
+    topScore: topCandidate?.score ?? null,
+    topConfidence: topCandidate?.confidence ?? null,
+    topCandidate: topCandidate
+      ? {
+          sourceFamilyKey: topCandidate.sourceFamilyKey,
+          sourceOffset: topCandidate.sourceOffset,
+          width: topCandidate.width,
+          targetFamilyKey: topCandidate.targetFamilyKey,
+          replayCount: topCandidate.replayCount,
+          assignedSourceRowReplayCount: topCandidate.assignedSourceRowReplayCount,
+          assignedRowCount: topCandidate.assignedRowCount,
+          components: topCandidate.components ?? null,
+        }
+      : null,
+    topCandidates: candidates.slice(0, 5).map((candidate) => ({
+      score: candidate.score,
+      confidence: candidate.confidence,
+      sourceFamilyKey: candidate.sourceFamilyKey,
+      sourceOffset: candidate.sourceOffset,
+      width: candidate.width,
+      targetFamilyKey: candidate.targetFamilyKey,
+      replayCount: candidate.replayCount,
+      assignedSourceRowReplayCount: candidate.assignedSourceRowReplayCount,
+      assignedRowCount: candidate.assignedRowCount,
+    })),
+  };
+}
+
 function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
   const roflStatAssignmentsPath = path.join(root, "artifacts-keyframes", `keyframe-rofl-stat-slot-assignments-${versionGroup}.json`);
   const roflStatComparisonPath = path.join(root, "artifacts-keyframes", `keyframe-rofl-stat-supervised-comparison-${versionGroup}.json`);
   const startupRosterTokenScanPath = path.join(root, "artifacts-keyframes", "startup-roster-token-scan.json");
+  const handleGraphCandidateScoresPath = path.join(root, "artifacts-keyframes", "keyframe-handle-graph-candidate-scores.json");
   const rowIdentity02Path = path.join(root, "artifacts-keyframes", `reconstruction-row-identity-241-0x02-${versionGroup}.json`);
   const rowIdentity04Path = path.join(root, "artifacts-keyframes", `reconstruction-row-identity-241-0x04-${versionGroup}.json`);
   const rowGridCandidatesPath = path.join(root, "artifacts-keyframes", `reconstruction-row-grid-candidates-${versionGroup}.json`);
@@ -2300,6 +2348,7 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
   const roflStatAssignments = readOptionalJson(roflStatAssignmentsPath);
   const roflStatComparison = readOptionalJson(roflStatComparisonPath);
   const startupRosterTokenScan = readOptionalJson(startupRosterTokenScanPath);
+  const handleGraphCandidateScores = readOptionalJson(handleGraphCandidateScoresPath);
   const rowIdentity02 = readOptionalJson(rowIdentity02Path);
   const rowIdentity04 = readOptionalJson(rowIdentity04Path);
   const rowGridCandidates = readOptionalJson(rowGridCandidatesPath);
@@ -2412,11 +2461,13 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
                 exists: false,
               },
           startupRosterTokenScan: summarizeStartupRosterTokenScan(startupRosterTokenScan, versionGroup),
+          handleGraphRowLinkCandidates: summarizeHandleGraphCandidateScores(handleGraphCandidateScores),
         }
       : {
           status: "not_found",
           reason: "no replay-only keyframe scalar identity assignment artifact found",
           startupRosterTokenScan: summarizeStartupRosterTokenScan(startupRosterTokenScan, versionGroup),
+          handleGraphRowLinkCandidates: summarizeHandleGraphCandidateScores(handleGraphCandidateScores),
         },
     reconstructionRowIdentity: {
       status: "not_promoted",
@@ -3099,6 +3150,12 @@ function main() {
         {
           path: path.join(root, "artifacts-keyframes", "startup-roster-token-scan.json"),
           role: "replay-only-startup-roster-token-diagnostic",
+          runtimeInput: false,
+          runtimeApiData: false,
+        },
+        {
+          path: path.join(root, "artifacts-keyframes", "keyframe-handle-graph-candidate-scores.json"),
+          role: "offline-handle-graph-row-link-diagnostic",
           runtimeInput: false,
           runtimeApiData: false,
         },

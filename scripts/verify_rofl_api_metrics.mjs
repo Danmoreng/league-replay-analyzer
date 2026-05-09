@@ -771,6 +771,17 @@ function verifyRejectedCandidateArtifacts(artifact) {
       "Non-final identity evidence must include the replay-only startup roster token diagnostic without promoting it", {
         startupRosterTokenScan: nonFinalScalarIdentity.startupRosterTokenScan,
       });
+    assert(nonFinalScalarIdentity.handleGraphRowLinkCandidates?.status === "not_promoted" &&
+      nonFinalScalarIdentity.handleGraphRowLinkCandidates?.runtimeInput === false &&
+      nonFinalScalarIdentity.handleGraphRowLinkCandidates?.runtimeApiData === false &&
+      nonFinalScalarIdentity.handleGraphRowLinkCandidates?.schema === "keyframe-handle-graph-candidate-scores.v1" &&
+      nonFinalScalarIdentity.handleGraphRowLinkCandidates?.replayCount === 20 &&
+      nonFinalScalarIdentity.handleGraphRowLinkCandidates?.candidateCount > 0 &&
+      nonFinalScalarIdentity.handleGraphRowLinkCandidates?.confidenceCounts?.weak === nonFinalScalarIdentity.handleGraphRowLinkCandidates?.candidateCount &&
+      nonFinalScalarIdentity.handleGraphRowLinkCandidates?.topConfidence === "weak",
+      "Non-final identity evidence must include handle-graph row-link candidates as not-promoted diagnostics", {
+        handleGraphRowLinkCandidates: nonFinalScalarIdentity.handleGraphRowLinkCandidates,
+      });
   }
 
   const reconstructionRowIdentity = rejected.reconstructionRowIdentity;
@@ -1090,6 +1101,12 @@ function verifyIdentityLinkage(artifact) {
     "Identity linkage summary must surface the startup roster token diagnostic as non-runtime evidence", {
       identityLinkage,
     });
+  assert(identityLinkage.nonFinalScalarIdentity?.handleGraphRowLinkCandidates?.status === "not_promoted" &&
+    identityLinkage.nonFinalScalarIdentity?.handleGraphRowLinkCandidates?.runtimeApiData === false &&
+    identityLinkage.nonFinalScalarIdentity?.handleGraphRowLinkCandidates?.topConfidence === "weak",
+    "Identity linkage summary must surface handle-graph row-link candidates as not-promoted evidence", {
+      identityLinkage,
+    });
   assert(Array.isArray(identityLinkage.nonFinalScalarIdentity?.nextDecoderTargets) && identityLinkage.nonFinalScalarIdentity.nextDecoderTargets.length > 0, "Identity linkage summary must include next decoder target metrics", {
     identityLinkage,
   });
@@ -1255,6 +1272,7 @@ function main() {
     "replay-only-no-priors-position-diagnostic",
     "offline-no-priors-position-validation-diagnostic",
     "replay-only-startup-roster-token-diagnostic",
+    "offline-handle-graph-row-link-diagnostic",
   ]) {
     assert(diagnosticRoles.has(role), `Artifact manifest must include decoder diagnostic role '${role}'`, {
       decoderDiagnostics: artifact.artifactManifest?.decoderDiagnostics,
