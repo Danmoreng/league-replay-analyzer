@@ -406,6 +406,26 @@ function verifyIdentitySupportSweepOutput(artifactRoot, versionGroup) {
   }
 }
 
+function verifyKeyframeIdentifierTokenScanOutput(artifactRoot, versionGroup) {
+  const scanPath = path.resolve(process.cwd(), artifactRoot, "keyframe-identifier-token-scan.json");
+  const scan = JSON.parse(fs.readFileSync(scanPath, "utf8"));
+  if (scan.stableOnly !== true) {
+    throw new Error(`Keyframe identifier token scan must use strict stable-only mode: ${JSON.stringify(scan)}`);
+  }
+  if ((scan.scannedRows ?? 0) <= 0 || (scan.rawCandidateCount ?? 0) <= 0) {
+    throw new Error(`Keyframe identifier token scan must inspect candidate rows: ${JSON.stringify(scan)}`);
+  }
+  if (scan.thresholds?.minSupportRows !== 3 || scan.thresholds?.minHitRate !== 0.75) {
+    throw new Error(`Keyframe identifier token scan thresholds changed unexpectedly: ${JSON.stringify(scan.thresholds ?? null)}`);
+  }
+  const rosterOrderKinds = new Set(["participantId", "rosterIndex", "rosterOrdinal", "teamId", "championId"]);
+  const rosterOrderCandidates = (scan.candidates ?? [])
+    .filter((candidate) => candidate.versionGroup === versionGroup && rosterOrderKinds.has(candidate.tokenKind));
+  if (rosterOrderCandidates.length !== 0) {
+    throw new Error(`Strict keyframe identifier token scan found roster/order candidates that need promotion review: ${JSON.stringify(rosterOrderCandidates)}`);
+  }
+}
+
 function verifyStartupKeyframeRowLinkOutput(artifactRoot, versionGroup) {
   const diagnosticPath = path.resolve(process.cwd(), artifactRoot, `startup-keyframe-row-link-diagnostic-${versionGroup}.json`);
   const diagnostic = JSON.parse(fs.readFileSync(diagnosticPath, "utf8"));
@@ -507,6 +527,7 @@ function main() {
   const assignIdentityScript = path.join("scripts", "assign_keyframe_slots_from_rofl_stats.mjs");
   const compareIdentityScript = path.join("scripts", "compare_rofl_stat_assignments_to_supervised.mjs");
   const sweepIdentitySupportScript = path.join("scripts", "sweep_rofl_identity_support_thresholds.mjs");
+  const scanKeyframeIdentifierTokensScript = path.join("scripts", "scan_keyframe_identifier_tokens.mjs");
   const analyzeStartupKeyframeRowLinksScript = path.join("scripts", "analyze_startup_keyframe_row_links.mjs");
   const sharedArgs = [
     "--replay-id",
@@ -539,6 +560,11 @@ function main() {
     args.artifactRoot,
   ]);
   verifyIdentitySupportSweepOutput(args.artifactRoot, args.versionGroup);
+  runStep("scan-keyframe-identifier-tokens", scanKeyframeIdentifierTokensScript, [
+    "--artifact-root",
+    args.artifactRoot,
+  ]);
+  verifyKeyframeIdentifierTokenScanOutput(args.artifactRoot, args.versionGroup);
 
   runStep("offline-timeline-reconstruction-audit", timelineReconstructionScript, sharedArgs);
   verifyTimelineReconstructionOutput(args.replayId, args.artifactRoot);
