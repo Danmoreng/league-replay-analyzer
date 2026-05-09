@@ -1085,6 +1085,31 @@ function verifyRejectedCandidateArtifacts(artifact) {
 
 function verifyIdentityLinkage(artifact) {
   const identityLinkage = artifact.identityLinkage ?? {};
+  const evidenceMatrix = identityLinkage.evidenceMatrix ?? [];
+  for (const evidenceClass of [
+    "ROFL metadata/statsJson roster",
+    "roster order",
+    "team/champion metadata",
+    "cross-metric final stats consistency",
+    "startup roster/order tokens",
+    "keyframe row identity gates",
+    "handle graph row links",
+  ]) {
+    assert(evidenceMatrix.some((entry) =>
+      entry.evidenceClass === evidenceClass &&
+      Array.isArray(entry.evidenceRefs) &&
+      entry.evidenceRefs.length > 0 &&
+      (entry.runtimeApiData === true || entry.runtimeApiData === false)
+    ), `Identity linkage evidence matrix must include ${evidenceClass}`, {
+      evidenceMatrix,
+    });
+  }
+  assert(evidenceMatrix.some((entry) => entry.evidenceClass === "keyframe row identity gates" && entry.promotion === "not_promoted" && entry.runtimeApiData === false), "Identity evidence matrix must keep row identity gates not promoted", {
+    evidenceMatrix,
+  });
+  assert(evidenceMatrix.some((entry) => entry.evidenceClass === "ROFL metadata/statsJson roster" && entry.promotion === "accepted_for_final_roster_identity" && entry.runtimeApiData === true), "Identity evidence matrix must mark ROFL metadata/statsJson as final roster identity", {
+    evidenceMatrix,
+  });
   assert(identityLinkage.finalRosterIdentity?.status === "decoded", "Identity linkage summary must mark final roster identity decoded", {
     identityLinkage,
   });

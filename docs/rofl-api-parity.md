@@ -242,6 +242,7 @@ Current verified output:
 - `fieldCoverage.matchTeamGaps` for Riot team fields not present in the current ROFL summary, including bans and `objectives.*.first` event-order flags; those fields are emitted API-shaped as `null` and listed in `apiShapedNotFoundFields`, not counted as decoded ROFL data
 - `fieldCoverage.matchTeamGaps.unstableDecodedFields` lists decoded team objective kill fields that still need event-level or alternate ROFL evidence before they can be treated as patch-wide stable parity
 - `identityLinkage` that summarizes final roster linkage, Riot API identifier parity status, and non-final scalar identity blockers
+- `identityLinkage.evidenceMatrix` maps the replay-only identity evidence classes from the goal to concrete artifact refs: ROFL metadata/statsJson roster, roster order, team/champion metadata, cross-metric final stats consistency, startup roster/order tokens, keyframe row identity gates, and handle graph row links
 - `identityLinkage.roflMetadataParticipantIdentifiers` marks ROFL `statsJson` participant identifiers as internal/shape-only, not verified Riot API PUUIDs or encrypted summoner IDs
 - `parityChecklist` that maps the current goal requirements to artifact evidence and explicit gaps
 - `parityChecklist` includes concrete evidence paths for the conservative replay-only identity gate and records the true Riot API PUUID gap

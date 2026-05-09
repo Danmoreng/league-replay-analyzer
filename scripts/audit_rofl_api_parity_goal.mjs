@@ -189,6 +189,7 @@ function buildAudit(artifact, inputPath) {
   const rejectedCandidates = artifact.rejectedCandidateArtifacts ?? {};
   const runtimeReconstructionRowIdentity = rejectedCandidates.reconstructionRowIdentity ?? {};
   const identityLinkage = artifact.identityLinkage ?? {};
+  const identityEvidenceMatrix = identityLinkage.evidenceMatrix ?? [];
   const roflDerivedFieldMap = artifact.roflDerivedFieldMap ?? {};
   const fieldCoverage = artifact.fieldCoverage ?? {};
   const remainingGapByKey = new Map((artifact.remainingParityGaps ?? []).map((entry) => [entry.key, entry]));
@@ -406,6 +407,7 @@ function buildAudit(artifact, inputPath) {
         `identityLinkage.roflMetadataParticipantIdentifiers.status=${identityLinkage.roflMetadataParticipantIdentifiers?.status ?? null}`,
         `identityLinkage.roflMetadataParticipantIdentifiers.apiFieldCompatibility=${identityLinkage.roflMetadataParticipantIdentifiers?.apiFieldCompatibility ?? null}`,
         `identityLinkage.riotApiIdentifierParity.status=${identityLinkage.riotApiIdentifierParity?.status ?? null}`,
+        `identityLinkage.evidenceMatrix=${JSON.stringify(identityEvidenceMatrix.map((entry) => [entry.evidenceClass, entry.status, entry.promotion, entry.runtimeApiData]))}`,
         `metricSet=${nonFinalIdentity?.assignmentArtifact?.metricSet ?? null}`,
         `identity corpus path=${identityCorpusPath}`,
         `identity corpus analyzedReplayCount=${identityCorpus?.analyzedReplayCount ?? null}`,
@@ -474,6 +476,9 @@ function buildAudit(artifact, inputPath) {
           nonFinalIdentity?.handleGraphRowLinkCandidates?.topConfidence === "weak"
           ? []
           : ["handle graph row-link diagnostic missing or not rejected as weak evidence"]),
+        ...(["ROFL metadata/statsJson roster", "roster order", "team/champion metadata", "cross-metric final stats consistency", "startup roster/order tokens", "keyframe row identity gates", "handle graph row links"].every((evidenceClass) =>
+          identityEvidenceMatrix.some((entry) => entry.evidenceClass === evidenceClass && (entry.evidenceRefs ?? []).length > 0)
+        ) ? [] : ["identityLinkage evidence matrix missing one or more replay-only evidence classes"]),
       ],
     },
     {
