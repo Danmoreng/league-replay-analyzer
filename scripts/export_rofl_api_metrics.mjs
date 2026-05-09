@@ -1141,6 +1141,50 @@ function buildIdentityLinkageSummary(rosterParticipants, emittedTimelineParticip
       canonicalCandidateCount: nonFinalScalarIdentity.assignmentArtifact?.canonicalCandidateCount ?? null,
       startupRosterTokenScan: nonFinalScalarIdentity.startupRosterTokenScan ?? { exists: false },
       handleGraphRowLinkCandidates: nonFinalScalarIdentity.handleGraphRowLinkCandidates ?? { exists: false },
+      runtimePromotionGate: {
+        status: "blocked",
+        runtimeApiData: false,
+        requiredGates: [
+          {
+            gate: "final-roster-identity",
+            status: rosterParticipants.length === 10 && emittedTimelineParticipantIds.size === 10 ? "passed" : "blocked",
+            evidenceRef: "identityLinkage.finalRosterIdentity",
+          },
+          {
+            gate: "non-final-scalar-identity",
+            status: (nonFinalScalarIdentity.assignmentArtifact?.canonicalCandidateCount ?? 0) > 0 ? "passed" : "blocked",
+            evidenceRef: "rejectedCandidateArtifacts.nonFinalScalarIdentity.assignmentArtifact",
+            blocker: "canonicalCandidateCount=0",
+          },
+          {
+            gate: "startup-token-to-keyframe-row-link",
+            status: "blocked",
+            evidenceRef: "rejectedCandidateArtifacts.nonFinalScalarIdentity.startupRosterTokenScan",
+            blocker: "startup roster/order tokens are not linked to keyframe state rows",
+          },
+          {
+            gate: "row-identity-coherence",
+            status: (rejectedCandidateArtifacts.reconstructionRowIdentity?.rowIdentityArtifacts ?? []).some((entry) => entry.participantIdentity === true)
+              ? "passed"
+              : "blocked",
+            evidenceRef: "rejectedCandidateArtifacts.reconstructionRowIdentity.rowIdentityArtifacts",
+            blocker: "241-family row gates remain not_promoted",
+          },
+          {
+            gate: "handle-graph-row-link",
+            status: nonFinalScalarIdentity.handleGraphRowLinkCandidates?.topConfidence === "strong" ? "passed" : "blocked",
+            evidenceRef: "rejectedCandidateArtifacts.nonFinalScalarIdentity.handleGraphRowLinkCandidates",
+            blocker: "handle graph candidates are weak",
+          },
+          {
+            gate: "position-identity-without-priors",
+            status: (rejectedCandidateArtifacts.positions?.qualityGateSummary?.noPriorsAssignedParticipantCount ?? 0) === 10 ? "passed" : "blocked",
+            evidenceRef: "rejectedCandidateArtifacts.positions.noPriorsDiagnostic",
+            blocker: `no-priors assignment=${rejectedCandidateArtifacts.positions?.qualityGateSummary?.noPriorsAssignedParticipantCount ?? null}/10`,
+          },
+        ],
+        nextPromotionStep: "Find a ROFL-only link from startup roster/order evidence to non-final keyframe/chunk state rows, then rerun scalar, row, handle, and movement gates.",
+      },
       supportBelowMetricScoreCount: nonFinalScalarIdentity.assignmentArtifact?.diagnostics?.supportBelowMetricScoreCount ?? null,
       ambiguousFinalTargetSupportCountsByMetric:
         nonFinalScalarIdentity.assignmentArtifact?.diagnostics?.ambiguousFinalTargetSupportCountsByMetric ?? {},

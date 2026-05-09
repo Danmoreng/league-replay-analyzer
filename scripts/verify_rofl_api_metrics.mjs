@@ -1161,6 +1161,19 @@ function verifyIdentityLinkage(artifact) {
     "Identity linkage summary must surface handle-graph row-link candidates as not-promoted evidence", {
       identityLinkage,
     });
+  const promotionGate = identityLinkage.nonFinalScalarIdentity?.runtimePromotionGate ?? {};
+  assert(promotionGate.status === "blocked" &&
+    promotionGate.runtimeApiData === false &&
+    (promotionGate.requiredGates ?? []).length >= 6 &&
+    (promotionGate.requiredGates ?? []).some((gate) => gate.gate === "final-roster-identity" && gate.status === "passed") &&
+    (promotionGate.requiredGates ?? []).some((gate) => gate.gate === "non-final-scalar-identity" && gate.status === "blocked") &&
+    (promotionGate.requiredGates ?? []).some((gate) => gate.gate === "startup-token-to-keyframe-row-link" && gate.status === "blocked") &&
+    (promotionGate.requiredGates ?? []).some((gate) => gate.gate === "row-identity-coherence" && gate.status === "blocked") &&
+    (promotionGate.requiredGates ?? []).some((gate) => gate.gate === "handle-graph-row-link" && gate.status === "blocked") &&
+    (promotionGate.requiredGates ?? []).some((gate) => gate.gate === "position-identity-without-priors" && gate.status === "blocked" && String(gate.blocker ?? "").includes("8/10")),
+    "Identity linkage summary must include a blocked runtime promotion gate summary for non-final identity", {
+      promotionGate,
+    });
   assert(Array.isArray(identityLinkage.nonFinalScalarIdentity?.nextDecoderTargets) && identityLinkage.nonFinalScalarIdentity.nextDecoderTargets.length > 0, "Identity linkage summary must include next decoder target metrics", {
     identityLinkage,
   });

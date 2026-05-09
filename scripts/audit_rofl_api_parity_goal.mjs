@@ -190,6 +190,7 @@ function buildAudit(artifact, inputPath) {
   const runtimeReconstructionRowIdentity = rejectedCandidates.reconstructionRowIdentity ?? {};
   const identityLinkage = artifact.identityLinkage ?? {};
   const identityEvidenceMatrix = identityLinkage.evidenceMatrix ?? [];
+  const identityPromotionGate = identityLinkage.nonFinalScalarIdentity?.runtimePromotionGate ?? {};
   const roflDerivedFieldMap = artifact.roflDerivedFieldMap ?? {};
   const fieldCoverage = artifact.fieldCoverage ?? {};
   const remainingGapByKey = new Map((artifact.remainingParityGaps ?? []).map((entry) => [entry.key, entry]));
@@ -408,6 +409,7 @@ function buildAudit(artifact, inputPath) {
         `identityLinkage.roflMetadataParticipantIdentifiers.apiFieldCompatibility=${identityLinkage.roflMetadataParticipantIdentifiers?.apiFieldCompatibility ?? null}`,
         `identityLinkage.riotApiIdentifierParity.status=${identityLinkage.riotApiIdentifierParity?.status ?? null}`,
         `identityLinkage.evidenceMatrix=${JSON.stringify(identityEvidenceMatrix.map((entry) => [entry.evidenceClass, entry.status, entry.promotion, entry.runtimeApiData]))}`,
+        `identityLinkage.nonFinalScalarIdentity.runtimePromotionGate=${JSON.stringify(identityPromotionGate)}`,
         `metricSet=${nonFinalIdentity?.assignmentArtifact?.metricSet ?? null}`,
         `identity corpus path=${identityCorpusPath}`,
         `identity corpus analyzedReplayCount=${identityCorpus?.analyzedReplayCount ?? null}`,
@@ -479,6 +481,14 @@ function buildAudit(artifact, inputPath) {
         ...(["ROFL metadata/statsJson roster", "roster order", "team/champion metadata", "cross-metric final stats consistency", "startup roster/order tokens", "keyframe row identity gates", "handle graph row links"].every((evidenceClass) =>
           identityEvidenceMatrix.some((entry) => entry.evidenceClass === evidenceClass && (entry.evidenceRefs ?? []).length > 0)
         ) ? [] : ["identityLinkage evidence matrix missing one or more replay-only evidence classes"]),
+        ...(identityPromotionGate.status === "blocked" &&
+          identityPromotionGate.runtimeApiData === false &&
+          (identityPromotionGate.requiredGates ?? []).some((gate) => gate.gate === "final-roster-identity" && gate.status === "passed") &&
+          (identityPromotionGate.requiredGates ?? []).some((gate) => gate.gate === "non-final-scalar-identity" && gate.status === "blocked") &&
+          (identityPromotionGate.requiredGates ?? []).some((gate) => gate.gate === "startup-token-to-keyframe-row-link" && gate.status === "blocked") &&
+          (identityPromotionGate.requiredGates ?? []).some((gate) => gate.gate === "position-identity-without-priors" && gate.status === "blocked" && String(gate.blocker ?? "").includes("8/10"))
+          ? []
+          : ["identityLinkage non-final identity runtime promotion gate summary missing or incomplete"]),
       ],
     },
     {
