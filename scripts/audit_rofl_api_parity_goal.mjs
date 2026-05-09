@@ -249,6 +249,10 @@ function buildAudit(artifact, inputPath) {
           extractionProof.proofSchema === "rofl-only-extraction-proof/v1" &&
           extractionProof.runtimeInputPolicy?.riotApiRuntimeInput === false &&
           extractionProof.runtimeInputPolicy?.supervisedFixtureRole === "offline-validation-only" &&
+          extractionProof.apiShapeProof?.matchShape?.missingLeafPathCount === 0 &&
+          extractionProof.apiShapeProof?.timelineShape?.missingLeafPathCount === 70 &&
+          extractionProof.apiShapeProof?.timelineShape?.runtimeEmission === "empty-events-arrays" &&
+          extractionProof.apiShapeProof?.fullApiShapeParity === false &&
           JSON.stringify([...(extractionProof.remainingGapKeys ?? [])].sort()) === JSON.stringify([...remainingGapByKey.keys()].sort()) &&
           proofPositionCandidate?.runtimeApiData === false &&
           proofPositionCandidate?.assignedParticipantCount === 9 &&
@@ -272,6 +276,7 @@ function buildAudit(artifact, inputPath) {
           `roflOnlyExtractionProof=${extractionProof.proofSchema ?? null}`,
           `roflOnlyExtractionProof.riotApiRuntimeInput=${extractionProof.runtimeInputPolicy?.riotApiRuntimeInput ?? null}`,
           `roflOnlyExtractionProof.supervisedFixtureRole=${extractionProof.runtimeInputPolicy?.supervisedFixtureRole ?? null}`,
+          `roflOnlyExtractionProof.apiShapeProof=${JSON.stringify(extractionProof.apiShapeProof ?? null)}`,
           `roflOnlyExtractionProof.remainingGapKeys=${(extractionProof.remainingGapKeys ?? []).join(",")}`,
           `roflOnlyExtractionProof.positionCandidate=${JSON.stringify(proofPositionCandidate ?? null)}`,
           `artifactManifest.sourceReplay.runtimeInput=${artifact.artifactManifest?.sourceReplay?.runtimeInput ?? null}`,

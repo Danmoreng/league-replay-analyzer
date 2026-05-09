@@ -2100,6 +2100,28 @@ function buildRoflOnlyExtractionProof(rosterParticipants, frames, rejectedCandid
         report: "rofl-challenge-gap-candidates.json",
       },
     ],
+    apiShapeProof: {
+      status: "partial",
+      runtimeInput: false,
+      source: "runtime-artifact-structure-and-static-16.9-event-leaf-inventory",
+      matchShape: {
+        status: "api_shaped",
+        offlineShapeGapMatchedLeafPathCount: 342,
+        offlineShapeGapRiotLeafPathCount: 342,
+        missingLeafPathCount: 0,
+      },
+      timelineShape: {
+        status: "partial",
+        offlineShapeGapMatchedLeafPathCount: 57,
+        offlineShapeGapRiotLeafPathCount: 127,
+        missingLeafPathCount: riotTimelineEventLeafPaths16_9.length,
+        missingCategory: "timeline-events",
+        runtimeEmission: "empty-events-arrays",
+        missingLeafPaths: riotTimelineEventLeafPaths16_9,
+      },
+      fullApiShapeParity: false,
+      blocker: "timeline.info.frames[].events leaves are tracked as not_found and are not emitted until ROFL-only event deltas are decoded",
+    },
     notPromotedRuntimeCandidates: [
       {
         surface: "non-final participant identity",

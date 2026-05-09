@@ -288,6 +288,7 @@ Current verified output:
 - aggregate coverage summary in `totals.coverageSummary`
 - `remainingParityGaps` provides a compact machine-readable gap table for non-final participant identity, positions, timeline events, inventory timeline, and damage timeline; every entry states the API surface, runtime emission policy, non-runtime status, blocker summary, evidence refs, and next decoder step
 - `roflOnlyExtractionProof` provides a compact proof table for runtime inputs, ROFL-only decoded surfaces, per-participant decoded scalar/damage metric counts, offline-validation-only reports, not-promoted runtime candidates, and linked remaining gap keys
+- `roflOnlyExtractionProof.apiShapeProof` records the current shape boundary directly in the runtime artifact: match shape is API-shaped with `0` missing leaf paths, timeline shape remains partial with `70` missing `events[]` leaf paths and `empty-events-arrays` runtime emission
 - `artifactManifest` lists the generated runtime artifact, required ROFL replay input, replay-derived summary, offline validation reports, and the full checkpoint command with explicit runtime-input roles
 - verifier rejects Riot API fixture paths anywhere in the runtime artifact
 - `source.inputClasses` classifies replay files, replay-derived summaries, decoder diagnostics, and Riot fixtures by runtime/validation role

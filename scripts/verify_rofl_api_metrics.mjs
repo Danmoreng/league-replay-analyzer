@@ -582,6 +582,19 @@ function verifyParityChecklist(artifact) {
     "ROFL-only extraction proof must explicitly separate runtime replay input from offline fixtures", {
       runtimeInputPolicy: proof.runtimeInputPolicy,
     });
+  assert(proof.apiShapeProof?.status === "partial" &&
+    proof.apiShapeProof?.runtimeInput === false &&
+    proof.apiShapeProof?.matchShape?.status === "api_shaped" &&
+    proof.apiShapeProof?.matchShape?.missingLeafPathCount === 0 &&
+    proof.apiShapeProof?.matchShape?.offlineShapeGapMatchedLeafPathCount === 342 &&
+    proof.apiShapeProof?.timelineShape?.status === "partial" &&
+    proof.apiShapeProof?.timelineShape?.missingLeafPathCount === 70 &&
+    proof.apiShapeProof?.timelineShape?.runtimeEmission === "empty-events-arrays" &&
+    (proof.apiShapeProof?.timelineShape?.missingLeafPaths ?? []).length === 70 &&
+    proof.apiShapeProof?.fullApiShapeParity === false,
+    "ROFL-only extraction proof must summarize match/timeline API shape parity and the remaining timeline event shape gap", {
+      apiShapeProof: proof.apiShapeProof,
+    });
   const proofBySurface = new Map((proof.decodedFromRoflOnly ?? []).map((entry) => [entry.surface, entry]));
   assert(proofBySurface.get("match.info.participants")?.participantCount === 10, "ROFL-only extraction proof must cover all 10 match participants", {
     decodedFromRoflOnly: proof.decodedFromRoflOnly,

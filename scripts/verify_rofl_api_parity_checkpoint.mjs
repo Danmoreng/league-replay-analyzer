@@ -238,6 +238,14 @@ function verifyRuntimeArtifactOutput(replayId, artifactRoot) {
   if (JSON.stringify(remainingGapKeys) !== JSON.stringify(proofGapKeys)) {
     throw new Error(`ROFL-only extraction proof remainingGapKeys do not match remainingParityGaps: ${JSON.stringify({ proofGapKeys, remainingGapKeys })}`);
   }
+  if (
+    proof.apiShapeProof?.matchShape?.missingLeafPathCount !== 0 ||
+    proof.apiShapeProof?.timelineShape?.missingLeafPathCount !== 70 ||
+    proof.apiShapeProof?.timelineShape?.runtimeEmission !== "empty-events-arrays" ||
+    proof.apiShapeProof?.fullApiShapeParity !== false
+  ) {
+    throw new Error(`ROFL-only extraction proof must summarize current match/timeline API shape parity gaps: ${JSON.stringify(proof.apiShapeProof ?? null)}`);
+  }
   if (!(proof.perParticipantProof ?? []).every((entry) =>
     entry.finalScalarMetricCount === 5 &&
     entry.finalDamageMetricCount === 12 &&
