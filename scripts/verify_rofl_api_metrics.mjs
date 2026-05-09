@@ -411,6 +411,14 @@ function verifyFieldCoverage(artifact) {
     timelineEvents: fieldCoverage.timelineEvents,
     itemEvents: artifact.rejectedCandidateArtifacts?.itemEvents,
   });
+  assert(fieldCoverage.timelineEvents?.eventFamilyCorrelation?.status === "not_promoted" &&
+    fieldCoverage.timelineEvents?.eventFamilyCorrelation?.runtimeApiData === false &&
+    fieldCoverage.timelineEvents?.eventFamilyCorrelation?.selectedIntervalCount === 40 &&
+    (fieldCoverage.timelineEvents?.eventFamilyCorrelation?.selectedFamilyKeys ?? []).includes("241-0x02") &&
+    (fieldCoverage.timelineEvents?.eventFamilyCorrelation?.topCorrelations ?? []).length > 0,
+    "Timeline event coverage must include offline event-family correlation diagnostics without promoting them", {
+      timelineEvents: fieldCoverage.timelineEvents,
+    });
   assert((artifact.timeline?.info?.frames ?? []).every((frame) => Array.isArray(frame.events) && frame.events.length === 0), "Timeline frames must keep events empty until ROFL event decoding exists", {
     frames: artifact.timeline?.info?.frames,
   });
@@ -1176,6 +1184,10 @@ function verifyRoflDerivedFieldMap(artifact) {
     fieldMap: fieldMap.timeline?.["info.frames[].events"],
     itemEvents: artifact.rejectedCandidateArtifacts?.itemEvents,
   });
+  assert(JSON.stringify(fieldMap.timeline?.["info.frames[].events"]?.eventFamilyCorrelation ?? null) === JSON.stringify(fieldCoverage.timelineEvents?.eventFamilyCorrelation ?? null), "Timeline event field map must mirror event-family correlation diagnostics", {
+    fieldMap: fieldMap.timeline?.["info.frames[].events"],
+    timelineEvents: fieldCoverage.timelineEvents,
+  });
   assert(fieldMap.timeline?.["info.frames[].participantFrames[].currentGold"]?.status === "not_promoted", "ROFL-derived field map must not promote final currentGold without API parity", {
     entry: fieldMap.timeline?.["info.frames[].participantFrames[].currentGold"],
   });
@@ -1286,6 +1298,7 @@ function main() {
     "offline-no-priors-position-validation-diagnostic",
     "replay-only-startup-roster-token-diagnostic",
     "offline-handle-graph-row-link-diagnostic",
+    "offline-event-family-correlation-diagnostic",
   ]) {
     assert(diagnosticRoles.has(role), `Artifact manifest must include decoder diagnostic role '${role}'`, {
       decoderDiagnostics: artifact.artifactManifest?.decoderDiagnostics,

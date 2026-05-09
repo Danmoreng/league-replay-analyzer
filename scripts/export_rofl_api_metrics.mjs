@@ -1274,6 +1274,7 @@ function buildRoflDerivedFieldMap(rejectedCandidateArtifacts = {}) {
         apiShapedNotFoundFields: riotTimelineEventLeafPaths16_9,
         runtimeEmission: "empty-events-arrays",
         rejectedItemEventEvidence: rejectedCandidateArtifacts.itemEvents?.candidateArtifact ?? null,
+        eventFamilyCorrelation: rejectedCandidateArtifacts.itemEvents?.eventFamilyCorrelation ?? { exists: false },
         note: "Runtime frames keep events empty until actual ROFL event records are decoded; no null placeholder event objects are emitted.",
       },
       "info.frames[].participantFrames[].level": {
@@ -1703,6 +1704,7 @@ function buildFieldCoverage(rejectedCandidateArtifacts = {}) {
       apiShapedNotFoundFields: riotTimelineEventLeafPaths16_9,
       runtimeEmission: "empty-events-arrays",
       rejectedItemEventEvidence: rejectedCandidateArtifacts.itemEvents?.candidateArtifact ?? null,
+      eventFamilyCorrelation: rejectedCandidateArtifacts.itemEvents?.eventFamilyCorrelation ?? { exists: false },
       reason: "Timeline event leaf shape is tracked as not_found, but null placeholder event objects are not emitted because they would imply events that were not decoded from ROFL.",
       reconstructionDirection: "decode chunk/subrecord event deltas between keyframe baselines before emitting API-shaped timeline events",
     },
@@ -1961,6 +1963,7 @@ function buildRemainingParityGaps(rejectedCandidateArtifacts) {
       evidenceRefs: [
         "fieldCoverage.timelineEvents",
         "rejectedCandidateArtifacts.itemEvents",
+        "rejectedCandidateArtifacts.itemEvents.eventFamilyCorrelation",
         "roflDerivedFieldMap.timeline.info.frames[].events",
       ],
       nextDecoderStep: "decode ROFL-only event deltas without supervised Riot timeline events as runtime input",
@@ -2352,6 +2355,36 @@ function summarizeHandleGraphCandidateScores(handleGraphScores) {
   };
 }
 
+function summarizeEventFamilyCorrelation(eventFamilyCorrelation) {
+  if (!eventFamilyCorrelation) {
+    return {
+      exists: false,
+    };
+  }
+  return {
+    exists: true,
+    status: eventFamilyCorrelation.promotionAssessment?.status ?? "not_promoted",
+    reason: "family/event correlations use offline Riot timeline categories as labels and do not decode event payload semantics",
+    runtimeInput: eventFamilyCorrelation.runtimeInput ?? false,
+    runtimeApiData: eventFamilyCorrelation.promotionAssessment?.runtimeApiData ?? false,
+    schema: eventFamilyCorrelation.schema ?? null,
+    mode: eventFamilyCorrelation.mode ?? null,
+    selectedIntervalCount: eventFamilyCorrelation.selection?.selectedIntervals ?? null,
+    selectedFamilyKeys: eventFamilyCorrelation.selection?.familyKeys ?? [],
+    correlationRowCount: (eventFamilyCorrelation.correlations ?? []).length,
+    promotionReasons: eventFamilyCorrelation.promotionAssessment?.reasons ?? [],
+    topCorrelations: (eventFamilyCorrelation.correlations ?? []).slice(0, 8).map((row) => ({
+      familyKey: row.familyKey,
+      category: row.category,
+      pearson: row.pearson ?? null,
+      spearman: row.spearman ?? null,
+      eventfulMeanRate: row.eventfulMeanRate ?? null,
+      quietMeanRate: row.quietMeanRate ?? null,
+      specificEnrichment: row.specificEnrichment ?? null,
+    })),
+  };
+}
+
 function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
   const roflStatAssignmentsPath = path.join(root, "artifacts-keyframes", `keyframe-rofl-stat-slot-assignments-${versionGroup}.json`);
   const roflStatComparisonPath = path.join(root, "artifacts-keyframes", `keyframe-rofl-stat-supervised-comparison-${versionGroup}.json`);
@@ -2366,6 +2399,7 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
   const movementNoPriorsPath = path.join(root, "artifacts", replayId, "participant-movement-no-priors.json");
   const movementNoPriorsValidationPath = path.join(root, "artifacts", replayId, "assigned-movement-no-priors-validation-report.json");
   const itemEventCandidatesPath = path.join(root, "artifacts", replayId, "item-event-candidates.json");
+  const eventFamilyCorrelationPath = path.join(root, "artifacts-keyframes", `reconstruction-family-event-correlation-${versionGroup}.json`);
   const extractedStatsPath = path.join(root, "artifacts", replayId, "extracted-stats.json");
   const roflStatAssignments = readOptionalJson(roflStatAssignmentsPath);
   const roflStatComparison = readOptionalJson(roflStatComparisonPath);
@@ -2380,6 +2414,7 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
   const movementNoPriors = readOptionalJson(movementNoPriorsPath);
   const movementNoPriorsValidation = readOptionalJson(movementNoPriorsValidationPath);
   const itemEventCandidates = readOptionalJson(itemEventCandidatesPath);
+  const eventFamilyCorrelation = readOptionalJson(eventFamilyCorrelationPath);
   const extractedStats = readOptionalJson(extractedStatsPath);
   const extractedMetricKeys = new Set(
     (extractedStats?.participants ?? []).flatMap((participant) => Object.keys(participant.metrics ?? {})),
@@ -2738,10 +2773,12 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
             source: "riot-api-timeline-fixture",
             runtimeInput: false,
           },
+          eventFamilyCorrelation: summarizeEventFamilyCorrelation(eventFamilyCorrelation),
         }
       : {
           status: "not_found",
           reason: "no item-event candidate artifact found for this replay",
+          eventFamilyCorrelation: summarizeEventFamilyCorrelation(eventFamilyCorrelation),
         },
     inventoryTimeline: itemEventCandidates
       ? {
@@ -3178,6 +3215,12 @@ function main() {
         {
           path: path.join(root, "artifacts-keyframes", "keyframe-handle-graph-candidate-scores.json"),
           role: "offline-handle-graph-row-link-diagnostic",
+          runtimeInput: false,
+          runtimeApiData: false,
+        },
+        {
+          path: path.join(root, "artifacts-keyframes", `reconstruction-family-event-correlation-${args.versionGroup}.json`),
+          role: "offline-event-family-correlation-diagnostic",
           runtimeInput: false,
           runtimeApiData: false,
         },

@@ -263,6 +263,7 @@ function buildAudit(artifact, inputPath) {
           (artifact.artifactManifest?.decoderDiagnostics ?? []).some((entry) => entry.role === "replay-only-no-priors-position-diagnostic" && entry.runtimeInput === false && entry.runtimeApiData === false) &&
           (artifact.artifactManifest?.decoderDiagnostics ?? []).some((entry) => entry.role === "replay-only-startup-roster-token-diagnostic" && entry.runtimeInput === false && entry.runtimeApiData === false) &&
           (artifact.artifactManifest?.decoderDiagnostics ?? []).some((entry) => entry.role === "offline-handle-graph-row-link-diagnostic" && entry.runtimeInput === false && entry.runtimeApiData === false) &&
+          (artifact.artifactManifest?.decoderDiagnostics ?? []).some((entry) => entry.role === "offline-event-family-correlation-diagnostic" && entry.runtimeInput === false && entry.runtimeApiData === false) &&
           (artifact.artifactManifest?.offlineValidationReports ?? []).length >= 3 &&
           (artifact.artifactManifest?.offlineValidationReports ?? []).every((entry) => entry.runtimeInput === false) &&
           artifact.source?.roflOnlyInputs?.runtimeRiotApiFiles === false &&
@@ -810,12 +811,17 @@ function buildAudit(artifact, inputPath) {
           (artifact.fieldCoverage?.timelineEvents?.apiShapedNotFoundFields ?? []).length === 70 &&
           artifact.fieldCoverage?.timelineEvents?.runtimeEmission === "empty-events-arrays" &&
           artifact.fieldCoverage?.timelineEvents?.rejectedItemEventEvidence?.candidateCount === rejectedCandidates.itemEvents?.candidateArtifact?.candidateCount &&
+          artifact.fieldCoverage?.timelineEvents?.eventFamilyCorrelation?.status === "not_promoted" &&
+          artifact.fieldCoverage?.timelineEvents?.eventFamilyCorrelation?.runtimeApiData === false &&
+          artifact.fieldCoverage?.timelineEvents?.eventFamilyCorrelation?.selectedIntervalCount === 40 &&
           remainingGapByKey.get("timelineEvents")?.runtimeApiData === false &&
           (remainingGapByKey.get("timelineEvents")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("itemEventCandidateCount=689")) &&
+          (remainingGapByKey.get("timelineEvents")?.evidenceRefs ?? []).includes("rejectedCandidateArtifacts.itemEvents.eventFamilyCorrelation") &&
           roflDerivedFieldMap.timeline?.["info.frames[].events"]?.source === artifact.fieldCoverage?.timelineEvents?.source &&
           (roflDerivedFieldMap.timeline?.["info.frames[].events"]?.apiShapedNotFoundFields ?? []).length === 70 &&
           roflDerivedFieldMap.timeline?.["info.frames[].events"]?.runtimeEmission === "empty-events-arrays" &&
           roflDerivedFieldMap.timeline?.["info.frames[].events"]?.rejectedItemEventEvidence?.candidateCount === rejectedCandidates.itemEvents?.candidateArtifact?.candidateCount &&
+          JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].events"]?.eventFamilyCorrelation ?? null) === JSON.stringify(artifact.fieldCoverage?.timelineEvents?.eventFamilyCorrelation ?? null) &&
           JSON.stringify(artifact.fieldCoverage?.inventoryTimeline?.rejectedCandidateEvidence ?? null) === JSON.stringify(rejectedCandidates.inventoryTimeline?.relatedCandidateArtifact ?? null) &&
           artifact.fieldCoverage?.inventoryTimeline?.runtimeInput === false &&
           remainingGapByKey.get("inventoryTimeline")?.runtimeApiData === false &&
@@ -1074,6 +1080,7 @@ function buildAudit(artifact, inputPath) {
           `fieldCoverage.timelineEvents.apiShapedNotFoundFields=${artifact.fieldCoverage?.timelineEvents?.apiShapedNotFoundFields?.length ?? null}`,
           `fieldCoverage.timelineEvents.runtimeEmission=${artifact.fieldCoverage?.timelineEvents?.runtimeEmission ?? null}`,
           `fieldCoverage.timelineEvents.rejectedItemEventCandidateCount=${artifact.fieldCoverage?.timelineEvents?.rejectedItemEventEvidence?.candidateCount ?? null}`,
+          `fieldCoverage.timelineEvents.eventFamilyCorrelation=${JSON.stringify(artifact.fieldCoverage?.timelineEvents?.eventFamilyCorrelation ?? null)}`,
           `remainingParityGaps.keys=${[...remainingGapByKey.keys()].join(",")}`,
           `remainingParityGaps.positions=${JSON.stringify(remainingGapByKey.get("positions") ?? null)}`,
           `remainingParityGaps.timelineEvents=${JSON.stringify(remainingGapByKey.get("timelineEvents") ?? null)}`,
@@ -1082,6 +1089,7 @@ function buildAudit(artifact, inputPath) {
           `fieldMap.timeline.events.apiShapedNotFoundFields=${roflDerivedFieldMap.timeline?.["info.frames[].events"]?.apiShapedNotFoundFields?.length ?? null}`,
           `fieldMap.timeline.events.runtimeEmission=${roflDerivedFieldMap.timeline?.["info.frames[].events"]?.runtimeEmission ?? null}`,
           `fieldMap.timeline.events.rejectedItemEventCandidateCount=${roflDerivedFieldMap.timeline?.["info.frames[].events"]?.rejectedItemEventEvidence?.candidateCount ?? null}`,
+          `fieldMap.timeline.events.eventFamilyCorrelation=${JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].events"]?.eventFamilyCorrelation ?? null)}`,
           `fieldCoverage.inventoryTimeline.matchesRejectedInventory=${JSON.stringify(artifact.fieldCoverage?.inventoryTimeline?.rejectedCandidateEvidence ?? null) === JSON.stringify(rejectedCandidates.inventoryTimeline?.relatedCandidateArtifact ?? null)}`,
           `fieldCoverage.inventoryTimeline.runtimeInput=${artifact.fieldCoverage?.inventoryTimeline?.runtimeInput ?? null}`,
           `fieldCoverage.positions.source=${artifact.fieldCoverage?.positions?.source ?? null}`,
@@ -1189,12 +1197,17 @@ function buildAudit(artifact, inputPath) {
           ...((artifact.fieldCoverage?.timelineEvents?.apiShapedNotFoundFields ?? []).length !== 70 ? ["fieldCoverage.timelineEvents missing API-shaped event leaf gap list"] : []),
           ...(artifact.fieldCoverage?.timelineEvents?.runtimeEmission !== "empty-events-arrays" ? ["fieldCoverage.timelineEvents missing empty event array runtime policy"] : []),
           ...(artifact.fieldCoverage?.timelineEvents?.rejectedItemEventEvidence?.candidateCount !== rejectedCandidates.itemEvents?.candidateArtifact?.candidateCount ? ["fieldCoverage.timelineEvents rejected item-event evidence does not match rejectedCandidateArtifacts.itemEvents"] : []),
+          ...(artifact.fieldCoverage?.timelineEvents?.eventFamilyCorrelation?.status !== "not_promoted" ? ["fieldCoverage.timelineEvents missing not-promoted event-family correlation diagnostic"] : []),
+          ...(artifact.fieldCoverage?.timelineEvents?.eventFamilyCorrelation?.runtimeApiData !== false ? ["fieldCoverage.timelineEvents event-family correlation must be non-runtime API data"] : []),
+          ...(artifact.fieldCoverage?.timelineEvents?.eventFamilyCorrelation?.selectedIntervalCount !== 40 ? ["fieldCoverage.timelineEvents event-family correlation missing selected interval count"] : []),
           ...(remainingGapByKey.get("timelineEvents")?.runtimeApiData !== false ? ["remainingParityGaps timelineEvents must be non-runtime"] : []),
           ...(!(remainingGapByKey.get("timelineEvents")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("itemEventCandidateCount=689")) ? ["remainingParityGaps timelineEvents missing item-event candidate blocker"] : []),
+          ...(!(remainingGapByKey.get("timelineEvents")?.evidenceRefs ?? []).includes("rejectedCandidateArtifacts.itemEvents.eventFamilyCorrelation") ? ["remainingParityGaps timelineEvents missing event-family correlation evidence ref"] : []),
           ...(roflDerivedFieldMap.timeline?.["info.frames[].events"]?.source !== artifact.fieldCoverage?.timelineEvents?.source ? ["roflDerivedFieldMap timeline events source does not match fieldCoverage.timelineEvents"] : []),
           ...((roflDerivedFieldMap.timeline?.["info.frames[].events"]?.apiShapedNotFoundFields ?? []).length !== 70 ? ["roflDerivedFieldMap timeline events missing API-shaped event leaf gap list"] : []),
           ...(roflDerivedFieldMap.timeline?.["info.frames[].events"]?.runtimeEmission !== "empty-events-arrays" ? ["roflDerivedFieldMap timeline events missing empty event array runtime policy"] : []),
           ...(roflDerivedFieldMap.timeline?.["info.frames[].events"]?.rejectedItemEventEvidence?.candidateCount !== rejectedCandidates.itemEvents?.candidateArtifact?.candidateCount ? ["roflDerivedFieldMap timeline events rejected item-event evidence does not match rejectedCandidateArtifacts.itemEvents"] : []),
+          ...(JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].events"]?.eventFamilyCorrelation ?? null) !== JSON.stringify(artifact.fieldCoverage?.timelineEvents?.eventFamilyCorrelation ?? null) ? ["roflDerivedFieldMap timeline events event-family correlation does not match fieldCoverage.timelineEvents"] : []),
           ...(JSON.stringify(artifact.fieldCoverage?.inventoryTimeline?.rejectedCandidateEvidence ?? null) !== JSON.stringify(rejectedCandidates.inventoryTimeline?.relatedCandidateArtifact ?? null) ? ["fieldCoverage.inventoryTimeline rejected evidence does not match rejectedCandidateArtifacts.inventoryTimeline"] : []),
           ...(artifact.fieldCoverage?.inventoryTimeline?.runtimeInput !== false ? ["fieldCoverage.inventoryTimeline must be non-runtime"] : []),
           ...(remainingGapByKey.get("inventoryTimeline")?.runtimeApiData !== false ? ["remainingParityGaps inventoryTimeline must be non-runtime"] : []),

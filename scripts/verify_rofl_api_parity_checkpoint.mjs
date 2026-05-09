@@ -222,6 +222,7 @@ function verifyRuntimeArtifactOutput(replayId, artifactRoot) {
     "offline-no-priors-position-validation-diagnostic",
     "replay-only-startup-roster-token-diagnostic",
     "offline-handle-graph-row-link-diagnostic",
+    "offline-event-family-correlation-diagnostic",
   ]) {
     if (!diagnosticRoles.has(role)) {
       throw new Error(`Artifact manifest missing decoder diagnostic role '${role}': ${JSON.stringify(manifest.decoderDiagnostics ?? null)}`);

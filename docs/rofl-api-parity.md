@@ -279,6 +279,8 @@ Current verified output:
 - `rejectedCandidateArtifacts.positions.perParticipantCoverage` and `fieldCoverage.positions.perParticipantCoverage` summarize all 10 participants with explicit `unstable_identity`, `noisy`, or `not_found` movement status; this keeps candidate x/y evidence visible without promoting it into `participantFrames.position`
 - `roflDerivedFieldMap.timeline["info.frames[].participantFrames[].position"]` mirrors the same per-participant movement coverage and status counts while keeping `position` `not_promoted`
 - `rejectedCandidateArtifacts.itemEvents` that records supervised item-event candidates and why they are not emitted as runtime API data
+- `rejectedCandidateArtifacts.itemEvents.eventFamilyCorrelation` summarizes `artifacts-keyframes/reconstruction-family-event-correlation-16.9.json` as `not_promoted`: selected event-enriched families such as `241-0x02`, `241-0x04`, `512-0x00`, and `2-0xC7` are tracked, but the diagnostic uses offline Riot event categories and does not decode ROFL event payload semantics
+- `artifactManifest.decoderDiagnostics` includes `offline-event-family-correlation-diagnostic` and marks it `runtimeInput:false` / `runtimeApiData:false`
 - `rejectedCandidateArtifacts.inventoryTimeline` that records why item/inventory state over time is not emitted
 - `rejectedCandidateArtifacts.championStatsFinal` that records why final `participantFrames[].championStats` is only shape-compatible: current `statsJson` candidates are all-zero or unrelated counter collisions, not accepted API parity
 - `rejectedCandidateArtifacts.damageTimeline` that records whether any extracted-stat damage candidates exist
