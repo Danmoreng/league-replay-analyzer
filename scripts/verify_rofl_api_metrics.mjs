@@ -888,6 +888,14 @@ function verifyRejectedCandidateArtifacts(artifact) {
     assert(Number.isFinite(artifactSummary.sameRowWinRate) && artifactSummary.sameRowWinRate < 0.75, `Row identity same-row win rate must remain below promotion threshold for ${familyKey}`, {
       artifactSummary,
     });
+    assert(artifactSummary.minCoherence === 0.75 &&
+      Number.isFinite(artifactSummary.duplicateRateThreshold) &&
+      (artifactSummary.promotionReasons ?? []).includes("row-to-participant mapping is not established from ROFL-only evidence") &&
+      (artifactSummary.strongestRows ?? []).length > 0 &&
+      (artifactSummary.strongestRows ?? []).every((row) => row.runtimeApiData === false && row.participantId === null && ["duplicate_rejected", "unstable_identity"].includes(row.status)),
+      `Row identity gate must expose per-row blocker details for ${familyKey}`, {
+        artifactSummary,
+      });
     assert(artifactSummary.rowCount === 10, `Row identity gate must summarize 10 rows for ${familyKey}`, {
       artifactSummary,
     });

@@ -2595,12 +2595,29 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
           participantIdentity: artifact.promotionAssessment?.participantIdentity ?? null,
           sameRowWinRate: artifact.evidence?.sameRowWinRate ?? null,
           duplicateRejectedRowCount: artifact.evidence?.duplicateRejectedRowCount ?? null,
+          minCoherence: artifact.hypothesis?.minCoherence ?? null,
+          duplicateRateThreshold: artifact.hypothesis?.duplicateRateThreshold ?? null,
+          promotionReasons: artifact.promotionAssessment?.reasons ?? [],
           rowStatusCounts: Object.fromEntries(
             Object.entries((artifact.rowIdentity ?? []).reduce((counts, row) => {
               counts[row.status] = (counts[row.status] ?? 0) + 1;
               return counts;
             }, {})).sort(([left], [right]) => left.localeCompare(right)),
           ),
+          strongestRows: (artifact.rowIdentity ?? [])
+            .slice()
+            .sort((left, right) => (right.sameRowWinRate ?? -1) - (left.sameRowWinRate ?? -1) || left.rowIndex - right.rowIndex)
+            .slice(0, 5)
+            .map((row) => ({
+              rowIndex: row.rowIndex,
+              status: row.status,
+              sameRowWinRate: row.sameRowWinRate ?? null,
+              duplicateRecordRate: row.duplicateRecordRate ?? null,
+              duplicateRecordCount: row.duplicateRecordCount ?? null,
+              participantId: row.participantId ?? null,
+              runtimeApiData: row.runtimeApiData ?? false,
+              reason: row.reason ?? null,
+            })),
           rowCount: (artifact.rowIdentity ?? []).length,
         })),
     },

@@ -1323,6 +1323,9 @@ function buildAudit(artifact, inputPath) {
             entry.runtimeApiData === false &&
             entry.participantIdentity === false &&
             entry.sameRowWinRate < 0.75 &&
+            entry.minCoherence === 0.75 &&
+            (entry.strongestRows ?? []).length > 0 &&
+            (entry.strongestRows ?? []).every((row) => row.runtimeApiData === false && row.participantId === null) &&
             ((entry.rowStatusCounts?.duplicate_rejected ?? 0) + (entry.rowStatusCounts?.unstable_identity ?? 0)) === 10
           ) ? ["runtime artifact reconstructionRowIdentity missing rejected 241-0x02 summary"] : []),
           ...(!(runtimeReconstructionRowIdentity.rowIdentityArtifacts ?? []).some((entry) =>
@@ -1331,6 +1334,9 @@ function buildAudit(artifact, inputPath) {
             entry.runtimeApiData === false &&
             entry.participantIdentity === false &&
             entry.sameRowWinRate < 0.75 &&
+            entry.minCoherence === 0.75 &&
+            (entry.strongestRows ?? []).length > 0 &&
+            (entry.strongestRows ?? []).every((row) => row.runtimeApiData === false && row.participantId === null) &&
             ((entry.rowStatusCounts?.duplicate_rejected ?? 0) + (entry.rowStatusCounts?.unstable_identity ?? 0)) === 10
           ) ? ["runtime artifact reconstructionRowIdentity missing rejected 241-0x04 summary"] : []),
           ...(!reconstructionRowGridCandidates ? ["row-grid candidate scan artifact missing"] : []),
