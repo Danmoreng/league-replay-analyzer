@@ -903,6 +903,7 @@ function buildAudit(artifact, inputPath) {
           (remainingGapByKey.get("nonFinalParticipantIdentity")?.evidenceRefs ?? []).includes("identityLinkage.evidenceMatrix") &&
           (remainingGapByKey.get("nonFinalParticipantIdentity")?.evidenceRefs ?? []).includes("identityLinkage.nonFinalScalarIdentity.runtimePromotionGate") &&
           (remainingGapByKey.get("nonFinalParticipantIdentity")?.evidenceRefs ?? []).includes("rejectedCandidateArtifacts.nonFinalScalarIdentity.startupKeyframeRowLink") &&
+          (remainingGapByKey.get("nonFinalParticipantIdentity")?.evidenceRefs ?? []).includes("rejectedCandidateArtifacts.reconstructionRowIdentity.blockerMatrix") &&
           remainingGapByKey.get("damageTimeline")?.runtimeApiData === false &&
           roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.status === "not_promoted" &&
           JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.perParticipantCoverage ?? []) === JSON.stringify(artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []) &&
@@ -1301,6 +1302,7 @@ function buildAudit(artifact, inputPath) {
           ...(!(remainingGapByKey.get("nonFinalParticipantIdentity")?.evidenceRefs ?? []).includes("identityLinkage.evidenceMatrix") ? ["remainingParityGaps nonFinalParticipantIdentity missing evidence matrix ref"] : []),
           ...(!(remainingGapByKey.get("nonFinalParticipantIdentity")?.evidenceRefs ?? []).includes("identityLinkage.nonFinalScalarIdentity.runtimePromotionGate") ? ["remainingParityGaps nonFinalParticipantIdentity missing runtime promotion gate ref"] : []),
           ...(!(remainingGapByKey.get("nonFinalParticipantIdentity")?.evidenceRefs ?? []).includes("rejectedCandidateArtifacts.nonFinalScalarIdentity.startupKeyframeRowLink") ? ["remainingParityGaps nonFinalParticipantIdentity missing startup-keyframe row-link ref"] : []),
+          ...(!(remainingGapByKey.get("nonFinalParticipantIdentity")?.evidenceRefs ?? []).includes("rejectedCandidateArtifacts.reconstructionRowIdentity.blockerMatrix") ? ["remainingParityGaps nonFinalParticipantIdentity missing row identity blocker matrix ref"] : []),
           ...(remainingGapByKey.get("damageTimeline")?.runtimeApiData !== false ? ["remainingParityGaps damageTimeline must be non-runtime"] : []),
           ...(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.status !== "not_promoted" ? ["roflDerivedFieldMap timeline position missing not_promoted status"] : []),
           ...(JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.perParticipantCoverage ?? []) !== JSON.stringify(artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []) ? ["roflDerivedFieldMap timeline position per-participant coverage does not match fieldCoverage.positions"] : []),

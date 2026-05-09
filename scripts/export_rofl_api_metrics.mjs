@@ -2045,6 +2045,7 @@ function buildRemainingParityGaps(rejectedCandidateArtifacts) {
       evidenceRefs: [
         "rejectedCandidateArtifacts.nonFinalScalarIdentity",
         "rejectedCandidateArtifacts.reconstructionRowIdentity",
+        "rejectedCandidateArtifacts.reconstructionRowIdentity.blockerMatrix",
         "identityLinkage.evidenceMatrix",
         "identityLinkage.nonFinalScalarIdentity.runtimePromotionGate",
         "rejectedCandidateArtifacts.nonFinalScalarIdentity.startupKeyframeRowLink",

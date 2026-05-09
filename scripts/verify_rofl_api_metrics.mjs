@@ -577,6 +577,7 @@ function verifyParityChecklist(artifact) {
     "identityLinkage.evidenceMatrix",
     "identityLinkage.nonFinalScalarIdentity.runtimePromotionGate",
     "rejectedCandidateArtifacts.nonFinalScalarIdentity.startupKeyframeRowLink",
+    "rejectedCandidateArtifacts.reconstructionRowIdentity.blockerMatrix",
   ]) {
     assert((remainingGapByKey.get("nonFinalParticipantIdentity")?.evidenceRefs ?? []).includes(evidenceRef), `remainingParityGaps.nonFinalParticipantIdentity must reference ${evidenceRef}`, {
       nonFinalParticipantIdentity: remainingGapByKey.get("nonFinalParticipantIdentity"),
