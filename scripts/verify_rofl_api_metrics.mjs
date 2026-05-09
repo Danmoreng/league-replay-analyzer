@@ -441,6 +441,10 @@ function verifyFieldCoverage(artifact) {
     fieldCoverage: fieldCoverage.positions,
     rejectedPositions: artifact.rejectedCandidateArtifacts?.positions,
   });
+  assert(JSON.stringify(fieldCoverage.positions?.noPriorsDiagnostic ?? null) === JSON.stringify(artifact.rejectedCandidateArtifacts?.positions?.noPriorsDiagnostic ?? null), "Position field coverage must mirror no-priors diagnostic evidence", {
+    fieldCoverage: fieldCoverage.positions,
+    rejectedPositions: artifact.rejectedCandidateArtifacts?.positions,
+  });
   for (const field of [
     "info.frames[].participantFrames[].championStats.*",
     "info.frames[].participantFrames[].currentGold",
@@ -549,6 +553,19 @@ function verifyParityChecklist(artifact) {
   assert((remainingGapByKey.get("positions")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("9/10")), "remainingParityGaps.positions must preserve movement assignment blocker", {
     positions: remainingGapByKey.get("positions"),
   });
+  assert((remainingGapByKey.get("positions")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("no-priors") && String(blocker).includes("8/10")), "remainingParityGaps.positions must preserve no-priors replay-only assignment blocker", {
+    positions: remainingGapByKey.get("positions"),
+  });
+  for (const evidenceRef of [
+    "rejectedCandidateArtifacts.positions.noPriorsDiagnostic",
+    "fieldCoverage.positions.noPriorsDiagnostic",
+    "artifactManifest.decoderDiagnostics.replay-only-no-priors-position-diagnostic",
+    "artifactManifest.decoderDiagnostics.offline-no-priors-position-validation-diagnostic",
+  ]) {
+    assert((remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes(evidenceRef), `remainingParityGaps.positions must reference ${evidenceRef}`, {
+      positions: remainingGapByKey.get("positions"),
+    });
+  }
   assert((remainingGapByKey.get("timelineEvents")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("itemEventCandidateCount=689")), "remainingParityGaps.timelineEvents must preserve rejected item-event candidate count", {
     timelineEvents: remainingGapByKey.get("timelineEvents"),
   });
@@ -608,6 +625,17 @@ function verifyParityChecklist(artifact) {
     remainingGapKeys: proof.remainingGapKeys,
     remainingParityGapKeys: [...remainingGapByKey.keys()],
   });
+  const proofPositionCandidate = (proof.notPromotedRuntimeCandidates ?? []).find((entry) => entry.surface === "position x/y movement tracks");
+  assert(proofPositionCandidate?.runtimeInput === false &&
+    proofPositionCandidate?.runtimeApiData === false &&
+    proofPositionCandidate?.assignedParticipantCount === 9 &&
+    proofPositionCandidate?.expectedParticipantCount === 10 &&
+    proofPositionCandidate?.offlinePassingAssignmentCount === 7 &&
+    proofPositionCandidate?.noPriorsAssignedParticipantCount === 8 &&
+    proofPositionCandidate?.noPriorsOfflinePassingAssignmentCount === 7,
+    "ROFL-only extraction proof must summarize rejected position candidate counts", {
+      proofPositionCandidate,
+    });
   const runtimePolicy = byRequirement.get("Runtime extraction does not use Riot API data.");
   assert(runtimePolicy?.status === "satisfied", "Parity checklist must mark runtime Riot API exclusion satisfied", {
     runtimePolicy,
@@ -870,15 +898,37 @@ function verifyRejectedCandidateArtifacts(artifact) {
     assert((positions.promotionBlockers ?? []).some((blocker) => blocker.includes("7/9")), "Position blockers must preserve failed offline-quality evidence", {
       blockers: positions.promotionBlockers,
     });
+    assert((positions.promotionBlockers ?? []).some((blocker) => blocker.includes("no-priors") && blocker.includes("8/10")), "Position blockers must preserve the replay-only no-priors assignment drop", {
+      blockers: positions.promotionBlockers,
+    });
     assert(positions.qualityGateSummary?.expectedParticipantCount === 10 &&
       positions.qualityGateSummary?.assignedParticipantCount === 9 &&
       positions.qualityGateSummary?.unmatchedParticipantCount === 1 &&
       positions.qualityGateSummary?.usesIdentityPriors === true &&
       positions.qualityGateSummary?.offlineAssignmentCount === 9 &&
       positions.qualityGateSummary?.offlinePassingAssignmentCount === 7 &&
+      positions.qualityGateSummary?.noPriorsAssignedParticipantCount === 8 &&
+      positions.qualityGateSummary?.noPriorsUnmatchedParticipantCount === 2 &&
+      positions.qualityGateSummary?.noPriorsOfflineAssignmentCount === 8 &&
+      positions.qualityGateSummary?.noPriorsOfflinePassingAssignmentCount === 7 &&
       positions.qualityGateSummary?.runtimeInput === false,
       "Position quality gate summary must mirror movement assignment and offline-validation blockers", {
         qualityGateSummary: positions.qualityGateSummary,
+      });
+    assert(positions.noPriorsDiagnostic?.status === "diagnostic_only_not_runtime_api_data" &&
+      positions.noPriorsDiagnostic?.runtimeInput === false &&
+      positions.noPriorsDiagnostic?.usesIdentityPriors === false &&
+      positions.noPriorsDiagnostic?.assignmentCount === 8 &&
+      positions.noPriorsDiagnostic?.unmatchedParticipantCount === 2 &&
+      (positions.noPriorsDiagnostic?.unmatchedParticipants ?? []).length === 2 &&
+      (positions.noPriorsDiagnostic?.unmatchedParticipants ?? []).some((participant) => participant.champion === "Vayne" && participant.teamPosition === "TOP") &&
+      (positions.noPriorsDiagnostic?.unmatchedParticipants ?? []).some((participant) => participant.champion === "Malphite" && participant.teamPosition === "TOP") &&
+      (positions.noPriorsDiagnostic?.unmatchedParticipants ?? []).every((participant) => (participant.topRejectedEntityCandidates ?? []).length > 0) &&
+      positions.noPriorsDiagnostic?.offlineValidation?.assignmentCount === 8 &&
+      positions.noPriorsDiagnostic?.offlineValidation?.passingAssignmentCount === 7 &&
+      positions.noPriorsDiagnostic?.offlineValidation?.runtimeInput === false,
+      "Position evidence must include the no-priors replay-only diagnostic without promoting it", {
+        noPriorsDiagnostic: positions.noPriorsDiagnostic,
       });
     const unmatchedPositionCoverage = (positions.perParticipantCoverage ?? []).find((entry) => entry.status === "not_found");
     assert((positions.participantMovementArtifact?.unmatchedParticipants ?? []).length === 1 &&
@@ -1094,6 +1144,10 @@ function verifyRoflDerivedFieldMap(artifact) {
     fieldMap: fieldMap.timeline?.["info.frames[].participantFrames[].position"],
     positions: fieldCoverage.positions,
   });
+  assert(JSON.stringify(fieldMap.timeline?.["info.frames[].participantFrames[].position"]?.noPriorsDiagnostic ?? null) === JSON.stringify(fieldCoverage.positions?.noPriorsDiagnostic ?? null), "Position field map must mirror no-priors position coverage", {
+    fieldMap: fieldMap.timeline?.["info.frames[].participantFrames[].position"],
+    positions: fieldCoverage.positions,
+  });
   assert(fieldMap.timeline?.["info.frames[].participantFrames[].nonFinalParticipantIdentity"]?.status === "not_promoted", "ROFL-derived field map must not promote non-final participant identity", {
     entry: fieldMap.timeline?.["info.frames[].participantFrames[].nonFinalParticipantIdentity"],
   });
@@ -1171,11 +1225,24 @@ function main() {
   assert(artifact.artifactManifest?.sourceReplay?.runtimeInput === true &&
     artifact.artifactManifest?.replayDerivedSummary?.runtimeInput === true &&
     artifact.artifactManifest?.primaryRuntimeArtifact?.runtimeInput === false &&
+    (artifact.artifactManifest?.decoderDiagnostics ?? []).length >= 4 &&
+    (artifact.artifactManifest?.decoderDiagnostics ?? []).every((entry) => entry.runtimeInput === false && entry.runtimeApiData === false) &&
     (artifact.artifactManifest?.offlineValidationReports ?? []).length >= 3 &&
     (artifact.artifactManifest?.offlineValidationReports ?? []).every((entry) => entry.runtimeInput === false),
     "Artifact manifest must distinguish runtime ROFL inputs from offline validation reports", {
       artifactManifest: artifact.artifactManifest,
     });
+  const diagnosticRoles = new Set((artifact.artifactManifest?.decoderDiagnostics ?? []).map((entry) => entry.role));
+  for (const role of [
+    "rejected-position-candidate-diagnostic",
+    "offline-position-validation-diagnostic",
+    "replay-only-no-priors-position-diagnostic",
+    "offline-no-priors-position-validation-diagnostic",
+  ]) {
+    assert(diagnosticRoles.has(role), `Artifact manifest must include decoder diagnostic role '${role}'`, {
+      decoderDiagnostics: artifact.artifactManifest?.decoderDiagnostics,
+    });
+  }
   assert((artifact.artifactManifest?.sourceReplay?.path ?? "").replaceAll("\\", "/").includes("/replays/") &&
     !(artifact.artifactManifest?.sourceReplay?.path ?? "").replaceAll("\\", "/").includes("/replays/api/"),
     "Artifact manifest source replay must point at a ROFL replay, not Riot API fixtures", {

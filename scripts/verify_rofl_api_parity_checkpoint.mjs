@@ -211,6 +211,20 @@ function verifyRuntimeArtifactOutput(replayId, artifactRoot) {
   if (manifest.primaryRuntimeArtifact?.runtimeInput !== false) {
     throw new Error(`Artifact manifest must not treat the generated output as an input: ${JSON.stringify(manifest.primaryRuntimeArtifact ?? null)}`);
   }
+  if ((manifest.decoderDiagnostics ?? []).length < 4 || !(manifest.decoderDiagnostics ?? []).every((entry) => entry.runtimeInput === false && entry.runtimeApiData === false)) {
+    throw new Error(`Artifact manifest must mark decoder diagnostics as non-runtime/non-API data: ${JSON.stringify(manifest.decoderDiagnostics ?? null)}`);
+  }
+  const diagnosticRoles = new Set((manifest.decoderDiagnostics ?? []).map((entry) => entry.role));
+  for (const role of [
+    "rejected-position-candidate-diagnostic",
+    "offline-position-validation-diagnostic",
+    "replay-only-no-priors-position-diagnostic",
+    "offline-no-priors-position-validation-diagnostic",
+  ]) {
+    if (!diagnosticRoles.has(role)) {
+      throw new Error(`Artifact manifest missing decoder diagnostic role '${role}': ${JSON.stringify(manifest.decoderDiagnostics ?? null)}`);
+    }
+  }
   if ((manifest.offlineValidationReports ?? []).length < 3 || !(manifest.offlineValidationReports ?? []).every((entry) => entry.runtimeInput === false)) {
     throw new Error(`Artifact manifest must mark validation reports as offline-only: ${JSON.stringify(manifest.offlineValidationReports ?? null)}`);
   }
@@ -229,6 +243,17 @@ function verifyRuntimeArtifactOutput(replayId, artifactRoot) {
     (entry.unresolvedRuntimeFields ?? []).includes("championStats")
   )) {
     throw new Error(`ROFL-only extraction proof per-participant counts/gaps are incomplete: ${JSON.stringify(proof.perParticipantProof ?? [])}`);
+  }
+  const proofPositionCandidate = (proof.notPromotedRuntimeCandidates ?? []).find((entry) => entry.surface === "position x/y movement tracks");
+  if (
+    proofPositionCandidate?.runtimeApiData !== false ||
+    proofPositionCandidate?.assignedParticipantCount !== 9 ||
+    proofPositionCandidate?.expectedParticipantCount !== 10 ||
+    proofPositionCandidate?.offlinePassingAssignmentCount !== 7 ||
+    proofPositionCandidate?.noPriorsAssignedParticipantCount !== 8 ||
+    proofPositionCandidate?.noPriorsOfflinePassingAssignmentCount !== 7
+  ) {
+    throw new Error(`ROFL-only extraction proof must summarize rejected position candidate counts: ${JSON.stringify(proofPositionCandidate ?? null)}`);
   }
 }
 
@@ -270,6 +295,34 @@ function verifyAssignedMovementValidationOutput(replayId) {
   }
   if (validation.summary?.assignmentCount !== 9 || validation.summary?.passingAssignmentCount !== 7) {
     throw new Error(`Focused movement validation must preserve 7/9 quality blocker: ${JSON.stringify(validation.summary)}`);
+  }
+}
+
+function verifyParticipantMovementNoPriorsOutput(replayId) {
+  const movementPath = path.resolve(process.cwd(), "artifacts", replayId, "participant-movement-no-priors.json");
+  const movement = JSON.parse(fs.readFileSync(movementPath, "utf8"));
+  if (movement.replayId !== replayId) {
+    throw new Error(`No-priors participant movement replay id mismatch: ${movement.replayId ?? "missing"}.`);
+  }
+  if (movement.priorsPath !== null) {
+    throw new Error(`No-priors participant movement must disable identity priors: ${movement.priorsPath}.`);
+  }
+  if ((movement.assignments ?? []).length !== 8 || (movement.unmatchedParticipants ?? []).length !== 2) {
+    throw new Error(`No-priors movement diagnostic must preserve the 8/10 replay-only assignment blocker: ${JSON.stringify({
+      assignments: movement.assignments?.length ?? null,
+      unmatchedParticipants: movement.unmatchedParticipants?.length ?? null,
+    })}`);
+  }
+}
+
+function verifyAssignedMovementNoPriorsValidationOutput(replayId) {
+  const validationPath = path.resolve(process.cwd(), "artifacts", replayId, "assigned-movement-no-priors-validation-report.json");
+  const validation = JSON.parse(fs.readFileSync(validationPath, "utf8"));
+  if (validation.replayId !== replayId) {
+    throw new Error(`No-priors movement validation replay id mismatch: ${validation.replayId ?? "missing"}.`);
+  }
+  if (validation.summary?.assignmentCount !== 8 || validation.summary?.passingAssignmentCount !== 7) {
+    throw new Error(`No-priors movement validation must preserve 7/8 quality evidence: ${JSON.stringify(validation.summary)}`);
   }
 }
 
@@ -588,6 +641,7 @@ function main() {
   ]);
   const movementArtifactDir = path.join("artifacts", args.replayId);
   const participantMovementPath = path.join(movementArtifactDir, "participant-movement.json");
+  const participantMovementNoPriorsPath = path.join(movementArtifactDir, "participant-movement-no-priors.json");
   runStep("assign-movement", assignMovementScript, [
     "--artifact-dir",
     movementArtifactDir,
@@ -598,6 +652,22 @@ function main() {
     participantMovementPath,
   ]);
   verifyAssignedMovementValidationOutput(args.replayId);
+  runStep("assign-movement-no-priors-diagnostic", assignMovementScript, [
+    "--artifact-dir",
+    movementArtifactDir,
+    "--priors-path",
+    path.join(movementArtifactDir, "no-priors.json"),
+    "--output-path",
+    participantMovementNoPriorsPath,
+  ]);
+  verifyParticipantMovementNoPriorsOutput(args.replayId);
+  runStep("validate-assigned-movement-no-priors-diagnostic", validateAssignedMovementScript, [
+    "--participant-movement-path",
+    participantMovementNoPriorsPath,
+    "--output-path",
+    path.join(movementArtifactDir, "assigned-movement-no-priors-validation-report.json"),
+  ]);
+  verifyAssignedMovementNoPriorsValidationOutput(args.replayId);
   runStep("export", exportScript, [
     ...sharedArgs,
     "--version-group",

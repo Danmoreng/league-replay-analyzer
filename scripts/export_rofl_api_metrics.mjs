@@ -1337,6 +1337,7 @@ function buildRoflDerivedFieldMap(rejectedCandidateArtifacts = {}) {
         status: "not_promoted",
         source: "movement-candidates-rejected-for-runtime",
         perParticipantCoverage: rejectedCandidateArtifacts.positions?.perParticipantCoverage ?? [],
+        noPriorsDiagnostic: rejectedCandidateArtifacts.positions?.noPriorsDiagnostic ?? null,
         statusCounts: countMetricStatuses(Object.fromEntries((rejectedCandidateArtifacts.positions?.perParticipantCoverage ?? []).map((entry) => [
           entry.participantId,
           entry,
@@ -1707,6 +1708,7 @@ function buildFieldCoverage(rejectedCandidateArtifacts = {}) {
       status: "not_found",
       source: "state-reconstruction-not-extracted-for-16.9",
       perParticipantCoverage: rejectedCandidateArtifacts.positions?.perParticipantCoverage ?? [],
+      noPriorsDiagnostic: rejectedCandidateArtifacts.positions?.noPriorsDiagnostic ?? null,
       statusCounts: countMetricStatuses(Object.fromEntries((rejectedCandidateArtifacts.positions?.perParticipantCoverage ?? []).map((entry) => [
         entry.participantId,
         entry,
@@ -1934,8 +1936,12 @@ function buildRemainingParityGaps(rejectedCandidateArtifacts) {
       ],
       evidenceRefs: [
         "rejectedCandidateArtifacts.positions",
+        "rejectedCandidateArtifacts.positions.noPriorsDiagnostic",
         "fieldCoverage.positions",
+        "fieldCoverage.positions.noPriorsDiagnostic",
         "roflDerivedFieldMap.timeline.info.frames[].participantFrames[].position",
+        "artifactManifest.decoderDiagnostics.replay-only-no-priors-position-diagnostic",
+        "artifactManifest.decoderDiagnostics.offline-no-priors-position-validation-diagnostic",
       ],
       nextDecoderStep: "replace prior-dependent 9/10 movement assignment with 10/10 ROFL-only identity and quality gates",
     },
@@ -2102,6 +2108,12 @@ function buildRoflOnlyExtractionProof(rosterParticipants, frames, rejectedCandid
         surface: "position x/y movement tracks",
         status: rejectedCandidateArtifacts.positions?.status ?? "not_found",
         runtimeInput: false,
+        runtimeApiData: false,
+        assignedParticipantCount: rejectedCandidateArtifacts.positions?.qualityGateSummary?.assignedParticipantCount ?? null,
+        expectedParticipantCount: rejectedCandidateArtifacts.positions?.qualityGateSummary?.expectedParticipantCount ?? null,
+        offlinePassingAssignmentCount: rejectedCandidateArtifacts.positions?.qualityGateSummary?.offlinePassingAssignmentCount ?? null,
+        noPriorsAssignedParticipantCount: rejectedCandidateArtifacts.positions?.qualityGateSummary?.noPriorsAssignedParticipantCount ?? null,
+        noPriorsOfflinePassingAssignmentCount: rejectedCandidateArtifacts.positions?.qualityGateSummary?.noPriorsOfflinePassingAssignmentCount ?? null,
       },
       {
         surface: "timeline events",
@@ -2221,6 +2233,8 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
   const rowGridFieldAnalysisPath = path.join(root, "artifacts-keyframes", `reconstruction-row-grid-field-analysis-${versionGroup}.json`);
   const movementPath = path.join(root, "artifacts", replayId, "participant-movement.json");
   const movementValidationPath = path.join(root, "artifacts", replayId, "assigned-movement-validation-report.json");
+  const movementNoPriorsPath = path.join(root, "artifacts", replayId, "participant-movement-no-priors.json");
+  const movementNoPriorsValidationPath = path.join(root, "artifacts", replayId, "assigned-movement-no-priors-validation-report.json");
   const itemEventCandidatesPath = path.join(root, "artifacts", replayId, "item-event-candidates.json");
   const extractedStatsPath = path.join(root, "artifacts", replayId, "extracted-stats.json");
   const roflStatAssignments = readOptionalJson(roflStatAssignmentsPath);
@@ -2231,6 +2245,8 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
   const rowGridFieldAnalysis = readOptionalJson(rowGridFieldAnalysisPath);
   const movement = readOptionalJson(movementPath);
   const movementValidation = readOptionalJson(movementValidationPath);
+  const movementNoPriors = readOptionalJson(movementNoPriorsPath);
+  const movementNoPriorsValidation = readOptionalJson(movementNoPriorsValidationPath);
   const itemEventCandidates = readOptionalJson(itemEventCandidatesPath);
   const extractedStats = readOptionalJson(extractedStatsPath);
   const extractedMetricKeys = new Set(
@@ -2434,6 +2450,9 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
             ...(movementValidation && (movementValidation.summary?.passingAssignmentCount ?? 0) < (movementValidation.summary?.assignmentCount ?? 0)
               ? [`only ${movementValidation.summary?.passingAssignmentCount ?? 0}/${movementValidation.summary?.assignmentCount ?? 0} movement assignments pass offline quality validation`]
               : []),
+            ...(movementNoPriors && (movementNoPriors.assignments?.length ?? 0) < (movement?.assignments?.length ?? 0)
+              ? [`ROFL-only no-priors movement assignment drops to ${movementNoPriors.assignments?.length ?? 0}/10 participants`]
+              : []),
           ],
           qualityGateSummary: {
             assignedParticipantCount: movement?.assignments?.length ?? null,
@@ -2452,6 +2471,10 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
             averageAxisCorrelation: movementValidation?.summary?.averageAxisCorrelation ?? null,
             averagePathCorrelation: movementValidation?.summary?.averagePathCorrelation ?? null,
             averageNormalizedDistanceRmse: movementValidation?.summary?.averageNormalizedDistanceRmse ?? null,
+            noPriorsAssignedParticipantCount: movementNoPriors?.assignments?.length ?? null,
+            noPriorsUnmatchedParticipantCount: movementNoPriors?.unmatchedParticipants?.length ?? null,
+            noPriorsOfflineAssignmentCount: movementNoPriorsValidation?.summary?.assignmentCount ?? null,
+            noPriorsOfflinePassingAssignmentCount: movementNoPriorsValidation?.summary?.passingAssignmentCount ?? null,
             runtimeInput: false,
           },
           participantMovementArtifact: movement
@@ -2504,6 +2527,48 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
                 averagePathCorrelation: movementValidation.summary?.averagePathCorrelation ?? null,
                 averageNormalizedDistanceRmse: movementValidation.summary?.averageNormalizedDistanceRmse ?? null,
                 runtimeInput: false,
+              }
+            : {
+                exists: false,
+              },
+          noPriorsDiagnostic: movementNoPriors || movementNoPriorsValidation
+            ? {
+                exists: true,
+                status: "diagnostic_only_not_runtime_api_data",
+                reason: "diagnostic rerun disables movement identity priors to measure replay-only assignment strength",
+                runtimeInput: false,
+                assignmentCount: movementNoPriors?.assignments?.length ?? null,
+                unmatchedParticipantCount: movementNoPriors?.unmatchedParticipants?.length ?? null,
+                unassignedEntityCount: movementNoPriors?.unassignedEntities?.length ?? null,
+                usesIdentityPriors: movementNoPriors?.priorsPath != null,
+                unmatchedParticipants: (movementNoPriors?.unmatchedParticipants ?? []).map((participant) => ({
+                  rosterIndex: participant.rosterIndex ?? null,
+                  champion: participant.champion ?? null,
+                  team: participant.team ?? null,
+                  teamPosition: participant.teamPosition ?? null,
+                  topRejectedEntityCandidates: (participant.topRejectedEntityCandidates ?? []).slice(0, 3).map((candidate) => ({
+                    entityKey: candidate.entityKey ?? null,
+                    familyKey: candidate.familyKey ?? null,
+                    slotIndex: candidate.slotIndex ?? null,
+                    score: candidate.score ?? null,
+                    belowMinimumAssignmentScore: candidate.belowMinimumAssignmentScore ?? null,
+                    assignedToOtherParticipant: candidate.assignedToOtherParticipant ?? null,
+                  })),
+                })),
+                offlineValidation: movementNoPriorsValidation
+                  ? {
+                      exists: true,
+                      assignmentCount: movementNoPriorsValidation.summary?.assignmentCount ?? null,
+                      passingAssignmentCount: movementNoPriorsValidation.summary?.passingAssignmentCount ?? null,
+                      matchedAssignmentCount: movementNoPriorsValidation.summary?.matchedAssignmentCount ?? null,
+                      averageAxisCorrelation: movementNoPriorsValidation.summary?.averageAxisCorrelation ?? null,
+                      averagePathCorrelation: movementNoPriorsValidation.summary?.averagePathCorrelation ?? null,
+                      averageNormalizedDistanceRmse: movementNoPriorsValidation.summary?.averageNormalizedDistanceRmse ?? null,
+                      runtimeInput: false,
+                    }
+                  : {
+                      exists: false,
+                    },
               }
             : {
                 exists: false,
@@ -2943,6 +3008,32 @@ function main() {
         role: "required-runtime-derived-summary",
         runtimeInput: true,
       },
+      decoderDiagnostics: [
+        {
+          path: path.join(root, "artifacts", args.replayId, "participant-movement.json"),
+          role: "rejected-position-candidate-diagnostic",
+          runtimeInput: false,
+          runtimeApiData: false,
+        },
+        {
+          path: path.join(root, "artifacts", args.replayId, "assigned-movement-validation-report.json"),
+          role: "offline-position-validation-diagnostic",
+          runtimeInput: false,
+          runtimeApiData: false,
+        },
+        {
+          path: path.join(root, "artifacts", args.replayId, "participant-movement-no-priors.json"),
+          role: "replay-only-no-priors-position-diagnostic",
+          runtimeInput: false,
+          runtimeApiData: false,
+        },
+        {
+          path: path.join(root, "artifacts", args.replayId, "assigned-movement-no-priors-validation-report.json"),
+          role: "offline-no-priors-position-validation-diagnostic",
+          runtimeInput: false,
+          runtimeApiData: false,
+        },
+      ],
       offlineValidationReports: [
         {
           path: path.join(path.dirname(outputPath), "rofl-api-metrics-riot-validation.json"),

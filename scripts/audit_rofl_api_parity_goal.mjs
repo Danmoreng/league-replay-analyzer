@@ -194,6 +194,7 @@ function buildAudit(artifact, inputPath) {
   const remainingGapByKey = new Map((artifact.remainingParityGaps ?? []).map((entry) => [entry.key, entry]));
   const extractionProof = artifact.roflOnlyExtractionProof ?? {};
   const extractionProofBySurface = new Map((extractionProof.decodedFromRoflOnly ?? []).map((entry) => [entry.surface, entry]));
+  const proofPositionCandidate = (extractionProof.notPromotedRuntimeCandidates ?? []).find((entry) => entry.surface === "position x/y movement tracks");
   const matchMetadataGaps = fieldCoverage.matchMetadataGaps ?? {};
   const matchParticipantGaps = fieldCoverage.matchParticipantGaps ?? {};
   const matchTeamGaps = fieldCoverage.matchTeamGaps ?? {};
@@ -249,9 +250,13 @@ function buildAudit(artifact, inputPath) {
           extractionProof.runtimeInputPolicy?.riotApiRuntimeInput === false &&
           extractionProof.runtimeInputPolicy?.supervisedFixtureRole === "offline-validation-only" &&
           JSON.stringify([...(extractionProof.remainingGapKeys ?? [])].sort()) === JSON.stringify([...remainingGapByKey.keys()].sort()) &&
+          proofPositionCandidate?.runtimeApiData === false &&
+          proofPositionCandidate?.assignedParticipantCount === 9 &&
+          proofPositionCandidate?.noPriorsAssignedParticipantCount === 8 &&
           artifact.artifactManifest?.sourceReplay?.runtimeInput === true &&
           artifact.artifactManifest?.replayDerivedSummary?.runtimeInput === true &&
           artifact.artifactManifest?.primaryRuntimeArtifact?.runtimeInput === false &&
+          (artifact.artifactManifest?.decoderDiagnostics ?? []).some((entry) => entry.role === "replay-only-no-priors-position-diagnostic" && entry.runtimeInput === false && entry.runtimeApiData === false) &&
           (artifact.artifactManifest?.offlineValidationReports ?? []).length >= 3 &&
           (artifact.artifactManifest?.offlineValidationReports ?? []).every((entry) => entry.runtimeInput === false) &&
           artifact.source?.roflOnlyInputs?.runtimeRiotApiFiles === false &&
@@ -266,7 +271,9 @@ function buildAudit(artifact, inputPath) {
           `roflOnlyExtractionProof.riotApiRuntimeInput=${extractionProof.runtimeInputPolicy?.riotApiRuntimeInput ?? null}`,
           `roflOnlyExtractionProof.supervisedFixtureRole=${extractionProof.runtimeInputPolicy?.supervisedFixtureRole ?? null}`,
           `roflOnlyExtractionProof.remainingGapKeys=${(extractionProof.remainingGapKeys ?? []).join(",")}`,
+          `roflOnlyExtractionProof.positionCandidate=${JSON.stringify(proofPositionCandidate ?? null)}`,
           `artifactManifest.sourceReplay.runtimeInput=${artifact.artifactManifest?.sourceReplay?.runtimeInput ?? null}`,
+          `artifactManifest.decoderDiagnostics=${artifact.artifactManifest?.decoderDiagnostics?.length ?? null}`,
           `artifactManifest.offlineValidationReports=${artifact.artifactManifest?.offlineValidationReports?.length ?? null}`,
           "source.roflOnlyInputs.runtimeRiotApiFiles=false",
           "source.inputClasses.riotApiFixtures.class=offline-validation-only",
@@ -456,10 +463,25 @@ function buildAudit(artifact, inputPath) {
           (rejectedCandidates.positions?.promotionBlockers ?? []).some((blocker) => blocker.includes("9/10")) &&
           (rejectedCandidates.positions?.promotionBlockers ?? []).some((blocker) => blocker.includes("identity priors")) &&
           (rejectedCandidates.positions?.promotionBlockers ?? []).some((blocker) => blocker.includes("7/9")) &&
+          (rejectedCandidates.positions?.promotionBlockers ?? []).some((blocker) => blocker.includes("no-priors") && blocker.includes("8/10")) &&
           rejectedCandidates.positions?.qualityGateSummary?.assignedParticipantCount === 9 &&
           rejectedCandidates.positions?.qualityGateSummary?.expectedParticipantCount === 10 &&
           rejectedCandidates.positions?.qualityGateSummary?.offlinePassingAssignmentCount === 7 &&
+          rejectedCandidates.positions?.qualityGateSummary?.noPriorsAssignedParticipantCount === 8 &&
+          rejectedCandidates.positions?.qualityGateSummary?.noPriorsOfflinePassingAssignmentCount === 7 &&
+          proofPositionCandidate?.runtimeApiData === false &&
+          proofPositionCandidate?.assignedParticipantCount === 9 &&
+          proofPositionCandidate?.expectedParticipantCount === 10 &&
+          proofPositionCandidate?.offlinePassingAssignmentCount === 7 &&
+          proofPositionCandidate?.noPriorsAssignedParticipantCount === 8 &&
+          proofPositionCandidate?.noPriorsOfflinePassingAssignmentCount === 7 &&
           rejectedCandidates.positions?.qualityGateSummary?.runtimeInput === false &&
+          rejectedCandidates.positions?.noPriorsDiagnostic?.status === "diagnostic_only_not_runtime_api_data" &&
+          rejectedCandidates.positions?.noPriorsDiagnostic?.runtimeInput === false &&
+          rejectedCandidates.positions?.noPriorsDiagnostic?.usesIdentityPriors === false &&
+          (rejectedCandidates.positions?.noPriorsDiagnostic?.unmatchedParticipants ?? []).length === 2 &&
+          (rejectedCandidates.positions?.noPriorsDiagnostic?.unmatchedParticipants ?? []).some((participant) => participant.champion === "Vayne" && participant.teamPosition === "TOP") &&
+          (rejectedCandidates.positions?.noPriorsDiagnostic?.unmatchedParticipants ?? []).some((participant) => participant.champion === "Malphite" && participant.teamPosition === "TOP") &&
           (rejectedCandidates.positions?.participantMovementArtifact?.unmatchedParticipants ?? []).length === 1 &&
           (rejectedCandidates.positions?.participantMovementArtifact?.unmatchedParticipants?.[0]?.topRejectedEntityCandidates ?? []).length > 0 &&
           (rejectedCandidates.positions?.participantMovementArtifact?.unassignedEntities ?? []).length === 2 &&
@@ -491,6 +513,8 @@ function buildAudit(artifact, inputPath) {
           `positions.usesIdentityPriors=${rejectedCandidates.positions?.participantMovementArtifact?.usesIdentityPriors ?? null}`,
           `positions.offlinePassingAssignments=${rejectedCandidates.positions?.offlineValidation?.passingAssignmentCount ?? null}`,
           `positions.offlineValidation.runtimeInput=${rejectedCandidates.positions?.offlineValidation?.runtimeInput ?? null}`,
+          `positions.noPriorsDiagnostic=${JSON.stringify(rejectedCandidates.positions?.noPriorsDiagnostic ?? {})}`,
+          `roflOnlyExtractionProof.positionCandidate=${JSON.stringify(proofPositionCandidate ?? null)}`,
           `positions.promotionBlockers=${JSON.stringify(rejectedCandidates.positions?.promotionBlockers ?? [])}`,
           `positions.qualityGateSummary=${JSON.stringify(rejectedCandidates.positions?.qualityGateSummary ?? {})}`,
           `positions.unmatchedNearMissCandidates=${rejectedCandidates.positions?.participantMovementArtifact?.unmatchedParticipants?.[0]?.topRejectedEntityCandidates?.length ?? null}`,
@@ -520,10 +544,25 @@ function buildAudit(artifact, inputPath) {
           ...(!(rejectedCandidates.positions?.promotionBlockers ?? []).some((blocker) => blocker.includes("9/10")) ? ["position promotion blockers missing 9/10 assignment evidence"] : []),
           ...(!(rejectedCandidates.positions?.promotionBlockers ?? []).some((blocker) => blocker.includes("identity priors")) ? ["position promotion blockers missing identity-prior evidence"] : []),
           ...(!(rejectedCandidates.positions?.promotionBlockers ?? []).some((blocker) => blocker.includes("7/9")) ? ["position promotion blockers missing 7/9 offline-quality evidence"] : []),
+          ...(!(rejectedCandidates.positions?.promotionBlockers ?? []).some((blocker) => blocker.includes("no-priors") && blocker.includes("8/10")) ? ["position promotion blockers missing no-priors replay-only assignment evidence"] : []),
           ...(rejectedCandidates.positions?.qualityGateSummary?.assignedParticipantCount !== 9 ? ["position quality gate missing assigned participant count"] : []),
           ...(rejectedCandidates.positions?.qualityGateSummary?.expectedParticipantCount !== 10 ? ["position quality gate missing expected participant count"] : []),
           ...(rejectedCandidates.positions?.qualityGateSummary?.offlinePassingAssignmentCount !== 7 ? ["position quality gate missing offline passing assignment count"] : []),
+          ...(rejectedCandidates.positions?.qualityGateSummary?.noPriorsAssignedParticipantCount !== 8 ? ["position quality gate missing no-priors assigned participant count"] : []),
+          ...(rejectedCandidates.positions?.qualityGateSummary?.noPriorsOfflinePassingAssignmentCount !== 7 ? ["position quality gate missing no-priors offline passing count"] : []),
+          ...(proofPositionCandidate?.runtimeApiData !== false ? ["roflOnlyExtractionProof position candidate must be non-runtime API data"] : []),
+          ...(proofPositionCandidate?.assignedParticipantCount !== 9 ? ["roflOnlyExtractionProof position candidate missing 9 assigned participants"] : []),
+          ...(proofPositionCandidate?.expectedParticipantCount !== 10 ? ["roflOnlyExtractionProof position candidate missing expected participant count"] : []),
+          ...(proofPositionCandidate?.offlinePassingAssignmentCount !== 7 ? ["roflOnlyExtractionProof position candidate missing 7 offline passing assignments"] : []),
+          ...(proofPositionCandidate?.noPriorsAssignedParticipantCount !== 8 ? ["roflOnlyExtractionProof position candidate missing no-priors assigned count"] : []),
+          ...(proofPositionCandidate?.noPriorsOfflinePassingAssignmentCount !== 7 ? ["roflOnlyExtractionProof position candidate missing no-priors passing count"] : []),
           ...(rejectedCandidates.positions?.qualityGateSummary?.runtimeInput !== false ? ["position quality gate must be non-runtime"] : []),
+          ...(rejectedCandidates.positions?.noPriorsDiagnostic?.status !== "diagnostic_only_not_runtime_api_data" ? ["position evidence missing no-priors diagnostic status"] : []),
+          ...(rejectedCandidates.positions?.noPriorsDiagnostic?.runtimeInput !== false ? ["position no-priors diagnostic must be non-runtime"] : []),
+          ...(rejectedCandidates.positions?.noPriorsDiagnostic?.usesIdentityPriors !== false ? ["position no-priors diagnostic must disable identity priors"] : []),
+          ...((rejectedCandidates.positions?.noPriorsDiagnostic?.unmatchedParticipants ?? []).length !== 2 ? ["position no-priors diagnostic missing two unmatched participants"] : []),
+          ...(!(rejectedCandidates.positions?.noPriorsDiagnostic?.unmatchedParticipants ?? []).some((participant) => participant.champion === "Vayne" && participant.teamPosition === "TOP") ? ["position no-priors diagnostic missing Vayne TOP unmatched participant"] : []),
+          ...(!(rejectedCandidates.positions?.noPriorsDiagnostic?.unmatchedParticipants ?? []).some((participant) => participant.champion === "Malphite" && participant.teamPosition === "TOP") ? ["position no-priors diagnostic missing Malphite TOP unmatched participant"] : []),
           ...((rejectedCandidates.positions?.participantMovementArtifact?.unmatchedParticipants ?? []).length !== 1 ? ["position artifact missing unmatched participant near-miss summary"] : []),
           ...((rejectedCandidates.positions?.participantMovementArtifact?.unmatchedParticipants?.[0]?.topRejectedEntityCandidates ?? []).length === 0 ? ["position artifact missing unmatched participant rejected entity candidates"] : []),
           ...((rejectedCandidates.positions?.participantMovementArtifact?.unassignedEntities ?? []).length !== 2 ? ["position artifact missing unassigned entity near-miss summaries"] : []),
@@ -757,12 +796,18 @@ function buildAudit(artifact, inputPath) {
           artifact.fieldCoverage?.positions?.source === "state-reconstruction-not-extracted-for-16.9" &&
           (artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []).length === 10 &&
           JSON.stringify(artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []) === JSON.stringify(rejectedCandidates.positions?.perParticipantCoverage ?? []) &&
+          JSON.stringify(artifact.fieldCoverage?.positions?.noPriorsDiagnostic ?? null) === JSON.stringify(rejectedCandidates.positions?.noPriorsDiagnostic ?? null) &&
           remainingGapByKey.get("positions")?.runtimeApiData === false &&
           (remainingGapByKey.get("positions")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("9/10")) &&
+          (remainingGapByKey.get("positions")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("no-priors") && String(blocker).includes("8/10")) &&
+          (remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("rejectedCandidateArtifacts.positions.noPriorsDiagnostic") &&
+          (remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("fieldCoverage.positions.noPriorsDiagnostic") &&
+          (remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("artifactManifest.decoderDiagnostics.replay-only-no-priors-position-diagnostic") &&
           remainingGapByKey.get("nonFinalParticipantIdentity")?.runtimeApiData === false &&
           remainingGapByKey.get("damageTimeline")?.runtimeApiData === false &&
           roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.status === "not_promoted" &&
           JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.perParticipantCoverage ?? []) === JSON.stringify(artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []) &&
+          JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.noPriorsDiagnostic ?? null) === JSON.stringify(artifact.fieldCoverage?.positions?.noPriorsDiagnostic ?? null) &&
           JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.statusCounts ?? {}) === JSON.stringify(artifact.fieldCoverage?.positions?.statusCounts ?? {}) &&
           JSON.stringify((artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []).reduce((counts, entry) => {
             counts[entry.status] = (counts[entry.status] ?? 0) + 1;
@@ -931,6 +976,16 @@ function buildAudit(artifact, inputPath) {
           docsText.includes("roflOnlyExtractionProof") &&
           docsText.includes("per-participant decoded scalar/damage metric counts") &&
           docsText.includes("remainingParityGaps") &&
+          docsText.includes("participant-movement-no-priors.json") &&
+          docsText.includes("assigned-movement-no-priors-validation-report.json") &&
+          docsText.includes("npm run assign:movement") &&
+          docsText.includes("npm run validate:assigned-movement") &&
+          docsText.includes("fieldCoverage.positions.noPriorsDiagnostic") &&
+          docsText.includes("roflDerivedFieldMap.timeline[\"info.frames[].participantFrames[].position\"].noPriorsDiagnostic") &&
+          docsText.includes("8/10 participants") &&
+          docsText.includes("7/8 assigned tracks") &&
+          docsText.includes("Vayne TOP") &&
+          docsText.includes("Malphite TOP") &&
           docsText.includes("roflDerivedFieldMap.timeline[\"info.frames[].participantFrames[].nonFinalParticipantIdentity\"]") &&
           docsText.includes("nearest-row index stability") &&
           docsText.includes("row-discriminator") &&
@@ -951,6 +1006,12 @@ function buildAudit(artifact, inputPath) {
           "parityChecklist full parity is not_satisfied",
           "docs name roflOnlyExtractionProof",
           "docs name remainingParityGaps",
+          "docs name participant-movement-no-priors.json",
+          "docs name assigned-movement-no-priors-validation-report.json",
+          "docs name npm run assign:movement",
+          "docs name npm run validate:assigned-movement",
+          "docs name fieldCoverage.positions.noPriorsDiagnostic",
+          "docs name roflDerivedFieldMap.timeline position noPriorsDiagnostic",
           `fullParityGaps=${[...fullParityGaps].join(",")}`,
           `fieldCoverage.matchMetadataGaps.status=${matchMetadataGaps.status ?? null}`,
           `fieldCoverage.matchMetadataGaps.fields=${matchMetadataGapFields.join(",")}`,
@@ -1102,12 +1163,18 @@ function buildAudit(artifact, inputPath) {
           ...(artifact.fieldCoverage?.positions?.source !== "state-reconstruction-not-extracted-for-16.9" ? ["fieldCoverage.positions missing state reconstruction source"] : []),
           ...((artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []).length !== 10 ? ["fieldCoverage.positions missing per-participant movement coverage"] : []),
           ...(JSON.stringify(artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []) !== JSON.stringify(rejectedCandidates.positions?.perParticipantCoverage ?? []) ? ["fieldCoverage.positions per-participant coverage does not match rejected position evidence"] : []),
+          ...(JSON.stringify(artifact.fieldCoverage?.positions?.noPriorsDiagnostic ?? null) !== JSON.stringify(rejectedCandidates.positions?.noPriorsDiagnostic ?? null) ? ["fieldCoverage.positions no-priors diagnostic does not match rejected position evidence"] : []),
           ...(remainingGapByKey.get("positions")?.runtimeApiData !== false ? ["remainingParityGaps positions must be non-runtime"] : []),
           ...(!(remainingGapByKey.get("positions")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("9/10")) ? ["remainingParityGaps positions missing 9/10 blocker"] : []),
+          ...(!(remainingGapByKey.get("positions")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("no-priors") && String(blocker).includes("8/10")) ? ["remainingParityGaps positions missing no-priors 8/10 blocker"] : []),
+          ...(!(remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("rejectedCandidateArtifacts.positions.noPriorsDiagnostic") ? ["remainingParityGaps positions missing rejected no-priors evidence ref"] : []),
+          ...(!(remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("fieldCoverage.positions.noPriorsDiagnostic") ? ["remainingParityGaps positions missing fieldCoverage no-priors evidence ref"] : []),
+          ...(!(remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("artifactManifest.decoderDiagnostics.replay-only-no-priors-position-diagnostic") ? ["remainingParityGaps positions missing manifest no-priors evidence ref"] : []),
           ...(remainingGapByKey.get("nonFinalParticipantIdentity")?.runtimeApiData !== false ? ["remainingParityGaps nonFinalParticipantIdentity must be non-runtime"] : []),
           ...(remainingGapByKey.get("damageTimeline")?.runtimeApiData !== false ? ["remainingParityGaps damageTimeline must be non-runtime"] : []),
           ...(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.status !== "not_promoted" ? ["roflDerivedFieldMap timeline position missing not_promoted status"] : []),
           ...(JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.perParticipantCoverage ?? []) !== JSON.stringify(artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []) ? ["roflDerivedFieldMap timeline position per-participant coverage does not match fieldCoverage.positions"] : []),
+          ...(JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.noPriorsDiagnostic ?? null) !== JSON.stringify(artifact.fieldCoverage?.positions?.noPriorsDiagnostic ?? null) ? ["roflDerivedFieldMap timeline position no-priors diagnostic does not match fieldCoverage.positions"] : []),
           ...(JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.statusCounts ?? {}) !== JSON.stringify(artifact.fieldCoverage?.positions?.statusCounts ?? {}) ? ["roflDerivedFieldMap timeline position statusCounts do not match fieldCoverage.positions"] : []),
           ...(JSON.stringify((artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []).reduce((counts, entry) => {
             counts[entry.status] = (counts[entry.status] ?? 0) + 1;
@@ -1274,6 +1341,16 @@ function buildAudit(artifact, inputPath) {
           ...(!docsText.includes("roflOnlyExtractionProof") ? ["docs missing roflOnlyExtractionProof section"] : []),
           ...(!docsText.includes("per-participant decoded scalar/damage metric counts") ? ["docs missing per-participant proof wording"] : []),
           ...(!docsText.includes("remainingParityGaps") ? ["docs missing remainingParityGaps section"] : []),
+          ...(!docsText.includes("participant-movement-no-priors.json") ? ["docs missing no-priors movement diagnostic artifact"] : []),
+          ...(!docsText.includes("assigned-movement-no-priors-validation-report.json") ? ["docs missing no-priors movement validation artifact"] : []),
+          ...(!docsText.includes("npm run assign:movement") ? ["docs missing no-priors movement assignment command"] : []),
+          ...(!docsText.includes("npm run validate:assigned-movement") ? ["docs missing no-priors movement validation command"] : []),
+          ...(!docsText.includes("fieldCoverage.positions.noPriorsDiagnostic") ? ["docs missing fieldCoverage no-priors position diagnostic wording"] : []),
+          ...(!docsText.includes("roflDerivedFieldMap.timeline[\"info.frames[].participantFrames[].position\"].noPriorsDiagnostic") ? ["docs missing field-map no-priors position diagnostic wording"] : []),
+          ...(!docsText.includes("8/10 participants") ? ["docs missing no-priors 8/10 assignment result"] : []),
+          ...(!docsText.includes("7/8 assigned tracks") ? ["docs missing no-priors 7/8 validation result"] : []),
+          ...(!docsText.includes("Vayne TOP") ? ["docs missing Vayne TOP no-priors unmatched participant"] : []),
+          ...(!docsText.includes("Malphite TOP") ? ["docs missing Malphite TOP no-priors unmatched participant"] : []),
           ...(!docsText.includes("npm run verify:rofl-api-parity") ? ["docs missing full checkpoint command"] : []),
           ...(!docsText.includes("npm run analyze:reconstruction-target-table") ? ["docs missing target table analysis command"] : []),
           ...(!docsText.includes("npm run infer:reconstruction-row-identity") ? ["docs missing row identity gate command"] : []),

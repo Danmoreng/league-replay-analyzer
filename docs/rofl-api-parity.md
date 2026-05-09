@@ -153,6 +153,14 @@ The checkpoint also requires the default sweep row (`minSupportScore=0.35`) to h
 The sweep also includes an unsafe single-metric negative control; on the current 16.9 corpus it produces tempting assignments but offline comparison marks them mostly as conflicts, which is why one-metric identity links are not runtime-exported.
 The full checkpoint also regenerates the reconstruction chunk summary, chunk-family comparison, family samples, sample analysis, target ranking, 241 target dossiers, target neighborhoods, table analyses, row identity gates, and family/event correlation before exporting the API-shaped runtime artifact, then verifies all of them. The chunk and event-correlation steps shell out to the native `rofl_core_cli.exe` to dump chunk subrecords, so on this Windows machine it should be run outside the sandbox if a sandboxed invocation fails with `EPERM`.
 The full checkpoint also regenerates `artifacts/EUW1-7840220945/participant-movement.json` and `artifacts/EUW1-7840220945/assigned-movement-validation-report.json` before export, then asserts the focused movement blocker is still present: 9/10 participant assignments, Malphite TOP unmatched, top rejected entity candidates for the unmatched participant, two unassigned entity tracks with rejected participant candidates, and 7/9 offline movement-quality passes.
+The full checkpoint also regenerates the no-priors movement diagnostic before export:
+
+```powershell
+npm run assign:movement -- --artifact-dir artifacts/EUW1-7840220945 --priors-path artifacts/EUW1-7840220945/no-priors.json --output-path artifacts/EUW1-7840220945/participant-movement-no-priors.json
+npm run validate:assigned-movement -- --participant-movement-path artifacts/EUW1-7840220945/participant-movement-no-priors.json --output-path artifacts/EUW1-7840220945/assigned-movement-no-priors-validation-report.json
+```
+
+The checkpoint asserts that this replay-only no-priors diagnostic disables identity priors, assigns 8/10 participants, leaves Vayne TOP and Malphite TOP unmatched with rejected entity candidates, and has 7/8 offline movement-quality passes.
 
 The full checkpoint also runs a negative completion gate: `audit:rofl-api-parity -- --require-complete` must fail until full API parity is actually achieved.
 
@@ -442,6 +450,8 @@ Important direction: do not treat isolated keyframe rows as complete Riot API ti
 5. validate against Riot API fixtures only offline
 
 For `EUW1-7840220945`, the movement pipeline has a `participant-movement.json` diagnostic, but it is not emitted into `timeline.info.frames` because it assigns 9 of 10 participants, only 7 of 9 assignments pass offline Riot validation, and the current assignment path uses identity priors. The unmatched participant is Malphite TOP on team 200; its best rejected entity candidates are already assigned to other participants, while the remaining unassigned entity tracks also keep their top rejected participant candidates. The API-shaped artifact records this under `rejectedCandidateArtifacts.positions`, including explicit `promotionBlockers`, `qualityGateSummary`, near-miss candidate summaries, and per-participant movement coverage so consumers can distinguish unstable assigned candidates, noisy failed-validation candidates, and the unmatched participant.
+
+The same position blocker now has a no-priors diagnostic: `participant-movement-no-priors.json` reruns the assignment with `movement-identity-priors.json` disabled, and `assigned-movement-no-priors-validation-report.json` validates that offline-only diagnostic. On `EUW1-7840220945`, this drops movement assignment from 9/10 to 8/10 participants while 7/8 assigned tracks pass offline validation. The API-shaped artifact records that under `rejectedCandidateArtifacts.positions.noPriorsDiagnostic`, mirrors it through `fieldCoverage.positions.noPriorsDiagnostic` and `roflDerivedFieldMap.timeline["info.frames[].participantFrames[].position"].noPriorsDiagnostic`, and keeps `runtimeApiData=false`; it is evidence that real x/y tracks exist, but replay-only participant identity is still too weak to emit `participantFrames.position`.
 
 The same replay now has an offline `item-event-candidates.json` diagnostic with 689 candidates and 93 strong candidates, but it is not emitted into `timeline.info.frames[*].events` because the report is discovered against Riot API timeline item events and is not yet a ROFL-only event decoder. The API-shaped artifact records this under `rejectedCandidateArtifacts.itemEvents`.
 
