@@ -104,11 +104,15 @@ function main() {
       "--api-root",
       apiRoot,
     ]);
+    const artifactPath = path.join(artifactRoot, replayId, "rofl-api-metrics.json");
+    const artifact = readJson(artifactPath);
     const validationPath = path.join(artifactRoot, replayId, "rofl-api-metrics-riot-validation.json");
     const validation = readJson(validationPath);
     rows.push({
       replayId,
+      artifactPath,
       validationPath,
+      runtimeProof: summarizeRuntimeProof(artifact),
       participant: {
         pass: validation.totals?.passCount ?? null,
         total: validation.totals?.comparisonCount ?? null,
@@ -177,6 +181,7 @@ function main() {
     artifactRoot,
     apiRoot,
     totals,
+    runtimeProofSummary: summarizeRuntimeProofRows(rows),
     timelineReconstruction: summarizeTimelineReconstruction(timelineReconstructionPath),
     failureSummary: {
       participantFields: mergeCounts(rows.map((row) => row.failureSummary.participantFields)),
@@ -193,7 +198,21 @@ function main() {
   console.log(`team parity: ${totals.team.pass}/${totals.team.total}`);
   console.log(`final timeline parity: ${totals.finalTimeline.pass}/${totals.finalTimeline.total}`);
   console.log(`metadata parity: ${totals.metadata.pass}/${totals.metadata.total}`);
+  console.log(`ROFL-only runtime proof: ${output.runtimeProofSummary.roflOnlyRuntimeInputCount}/${rows.length}`);
+  console.log(`participant proof count: ${output.runtimeProofSummary.allParticipantProofCount}/${rows.length}`);
+  console.log(`remaining gap coverage: ${output.runtimeProofSummary.allRequiredGapsPresentCount}/${rows.length}`);
   console.log(`timeline reconstruction frame/keyframe +1: ${output.timelineReconstruction?.apiFramesEqualKeyframesPlusOne ?? null}/${output.timelineReconstruction?.replayCount ?? null}`);
+  if (
+    output.runtimeProofSummary.roflOnlyRuntimeInputCount !== rows.length ||
+    output.runtimeProofSummary.allParticipantProofCount !== rows.length ||
+    output.runtimeProofSummary.allParticipantsHaveFinalMetricsCount !== rows.length ||
+    output.runtimeProofSummary.allTimelineFramesHaveEventsArrayCount !== rows.length ||
+    output.runtimeProofSummary.zeroRuntimeEventEmissionCount !== rows.length ||
+    output.runtimeProofSummary.allRequiredGapsPresentCount !== rows.length ||
+    output.runtimeProofSummary.fullApiShapeParityCount !== 0
+  ) {
+    throw new Error(`ROFL-only runtime proof coverage failed across corpus: ${JSON.stringify(output.runtimeProofSummary)}`);
+  }
   if (args.requirePerfectMatch && (
     totals.participant.fail !== 0 ||
     totals.team.fail !== 0 ||
@@ -244,6 +263,61 @@ function summarizeTimelineReconstruction(reportPath) {
     totalChunkMappedIntervals: report.summary?.totalChunkMappedIntervals ?? null,
     totalTimelineEvents: report.summary?.totalTimelineEvents ?? null,
     reconstructionModel: report.rows?.[0]?.reconstructionModel?.model ?? null,
+  };
+}
+
+function summarizeRuntimeProof(artifact) {
+  const proof = artifact.roflOnlyExtractionProof ?? {};
+  const participantProof = proof.perParticipantProof ?? [];
+  const frames = artifact.timeline?.info?.frames ?? [];
+  const remainingGapKeys = artifact.remainingParityGaps?.map((entry) => entry.key).sort() ?? [];
+  return {
+    artifactSchema: artifact.artifactSchema ?? null,
+    extractionMode: artifact.extractionMode ?? null,
+    riotApiRuntimeInput: proof.runtimeInputPolicy?.riotApiRuntimeInput ?? null,
+    replayFileRequired: proof.runtimeInputPolicy?.replayFileRequired ?? null,
+    supervisedFixtureRole: proof.runtimeInputPolicy?.supervisedFixtureRole ?? null,
+    participantProofCount: participantProof.length,
+    allParticipantsHaveFinalMetrics: participantProof.every((entry) =>
+      entry.finalScalarMetricCount === 5 &&
+      entry.finalDamageMetricCount === 12
+    ),
+    timelineFrameCount: frames.length,
+    allTimelineFramesHaveEventsArray: frames.every((frame) => Array.isArray(frame.events)),
+    emittedEventCount: frames.reduce((sum, frame) => sum + (frame.events?.length ?? 0), 0),
+    remainingGapKeys,
+    apiShapeFullParity: proof.apiShapeProof?.fullApiShapeParity ?? null,
+    timelineEventRuntimeEmission: proof.apiShapeProof?.timelineShape?.runtimeEmission ?? null,
+  };
+}
+
+function summarizeRuntimeProofRows(rows) {
+  const requiredGapKeys = new Set([
+    "nonFinalParticipantIdentity",
+    "positions",
+    "timelineEvents",
+    "inventoryTimeline",
+    "damageTimeline",
+  ]);
+  const proofRows = rows.map((row) => row.runtimeProof ?? {});
+  const replayCount = proofRows.length;
+  const allRequiredGapsPresent = proofRows.filter((proof) =>
+    [...requiredGapKeys].every((key) => (proof.remainingGapKeys ?? []).includes(key)),
+  ).length;
+  return {
+    replayCount,
+    roflOnlyRuntimeInputCount: proofRows.filter((proof) =>
+      proof.riotApiRuntimeInput === false &&
+      proof.replayFileRequired === true &&
+      proof.supervisedFixtureRole === "offline-validation-only",
+    ).length,
+    allParticipantProofCount: proofRows.filter((proof) => proof.participantProofCount === 10).length,
+    allParticipantsHaveFinalMetricsCount: proofRows.filter((proof) => proof.allParticipantsHaveFinalMetrics === true).length,
+    allTimelineFramesHaveEventsArrayCount: proofRows.filter((proof) => proof.allTimelineFramesHaveEventsArray === true).length,
+    zeroRuntimeEventEmissionCount: proofRows.filter((proof) => proof.emittedEventCount === 0 && proof.timelineEventRuntimeEmission === "empty-events-arrays").length,
+    allRequiredGapsPresentCount: allRequiredGapsPresent,
+    fullApiShapeParityCount: proofRows.filter((proof) => proof.apiShapeFullParity === true).length,
+    requiredGapKeys: [...requiredGapKeys].sort(),
   };
 }
 
