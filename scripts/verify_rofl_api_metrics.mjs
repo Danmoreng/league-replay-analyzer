@@ -564,6 +564,20 @@ function verifyParityChecklist(artifact) {
   assert((remainingGapByKey.get("positions")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("no-priors") && String(blocker).includes("8/10")), "remainingParityGaps.positions must preserve no-priors replay-only assignment blocker", {
     positions: remainingGapByKey.get("positions"),
   });
+  assert((remainingGapByKey.get("nonFinalParticipantIdentity")?.blockerSummary ?? []).includes("runtimePromotionGate=blocked"), "remainingParityGaps.nonFinalParticipantIdentity must preserve the blocked runtime promotion gate", {
+    nonFinalParticipantIdentity: remainingGapByKey.get("nonFinalParticipantIdentity"),
+  });
+  assert((remainingGapByKey.get("nonFinalParticipantIdentity")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("noPriorsPositionAssignment=8/10")), "remainingParityGaps.nonFinalParticipantIdentity must preserve the replay-only no-priors identity blocker", {
+    nonFinalParticipantIdentity: remainingGapByKey.get("nonFinalParticipantIdentity"),
+  });
+  for (const evidenceRef of [
+    "identityLinkage.evidenceMatrix",
+    "identityLinkage.nonFinalScalarIdentity.runtimePromotionGate",
+  ]) {
+    assert((remainingGapByKey.get("nonFinalParticipantIdentity")?.evidenceRefs ?? []).includes(evidenceRef), `remainingParityGaps.nonFinalParticipantIdentity must reference ${evidenceRef}`, {
+      nonFinalParticipantIdentity: remainingGapByKey.get("nonFinalParticipantIdentity"),
+    });
+  }
   for (const evidenceRef of [
     "rejectedCandidateArtifacts.positions.noPriorsDiagnostic",
     "fieldCoverage.positions.noPriorsDiagnostic",
