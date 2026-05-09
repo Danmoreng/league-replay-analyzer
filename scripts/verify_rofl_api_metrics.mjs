@@ -570,9 +570,13 @@ function verifyParityChecklist(artifact) {
   assert((remainingGapByKey.get("nonFinalParticipantIdentity")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("noPriorsPositionAssignment=8/10")), "remainingParityGaps.nonFinalParticipantIdentity must preserve the replay-only no-priors identity blocker", {
     nonFinalParticipantIdentity: remainingGapByKey.get("nonFinalParticipantIdentity"),
   });
+  assert((remainingGapByKey.get("nonFinalParticipantIdentity")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("startupKeyframeRowLink=not_found")), "remainingParityGaps.nonFinalParticipantIdentity must preserve the startup-to-keyframe row-link blocker", {
+    nonFinalParticipantIdentity: remainingGapByKey.get("nonFinalParticipantIdentity"),
+  });
   for (const evidenceRef of [
     "identityLinkage.evidenceMatrix",
     "identityLinkage.nonFinalScalarIdentity.runtimePromotionGate",
+    "rejectedCandidateArtifacts.nonFinalScalarIdentity.startupKeyframeRowLink",
   ]) {
     assert((remainingGapByKey.get("nonFinalParticipantIdentity")?.evidenceRefs ?? []).includes(evidenceRef), `remainingParityGaps.nonFinalParticipantIdentity must reference ${evidenceRef}`, {
       nonFinalParticipantIdentity: remainingGapByKey.get("nonFinalParticipantIdentity"),
@@ -816,6 +820,17 @@ function verifyRejectedCandidateArtifacts(artifact) {
       nonFinalScalarIdentity.handleGraphRowLinkCandidates?.topConfidence === "weak",
       "Non-final identity evidence must include handle-graph row-link candidates as not-promoted diagnostics", {
         handleGraphRowLinkCandidates: nonFinalScalarIdentity.handleGraphRowLinkCandidates,
+      });
+    assert(nonFinalScalarIdentity.startupKeyframeRowLink?.status === "not_promoted" &&
+      nonFinalScalarIdentity.startupKeyframeRowLink?.runtimeInput === false &&
+      nonFinalScalarIdentity.startupKeyframeRowLink?.runtimeApiData === false &&
+      nonFinalScalarIdentity.startupKeyframeRowLink?.schema === "startup-keyframe-row-link-diagnostic/v1" &&
+      nonFinalScalarIdentity.startupKeyframeRowLink?.assessment?.startupRosterOrderTokens === "present" &&
+      nonFinalScalarIdentity.startupKeyframeRowLink?.assessment?.directStartupToKeyframeRowLink === "not_found" &&
+      nonFinalScalarIdentity.startupKeyframeRowLink?.assessment?.runtimePromotion === "blocked" &&
+      nonFinalScalarIdentity.startupKeyframeRowLink?.startupRosterOrderCandidateCount > 0,
+      "Non-final identity evidence must include startup-to-keyframe row-link diagnostics as not-promoted evidence", {
+        startupKeyframeRowLink: nonFinalScalarIdentity.startupKeyframeRowLink,
       });
   }
 
@@ -1175,13 +1190,19 @@ function verifyIdentityLinkage(artifact) {
     "Identity linkage summary must surface handle-graph row-link candidates as not-promoted evidence", {
       identityLinkage,
     });
+  assert(identityLinkage.nonFinalScalarIdentity?.startupKeyframeRowLink?.status === "not_promoted" &&
+    identityLinkage.nonFinalScalarIdentity?.startupKeyframeRowLink?.runtimeApiData === false &&
+    identityLinkage.nonFinalScalarIdentity?.startupKeyframeRowLink?.assessment?.directStartupToKeyframeRowLink === "not_found",
+    "Identity linkage summary must surface startup-to-keyframe row-link diagnostics as not-promoted evidence", {
+      identityLinkage,
+    });
   const promotionGate = identityLinkage.nonFinalScalarIdentity?.runtimePromotionGate ?? {};
   assert(promotionGate.status === "blocked" &&
     promotionGate.runtimeApiData === false &&
     (promotionGate.requiredGates ?? []).length >= 6 &&
     (promotionGate.requiredGates ?? []).some((gate) => gate.gate === "final-roster-identity" && gate.status === "passed") &&
     (promotionGate.requiredGates ?? []).some((gate) => gate.gate === "non-final-scalar-identity" && gate.status === "blocked") &&
-    (promotionGate.requiredGates ?? []).some((gate) => gate.gate === "startup-token-to-keyframe-row-link" && gate.status === "blocked") &&
+    (promotionGate.requiredGates ?? []).some((gate) => gate.gate === "startup-token-to-keyframe-row-link" && gate.status === "blocked" && gate.evidenceRef === "rejectedCandidateArtifacts.nonFinalScalarIdentity.startupKeyframeRowLink") &&
     (promotionGate.requiredGates ?? []).some((gate) => gate.gate === "row-identity-coherence" && gate.status === "blocked") &&
     (promotionGate.requiredGates ?? []).some((gate) => gate.gate === "handle-graph-row-link" && gate.status === "blocked") &&
     (promotionGate.requiredGates ?? []).some((gate) => gate.gate === "position-identity-without-priors" && gate.status === "blocked" && String(gate.blocker ?? "").includes("8/10")),

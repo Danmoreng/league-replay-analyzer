@@ -1081,6 +1081,15 @@ function buildIdentityLinkageSummary(rosterParticipants, emittedTimelineParticip
         blocker: "startup tokens are not linked to non-final keyframe state rows",
       },
       {
+        evidenceClass: "startup-to-keyframe row link",
+        status: nonFinalScalarIdentity.startupKeyframeRowLink?.status ?? "not_found",
+        runtimeApiData: false,
+        participantScope: "startup roster/order tokens to keyframe row families",
+        evidenceRefs: ["rejectedCandidateArtifacts.nonFinalScalarIdentity.startupKeyframeRowLink"],
+        promotion: "not_promoted",
+        blocker: "no direct startup-token to stable keyframe row identity link is established",
+      },
+      {
         evidenceClass: "keyframe row identity gates",
         status: rejectedCandidateArtifacts.reconstructionRowIdentity?.status ?? "not_found",
         runtimeApiData: false,
@@ -1140,6 +1149,7 @@ function buildIdentityLinkageSummary(rosterParticipants, emittedTimelineParticip
       assignmentCount: nonFinalScalarIdentity.assignmentArtifact?.assignmentCount ?? null,
       canonicalCandidateCount: nonFinalScalarIdentity.assignmentArtifact?.canonicalCandidateCount ?? null,
       startupRosterTokenScan: nonFinalScalarIdentity.startupRosterTokenScan ?? { exists: false },
+      startupKeyframeRowLink: nonFinalScalarIdentity.startupKeyframeRowLink ?? { exists: false },
       handleGraphRowLinkCandidates: nonFinalScalarIdentity.handleGraphRowLinkCandidates ?? { exists: false },
       runtimePromotionGate: {
         status: "blocked",
@@ -1159,8 +1169,8 @@ function buildIdentityLinkageSummary(rosterParticipants, emittedTimelineParticip
           {
             gate: "startup-token-to-keyframe-row-link",
             status: "blocked",
-            evidenceRef: "rejectedCandidateArtifacts.nonFinalScalarIdentity.startupRosterTokenScan",
-            blocker: "startup roster/order tokens are not linked to keyframe state rows",
+            evidenceRef: "rejectedCandidateArtifacts.nonFinalScalarIdentity.startupKeyframeRowLink",
+            blocker: "directStartupToKeyframeRowLink=not_found",
           },
           {
             gate: "row-identity-coherence",
@@ -2028,6 +2038,7 @@ function buildRemainingParityGaps(rejectedCandidateArtifacts) {
         `rowIdentityStatus=${rowIdentity.status ?? null}`,
         "runtimePromotionGate=blocked",
         `startupTokenLink=${scalarIdentity.startupRosterTokenScan?.status ?? null}`,
+        `startupKeyframeRowLink=${scalarIdentity.startupKeyframeRowLink?.assessment?.directStartupToKeyframeRowLink ?? null}`,
         `handleGraphLink=${scalarIdentity.handleGraphRowLinkCandidates?.status ?? null}`,
         `noPriorsPositionAssignment=${positions.qualityGateSummary?.noPriorsAssignedParticipantCount ?? null}/10`,
       ],
@@ -2036,6 +2047,7 @@ function buildRemainingParityGaps(rejectedCandidateArtifacts) {
         "rejectedCandidateArtifacts.reconstructionRowIdentity",
         "identityLinkage.evidenceMatrix",
         "identityLinkage.nonFinalScalarIdentity.runtimePromotionGate",
+        "rejectedCandidateArtifacts.nonFinalScalarIdentity.startupKeyframeRowLink",
         "fieldCoverage.timelineNonFinalParticipantIdentity",
       ],
       nextDecoderStep: "establish stable ROFL-only row/entity-to-participant identity across non-final frames",
@@ -2467,6 +2479,39 @@ function summarizeHandleGraphCandidateScores(handleGraphScores) {
   };
 }
 
+function summarizeStartupKeyframeRowLinkDiagnostic(linkDiagnostic) {
+  if (!linkDiagnostic) {
+    return {
+      exists: false,
+    };
+  }
+  return {
+    exists: true,
+    status: linkDiagnostic.status ?? "not_promoted",
+    reason: "startup roster/order tokens are present but no replay-only link to stable keyframe participant rows has been established",
+    runtimeInput: linkDiagnostic.runtimeInput ?? false,
+    runtimeApiData: linkDiagnostic.runtimeApiData ?? false,
+    schema: linkDiagnostic.schema ?? null,
+    mode: linkDiagnostic.mode ?? null,
+    assessment: linkDiagnostic.assessment ?? null,
+    blockerSummary: linkDiagnostic.blockerSummary ?? [],
+    startupRosterOrderCandidateCount: (linkDiagnostic.startupRosterOrderCandidates ?? []).length,
+    keyframeRowIdentity: (linkDiagnostic.keyframeRowIdentity ?? []).map((entry) => ({
+      familyKey: entry.familyKey ?? null,
+      status: entry.status ?? null,
+      runtimeApiData: entry.runtimeApiData ?? null,
+      participantIdentity: entry.participantIdentity ?? null,
+      rowCount: entry.rowCount ?? null,
+      sameRowWinRate: entry.sameRowWinRate ?? null,
+      duplicateRejectedRowCount: entry.duplicateRejectedRowCount ?? null,
+      rowStatusCounts: entry.rowStatusCounts ?? {},
+    })),
+    strongestStartupCandidates: (linkDiagnostic.startupRosterOrderCandidates ?? []).slice(0, 5),
+    strongestHandleGraphCandidate: linkDiagnostic.handleGraphRowLinks?.strongestCandidate ?? null,
+    nextDecoderStep: linkDiagnostic.nextDecoderStep ?? null,
+  };
+}
+
 function summarizeEventFamilyCorrelation(eventFamilyCorrelation) {
   if (!eventFamilyCorrelation) {
     return {
@@ -2502,6 +2547,7 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
   const roflStatComparisonPath = path.join(root, "artifacts-keyframes", `keyframe-rofl-stat-supervised-comparison-${versionGroup}.json`);
   const startupRosterTokenScanPath = path.join(root, "artifacts-keyframes", "startup-roster-token-scan.json");
   const handleGraphCandidateScoresPath = path.join(root, "artifacts-keyframes", "keyframe-handle-graph-candidate-scores.json");
+  const startupKeyframeRowLinkPath = path.join(root, "artifacts-keyframes", `startup-keyframe-row-link-diagnostic-${versionGroup}.json`);
   const rowIdentity02Path = path.join(root, "artifacts-keyframes", `reconstruction-row-identity-241-0x02-${versionGroup}.json`);
   const rowIdentity04Path = path.join(root, "artifacts-keyframes", `reconstruction-row-identity-241-0x04-${versionGroup}.json`);
   const rowGridCandidatesPath = path.join(root, "artifacts-keyframes", `reconstruction-row-grid-candidates-${versionGroup}.json`);
@@ -2517,6 +2563,7 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
   const roflStatComparison = readOptionalJson(roflStatComparisonPath);
   const startupRosterTokenScan = readOptionalJson(startupRosterTokenScanPath);
   const handleGraphCandidateScores = readOptionalJson(handleGraphCandidateScoresPath);
+  const startupKeyframeRowLink = readOptionalJson(startupKeyframeRowLinkPath);
   const rowIdentity02 = readOptionalJson(rowIdentity02Path);
   const rowIdentity04 = readOptionalJson(rowIdentity04Path);
   const rowGridCandidates = readOptionalJson(rowGridCandidatesPath);
@@ -2631,12 +2678,14 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
               },
           startupRosterTokenScan: summarizeStartupRosterTokenScan(startupRosterTokenScan, versionGroup),
           handleGraphRowLinkCandidates: summarizeHandleGraphCandidateScores(handleGraphCandidateScores),
+          startupKeyframeRowLink: summarizeStartupKeyframeRowLinkDiagnostic(startupKeyframeRowLink),
         }
       : {
           status: "not_found",
           reason: "no replay-only keyframe scalar identity assignment artifact found",
           startupRosterTokenScan: summarizeStartupRosterTokenScan(startupRosterTokenScan, versionGroup),
           handleGraphRowLinkCandidates: summarizeHandleGraphCandidateScores(handleGraphCandidateScores),
+          startupKeyframeRowLink: summarizeStartupKeyframeRowLinkDiagnostic(startupKeyframeRowLink),
         },
     reconstructionRowIdentity: {
       status: "not_promoted",
@@ -3344,6 +3393,12 @@ function main() {
         {
           path: path.join(root, "artifacts-keyframes", "keyframe-handle-graph-candidate-scores.json"),
           role: "offline-handle-graph-row-link-diagnostic",
+          runtimeInput: false,
+          runtimeApiData: false,
+        },
+        {
+          path: path.join(root, "artifacts-keyframes", `startup-keyframe-row-link-diagnostic-${args.versionGroup}.json`),
+          role: "offline-startup-keyframe-row-link-diagnostic",
           runtimeInput: false,
           runtimeApiData: false,
         },

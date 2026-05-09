@@ -222,6 +222,7 @@ function verifyRuntimeArtifactOutput(replayId, artifactRoot) {
     "offline-no-priors-position-validation-diagnostic",
     "replay-only-startup-roster-token-diagnostic",
     "offline-handle-graph-row-link-diagnostic",
+    "offline-startup-keyframe-row-link-diagnostic",
     "offline-event-family-correlation-diagnostic",
   ]) {
     if (!diagnosticRoles.has(role)) {
@@ -405,6 +406,29 @@ function verifyIdentitySupportSweepOutput(artifactRoot, versionGroup) {
   }
 }
 
+function verifyStartupKeyframeRowLinkOutput(artifactRoot, versionGroup) {
+  const diagnosticPath = path.resolve(process.cwd(), artifactRoot, `startup-keyframe-row-link-diagnostic-${versionGroup}.json`);
+  const diagnostic = JSON.parse(fs.readFileSync(diagnosticPath, "utf8"));
+  if (diagnostic.schema !== "startup-keyframe-row-link-diagnostic/v1") {
+    throw new Error(`Startup/keyframe row-link diagnostic has unexpected schema marker: ${diagnostic.schema ?? "missing"}.`);
+  }
+  if (diagnostic.versionGroup !== versionGroup) {
+    throw new Error(`Startup/keyframe row-link diagnostic version group mismatch: ${diagnostic.versionGroup ?? "missing"}.`);
+  }
+  if (diagnostic.status !== "not_promoted" || diagnostic.runtimeInput !== false || diagnostic.runtimeApiData !== false) {
+    throw new Error(`Startup/keyframe row-link diagnostic must remain non-runtime/not-promoted: ${JSON.stringify(diagnostic)}`);
+  }
+  if (diagnostic.assessment?.startupRosterOrderTokens !== "present" ||
+    diagnostic.assessment?.directStartupToKeyframeRowLink !== "not_found" ||
+    diagnostic.assessment?.runtimePromotion !== "blocked") {
+    throw new Error(`Startup/keyframe row-link diagnostic must preserve the current blocked linkage assessment: ${JSON.stringify(diagnostic.assessment ?? null)}`);
+  }
+  if ((diagnostic.startupRosterOrderCandidates ?? []).length === 0 ||
+    !(diagnostic.blockerSummary ?? []).some((blocker) => String(blocker).includes("directStartupToKeyframeRowLink=not_found"))) {
+    throw new Error(`Startup/keyframe row-link diagnostic must include startup candidates and the direct-link blocker: ${JSON.stringify(diagnostic)}`);
+  }
+}
+
 function verifyTimelineReconstructionOutput(replayId, artifactRoot) {
   const reportPath = path.resolve(process.cwd(), artifactRoot, replayId, "timeline-reconstruction-model.json");
   const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
@@ -482,6 +506,7 @@ function main() {
   const assignIdentityScript = path.join("scripts", "assign_keyframe_slots_from_rofl_stats.mjs");
   const compareIdentityScript = path.join("scripts", "compare_rofl_stat_assignments_to_supervised.mjs");
   const sweepIdentitySupportScript = path.join("scripts", "sweep_rofl_identity_support_thresholds.mjs");
+  const analyzeStartupKeyframeRowLinksScript = path.join("scripts", "analyze_startup_keyframe_row_links.mjs");
   const sharedArgs = [
     "--replay-id",
     args.replayId,
@@ -638,6 +663,13 @@ function main() {
       args.versionGroup,
     ]);
   }
+  runStep("analyze-startup-keyframe-row-links", analyzeStartupKeyframeRowLinksScript, [
+    "--artifact-root",
+    args.artifactRoot,
+    "--version-group",
+    args.versionGroup,
+  ]);
+  verifyStartupKeyframeRowLinkOutput(args.artifactRoot, args.versionGroup);
   runStep("correlate-reconstruction-families-events", correlateReconstructionFamiliesEventsScript, [
     "--artifact-root",
     args.artifactRoot,

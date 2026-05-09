@@ -422,6 +422,8 @@ function buildAudit(artifact, inputPath) {
         `startup roster token scan replay count=${nonFinalIdentity?.startupRosterTokenScan?.scannedReplayCount ?? null}`,
         `startup roster token scan full-corpus roster/order candidates=${nonFinalIdentity?.startupRosterTokenScan?.fullCorpusRosterOrderCandidateCount ?? null}`,
         `startup roster token scan top candidates=${JSON.stringify((nonFinalIdentity?.startupRosterTokenScan?.topReplayOnlyCandidates ?? []).slice(0, 3))}`,
+        `startup keyframe row-link status=${nonFinalIdentity?.startupKeyframeRowLink?.status ?? null}`,
+        `startup keyframe row-link assessment=${JSON.stringify(nonFinalIdentity?.startupKeyframeRowLink?.assessment ?? null)}`,
         `handle graph row-link status=${nonFinalIdentity?.handleGraphRowLinkCandidates?.status ?? null}`,
         `handle graph row-link candidate count=${nonFinalIdentity?.handleGraphRowLinkCandidates?.candidateCount ?? null}`,
         `handle graph row-link confidence counts=${JSON.stringify(nonFinalIdentity?.handleGraphRowLinkCandidates?.confidenceCounts ?? {})}`,
@@ -472,13 +474,19 @@ function buildAudit(artifact, inputPath) {
           (nonFinalIdentity?.startupRosterTokenScan?.fullCorpusRosterOrderCandidateCount ?? 0) > 0
           ? []
           : ["startup roster token diagnostic missing or not marked as non-runtime evidence"]),
+        ...(nonFinalIdentity?.startupKeyframeRowLink?.status === "not_promoted" &&
+          nonFinalIdentity?.startupKeyframeRowLink?.runtimeApiData === false &&
+          nonFinalIdentity?.startupKeyframeRowLink?.assessment?.startupRosterOrderTokens === "present" &&
+          nonFinalIdentity?.startupKeyframeRowLink?.assessment?.directStartupToKeyframeRowLink === "not_found"
+          ? []
+          : ["startup-to-keyframe row-link diagnostic missing or not preserving direct-link blocker"]),
         ...(nonFinalIdentity?.handleGraphRowLinkCandidates?.status === "not_promoted" &&
           nonFinalIdentity?.handleGraphRowLinkCandidates?.runtimeApiData === false &&
           nonFinalIdentity?.handleGraphRowLinkCandidates?.candidateCount > 0 &&
           nonFinalIdentity?.handleGraphRowLinkCandidates?.topConfidence === "weak"
           ? []
           : ["handle graph row-link diagnostic missing or not rejected as weak evidence"]),
-        ...(["ROFL metadata/statsJson roster", "roster order", "team/champion metadata", "cross-metric final stats consistency", "startup roster/order tokens", "keyframe row identity gates", "handle graph row links"].every((evidenceClass) =>
+        ...(["ROFL metadata/statsJson roster", "roster order", "team/champion metadata", "cross-metric final stats consistency", "startup roster/order tokens", "startup-to-keyframe row link", "keyframe row identity gates", "handle graph row links"].every((evidenceClass) =>
           identityEvidenceMatrix.some((entry) => entry.evidenceClass === evidenceClass && (entry.evidenceRefs ?? []).length > 0)
         ) ? [] : ["identityLinkage evidence matrix missing one or more replay-only evidence classes"]),
         ...(identityPromotionGate.status === "blocked" &&
@@ -854,9 +862,11 @@ function buildAudit(artifact, inputPath) {
           (remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("artifactManifest.decoderDiagnostics.offline-no-priors-position-validation-diagnostic") &&
           remainingGapByKey.get("nonFinalParticipantIdentity")?.runtimeApiData === false &&
           (remainingGapByKey.get("nonFinalParticipantIdentity")?.blockerSummary ?? []).includes("runtimePromotionGate=blocked") &&
+          (remainingGapByKey.get("nonFinalParticipantIdentity")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("startupKeyframeRowLink=not_found")) &&
           (remainingGapByKey.get("nonFinalParticipantIdentity")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("noPriorsPositionAssignment=8/10")) &&
           (remainingGapByKey.get("nonFinalParticipantIdentity")?.evidenceRefs ?? []).includes("identityLinkage.evidenceMatrix") &&
           (remainingGapByKey.get("nonFinalParticipantIdentity")?.evidenceRefs ?? []).includes("identityLinkage.nonFinalScalarIdentity.runtimePromotionGate") &&
+          (remainingGapByKey.get("nonFinalParticipantIdentity")?.evidenceRefs ?? []).includes("rejectedCandidateArtifacts.nonFinalScalarIdentity.startupKeyframeRowLink") &&
           remainingGapByKey.get("damageTimeline")?.runtimeApiData === false &&
           roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.status === "not_promoted" &&
           JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.perParticipantCoverage ?? []) === JSON.stringify(artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []) &&
@@ -1244,9 +1254,11 @@ function buildAudit(artifact, inputPath) {
           ...(!(remainingGapByKey.get("positions")?.evidenceRefs ?? []).includes("artifactManifest.decoderDiagnostics.offline-no-priors-position-validation-diagnostic") ? ["remainingParityGaps positions missing manifest no-priors validation evidence ref"] : []),
           ...(remainingGapByKey.get("nonFinalParticipantIdentity")?.runtimeApiData !== false ? ["remainingParityGaps nonFinalParticipantIdentity must be non-runtime"] : []),
           ...(!(remainingGapByKey.get("nonFinalParticipantIdentity")?.blockerSummary ?? []).includes("runtimePromotionGate=blocked") ? ["remainingParityGaps nonFinalParticipantIdentity missing runtime promotion gate blocker"] : []),
+          ...(!(remainingGapByKey.get("nonFinalParticipantIdentity")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("startupKeyframeRowLink=not_found")) ? ["remainingParityGaps nonFinalParticipantIdentity missing startup-keyframe row-link blocker"] : []),
           ...(!(remainingGapByKey.get("nonFinalParticipantIdentity")?.blockerSummary ?? []).some((blocker) => String(blocker).includes("noPriorsPositionAssignment=8/10")) ? ["remainingParityGaps nonFinalParticipantIdentity missing no-priors identity blocker"] : []),
           ...(!(remainingGapByKey.get("nonFinalParticipantIdentity")?.evidenceRefs ?? []).includes("identityLinkage.evidenceMatrix") ? ["remainingParityGaps nonFinalParticipantIdentity missing evidence matrix ref"] : []),
           ...(!(remainingGapByKey.get("nonFinalParticipantIdentity")?.evidenceRefs ?? []).includes("identityLinkage.nonFinalScalarIdentity.runtimePromotionGate") ? ["remainingParityGaps nonFinalParticipantIdentity missing runtime promotion gate ref"] : []),
+          ...(!(remainingGapByKey.get("nonFinalParticipantIdentity")?.evidenceRefs ?? []).includes("rejectedCandidateArtifacts.nonFinalScalarIdentity.startupKeyframeRowLink") ? ["remainingParityGaps nonFinalParticipantIdentity missing startup-keyframe row-link ref"] : []),
           ...(remainingGapByKey.get("damageTimeline")?.runtimeApiData !== false ? ["remainingParityGaps damageTimeline must be non-runtime"] : []),
           ...(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.status !== "not_promoted" ? ["roflDerivedFieldMap timeline position missing not_promoted status"] : []),
           ...(JSON.stringify(roflDerivedFieldMap.timeline?.["info.frames[].participantFrames[].position"]?.perParticipantCoverage ?? []) !== JSON.stringify(artifact.fieldCoverage?.positions?.perParticipantCoverage ?? []) ? ["roflDerivedFieldMap timeline position per-participant coverage does not match fieldCoverage.positions"] : []),
