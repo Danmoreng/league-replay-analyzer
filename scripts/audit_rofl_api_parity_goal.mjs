@@ -192,6 +192,7 @@ function buildAudit(artifact, inputPath) {
   const nonFinalIdentity = artifact.rejectedCandidateArtifacts?.nonFinalScalarIdentity;
   const rejectedCandidates = artifact.rejectedCandidateArtifacts ?? {};
   const runtimeReconstructionRowIdentity = rejectedCandidates.reconstructionRowIdentity ?? {};
+  const rowIdentityBlockerMatrix = runtimeReconstructionRowIdentity.blockerMatrix ?? [];
   const identityLinkage = artifact.identityLinkage ?? {};
   const identityEvidenceMatrix = identityLinkage.evidenceMatrix ?? [];
   const identityPromotionGate = identityLinkage.nonFinalScalarIdentity?.runtimePromotionGate ?? {};
@@ -1007,6 +1008,8 @@ function buildAudit(artifact, inputPath) {
           runtimeReconstructionRowIdentity.rowGridCandidateScan?.runtimeInput === false &&
           runtimeReconstructionRowIdentity.rowGridFieldAnalysis?.status === "field_hypothesis_only_not_runtime_api_data" &&
           runtimeReconstructionRowIdentity.rowGridFieldAnalysis?.runtimeInput === false &&
+          rowIdentityBlockerMatrix.some((entry) => entry.familyKey === "241-0x02" && entry.primaryBlocker === "duplicate-row-bytes" && entry.duplicateRejectedRowCount === 4 && entry.runtimeApiData === false) &&
+          rowIdentityBlockerMatrix.some((entry) => entry.familyKey === "241-0x04" && entry.primaryBlocker === "low-row-continuity" && entry.unstableIdentityRowCount === 10 && entry.runtimeApiData === false) &&
           (runtimeReconstructionRowIdentity.reason ?? "").includes("stable replay-only participant identity") &&
           (artifactIdentityChecklist?.evidence ?? []).includes("rejectedCandidateArtifacts.reconstructionRowIdentity.status=not_promoted") &&
           (artifactIdentityChecklist?.evidence ?? []).includes("rejectedCandidateArtifacts.reconstructionRowIdentity.rowGridCandidateScan.status=candidate_scan_only_not_runtime_api_data") &&
@@ -1437,6 +1440,8 @@ function buildAudit(artifact, inputPath) {
           ...(runtimeReconstructionRowIdentity.rowGridCandidateScan?.runtimeInput !== false ? ["runtime artifact row-grid scan summary must be non-runtime"] : []),
           ...(runtimeReconstructionRowIdentity.rowGridFieldAnalysis?.status !== "field_hypothesis_only_not_runtime_api_data" ? ["runtime artifact reconstructionRowIdentity missing row-grid field analysis summary"] : []),
           ...(runtimeReconstructionRowIdentity.rowGridFieldAnalysis?.runtimeInput !== false ? ["runtime artifact row-grid field analysis summary must be non-runtime"] : []),
+          ...(!rowIdentityBlockerMatrix.some((entry) => entry.familyKey === "241-0x02" && entry.primaryBlocker === "duplicate-row-bytes" && entry.duplicateRejectedRowCount === 4 && entry.runtimeApiData === false) ? ["runtime artifact row identity blocker matrix missing 241-0x02 duplicate blocker"] : []),
+          ...(!rowIdentityBlockerMatrix.some((entry) => entry.familyKey === "241-0x04" && entry.primaryBlocker === "low-row-continuity" && entry.unstableIdentityRowCount === 10 && entry.runtimeApiData === false) ? ["runtime artifact row identity blocker matrix missing 241-0x04 continuity blocker"] : []),
           ...(!reconstructionFamilyEventCorrelation ? ["family event correlation artifact missing"] : []),
           ...(reconstructionFamilyEventCorrelation && reconstructionFamilyEventCorrelation.schema !== "rofl-reconstruction-family-event-correlation/v1" ? ["family event correlation schema mismatch"] : []),
           ...(reconstructionFamilyEventCorrelation && reconstructionFamilyEventCorrelation.mode !== "offline-validation-only" ? ["family event correlation mode must be offline-validation-only"] : []),

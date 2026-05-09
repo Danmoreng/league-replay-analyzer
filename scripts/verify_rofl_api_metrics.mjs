@@ -845,6 +845,20 @@ function verifyRejectedCandidateArtifacts(artifact) {
   assert(reconstructionRowIdentity.runtimeInput === false, "Reconstruction row identity evidence must be non-runtime", {
     reconstructionRowIdentity,
   });
+  assert((reconstructionRowIdentity.blockerMatrix ?? []).length >= 2 &&
+    (reconstructionRowIdentity.blockerMatrix ?? []).every((entry) =>
+      entry.status === "not_promoted" &&
+      entry.runtimeApiData === false &&
+      entry.participantIdentity === false &&
+      Number.isInteger(entry.rowCount) &&
+      entry.rowCount === 10 &&
+      ["duplicate-row-bytes", "low-row-continuity", "participant-mapping-not-established"].includes(entry.primaryBlocker)
+    ) &&
+    (reconstructionRowIdentity.blockerMatrix ?? []).some((entry) => entry.familyKey === "241-0x02" && entry.primaryBlocker === "duplicate-row-bytes" && entry.duplicateRejectedRowCount === 4) &&
+    (reconstructionRowIdentity.blockerMatrix ?? []).some((entry) => entry.familyKey === "241-0x04" && entry.primaryBlocker === "low-row-continuity" && entry.unstableIdentityRowCount === 10),
+    "Reconstruction row identity evidence must include a per-family blocker matrix for decoder targeting", {
+      blockerMatrix: reconstructionRowIdentity.blockerMatrix,
+    });
   assert((reconstructionRowIdentity.reason ?? "").includes("stable replay-only participant identity"), "Reconstruction row identity evidence must explain the participant identity blocker", {
     reconstructionRowIdentity,
   });

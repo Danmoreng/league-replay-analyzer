@@ -2551,6 +2551,43 @@ function summarizeEventFamilyCorrelation(eventFamilyCorrelation) {
   };
 }
 
+function summarizeRowIdentityBlockerMatrix(rowIdentityArtifacts) {
+  return rowIdentityArtifacts
+    .filter(Boolean)
+    .map((artifact) => {
+      const rows = artifact.rowIdentity ?? [];
+      const rowStatusCounts = rows.reduce((counts, row) => {
+        counts[row.status ?? "unknown"] = (counts[row.status ?? "unknown"] ?? 0) + 1;
+        return counts;
+      }, {});
+      const duplicateRejected = rowStatusCounts.duplicate_rejected ?? 0;
+      const unstableIdentity = rowStatusCounts.unstable_identity ?? 0;
+      const sameRowWinRate = artifact.evidence?.sameRowWinRate ?? null;
+      const primaryBlocker = duplicateRejected > 0
+        ? "duplicate-row-bytes"
+        : sameRowWinRate != null && sameRowWinRate < (artifact.hypothesis?.minCoherence ?? 0.75)
+          ? "low-row-continuity"
+          : "participant-mapping-not-established";
+      return {
+        familyKey: artifact.familyKey ?? null,
+        status: "not_promoted",
+        runtimeApiData: false,
+        participantIdentity: false,
+        primaryBlocker,
+        rowCount: rows.length,
+        duplicateRejectedRowCount: duplicateRejected,
+        unstableIdentityRowCount: unstableIdentity,
+        sameRowWinRate,
+        minCoherence: artifact.hypothesis?.minCoherence ?? null,
+        rowTrackCoherence: artifact.evidence?.rowTrackCoherence ?? null,
+        rowStatusCounts: Object.fromEntries(Object.entries(rowStatusCounts).sort(([left], [right]) => left.localeCompare(right))),
+        nextDecoderStep: primaryBlocker === "duplicate-row-bytes"
+          ? "identify non-duplicated row discriminator or split duplicated table rows before participant mapping"
+          : "find a stable row continuity signal or a direct roster/team/champion token inside the row family",
+      };
+    });
+}
+
 function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
   const roflStatAssignmentsPath = path.join(root, "artifacts-keyframes", `keyframe-rofl-stat-slot-assignments-${versionGroup}.json`);
   const roflStatComparisonPath = path.join(root, "artifacts-keyframes", `keyframe-rofl-stat-supervised-comparison-${versionGroup}.json`);
@@ -2700,6 +2737,7 @@ function buildRejectedCandidateArtifacts(root, replayId, versionGroup) {
       status: "not_promoted",
       reason: "241-family chunk rows are structurally plausible but do not establish stable replay-only participant identity",
       runtimeInput: false,
+      blockerMatrix: summarizeRowIdentityBlockerMatrix([rowIdentity02, rowIdentity04]),
       rowGridCandidateScan: rowGridCandidates
         ? {
             exists: true,
