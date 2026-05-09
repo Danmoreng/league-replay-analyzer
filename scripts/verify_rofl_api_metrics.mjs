@@ -826,6 +826,7 @@ function verifyRejectedCandidateArtifacts(artifact) {
       nonFinalScalarIdentity.startupKeyframeRowLink?.runtimeApiData === false &&
       nonFinalScalarIdentity.startupKeyframeRowLink?.schema === "startup-keyframe-row-link-diagnostic/v1" &&
       nonFinalScalarIdentity.startupKeyframeRowLink?.assessment?.startupRosterOrderTokens === "present" &&
+      nonFinalScalarIdentity.startupKeyframeRowLink?.assessment?.keyframeRosterOrderTokens === "not_found" &&
       nonFinalScalarIdentity.startupKeyframeRowLink?.assessment?.directStartupToKeyframeRowLink === "not_found" &&
       nonFinalScalarIdentity.startupKeyframeRowLink?.assessment?.runtimePromotion === "blocked" &&
       nonFinalScalarIdentity.startupKeyframeRowLink?.startupRosterOrderCandidateCount > 0,
@@ -1192,6 +1193,7 @@ function verifyIdentityLinkage(artifact) {
     });
   assert(identityLinkage.nonFinalScalarIdentity?.startupKeyframeRowLink?.status === "not_promoted" &&
     identityLinkage.nonFinalScalarIdentity?.startupKeyframeRowLink?.runtimeApiData === false &&
+    identityLinkage.nonFinalScalarIdentity?.startupKeyframeRowLink?.assessment?.keyframeRosterOrderTokens === "not_found" &&
     identityLinkage.nonFinalScalarIdentity?.startupKeyframeRowLink?.assessment?.directStartupToKeyframeRowLink === "not_found",
     "Identity linkage summary must surface startup-to-keyframe row-link diagnostics as not-promoted evidence", {
       identityLinkage,

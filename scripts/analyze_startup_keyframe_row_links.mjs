@@ -93,6 +93,37 @@ function summarizeHandleGraph(handleGraph) {
   };
 }
 
+function summarizeKeyframeIdentifierTokens(identifierScan, versionGroup) {
+  const candidates = (identifierScan?.candidates ?? [])
+    .filter((candidate) => candidate.versionGroup === versionGroup)
+    .sort((left, right) =>
+      (right.hitRate ?? 0) - (left.hitRate ?? 0) ||
+      (right.hitRows ?? 0) - (left.hitRows ?? 0) ||
+      `${left.tokenKind}`.localeCompare(`${right.tokenKind}`)
+    );
+  const rosterOrderKinds = new Set(["participantId", "rosterIndex", "rosterOrdinal", "teamId", "championId"]);
+  const rosterOrderCandidates = candidates.filter((candidate) => rosterOrderKinds.has(candidate.tokenKind));
+  return {
+    schema: identifierScan ? "keyframe-identifier-token-scan" : "missing",
+    stableOnly: identifierScan?.stableOnly ?? null,
+    scannedRows: identifierScan?.scannedRows ?? 0,
+    candidateCount: candidates.length,
+    rosterOrderCandidateCount: rosterOrderCandidates.length,
+    thresholds: identifierScan?.thresholds ?? null,
+    topCandidates: candidates.slice(0, 8).map((candidate) => ({
+      familyKey: candidate.familyKey ?? null,
+      offset: candidate.offset ?? null,
+      decodeLabel: candidate.decodeLabel ?? null,
+      valueSource: candidate.valueSource ?? null,
+      tokenKind: candidate.tokenKind ?? null,
+      comparableRows: candidate.comparableRows ?? null,
+      hitRows: candidate.hitRows ?? null,
+      replayCount: candidate.replayCount ?? null,
+      hitRate: candidate.hitRate ?? null,
+    })),
+  };
+}
+
 function main() {
   const root = process.cwd();
   const args = parseArgs(process.argv);
@@ -102,6 +133,7 @@ function main() {
     : path.join(artifactRoot, `startup-keyframe-row-link-diagnostic-${args.versionGroup}.json`);
 
   const startupScanPath = path.join(artifactRoot, "startup-roster-token-scan.json");
+  const keyframeIdentifierTokenScanPath = path.join(artifactRoot, "keyframe-identifier-token-scan.json");
   const handleGraphPath = path.join(artifactRoot, "keyframe-handle-graph-candidate-scores.json");
   const rowIdentityPaths = [
     path.join(artifactRoot, `reconstruction-row-identity-241-0x02-${args.versionGroup}.json`),
@@ -109,10 +141,12 @@ function main() {
   ];
 
   const startupScan = readOptionalJson(startupScanPath);
+  const keyframeIdentifierTokenScan = readOptionalJson(keyframeIdentifierTokenScanPath);
   const handleGraph = readOptionalJson(handleGraphPath);
   const rowIdentityArtifacts = rowIdentityPaths.map(readOptionalJson).filter(Boolean);
   const startupCandidates = summarizeStartupCandidates(startupScan, args.versionGroup);
   const handleSummary = summarizeHandleGraph(handleGraph);
+  const keyframeIdentifierSummary = summarizeKeyframeIdentifierTokens(keyframeIdentifierTokenScan, args.versionGroup);
   const rowSummaries = rowIdentitySummary(rowIdentityArtifacts);
   const fullCorpusStartupCandidateCount = startupCandidates.filter((candidate) =>
     candidate.replayCount === 20 &&
@@ -121,6 +155,7 @@ function main() {
 
   const assessment = {
     startupRosterOrderTokens: startupCandidates.length > 0 ? "present" : "not_found",
+    keyframeRosterOrderTokens: keyframeIdentifierSummary.rosterOrderCandidateCount > 0 ? "present_needs_review" : "not_found",
     directStartupToKeyframeRowLink: "not_found",
     rowIdentityGate: rowSummaries.every((entry) => entry.status === "not_promoted") ? "blocked" : "review",
     handleGraphGate: handleSummary.strongestConfidence === "weak" ? "blocked" : "review",
@@ -137,6 +172,7 @@ function main() {
     runtimeApiData: false,
     inputPaths: {
       startupRosterTokenScan: startupScanPath,
+      keyframeIdentifierTokenScan: keyframeIdentifierTokenScanPath,
       handleGraphCandidateScores: handleGraphPath,
       rowIdentityArtifacts: rowIdentityPaths,
     },
@@ -144,11 +180,13 @@ function main() {
     blockerSummary: [
       `startupRosterOrderCandidateCount=${startupCandidates.length}`,
       `fullCorpusStartupRosterOrderCandidateCount=${fullCorpusStartupCandidateCount}`,
+      `keyframeRosterOrderTokenCandidateCount=${keyframeIdentifierSummary.rosterOrderCandidateCount}`,
       "directStartupToKeyframeRowLink=not_found",
       `rowIdentityGate=${assessment.rowIdentityGate}`,
       `handleGraphGate=${assessment.handleGraphGate}`,
     ],
     startupRosterOrderCandidates: startupCandidates,
+    keyframeIdentifierTokenScan: keyframeIdentifierSummary,
     keyframeRowIdentity: rowSummaries,
     handleGraphRowLinks: handleSummary,
     nextDecoderStep: "Find a replay-only record edge that carries startup roster/order tokens into a keyframe row family with stable 10-row participant identity.",

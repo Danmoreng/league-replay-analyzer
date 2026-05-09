@@ -419,6 +419,7 @@ function verifyStartupKeyframeRowLinkOutput(artifactRoot, versionGroup) {
     throw new Error(`Startup/keyframe row-link diagnostic must remain non-runtime/not-promoted: ${JSON.stringify(diagnostic)}`);
   }
   if (diagnostic.assessment?.startupRosterOrderTokens !== "present" ||
+    diagnostic.assessment?.keyframeRosterOrderTokens !== "not_found" ||
     diagnostic.assessment?.directStartupToKeyframeRowLink !== "not_found" ||
     diagnostic.assessment?.runtimePromotion !== "blocked") {
     throw new Error(`Startup/keyframe row-link diagnostic must preserve the current blocked linkage assessment: ${JSON.stringify(diagnostic.assessment ?? null)}`);

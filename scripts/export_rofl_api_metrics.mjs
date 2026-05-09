@@ -2496,6 +2496,15 @@ function summarizeStartupKeyframeRowLinkDiagnostic(linkDiagnostic) {
     assessment: linkDiagnostic.assessment ?? null,
     blockerSummary: linkDiagnostic.blockerSummary ?? [],
     startupRosterOrderCandidateCount: (linkDiagnostic.startupRosterOrderCandidates ?? []).length,
+    keyframeRosterOrderTokenCandidateCount: linkDiagnostic.keyframeIdentifierTokenScan?.rosterOrderCandidateCount ?? null,
+    keyframeIdentifierTokenScan: linkDiagnostic.keyframeIdentifierTokenScan
+      ? {
+          scannedRows: linkDiagnostic.keyframeIdentifierTokenScan.scannedRows ?? null,
+          candidateCount: linkDiagnostic.keyframeIdentifierTokenScan.candidateCount ?? null,
+          rosterOrderCandidateCount: linkDiagnostic.keyframeIdentifierTokenScan.rosterOrderCandidateCount ?? null,
+          topCandidates: (linkDiagnostic.keyframeIdentifierTokenScan.topCandidates ?? []).slice(0, 5),
+        }
+      : null,
     keyframeRowIdentity: (linkDiagnostic.keyframeRowIdentity ?? []).map((entry) => ({
       familyKey: entry.familyKey ?? null,
       status: entry.status ?? null,

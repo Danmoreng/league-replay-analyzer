@@ -477,6 +477,7 @@ function buildAudit(artifact, inputPath) {
         ...(nonFinalIdentity?.startupKeyframeRowLink?.status === "not_promoted" &&
           nonFinalIdentity?.startupKeyframeRowLink?.runtimeApiData === false &&
           nonFinalIdentity?.startupKeyframeRowLink?.assessment?.startupRosterOrderTokens === "present" &&
+          nonFinalIdentity?.startupKeyframeRowLink?.assessment?.keyframeRosterOrderTokens === "not_found" &&
           nonFinalIdentity?.startupKeyframeRowLink?.assessment?.directStartupToKeyframeRowLink === "not_found"
           ? []
           : ["startup-to-keyframe row-link diagnostic missing or not preserving direct-link blocker"]),
