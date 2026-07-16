@@ -56,10 +56,14 @@ Current state:
 - `scripts/build-native.ps1` builds the native target.
 - `scripts/build-wasm.ps1` builds the Wasm target and publishes generated artifacts into `apps/web/src/generated/wasm`.
 - `replays/` contains local replay samples for manual testing.
-- the current parser MVP extracts the embedded replay metadata block and per-player `statsJson` payload
-- the current web app can load a `.rofl` file in the browser and render the parsed result through the real Wasm parser
+- the parser extracts embedded replay metadata and per-player `statsJson`
+- the shared C++ core implements exact packet-block framing with timestamps, channels, packet types, signed compact block parameters, payload boundaries, and source provenance
+- native CLI tools validate framing, catalog packet types, dump bounded payload samples, and emit normalized replay-only champion-kill events
+- the kill decoder is version-profiled for patches 15.22 through 16.9 and validates 2,796/2,796 corpus kills plus final K/D/A for all 470 participants
+- the current web app loads a `.rofl` locally, calls the real Wasm decoder, and renders the replay-derived kill timeline with participant labels and diagnostics
+- exact elite-monster objective profiles are documented but not yet promoted into the runtime event schema
 
-Near-term engineering focus should move from metadata extraction to chunk parsing, frame/timeline extraction, movement data, and event normalization.
+Near-term engineering focus should move to elite-objective runtime events, bit-packed inventory transactions, scalar state/timeseries decoding, and replay-native movement coordinates.
 
 When starting a future session:
 

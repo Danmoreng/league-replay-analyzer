@@ -14,7 +14,7 @@ The frontend is a Vue 3 + TypeScript app in `apps/web`, and that folder owns the
 ## Repo Layout
 
 - `apps/web` - Vue frontend and current replay dashboard
-- `packages/rofl-core` - native C++ parser core and replay metadata extraction
+- `packages/rofl-core` - native C++ container, packet-block, and normalized event parser
 - `packages/rofl-wasm` - browser Wasm bridge target for the C++ parser
 - `scripts` - Windows/PowerShell automation
 - `docs` - project notes, setup instructions, and captured direction
@@ -81,25 +81,49 @@ pwsh -File .\scripts\build-wasm.ps1 -Configuration Release
 
 ## Current MVP
 
-The browser vertical slice is still working end-to-end, but the decoder work has moved well beyond the original metadata-only MVP.
+The browser vertical slice now reads real replay packet data end-to-end.
 
-The parser and research tooling currently cover:
+The shared C++ core and research tooling currently cover:
 
 - embedded replay metadata and per-player `statsJson`
+- exact packet-block framing for startup, keyframe, and chunk segments
+- packet timestamps, channels, packet types, signed compact entity parameters, payload boundaries, and source provenance
+- normalized replay-only champion-kill events with victim, killer, ordered assists, participant identity, and final K/D/A validation
+- native packet catalogs and bounded packet-type payload dumps for decoder research
 - replay-derived final participant/team metric export shaped toward Riot match API parity
 - keyframe/chunk reconstruction diagnostics
 - replay-only movement candidate extraction and assignment diagnostics
 - offline validation reports against local Riot fixtures and saved replay corpus artifacts
 
-The web app can load a local `.rofl` file, parse it through the real C++ Wasm module, and inspect replay-derived outputs. The decoder research loop is currently driven mostly by native/scripted corpus artifacts in `artifacts-keyframes` and `artifacts`.
+The exact packet grammar validates all 4,093 decompressed segments in the local
+47-replay corpus: 79,232,747 packet blocks and 3,132,599,313 bytes with zero
+framing errors across patch groups 15.22 through 16.9.
+
+Champion kills are productionized through the shared C++/Wasm path. The corpus
+contains 2,796 decoded events, all matching the offline timeline labels within
+1 ms; replay metadata final K/D/A also matches all 470 participants. The Vue
+app renders those replay-only events as a clickable kill timeline after a local
+`.rofl` upload.
+
+Useful commands:
+
+```powershell
+.\build\packages\rofl-core\rofl_core_cli.exe --validate-packet-framing .\replays\example.rofl
+.\build\packages\rofl-core\rofl_core_cli.exe --summarize-packet-types-json .\replays\example.rofl
+.\build\packages\rofl-core\rofl_core_cli.exe --extract-replay-kills-json .\replays\example.rofl
+npm run extract:replay-kills -- .\replays\example.rofl
+npm run validate:replay-kills-corpus
+```
 
 ## Next Focus
 
 The active decoder direction is API/timeline parity from `.rofl` files without using Riot API data at runtime. Current focused gaps are:
 
-- stable replay-only participant identity for timeline rows and movement entities
+- porting the exact elite-monster objective profiles into normalized C++/Wasm events
+- decoding bit-packed inventory deltas into safe item purchase/sale/undo events
+- extracting gold, damage, health, mana, CS, and level timeseries from packet payloads
+- stable replay-only participant identity for movement entities
 - alias-aware movement entity grouping for `participantFrames.position`
-- fuller timeline/event reconstruction from chunk/keyframe records
 - preserving and calibrating validation-passing movement candidates through extraction
 
 The latest movement checkpoint is intentionally not promoted to runtime `participantFrames.position`: strict replay-only current max128 assignment reaches high coverage only diagnostically, and the movement promotion audit remains `not_complete`. See `docs/rofl-api-parity.md` for current numbers and blockers.

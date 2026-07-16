@@ -1,4 +1,5 @@
 #include "rofl/core/replay_analyzer.hpp"
+#include "rofl/core/packet_blocks.hpp"
 #include <array>
 #include <bit>
 #include <cmath>
@@ -7,6 +8,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <future>
 #include <functional>
@@ -526,6 +530,9 @@ void write_number_array(std::ostringstream& output, const std::vector<Number>& v
         player.riot_id_game_name = parse_string_field(object_json, "RIOT_ID_GAME_NAME");
         player.riot_id_tag_line = parse_string_field(object_json, "RIOT_ID_TAG_LINE");
         player.team_position = parse_string_field(object_json, "TEAM_POSITION");
+        if (player.team_position.empty()) {
+            player.team_position = parse_string_field(object_json, "INDIVIDUAL_POSITION");
+        }
         player.win = parse_string_field(object_json, "WIN");
         player.team = parse_int_field(object_json, "TEAM");
         player.kills = parse_int_field(object_json, "CHAMPIONS_KILLED");
@@ -1480,9 +1487,9 @@ struct SubrecordGroup {
 
 BuildInfo get_build_info() {
     return {
-        .version = "0.6.0-footer-payload-inspector",
-        .parser_state = "footer-zstd-records-plus-inspector",
-        .wasm_state = "scaffolded-not-built"
+        .version = "0.7.0-packet-block-framing",
+        .parser_state = "footer-zstd-plus-packet-block-framing",
+        .wasm_state = "packet-kill-bridge-ready"
     };
 }
 
@@ -1611,11 +1618,11 @@ ReplaySummary parse_replay_bytes(const std::vector<std::uint8_t>& bytes) {
             summary.capabilities.payload_decoding_available = raw_footer_decompression_available;
             if (raw_footer_decompression_available) {
                 summary.warnings.push_back(
-                    "Footer-style zstd records were indexed from the pre-metadata payload region, and raw zstd decompression is available. Packet decoding is still not implemented."
+                    "Footer-style zstd records were indexed from the pre-metadata payload region, and exact packet-block framing is available. Semantic event and state decoding remains partial."
                 );
             } else {
                 summary.warnings.push_back(
-                    "Footer-style zstd records were indexed from the pre-metadata payload region, but raw zstd decompression could not be verified yet. Packet decoding is still not implemented."
+                    "Footer-style zstd records were indexed from the pre-metadata payload region, but raw zstd decompression could not be verified, so packet-block framing is unavailable for this replay."
                 );
             }
         } else {
@@ -1957,6 +1964,922 @@ std::string inspect_replay_file(const std::string& path) {
 
 ReplaySummary parse_replay_file(const std::string& path) {
     return parse_replay_bytes(read_file_bytes(path));
+}
+
+namespace {
+
+constexpr std::size_t kPacketDumpHexLimit = 256;
+
+[[nodiscard]] PacketSegmentKind packet_segment_kind_from_name(std::string_view type) {
+    if (type == "startup") return PacketSegmentKind::startup;
+    if (type == "keyframe") return PacketSegmentKind::keyframe;
+    if (type == "chunk") return PacketSegmentKind::chunk;
+    return PacketSegmentKind::unknown;
+}
+
+[[nodiscard]] long long packet_timestamp_millis(double seconds) {
+    return static_cast<long long>(std::llround(static_cast<double>(seconds) * 1000.0));
+}
+
+[[nodiscard]] std::string packet_version_group(std::string_view version) {
+    const std::size_t first = version.find('.');
+    if (first == std::string_view::npos) return version.empty() ? "unknown" : std::string(version);
+    const std::size_t second = version.find('.', first + 1);
+    return second == std::string_view::npos ? std::string(version) : std::string(version.substr(0, second));
+}
+
+[[nodiscard]] std::string packet_bytes_to_hex(std::span<const std::uint8_t> bytes) {
+    static constexpr char digits[] = "0123456789abcdef";
+    std::string output(bytes.size() * 2, '0');
+    for (std::size_t i = 0; i < bytes.size(); ++i) {
+        output[i * 2] = digits[(bytes[i] >> 4U) & 0x0FU];
+        output[i * 2 + 1] = digits[bytes[i] & 0x0FU];
+    }
+    return output;
+}
+
+struct PacketScanError {
+    ReplaySegmentSummary segment;
+    std::string code;
+    std::string message;
+    bool has_parse_error = false;
+    PacketBlockParseError parse_error;
+};
+
+struct PacketSegmentScanReport {
+    ReplaySegmentSummary segment;
+    bool decompressed = false;
+    bool parse_ok = false;
+    bool exactly_consumed = false;
+    std::size_t input_bytes = 0;
+    std::size_t consumed_bytes = 0;
+    std::size_t packet_count = 0;
+    long long first_timestamp_millis = 0;
+    long long last_timestamp_millis = 0;
+    bool has_timestamp = false;
+    std::string error_code;
+    std::string error_message;
+    bool has_parse_error = false;
+    PacketBlockParseError parse_error;
+};
+
+struct PacketFileScan {
+    std::string segment_filter;
+    std::size_t selected_segment_count = 0;
+    std::size_t decompressed_segment_count = 0;
+    std::size_t exact_segment_count = 0;
+    std::size_t packet_count = 0;
+    std::size_t input_bytes = 0;
+    std::size_t consumed_bytes = 0;
+    std::vector<PacketSegmentScanReport> segments;
+    std::vector<PacketScanError> errors;
+};
+
+template <typename Visitor>
+[[nodiscard]] PacketFileScan scan_packet_segments(
+    const std::vector<std::uint8_t>& replay_bytes,
+    const ReplaySummary& summary,
+    std::string_view segment_type,
+    Visitor&& visitor
+) {
+    PacketFileScan scan;
+    scan.segment_filter = normalize_segment_type_filter(segment_type);
+    for (const ReplaySegmentSummary& segment : summary.container.segments) {
+        if (!segment_type_matches_filter(segment.type, scan.segment_filter)) continue;
+        scan.selected_segment_count += 1;
+        PacketSegmentScanReport report;
+        report.segment = segment;
+        if (segment.codec != "zstd") {
+            report.error_code = "unsupported_codec";
+            report.error_message = "Selected replay segment is not zstd-compressed.";
+            scan.errors.push_back({segment, report.error_code, report.error_message});
+            scan.segments.push_back(std::move(report));
+            continue;
+        }
+        std::vector<std::uint8_t> decompressed;
+        std::string decompression_error;
+        if (!try_decompress_zstd_segment(replay_bytes, segment, decompressed, decompression_error)) {
+            report.error_code = "zstd_decompression_failed";
+            report.error_message = decompression_error;
+            scan.errors.push_back({segment, report.error_code, report.error_message});
+            scan.segments.push_back(std::move(report));
+            continue;
+        }
+        report.decompressed = true;
+        scan.decompressed_segment_count += 1;
+        const PacketSegmentProvenance provenance{
+            packet_segment_kind_from_name(segment.type),
+            segment.id,
+            segment.chunk_id,
+            static_cast<std::size_t>(std::max(segment.header_offset, 0)),
+            static_cast<std::size_t>(std::max(segment.payload_offset, 0)),
+        };
+        const PacketBlockParseResult result = parse_packet_blocks(
+            std::span<const std::uint8_t>(decompressed.data(), decompressed.size()), provenance);
+        report.parse_ok = result.ok();
+        report.exactly_consumed = result.exactly_consumed();
+        report.input_bytes = result.input_size;
+        report.consumed_bytes = result.consumed_bytes;
+        report.packet_count = result.blocks.size();
+        scan.input_bytes += result.input_size;
+        scan.consumed_bytes += result.consumed_bytes;
+        scan.packet_count += result.blocks.size();
+        if (result.exactly_consumed()) scan.exact_segment_count += 1;
+        if (!result.blocks.empty()) {
+            report.has_timestamp = true;
+            report.first_timestamp_millis = packet_timestamp_millis(result.blocks.front().timestamp_seconds);
+            report.last_timestamp_millis = packet_timestamp_millis(result.blocks.back().timestamp_seconds);
+        }
+        if (result.error.has_value()) {
+            report.error_code = std::string(packet_block_parse_error_code_name(result.error->code));
+            report.error_message = result.error->message;
+            report.has_parse_error = true;
+            report.parse_error = *result.error;
+            PacketScanError error{segment, report.error_code, report.error_message};
+            error.has_parse_error = true;
+            error.parse_error = *result.error;
+            scan.errors.push_back(std::move(error));
+        }
+        visitor(segment, decompressed, result);
+        scan.segments.push_back(std::move(report));
+    }
+    return scan;
+}
+
+void write_packet_scan_error_json(std::ostringstream& output, const PacketScanError& error) {
+    output << '{';
+    output << "\"segmentType\":\"" << json_escape(error.segment.type) << "\",";
+    output << "\"segmentId\":" << error.segment.id << ',';
+    output << "\"chunkId\":" << error.segment.chunk_id << ',';
+    output << "\"code\":\"" << json_escape(error.code) << "\",";
+    output << "\"message\":\"" << json_escape(error.message) << "\"";
+    if (error.has_parse_error) {
+        output << ",\"blockIndex\":" << error.parse_error.block_index;
+        output << ",\"blockOffset\":" << error.parse_error.block_offset;
+        output << ",\"errorOffset\":" << error.parse_error.error_offset;
+        output << ",\"expectedBytes\":" << error.parse_error.expected_bytes;
+        output << ",\"availableBytes\":" << error.parse_error.available_bytes;
+        output << ",\"declaredContentLength\":" << error.parse_error.declared_content_length;
+    }
+    output << '}';
+}
+
+struct PacketTypeSegmentAggregate {
+    int segment_id = 0;
+    int chunk_id = 0;
+    std::size_t segment_header_offset = 0;
+    std::size_t segment_payload_offset = 0;
+    std::size_t count = 0;
+    long long first_timestamp_millis = 0;
+    long long last_timestamp_millis = 0;
+};
+
+struct PacketTypeKey {
+    std::string segment_type;
+    std::uint8_t channel = 0;
+    std::uint16_t packet_type = 0;
+    bool operator<(const PacketTypeKey& other) const {
+        if (segment_type != other.segment_type) return segment_type < other.segment_type;
+        if (channel != other.channel) return channel < other.channel;
+        return packet_type < other.packet_type;
+    }
+};
+
+struct PacketTypeAggregate {
+    PacketTypeKey key;
+    std::size_t count = 0;
+    std::uint64_t total_content_bytes = 0;
+    long long first_timestamp_millis = 0;
+    long long last_timestamp_millis = 0;
+    std::size_t nonzero_block_param_count = 0;
+    std::size_t delta_timestamp_count = 0;
+    std::size_t compact_length_count = 0;
+    std::size_t inherited_packet_type_count = 0;
+    std::size_t compact_block_param_count = 0;
+    std::map<std::uint32_t, std::size_t> content_lengths;
+    std::map<std::uint8_t, std::size_t> markers;
+    std::map<std::uint32_t, std::size_t> block_params;
+    std::map<std::pair<int, int>, PacketTypeSegmentAggregate> segments;
+};
+
+struct DumpedPacketBlock {
+    ReplaySegmentSummary segment;
+    std::size_t block_index = 0;
+    std::uint8_t marker = 0;
+    std::uint8_t channel = 0;
+    long long timestamp_millis = 0;
+    bool timestamp_is_delta = false;
+    std::uint8_t timestamp_delta_milliseconds = 0;
+    std::uint32_t content_length = 0;
+    bool content_length_is_compact = false;
+    std::uint16_t packet_type = 0;
+    bool packet_type_is_inherited = false;
+    std::uint32_t block_param = 0;
+    bool block_param_is_compact = false;
+    std::uint8_t block_param_delta = 0;
+    std::int16_t block_param_signed_delta = 0;
+    std::size_t header_offset = 0;
+    std::size_t content_offset = 0;
+    std::size_t end_offset = 0;
+    std::size_t content_hex_bytes = 0;
+    std::string content_hex;
+};
+
+}  // namespace
+
+std::string validate_packet_framing_file_json(const std::string& path, std::string_view segment_type) {
+    const std::vector<std::uint8_t> bytes = read_file_bytes(path);
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const PacketFileScan scan = scan_packet_segments(
+        bytes, summary, segment_type,
+        [](const ReplaySegmentSummary&, const std::vector<std::uint8_t>&, const PacketBlockParseResult&) {});
+
+    std::ostringstream output;
+    output << '{';
+    output << "\"schema\":\"packet-framing-validation.v1\",";
+    output << "\"replayPath\":\"" << json_escape(path) << "\",";
+    output << "\"gameVersion\":\"" << json_escape(summary.game_version) << "\",";
+    output << "\"versionGroup\":\"" << json_escape(packet_version_group(summary.game_version)) << "\",";
+    output << "\"segmentType\":\"" << json_escape(scan.segment_filter) << "\",";
+    output << "\"selectedSegmentCount\":" << scan.selected_segment_count << ',';
+    output << "\"decompressedSegmentCount\":" << scan.decompressed_segment_count << ',';
+    output << "\"validSegmentCount\":" << scan.exact_segment_count << ',';
+    output << "\"packetCount\":" << scan.packet_count << ',';
+    output << "\"inputBytes\":" << scan.input_bytes << ',';
+    output << "\"consumedBytes\":" << scan.consumed_bytes << ',';
+    output << "\"valid\":" << bool_to_json(scan.selected_segment_count > 0 && scan.exact_segment_count == scan.selected_segment_count) << ',';
+    output << "\"segments\":[";
+    for (std::size_t index = 0; index < scan.segments.size(); ++index) {
+        if (index > 0) output << ',';
+        const PacketSegmentScanReport& report = scan.segments[index];
+        output << '{';
+        output << "\"segmentType\":\"" << json_escape(report.segment.type) << "\",";
+        output << "\"segmentId\":" << report.segment.id << ',';
+        output << "\"chunkId\":" << report.segment.chunk_id << ',';
+        output << "\"segmentHeaderOffset\":" << report.segment.header_offset << ',';
+        output << "\"segmentPayloadOffset\":" << report.segment.payload_offset << ',';
+        output << "\"compressedLength\":" << report.segment.length << ',';
+        output << "\"advertisedUncompressedLength\":" << report.segment.uncompressed_length << ',';
+        output << "\"decompressed\":" << bool_to_json(report.decompressed) << ',';
+        output << "\"parseOk\":" << bool_to_json(report.parse_ok) << ',';
+        output << "\"exactlyConsumed\":" << bool_to_json(report.exactly_consumed) << ',';
+        output << "\"inputBytes\":" << report.input_bytes << ',';
+        output << "\"consumedBytes\":" << report.consumed_bytes << ',';
+        output << "\"packetCount\":" << report.packet_count << ',';
+        if (report.has_timestamp) {
+            output << "\"firstTimestampMillis\":" << report.first_timestamp_millis << ',';
+            output << "\"lastTimestampMillis\":" << report.last_timestamp_millis << ',';
+        } else {
+            output << "\"firstTimestampMillis\":null,\"lastTimestampMillis\":null,";
+        }
+        if (report.error_code.empty()) {
+            output << "\"error\":null";
+        } else {
+            output << "\"error\":{";
+            output << "\"code\":\"" << json_escape(report.error_code) << "\",";
+            output << "\"message\":\"" << json_escape(report.error_message) << "\"";
+            if (report.has_parse_error) {
+                output << ",\"blockIndex\":" << report.parse_error.block_index;
+                output << ",\"blockOffset\":" << report.parse_error.block_offset;
+                output << ",\"errorOffset\":" << report.parse_error.error_offset;
+                output << ",\"expectedBytes\":" << report.parse_error.expected_bytes;
+                output << ",\"availableBytes\":" << report.parse_error.available_bytes;
+                output << ",\"declaredContentLength\":" << report.parse_error.declared_content_length;
+            }
+            output << '}';
+        }
+        output << '}';
+    }
+    output << "],\"errors\":[";
+    for (std::size_t index = 0; index < scan.errors.size(); ++index) {
+        if (index > 0) output << ',';
+        write_packet_scan_error_json(output, scan.errors[index]);
+    }
+    output << "]}";
+    return output.str();
+}
+
+std::string summarize_packet_types_file_json(
+    const std::string& path,
+    std::string_view segment_type,
+    std::size_t top_types
+) {
+    const std::vector<std::uint8_t> bytes = read_file_bytes(path);
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    std::map<PacketTypeKey, PacketTypeAggregate> groups;
+    const PacketFileScan scan = scan_packet_segments(
+        bytes, summary, segment_type,
+        [&](const ReplaySegmentSummary& segment, const std::vector<std::uint8_t>&, const PacketBlockParseResult& result) {
+            for (const PacketBlock& block : result.blocks) {
+                const PacketTypeKey key{segment.type, block.channel, block.packet_type};
+                auto [group_it, inserted] = groups.try_emplace(key);
+                PacketTypeAggregate& group = group_it->second;
+                if (inserted) group.key = key;
+                const long long timestamp = packet_timestamp_millis(block.timestamp_seconds);
+                if (group.count == 0) {
+                    group.first_timestamp_millis = timestamp;
+                    group.last_timestamp_millis = timestamp;
+                } else {
+                    group.first_timestamp_millis = std::min(group.first_timestamp_millis, timestamp);
+                    group.last_timestamp_millis = std::max(group.last_timestamp_millis, timestamp);
+                }
+                group.count += 1;
+                group.total_content_bytes += block.content_length;
+                group.content_lengths[block.content_length] += 1;
+                group.markers[block.marker] += 1;
+                group.block_params[block.block_param] += 1;
+                if (block.block_param != 0) group.nonzero_block_param_count += 1;
+                if (block.timestamp_is_delta) group.delta_timestamp_count += 1;
+                if (block.content_length_is_compact) group.compact_length_count += 1;
+                if (block.packet_type_is_inherited) group.inherited_packet_type_count += 1;
+                if (block.block_param_is_compact) group.compact_block_param_count += 1;
+
+                const std::pair<int, int> segment_key{segment.id, segment.chunk_id};
+                PacketTypeSegmentAggregate& segment_group = group.segments[segment_key];
+                if (segment_group.count == 0) {
+                    segment_group.segment_id = segment.id;
+                    segment_group.chunk_id = segment.chunk_id;
+                    segment_group.segment_header_offset = static_cast<std::size_t>(std::max(segment.header_offset, 0));
+                    segment_group.segment_payload_offset = static_cast<std::size_t>(std::max(segment.payload_offset, 0));
+                    segment_group.first_timestamp_millis = timestamp;
+                    segment_group.last_timestamp_millis = timestamp;
+                } else {
+                    segment_group.first_timestamp_millis = std::min(segment_group.first_timestamp_millis, timestamp);
+                    segment_group.last_timestamp_millis = std::max(segment_group.last_timestamp_millis, timestamp);
+                }
+                segment_group.count += 1;
+            }
+        });
+
+    std::vector<const PacketTypeAggregate*> ranked;
+    ranked.reserve(groups.size());
+    for (const auto& entry : groups) ranked.push_back(&entry.second);
+    std::sort(ranked.begin(), ranked.end(), [](const PacketTypeAggregate* left, const PacketTypeAggregate* right) {
+        if (left->count != right->count) return left->count > right->count;
+        if (left->key.segment_type != right->key.segment_type) return left->key.segment_type < right->key.segment_type;
+        if (left->key.channel != right->key.channel) return left->key.channel < right->key.channel;
+        return left->key.packet_type < right->key.packet_type;
+    });
+    if (top_types > 0 && ranked.size() > top_types) ranked.resize(top_types);
+
+    std::ostringstream output;
+    output << '{';
+    output << "\"schema\":\"packet-type-catalog.v1\",";
+    output << "\"replayPath\":\"" << json_escape(path) << "\",";
+    output << "\"matchId\":" << summary.container.match_id << ',';
+    output << "\"gameVersion\":\"" << json_escape(summary.game_version) << "\",";
+    output << "\"versionGroup\":\"" << json_escape(packet_version_group(summary.game_version)) << "\",";
+    output << "\"segmentType\":\"" << json_escape(scan.segment_filter) << "\",";
+    output << "\"topTypes\":" << top_types << ',';
+    output << "\"selectedSegmentCount\":" << scan.selected_segment_count << ',';
+    output << "\"validSegmentCount\":" << scan.exact_segment_count << ',';
+    output << "\"packetCount\":" << scan.packet_count << ',';
+    output << "\"packetTypeGroupCount\":" << groups.size() << ',';
+    output << "\"emittedPacketTypeGroupCount\":" << ranked.size() << ',';
+    output << "\"valid\":" << bool_to_json(scan.selected_segment_count > 0 && scan.exact_segment_count == scan.selected_segment_count) << ',';
+    output << "\"packetTypes\":[";
+    for (std::size_t index = 0; index < ranked.size(); ++index) {
+        if (index > 0) output << ',';
+        const PacketTypeAggregate& group = *ranked[index];
+        const std::size_t distinct_nonzero_params = group.block_params.size() - (group.block_params.contains(0) ? 1 : 0);
+        output << '{';
+        output << "\"segmentType\":\"" << json_escape(group.key.segment_type) << "\",";
+        output << "\"channel\":" << static_cast<unsigned int>(group.key.channel) << ',';
+        output << "\"packetType\":" << group.key.packet_type << ',';
+        output << "\"count\":" << group.count << ',';
+        output << "\"totalContentBytes\":" << group.total_content_bytes << ',';
+        output << "\"minimumContentLength\":" << group.content_lengths.begin()->first << ',';
+        output << "\"maximumContentLength\":" << group.content_lengths.rbegin()->first << ',';
+        output << "\"firstTimestampMillis\":" << group.first_timestamp_millis << ',';
+        output << "\"lastTimestampMillis\":" << group.last_timestamp_millis << ',';
+        output << "\"nonzeroBlockParamCount\":" << group.nonzero_block_param_count << ',';
+        output << "\"distinctBlockParamCount\":" << group.block_params.size() << ',';
+        output << "\"distinctNonzeroBlockParamCount\":" << distinct_nonzero_params << ',';
+        output << "\"deltaTimestampCount\":" << group.delta_timestamp_count << ',';
+        output << "\"compactLengthCount\":" << group.compact_length_count << ',';
+        output << "\"inheritedPacketTypeCount\":" << group.inherited_packet_type_count << ',';
+        output << "\"compactBlockParamCount\":" << group.compact_block_param_count << ',';
+        output << "\"contentLengths\":[";
+        std::size_t item_index = 0;
+        for (const auto& length : group.content_lengths) {
+            if (item_index++ > 0) output << ',';
+            output << "{\"contentLength\":" << length.first << ",\"count\":" << length.second << '}';
+        }
+        output << "],\"markers\":[";
+        item_index = 0;
+        for (const auto& marker : group.markers) {
+            if (item_index++ > 0) output << ',';
+            output << "{\"marker\":" << static_cast<unsigned int>(marker.first) << ",\"count\":" << marker.second << '}';
+        }
+        std::vector<std::pair<std::uint32_t, std::size_t>> top_params(group.block_params.begin(), group.block_params.end());
+        std::sort(top_params.begin(), top_params.end(), [](const auto& left, const auto& right) {
+            if (left.second != right.second) return left.second > right.second;
+            return left.first < right.first;
+        });
+        if (top_params.size() > 16) top_params.resize(16);
+        output << "],\"topBlockParams\":[";
+        for (std::size_t param_index = 0; param_index < top_params.size(); ++param_index) {
+            if (param_index > 0) output << ',';
+            output << "{\"blockParam\":" << top_params[param_index].first << ",\"count\":" << top_params[param_index].second << '}';
+        }
+        output << "],\"segments\":[";
+        item_index = 0;
+        for (const auto& segment_entry : group.segments) {
+            if (item_index++ > 0) output << ',';
+            const PacketTypeSegmentAggregate& segment_group = segment_entry.second;
+            output << '{';
+            output << "\"segmentId\":" << segment_group.segment_id << ',';
+            output << "\"chunkId\":" << segment_group.chunk_id << ',';
+            output << "\"segmentHeaderOffset\":" << segment_group.segment_header_offset << ',';
+            output << "\"segmentPayloadOffset\":" << segment_group.segment_payload_offset << ',';
+            output << "\"count\":" << segment_group.count << ',';
+            output << "\"firstTimestampMillis\":" << segment_group.first_timestamp_millis << ',';
+            output << "\"lastTimestampMillis\":" << segment_group.last_timestamp_millis;
+            output << '}';
+        }
+        output << "]}";
+    }
+    output << "],\"errors\":[";
+    for (std::size_t index = 0; index < scan.errors.size(); ++index) {
+        if (index > 0) output << ',';
+        write_packet_scan_error_json(output, scan.errors[index]);
+    }
+    output << "]}";
+    return output.str();
+}
+
+std::string dump_packet_type_file_json(
+    const std::string& path,
+    std::uint16_t packet_type,
+    std::string_view segment_type,
+    std::size_t max_blocks
+) {
+    const std::vector<std::uint8_t> bytes = read_file_bytes(path);
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    std::size_t matching_block_count = 0;
+    std::vector<DumpedPacketBlock> dumped;
+    const PacketFileScan scan = scan_packet_segments(
+        bytes, summary, segment_type,
+        [&](const ReplaySegmentSummary& segment, const std::vector<std::uint8_t>& decompressed, const PacketBlockParseResult& result) {
+            for (const PacketBlock& block : result.blocks) {
+                if (block.packet_type != packet_type) continue;
+                matching_block_count += 1;
+                if (max_blocks > 0 && dumped.size() >= max_blocks) continue;
+                DumpedPacketBlock entry;
+                entry.segment = segment;
+                entry.block_index = block.block_index;
+                entry.marker = block.marker;
+                entry.channel = block.channel;
+                entry.timestamp_millis = packet_timestamp_millis(block.timestamp_seconds);
+                entry.timestamp_is_delta = block.timestamp_is_delta;
+                entry.timestamp_delta_milliseconds = block.timestamp_delta_milliseconds;
+                entry.content_length = block.content_length;
+                entry.content_length_is_compact = block.content_length_is_compact;
+                entry.packet_type = block.packet_type;
+                entry.packet_type_is_inherited = block.packet_type_is_inherited;
+                entry.block_param = block.block_param;
+                entry.block_param_is_compact = block.block_param_is_compact;
+                entry.block_param_delta = block.block_param_delta;
+                entry.block_param_signed_delta = block.block_param_signed_delta;
+                entry.header_offset = block.header_offset;
+                entry.content_offset = block.content_offset;
+                entry.end_offset = block.end_offset;
+                entry.content_hex_bytes = std::min<std::size_t>(block.content_length, kPacketDumpHexLimit);
+                entry.content_hex = packet_bytes_to_hex(std::span<const std::uint8_t>(
+                    decompressed.data() + block.content_offset, entry.content_hex_bytes));
+                dumped.push_back(std::move(entry));
+            }
+        });
+
+    std::ostringstream output;
+    output << '{';
+    output << "\"schema\":\"packet-type-dump.v1\",";
+    output << "\"replayPath\":\"" << json_escape(path) << "\",";
+    output << "\"matchId\":" << summary.container.match_id << ',';
+    output << "\"gameVersion\":\"" << json_escape(summary.game_version) << "\",";
+    output << "\"versionGroup\":\"" << json_escape(packet_version_group(summary.game_version)) << "\",";
+    output << "\"segmentType\":\"" << json_escape(scan.segment_filter) << "\",";
+    output << "\"packetType\":" << packet_type << ',';
+    output << "\"maxBlocks\":" << max_blocks << ',';
+    output << "\"matchingBlockCount\":" << matching_block_count << ',';
+    output << "\"emittedBlockCount\":" << dumped.size() << ',';
+    output << "\"truncated\":" << bool_to_json(dumped.size() < matching_block_count) << ',';
+    output << "\"valid\":" << bool_to_json(scan.selected_segment_count > 0 && scan.exact_segment_count == scan.selected_segment_count) << ',';
+    output << "\"blocks\":[";
+    for (std::size_t index = 0; index < dumped.size(); ++index) {
+        if (index > 0) output << ',';
+        const DumpedPacketBlock& block = dumped[index];
+        output << '{';
+        output << "\"segmentType\":\"" << json_escape(block.segment.type) << "\",";
+        output << "\"segmentId\":" << block.segment.id << ',';
+        output << "\"chunkId\":" << block.segment.chunk_id << ',';
+        output << "\"segmentHeaderOffset\":" << block.segment.header_offset << ',';
+        output << "\"segmentPayloadOffset\":" << block.segment.payload_offset << ',';
+        output << "\"blockIndex\":" << block.block_index << ',';
+        output << "\"sourceOffset\":" << block.header_offset << ',';
+        output << "\"headerOffset\":" << block.header_offset << ',';
+        output << "\"contentOffset\":" << block.content_offset << ',';
+        output << "\"endOffset\":" << block.end_offset << ',';
+        output << "\"marker\":" << static_cast<unsigned int>(block.marker) << ',';
+        output << "\"channel\":" << static_cast<unsigned int>(block.channel) << ',';
+        output << "\"timestampMillis\":" << block.timestamp_millis << ',';
+        output << "\"timestampIsDelta\":" << bool_to_json(block.timestamp_is_delta) << ',';
+        output << "\"timestampDeltaMilliseconds\":" << static_cast<unsigned int>(block.timestamp_delta_milliseconds) << ',';
+        output << "\"packetType\":" << block.packet_type << ',';
+        output << "\"packetTypeIsInherited\":" << bool_to_json(block.packet_type_is_inherited) << ',';
+        output << "\"blockParam\":" << block.block_param << ',';
+        output << "\"blockParamIsCompact\":" << bool_to_json(block.block_param_is_compact) << ',';
+        output << "\"rawBlockParam\":" << (block.block_param_is_compact ? static_cast<std::uint32_t>(block.block_param_delta) : block.block_param) << ',';
+        output << "\"blockParamDelta\":" << static_cast<unsigned int>(block.block_param_delta) << ',';
+        output << "\"blockParamSignedDelta\":" << block.block_param_signed_delta << ',';
+        output << "\"contentLength\":" << block.content_length << ',';
+        output << "\"contentLengthIsCompact\":" << bool_to_json(block.content_length_is_compact) << ',';
+        output << "\"contentHexBytes\":" << block.content_hex_bytes << ',';
+        output << "\"contentHexTruncated\":" << bool_to_json(block.content_hex_bytes < block.content_length) << ',';
+        output << "\"contentHex\":\"" << block.content_hex << "\"";
+        output << '}';
+    }
+    output << "],\"errors\":[";
+    for (std::size_t index = 0; index < scan.errors.size(); ++index) {
+        if (index > 0) output << ',';
+        write_packet_scan_error_json(output, scan.errors[index]);
+    }
+    output << "]}";
+    return output.str();
+}
+
+namespace {
+
+struct KillPacketProfile {
+    std::string_view version_group;
+    std::uint16_t owner_sequence_packet_type = 0;
+    std::uint16_t death_marker_packet_type = 0;
+    std::uint32_t champion_network_id_base = 0;
+};
+
+constexpr std::array<KillPacketProfile, 8> kKillPacketProfiles{{
+    {"15.22", 0x0015, 0x01D4, 0x40000099},
+    {"15.23", 0x0105, 0x0343, 0x400004CC},
+    {"15.24", 0x01D8, 0x020E, 0x40000147},
+    {"16.1", 0x02D6, 0x0093, 0x400000AD},
+    {"16.5", 0x021A, 0x03EF, 0x400000AD},
+    {"16.6", 0x02EC, 0x001A, 0x400000AD},
+    {"16.7", 0x0052, 0x0452, 0x400000AD},
+    {"16.9", 0x0073, 0x02CB, 0x400000AD},
+}};
+
+struct KillRelevantBlock { PacketBlock block; long long timestamp_millis = 0; };
+
+struct ReplayKillEvent {
+    long long timestamp_millis = 0;
+    int victim_participant_id = 0;
+    int killer_participant_id = 0;
+    std::vector<int> assisting_participant_ids;
+    std::uint32_t victim_network_id = 0;
+    std::uint32_t killer_network_id = 0;
+    std::vector<std::uint32_t> assisting_network_ids;
+    KillRelevantBlock death_marker;
+    std::vector<KillRelevantBlock> owner_sequence;
+};
+
+struct KillDecodeResult {
+    std::vector<ReplayKillEvent> events;
+    std::vector<std::string> errors;
+    std::vector<KillRelevantBlock> ignored_markers;
+    std::size_t pending_owner_block_count = 0;
+};
+
+struct KillKdaRow {
+    int participant_id = 0;
+    int expected_kills = 0;
+    int expected_deaths = 0;
+    int expected_assists = 0;
+    int decoded_kills = 0;
+    int decoded_deaths = 0;
+    int decoded_assists = 0;
+    bool pass = false;
+};
+
+struct KillKdaValidation {
+    std::vector<KillKdaRow> rows;
+    std::size_t passing_participant_count = 0;
+    bool pass = false;
+};
+
+struct KillSourceInfo {
+    bool has_file = false;
+    std::string replay_path;
+    std::string replay_id;
+    std::string match_id;
+};
+
+[[nodiscard]] const KillPacketProfile* find_kill_packet_profile(std::string_view version_group) {
+    const auto found = std::find_if(kKillPacketProfiles.begin(), kKillPacketProfiles.end(),
+        [version_group](const KillPacketProfile& profile) { return profile.version_group == version_group; });
+    return found == kKillPacketProfiles.end() ? nullptr : &*found;
+}
+
+[[nodiscard]] std::string fixed_hex(std::uint32_t value, int width) {
+    std::ostringstream output;
+    output << "0x" << std::uppercase << std::hex << std::setw(width) << std::setfill('0') << value;
+    return output.str();
+}
+
+[[nodiscard]] std::string current_utc_iso8601() {
+    const auto now = std::chrono::system_clock::now();
+    const auto seconds = std::chrono::time_point_cast<std::chrono::seconds>(now);
+    const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(now - seconds).count();
+    const std::time_t raw = std::chrono::system_clock::to_time_t(now);
+    std::tm utc{};
+#if defined(_WIN32)
+    gmtime_s(&utc, &raw);
+#else
+    gmtime_r(&raw, &utc);
+#endif
+    std::ostringstream output;
+    output << std::put_time(&utc, "%Y-%m-%dT%H:%M:%S") << '.'
+           << std::setw(3) << std::setfill('0') << milliseconds << 'Z';
+    return output.str();
+}
+
+[[nodiscard]] int owner_to_participant_id(std::uint32_t owner, const KillPacketProfile& profile) {
+    if (owner <= profile.champion_network_id_base) return 0;
+    const std::uint32_t participant_id = owner - profile.champion_network_id_base;
+    return participant_id <= 10 ? static_cast<int>(participant_id) : 0;
+}
+
+void write_nullable_string(std::ostringstream& output, std::string_view value) {
+    if (value.empty()) output << "null";
+    else output << '"' << json_escape(value) << '"';
+}
+
+void write_kill_block_provenance_json(std::ostringstream& output, const KillRelevantBlock& relevant) {
+    const PacketBlock& block = relevant.block;
+    output << '{';
+    output << "\"segmentType\":\"" << packet_segment_kind_name(block.provenance.kind) << "\",";
+    output << "\"segmentId\":" << block.provenance.segment_id << ',';
+    output << "\"chunkId\":" << block.provenance.chunk_id << ',';
+    output << "\"segmentHeaderOffset\":" << block.provenance.segment_header_offset << ',';
+    output << "\"segmentPayloadOffset\":" << block.provenance.segment_payload_offset << ',';
+    output << "\"blockIndex\":" << block.block_index << ',';
+    output << "\"decompressedHeaderOffset\":" << block.header_offset << ',';
+    output << "\"decompressedContentOffset\":" << block.content_offset << ',';
+    output << "\"decompressedEndOffset\":" << block.end_offset << '}';
+}
+
+[[nodiscard]] KillDecodeResult decode_kill_events(
+    const std::vector<KillRelevantBlock>& relevant_blocks,
+    const KillPacketProfile& profile
+) {
+    KillDecodeResult decoded;
+    std::vector<KillRelevantBlock> pending_owner_blocks;
+    for (const KillRelevantBlock& relevant : relevant_blocks) {
+        if (relevant.block.packet_type == profile.owner_sequence_packet_type) {
+            pending_owner_blocks.push_back(relevant);
+            continue;
+        }
+        std::vector<KillRelevantBlock> owner_blocks;
+        for (const KillRelevantBlock& owner : pending_owner_blocks) {
+            const long long delta = owner.timestamp_millis >= relevant.timestamp_millis
+                ? owner.timestamp_millis - relevant.timestamp_millis
+                : relevant.timestamp_millis - owner.timestamp_millis;
+            if (delta <= 1) owner_blocks.push_back(owner);
+        }
+        if (relevant.block.content_length != 5) {
+            decoded.errors.push_back("unexpected-death-marker-length: Death marker length is " +
+                std::to_string(relevant.block.content_length) + ", expected 5.");
+        }
+        if (owner_blocks.empty()) {
+            decoded.ignored_markers.push_back(relevant);
+            pending_owner_blocks.clear();
+            continue;
+        }
+        std::vector<int> participant_ids;
+        bool owner_outside_range = false;
+        for (const KillRelevantBlock& owner : owner_blocks) {
+            const int participant_id = owner_to_participant_id(owner.block.block_param, profile);
+            participant_ids.push_back(participant_id);
+            owner_outside_range = owner_outside_range || participant_id == 0;
+        }
+        if (owner_outside_range) {
+            decoded.errors.push_back("owner-outside-champion-range: Owner sequence contains a network ID outside the profiled champion range.");
+            pending_owner_blocks.clear();
+            continue;
+        }
+        const int victim_participant_id = owner_to_participant_id(relevant.block.block_param, profile);
+        if (victim_participant_id == 0 || participant_ids.front() != victim_participant_id) {
+            decoded.errors.push_back("death-marker-victim-mismatch: Death marker owner does not equal the first owner-sequence champion.");
+            pending_owner_blocks.clear();
+            continue;
+        }
+        ReplayKillEvent event;
+        event.timestamp_millis = relevant.timestamp_millis;
+        event.victim_participant_id = victim_participant_id;
+        event.victim_network_id = relevant.block.block_param;
+        event.death_marker = relevant;
+        event.owner_sequence = owner_blocks;
+        if (participant_ids.size() == 1) {
+            event.killer_participant_id = 0;
+        } else {
+            event.killer_participant_id = participant_ids.back();
+            event.killer_network_id = owner_blocks.back().block.block_param;
+            event.assisting_participant_ids.assign(participant_ids.begin() + 1, participant_ids.end() - 1);
+            for (std::size_t index = 1; index + 1 < owner_blocks.size(); ++index) {
+                event.assisting_network_ids.push_back(owner_blocks[index].block.block_param);
+            }
+        }
+        decoded.events.push_back(std::move(event));
+        pending_owner_blocks.clear();
+    }
+    decoded.pending_owner_block_count = pending_owner_blocks.size();
+    return decoded;
+}
+
+[[nodiscard]] KillKdaValidation validate_kill_final_kda(
+    const std::vector<PlayerSummary>& participants,
+    const std::vector<ReplayKillEvent>& events
+) {
+    KillKdaValidation validation;
+    for (std::size_t index = 0; index < participants.size(); ++index) {
+        KillKdaRow row;
+        row.participant_id = static_cast<int>(index + 1);
+        row.expected_kills = participants[index].kills;
+        row.expected_deaths = participants[index].deaths;
+        row.expected_assists = participants[index].assists;
+        for (const ReplayKillEvent& event : events) {
+            if (event.killer_participant_id == row.participant_id) ++row.decoded_kills;
+            if (event.victim_participant_id == row.participant_id) ++row.decoded_deaths;
+            if (std::find(event.assisting_participant_ids.begin(), event.assisting_participant_ids.end(), row.participant_id)
+                != event.assisting_participant_ids.end()) ++row.decoded_assists;
+        }
+        row.pass = row.decoded_kills == row.expected_kills && row.decoded_deaths == row.expected_deaths &&
+                   row.decoded_assists == row.expected_assists;
+        if (row.pass) ++validation.passing_participant_count;
+        validation.rows.push_back(row);
+    }
+    validation.pass = validation.rows.size() == 10 && validation.passing_participant_count == validation.rows.size();
+    return validation;
+}
+
+void write_kda_validation_json(std::ostringstream& output, const KillKdaValidation& validation) {
+    output << "{\"source\":\"replay-metadata-statsJson\",\"runtimeInput\":\"rofl-only\",";
+    output << "\"participantCount\":" << validation.rows.size() << ',';
+    output << "\"passingParticipantCount\":" << validation.passing_participant_count << ',';
+    output << "\"pass\":" << bool_to_json(validation.pass) << ",\"rows\":[";
+    for (std::size_t index = 0; index < validation.rows.size(); ++index) {
+        if (index > 0) output << ',';
+        const KillKdaRow& row = validation.rows[index];
+        output << "{\"participantId\":" << row.participant_id;
+        output << ",\"expected\":{\"kills\":" << row.expected_kills << ",\"deaths\":" << row.expected_deaths
+               << ",\"assists\":" << row.expected_assists << "}";
+        output << ",\"decoded\":{\"kills\":" << row.decoded_kills << ",\"deaths\":" << row.decoded_deaths
+               << ",\"assists\":" << row.decoded_assists << "}";
+        output << ",\"pass\":" << bool_to_json(row.pass) << '}';
+    }
+    output << "]}";
+}
+
+[[nodiscard]] std::string extract_replay_kills_impl(
+    const std::vector<std::uint8_t>& bytes,
+    const KillSourceInfo& source
+) {
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const std::string version_group = packet_version_group(summary.game_version);
+    const KillPacketProfile* profile = find_kill_packet_profile(version_group);
+    if (profile == nullptr) {
+        throw std::runtime_error("Unsupported replay version " + summary.game_version +
+            ". Supported groups: 15.22, 15.23, 15.24, 16.1, 16.5, 16.6, 16.7, 16.9.");
+    }
+    std::vector<KillRelevantBlock> relevant_blocks;
+    const PacketFileScan scan = scan_packet_segments(bytes, summary, "chunk",
+        [&](const ReplaySegmentSummary&, const std::vector<std::uint8_t>&, const PacketBlockParseResult& result) {
+            for (const PacketBlock& block : result.blocks) {
+                if (block.channel == 1 && (block.packet_type == profile->owner_sequence_packet_type ||
+                    block.packet_type == profile->death_marker_packet_type)) {
+                    relevant_blocks.push_back({block, packet_timestamp_millis(block.timestamp_seconds)});
+                }
+            }
+        });
+    if (scan.selected_segment_count == 0) throw std::runtime_error("Replay contains no footer-style chunk records.");
+    if (scan.exact_segment_count != scan.selected_segment_count || !scan.errors.empty()) {
+        const std::string detail = scan.errors.empty() ? "one or more chunks were not exactly consumed"
+            : scan.errors.front().code + ": " + scan.errors.front().message;
+        throw std::runtime_error("Replay chunk packet framing failed: " + detail);
+    }
+    const KillDecodeResult decoded = decode_kill_events(relevant_blocks, *profile);
+    if (!decoded.errors.empty()) throw std::runtime_error("Kill decoding failed with " +
+        std::to_string(decoded.errors.size()) + " error(s). " + decoded.errors.front());
+    const KillKdaValidation validation = validate_kill_final_kda(summary.players, decoded.events);
+    if (!validation.pass) throw std::runtime_error("Decoded kill events do not match replay metadata final K/D/A for " +
+        std::to_string(validation.rows.size() - validation.passing_participant_count) + " participant(s).");
+    const std::size_t owner_sequence_count = static_cast<std::size_t>(std::count_if(
+        relevant_blocks.begin(), relevant_blocks.end(), [&](const KillRelevantBlock& relevant) {
+            return relevant.block.packet_type == profile->owner_sequence_packet_type;
+        }));
+    const std::size_t death_marker_count = relevant_blocks.size() - owner_sequence_count;
+
+    std::ostringstream output;
+    output << "{\"schema\":\"rofl-replay-kills/v1\",\"generatedAtUtc\":\"" << current_utc_iso8601() << "\",";
+    output << "\"source\":{\"replayPath\":";
+    if (source.has_file) output << '"' << json_escape(source.replay_path) << '"'; else output << "null";
+    output << ",\"replayId\":";
+    if (source.has_file) output << '"' << json_escape(source.replay_id) << '"'; else output << "null";
+    output << ",\"matchId\":";
+    if (source.has_file) output << '"' << json_escape(source.match_id) << '"'; else output << "null";
+    output << ",\"runtimeInput\":\"rofl-only\",\"riotApiInput\":false},";
+    output << "\"gameVersion\":\"" << json_escape(summary.game_version) << "\",\"versionGroup\":\"" << version_group << "\",";
+    output << "\"profile\":{\"channel\":1,\"ownerSequencePacketType\":" << profile->owner_sequence_packet_type;
+    output << ",\"ownerSequencePacketTypeHex\":\"" << fixed_hex(profile->owner_sequence_packet_type, 4) << "\"";
+    output << ",\"deathMarkerPacketType\":" << profile->death_marker_packet_type;
+    output << ",\"deathMarkerPacketTypeHex\":\"" << fixed_hex(profile->death_marker_packet_type, 4) << "\"";
+    output << ",\"championNetworkIdBase\":" << profile->champion_network_id_base;
+    output << ",\"championNetworkIdBaseHex\":\"" << fixed_hex(profile->champion_network_id_base, 8) << "\"";
+    output << ",\"ownerOrder\":\"[victim, ...ordered assists, killer]\"";
+    output << ",\"executionRule\":\"A one-owner sequence has killerParticipantId=0.\"},";
+    output << "\"replay\":{\"gameLengthMillis\":";
+    if (summary.game_length_millis > 0) output << summary.game_length_millis; else output << "null";
+    output << ",\"lastGameChunkId\":";
+    if (summary.last_game_chunk_id > 0) output << summary.last_game_chunk_id; else output << "null";
+    output << ",\"lastKeyFrameId\":";
+    if (summary.last_keyframe_id > 0) output << summary.last_keyframe_id; else output << "null";
+    output << ",\"metadataOffset\":" << summary.container.metadata_offset << ",\"metadataLength\":" << summary.container.metadata_size << "},";
+    output << "\"participants\":[";
+    for (std::size_t index = 0; index < summary.players.size(); ++index) {
+        if (index > 0) output << ',';
+        const PlayerSummary& participant = summary.players[index];
+        output << "{\"participantId\":" << index + 1 << ",\"championName\":";
+        write_nullable_string(output, participant.champion);
+        output << ",\"teamId\":";
+        if (participant.team != 0) output << participant.team; else output << "null";
+        output << ",\"teamPosition\":"; write_nullable_string(output, participant.team_position);
+        output << ",\"riotIdGameName\":"; write_nullable_string(output, participant.riot_id_game_name);
+        output << ",\"riotIdTagLine\":"; write_nullable_string(output, participant.riot_id_tag_line);
+        output << ",\"finalKills\":" << participant.kills << ",\"finalDeaths\":" << participant.deaths
+               << ",\"finalAssists\":" << participant.assists << '}';
+    }
+    output << "],\"events\":[";
+    for (std::size_t index = 0; index < decoded.events.size(); ++index) {
+        if (index > 0) output << ',';
+        const ReplayKillEvent& event = decoded.events[index];
+        output << "{\"type\":\"CHAMPION_KILL\",\"timestampMillis\":" << event.timestamp_millis;
+        output << ",\"victimParticipantId\":" << event.victim_participant_id << ",\"killerParticipantId\":" << event.killer_participant_id;
+        output << ",\"assistingParticipantIds\":[";
+        for (std::size_t assist = 0; assist < event.assisting_participant_ids.size(); ++assist) {
+            if (assist > 0) output << ','; output << event.assisting_participant_ids[assist];
+        }
+        output << "],\"victimNetworkId\":" << event.victim_network_id << ",\"victimNetworkIdHex\":\""
+               << fixed_hex(event.victim_network_id, 8) << "\",\"killerNetworkId\":";
+        if (event.killer_participant_id == 0) output << "null"; else output << event.killer_network_id;
+        output << ",\"killerNetworkIdHex\":";
+        if (event.killer_participant_id == 0) output << "null"; else output << '"' << fixed_hex(event.killer_network_id, 8) << '"';
+        output << ",\"assistingNetworkIds\":[";
+        for (std::size_t assist = 0; assist < event.assisting_network_ids.size(); ++assist) {
+            if (assist > 0) output << ','; output << event.assisting_network_ids[assist];
+        }
+        output << "],\"provenance\":{\"deathMarker\":"; write_kill_block_provenance_json(output, event.death_marker);
+        output << ",\"ownerSequence\":[";
+        for (std::size_t owner = 0; owner < event.owner_sequence.size(); ++owner) {
+            if (owner > 0) output << ','; write_kill_block_provenance_json(output, event.owner_sequence[owner]);
+        }
+        output << "]}}";
+    }
+    output << "],\"diagnostics\":{\"footerRecordCount\":" << summary.container.segments.size();
+    output << ",\"chunkRecordCount\":" << scan.selected_segment_count << ",\"decompressedChunkBytes\":" << scan.input_bytes;
+    output << ",\"packetBlockCount\":" << scan.packet_count << ",\"relevantPacketBlockCount\":" << relevant_blocks.size();
+    output << ",\"ownerSequenceBlockCount\":" << owner_sequence_count << ",\"deathMarkerBlockCount\":" << death_marker_count;
+    output << ",\"ignoredDeathMarkerBlockCount\":" << decoded.ignored_markers.size() << ",\"ignoredDeathMarkers\":[";
+    for (std::size_t index = 0; index < decoded.ignored_markers.size(); ++index) {
+        if (index > 0) output << ',';
+        const KillRelevantBlock& marker = decoded.ignored_markers[index];
+        output << "{\"timestampMillis\":" << marker.timestamp_millis << ",\"networkId\":" << marker.block.block_param;
+        output << ",\"networkIdHex\":\"" << fixed_hex(marker.block.block_param, 8) << "\",\"provenance\":";
+        write_kill_block_provenance_json(output, marker); output << '}';
+    }
+    output << "],\"decodedKillEventCount\":" << decoded.events.size() << ",\"pendingOwnerBlockCount\":" << decoded.pending_owner_block_count;
+    output << ",\"exactPacketFraming\":true,\"signedCompactBlockParamDelta\":true,\"finalKdaValidation\":";
+    write_kda_validation_json(output, validation); output << "}}";
+    return output.str();
+}
+
+}  // namespace
+
+std::string extract_replay_kills_json(const std::vector<std::uint8_t>& bytes) {
+    return extract_replay_kills_impl(bytes, {});
+}
+
+std::string extract_replay_kills_file_json(const std::string& path) {
+    std::error_code error;
+    std::filesystem::path absolute = std::filesystem::absolute(path, error);
+    if (error) absolute = std::filesystem::path(path);
+    absolute = absolute.lexically_normal();
+    KillSourceInfo source;
+    source.has_file = true;
+    source.replay_path = absolute.string();
+    source.replay_id = absolute.stem().string();
+    source.match_id = source.replay_id;
+    const std::size_t separator = source.match_id.find('-');
+    if (separator != std::string::npos) source.match_id[separator] = '_';
+    return extract_replay_kills_impl(read_file_bytes(source.replay_path), source);
 }
 
 std::string replay_summary_to_json(const ReplaySummary& summary) {

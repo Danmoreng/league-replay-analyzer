@@ -1,6 +1,8 @@
+#include <bit>
 #include <cstdlib>
 #include <cstdint>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -221,6 +223,90 @@ std::vector<std::uint8_t> build_footer_zstd_fixture() {
     return bytes;
 }
 
+void append_u16_le(std::vector<std::uint8_t>& bytes, std::uint16_t value) {
+    bytes.push_back(static_cast<std::uint8_t>(value & 0xFFu));
+    bytes.push_back(static_cast<std::uint8_t>((value >> 8u) & 0xFFu));
+}
+
+void append_u32_le(std::vector<std::uint8_t>& bytes, std::uint32_t value) {
+    bytes.push_back(static_cast<std::uint8_t>(value & 0xFFu));
+    bytes.push_back(static_cast<std::uint8_t>((value >> 8u) & 0xFFu));
+    bytes.push_back(static_cast<std::uint8_t>((value >> 16u) & 0xFFu));
+    bytes.push_back(static_cast<std::uint8_t>((value >> 24u) & 0xFFu));
+}
+
+void append_packet_block(
+    std::vector<std::uint8_t>& bytes,
+    float timestamp_seconds,
+    std::uint16_t packet_type,
+    std::uint32_t block_param,
+    std::uint32_t content_length
+) {
+    bytes.push_back(0x01);  // channel 1, direct timestamp/length/type/parameter
+    append_u32_le(bytes, std::bit_cast<std::uint32_t>(timestamp_seconds));
+    append_u32_le(bytes, content_length);
+    append_u16_le(bytes, packet_type);
+    append_u32_le(bytes, block_param);
+    bytes.insert(bytes.end(), content_length, 0);
+}
+
+std::string escape_json_string(const std::string& input) {
+    std::string escaped;
+    for (const char ch : input) {
+        if (ch == '"' || ch == '\\') escaped.push_back('\\');
+        escaped.push_back(ch);
+    }
+    return escaped;
+}
+
+std::vector<std::uint8_t> build_footer_kill_fixture() {
+    constexpr std::uint32_t champion_base = 0x400000AD;
+    constexpr std::uint16_t owner_packet_type = 0x021A;
+    constexpr std::uint16_t marker_packet_type = 0x03EF;
+    std::vector<std::uint8_t> payload;
+    append_packet_block(payload, 10.0F, marker_packet_type, champion_base + 4, 5);  // orphan marker
+    append_packet_block(payload, 12.5F, owner_packet_type, champion_base + 1, 0);  // victim
+    append_packet_block(payload, 12.5F, owner_packet_type, champion_base + 3, 0);  // assist
+    append_packet_block(payload, 12.5F, owner_packet_type, champion_base + 2, 0);  // killer
+    append_packet_block(payload, 12.5F, marker_packet_type, champion_base + 1, 5);
+
+    std::ostringstream stats;
+    stats << '[';
+    for (int participant_id = 1; participant_id <= 10; ++participant_id) {
+        if (participant_id > 1) stats << ',';
+        stats << "{\"TEAM\":\"" << (participant_id <= 5 ? 100 : 200)
+              << "\",\"SKIN\":\"Champion" << participant_id
+              << "\",\"TEAM_POSITION\":\"" << (participant_id == 1 ? "TOP" : "UNKNOWN")
+              << "\",\"RIOT_ID_GAME_NAME\":\"Player" << participant_id
+              << "\",\"RIOT_ID_TAG_LINE\":\"TEST\",\"CHAMPIONS_KILLED\":\""
+              << (participant_id == 2 ? 1 : 0) << "\",\"NUM_DEATHS\":\""
+              << (participant_id == 1 ? 1 : 0) << "\",\"ASSISTS\":\""
+              << (participant_id == 3 ? 1 : 0) << "\"}";
+    }
+    stats << ']';
+    const std::string metadata =
+        "{\"gameLength\":240000,\"lastGameChunkId\":1,\"lastKeyFrameId\":0,\"statsJson\":\"" +
+        escape_json_string(stats.str()) + "\"}";
+    const auto compressed = compress_zstd_payload(std::string(
+        reinterpret_cast<const char*>(payload.data()), payload.size()));
+    if (compressed.empty()) return {};
+
+    constexpr std::size_t header_offset = 32;
+    constexpr std::size_t payload_offset = header_offset + 17;
+    const std::size_t metadata_offset = payload_offset + compressed.size();
+    const std::size_t total_size = metadata_offset + metadata.size() + 4;
+    std::vector<std::uint8_t> bytes(total_size, 0);
+    write_ascii(bytes, 0, "RIOT");
+    bytes[4] = 0x02;
+    write_ascii(bytes, 16, "16.5.752.7101");
+    write_zstd_record_header(bytes, header_offset, 1, 2, 1,
+        static_cast<std::uint32_t>(payload.size()), static_cast<std::uint32_t>(compressed.size()));
+    std::copy(compressed.begin(), compressed.end(), bytes.begin() + payload_offset);
+    write_ascii(bytes, metadata_offset, metadata);
+    write_u32_le(bytes, total_size - 4, static_cast<std::uint32_t>(metadata.size()));
+    return bytes;
+}
+
 
 bool test_classic_fixture() {
     const auto summary = rofl::core::parse_replay_bytes(build_classic_rofl_fixture());
@@ -325,7 +411,7 @@ bool test_footer_zstd_fixture() {
     return json.find("\"segmentTablePresent\":true") != std::string::npos &&
            json.find("\"codec\":\"zstd\"") != std::string::npos &&
            json.find("\"payloadDecodingAvailable\":true") != std::string::npos &&
-           summary.warnings.back().find("raw zstd decompression is available") != std::string::npos &&
+           summary.warnings.back().find("exact packet-block framing is available") != std::string::npos &&
            probe.find("Decompressed segment: id=1, type=startup") != std::string::npos &&
            probe.find("startup:hello") != std::string::npos &&
            inspect.find("Replay inspect") != std::string::npos &&
@@ -351,6 +437,19 @@ bool test_keyframe_state_candidates_unsupported_fixture() {
            json.find("\"participantIdentity\":\"unassigned\"") != std::string::npos;
 }
 
+bool test_replay_kill_extractor_fixture() {
+    const std::string json = rofl::core::extract_replay_kills_json(build_footer_kill_fixture());
+    return json.find("\"schema\":\"rofl-replay-kills/v1\"") != std::string::npos &&
+           json.find("\"replayPath\":null") != std::string::npos &&
+           json.find("\"versionGroup\":\"16.5\"") != std::string::npos &&
+           json.find("\"victimParticipantId\":1,\"killerParticipantId\":2") != std::string::npos &&
+           json.find("\"assistingParticipantIds\":[3]") != std::string::npos &&
+           json.find("\"ignoredDeathMarkerBlockCount\":1") != std::string::npos &&
+           json.find("\"segmentType\":\"chunk\"") != std::string::npos &&
+           json.find("\"decodedKillEventCount\":1") != std::string::npos &&
+           json.find("\"passingParticipantCount\":10,\"pass\":true") != std::string::npos;
+}
+
 }  // namespace
 
 int main() {
@@ -367,6 +466,10 @@ int main() {
     }
 
     if (!test_keyframe_state_candidates_unsupported_fixture()) {
+        return EXIT_FAILURE;
+    }
+
+    if (!test_replay_kill_extractor_fixture()) {
         return EXIT_FAILURE;
     }
 

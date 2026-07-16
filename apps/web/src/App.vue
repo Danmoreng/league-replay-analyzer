@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 
 import DataBrowser from "./components/DataBrowser.vue";
+import KillTimeline from "./components/KillTimeline.vue";
 import ReplayInspector from "./components/ReplayInspector.vue";
 import Minimap from "./components/Minimap.vue";
 import Timeline from "./components/Timeline.vue";
@@ -19,7 +20,8 @@ import {
   type LoadedReplayMovementFixture,
 } from "./replayMovementFixtures";
 import { type PlayerSummary, type ReplaySummary } from "./replayParser";
-import { parseReplayBufferWithWasm } from "./wasmReplayParser";
+import type { ReplayKillResult } from "./replayKills";
+import { extractReplayKillsWithWasm, parseReplayBufferWithWasm } from "./wasmReplayParser";
 
 const { seek, setDuration } = usePlayback();
 const summary = ref<ReplaySummary | null>(null);
@@ -28,6 +30,9 @@ const riotBundle = ref<RiotFixtureBundle | null>(null);
 const apiMovement = ref<PlayerMovementData[]>([]);
 const replayMovement = ref<PlayerMovementData[]>([]);
 const riotFixtureStatus = ref("No Riot fixture loaded yet.");
+const replayKills = ref<ReplayKillResult | null>(null);
+const replayKillsError = ref("");
+const isLoadingReplayKills = ref(false);
 const replayMovementStatus = ref("No replay-derived movement fixture loaded yet.");
 const parserEngine = ref("C++/Wasm");
 const replayBuffer = ref<ArrayBuffer | null>(null);
@@ -574,6 +579,9 @@ function formatFileSize(bytes: number): string {
 async function loadReplay(file: File): Promise<void> {
   isLoading.value = true;
   errorMessage.value = "";
+  replayKills.value = null;
+  replayKillsError.value = "";
+  isLoadingReplayKills.value = true;
   loadedReplayName.value = file.name;
   status.value = `Parsing ${file.name}...`;
 
@@ -587,6 +595,19 @@ async function loadReplay(file: File): Promise<void> {
     summary.value = parsedSummary;
     browserModel.value = buildReplayBrowserModel(bytes, parsedSummary);
     riotBundle.value = null;
+
+    let killStatus = "Kill timeline unavailable.";
+    status.value = `Parsed metadata for ${file.name}. Decoding replay kill events...`;
+    try {
+      replayKills.value = await extractReplayKillsWithWasm(buffer);
+      killStatus = `Decoded ${replayKills.value.events.length} replay-only kill events.`;
+    } catch (killError) {
+      replayKills.value = null;
+      replayKillsError.value = killError instanceof Error ? killError.message : String(killError);
+    } finally {
+      isLoadingReplayKills.value = false;
+    }
+
     if (derivedMatchId) {
       try {
         riotBundle.value = await loadRiotFixtureBundle(derivedMatchId);
@@ -602,16 +623,19 @@ async function loadReplay(file: File): Promise<void> {
     setDuration(parsedSummary.gameLengthMillis);
     seek(0);
     const movementStatus = await loadMovementData(derivedMatchId);
-    status.value = `Parsed ${file.name} successfully. ${movementStatus}`;
+    status.value = `Parsed ${file.name} successfully. ${killStatus} ${movementStatus}`;
   } catch (error) {
     summary.value = null;
     browserModel.value = null;
     riotBundle.value = null;
+    replayKills.value = null;
+    replayKillsError.value = "";
     replayBuffer.value = null;
     errorMessage.value = error instanceof Error ? error.message : String(error);
     status.value = "Replay parsing failed.";
   } finally {
     isLoading.value = false;
+    isLoadingReplayKills.value = false;
   }
 }
 
@@ -792,6 +816,12 @@ function onFileChange(event: Event): void {
 
             <Timeline class="main-timeline" />
           </div>
+
+          <KillTimeline
+            :result="replayKills"
+            :is-loading="isLoadingReplayKills"
+            :error-message="replayKillsError"
+          />
 
           <div class="row g-2">
             <div class="col-lg-8 d-flex flex-column gap-2">

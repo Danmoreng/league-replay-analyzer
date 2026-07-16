@@ -1,4 +1,5 @@
 add_library(rofl_core STATIC
+    src/packet_blocks.cpp
     src/replay_analyzer.cpp
 )
 
@@ -23,4 +24,12 @@ add_executable(rofl_core_tests
 
 target_link_libraries(rofl_core_tests PRIVATE rofl_core)
 
+add_executable(rofl_packet_blocks_tests
+    tests/packet_blocks_test.cpp
+)
+
+target_link_libraries(rofl_packet_blocks_tests PRIVATE rofl_core)
+add_dependencies(rofl_core_tests rofl_packet_blocks_tests)
+
 add_test(NAME rofl_core_smoke COMMAND rofl_core_tests)
+add_test(NAME rofl_packet_blocks COMMAND rofl_packet_blocks_tests)
