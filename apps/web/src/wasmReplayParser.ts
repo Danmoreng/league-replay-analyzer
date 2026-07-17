@@ -1,6 +1,12 @@
-import type { ReplayEntitySlabAnalysisResult, ReplayFamilyAnalysisResult, ReplayFamilyScanResult, ReplayScalarFamilyAnalysisResult } from "./replayInvestigation";
+import type {
+  ReplayEntitySlabAnalysisResult,
+  ReplayFamilyAnalysisResult,
+  ReplayFamilyScanResult,
+  ReplayScalarFamilyAnalysisResult,
+} from "./replayInvestigation";
 import type { ReplayKillResult } from "./replayKills";
 import type { ReplayObjectiveResult } from "./replayObjectives";
+import type { ReplayWardResult } from "./replayWards";
 import type { ReplaySummary } from "./replayParser";
 import createReplayModule from "./generated/wasm/rofl_wasm.js";
 
@@ -104,10 +110,19 @@ export async function extractReplayObjectivesWithWasm(
       ["number", "number"],
     );
 
-    return parseJsonResult<ReplayObjectiveResult>(
-      module,
-      extractObjectives(replayPointer, size),
+    return parseJsonResult<ReplayObjectiveResult>(module, extractObjectives(replayPointer, size));
+  });
+}
+
+export async function extractReplayWardsWithWasm(buffer: ArrayBuffer): Promise<ReplayWardResult> {
+  return withReplayBuffer(buffer, (module, replayPointer, size) => {
+    const extractWards = module.cwrap<(input: number, size: number) => number>(
+      "lra_extract_replay_wards_buffer",
+      "number",
+      ["number", "number"],
     );
+
+    return parseJsonResult<ReplayWardResult>(module, extractWards(replayPointer, size));
   });
 }
 
@@ -119,7 +134,13 @@ export async function scanReplayFamiliesWithWasm(
 ): Promise<ReplayFamilyScanResult> {
   return withReplayBuffer(buffer, (module, replayPointer, size) => {
     const scanFamilies = module.cwrap<
-      (input: number, size: number, minimumLength: number, minimumRecords: number, topFamilies: number) => number
+      (
+        input: number,
+        size: number,
+        minimumLength: number,
+        minimumRecords: number,
+        topFamilies: number,
+      ) => number
     >("lra_scan_replay_families_buffer", "number", [
       "number",
       "number",
@@ -145,13 +166,7 @@ export async function analyzeEntitySlabWithWasm(
     topSlots?: number;
   },
 ): Promise<ReplayEntitySlabAnalysisResult> {
-  const {
-    length,
-    firstByte,
-    headerSize,
-    stride = 16,
-    topSlots = 24,
-  } = options;
+  const { length, firstByte, headerSize, stride = 16, topSlots = 24 } = options;
 
   return withReplayBuffer(buffer, (module, replayPointer, size) => {
     const analyzeFamily = module.cwrap<
@@ -176,15 +191,7 @@ export async function analyzeEntitySlabWithWasm(
 
     return parseJsonResult<ReplayEntitySlabAnalysisResult>(
       module,
-      analyzeFamily(
-        replayPointer,
-        size,
-        length,
-        firstByte,
-        headerSize,
-        stride,
-        topSlots,
-      ),
+      analyzeFamily(replayPointer, size, length, firstByte, headerSize, stride, topSlots),
     );
   });
 }
@@ -253,8 +260,6 @@ export async function analyzeSparseFamilyWithWasm(
   });
 }
 
-
-
 export async function analyzeScalarFamilyWithWasm(
   buffer: ArrayBuffer,
   options: {
@@ -265,13 +270,7 @@ export async function analyzeScalarFamilyWithWasm(
     topSlots?: number;
   },
 ): Promise<ReplayScalarFamilyAnalysisResult> {
-  const {
-    length,
-    firstByte,
-    headerSize,
-    stride = 16,
-    topSlots = 24,
-  } = options;
+  const { length, firstByte, headerSize, stride = 16, topSlots = 24 } = options;
 
   return withReplayBuffer(buffer, (module, replayPointer, size) => {
     const analyzeFamily = module.cwrap<
@@ -296,19 +295,10 @@ export async function analyzeScalarFamilyWithWasm(
 
     return parseJsonResult<ReplayScalarFamilyAnalysisResult>(
       module,
-      analyzeFamily(
-        replayPointer,
-        size,
-        length,
-        firstByte,
-        headerSize,
-        stride,
-        topSlots,
-      ),
+      analyzeFamily(replayPointer, size, length, firstByte, headerSize, stride, topSlots),
     );
   });
 }
-
 
 export async function analyzeCleanRowOffsetsWithWasm(
   buffer: ArrayBuffer,
@@ -321,14 +311,7 @@ export async function analyzeCleanRowOffsetsWithWasm(
     topFields?: number;
   },
 ): Promise<any> {
-  const {
-    length,
-    firstByte,
-    headerSize,
-    stride = 16,
-    slotIndices,
-    topFields = 8,
-  } = options;
+  const { length, firstByte, headerSize, stride = 16, slotIndices, topFields = 8 } = options;
 
   return withReplayBuffer(buffer, (module, replayPointer, size) => {
     const analyzeFamily = module.cwrap<
@@ -380,14 +363,7 @@ export async function analyzeBitfieldSchemaWithWasm(
     topWindows?: number;
   },
 ): Promise<any> {
-  const {
-    length,
-    firstByte,
-    headerSize,
-    stride = 16,
-    slotIndices,
-    topWindows = 12,
-  } = options;
+  const { length, firstByte, headerSize, stride = 16, slotIndices, topWindows = 12 } = options;
 
   return withReplayBuffer(buffer, (module, replayPointer, size) => {
     const analyzeFamily = module.cwrap<

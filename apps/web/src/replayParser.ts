@@ -8,9 +8,16 @@ export interface PlayerSummary {
   kills: number;
   deaths: number;
   assists: number;
+  level: number;
+  experience: number;
+  laneMinionsKilled: number;
+  neutralMinionsKilled: number;
+  items: number[];
   goldEarned: number;
   totalDamageToChampions: number;
   visionScore: number;
+  wardsPlaced: number;
+  wardsKilled: number;
 }
 
 export interface ReplaySegmentSummary {
@@ -48,6 +55,7 @@ export interface ReplayContainerSummary {
 export interface ReplayCapabilities {
   metadataAvailable: boolean;
   playerStatsAvailable: boolean;
+  validatedFinalPlayerStatsAvailable: boolean;
   binaryHeaderAvailable: boolean;
   payloadHeaderAvailable: boolean;
   segmentTableAvailable: boolean;
@@ -75,6 +83,31 @@ const knownPayloadHeaderMinimumSize = 34;
 const knownSegmentHeaderLength = 17;
 const footerLengthFieldSize = 4;
 const footerRecordHeaderLength = 17;
+const validatedFinalPlayerStatVersionGroups = new Set([
+  "15.22",
+  "15.23",
+  "15.24",
+  "16.1",
+  "16.5",
+  "16.6",
+  "16.7",
+  "16.9",
+]);
+const validatedFinalPlayerStatKeys = [
+  "LEVEL",
+  "EXP",
+  "MINIONS_KILLED",
+  "NEUTRAL_MINIONS_KILLED",
+  "ITEM0",
+  "ITEM1",
+  "ITEM2",
+  "ITEM3",
+  "ITEM4",
+  "ITEM5",
+  "ITEM6",
+  "WARD_PLACED",
+  "WARD_KILLED",
+] as const;
 
 function findSubsequence(bytes: Uint8Array, needle: Uint8Array): number {
   outer: for (let offset = 0; offset <= bytes.length - needle.length; offset += 1) {
@@ -208,10 +241,42 @@ function normalizePlayer(raw: Record<string, unknown>): PlayerSummary {
     kills: toNumber(raw.CHAMPIONS_KILLED),
     deaths: toNumber(raw.NUM_DEATHS),
     assists: toNumber(raw.ASSISTS),
+    level: toNumber(raw.LEVEL),
+    experience: toNumber(raw.EXP),
+    laneMinionsKilled: toNumber(raw.MINIONS_KILLED),
+    neutralMinionsKilled: toNumber(raw.NEUTRAL_MINIONS_KILLED),
+    items: Array.from({ length: 7 }, (_, index) => toNumber(raw[`ITEM${index}`])),
     goldEarned: toNumber(raw.GOLD_EARNED),
     totalDamageToChampions: toNumber(raw.TOTAL_DAMAGE_DEALT_TO_CHAMPIONS),
     visionScore: toNumber(raw.VISION_SCORE),
+    wardsPlaced: toNumber(raw.WARD_PLACED),
+    wardsKilled: toNumber(raw.WARD_KILLED),
   };
+}
+
+function isIntegerValue(value: unknown): boolean {
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value);
+  }
+  if (typeof value !== "string" || !/^-?\d+$/.test(value)) {
+    return false;
+  }
+  return Number.isSafeInteger(Number(value));
+}
+
+function hasValidatedFinalPlayerStats(
+  gameVersion: string,
+  rawPlayers: Record<string, unknown>[],
+): boolean {
+  const match = gameVersion.match(/^(\d+)\.(\d+)/);
+  const versionGroup = match ? `${match[1]}.${match[2]}` : "";
+  return (
+    validatedFinalPlayerStatVersionGroups.has(versionGroup) &&
+    rawPlayers.length > 0 &&
+    rawPlayers.every((player) =>
+      validatedFinalPlayerStatKeys.every((key) => isIntegerValue(player[key])),
+    )
+  );
 }
 
 function buildEmptyContainer(
@@ -245,6 +310,7 @@ function buildEmptyCapabilities(): ReplayCapabilities {
   return {
     metadataAvailable: false,
     playerStatsAvailable: false,
+    validatedFinalPlayerStatsAvailable: false,
     binaryHeaderAvailable: false,
     payloadHeaderAvailable: false,
     segmentTableAvailable: false,
@@ -585,9 +651,13 @@ export function parseReplayBuffer(buffer: ArrayBuffer): ReplaySummary {
     statsJson?: string;
   };
 
-  const players = metadata.statsJson
-    ? (JSON.parse(metadata.statsJson) as Record<string, unknown>[]).map(normalizePlayer)
+  const scannedGameVersion = scanGameVersion(bytes);
+  const gameVersion =
+    scannedGameVersion === "unknown" ? (metadata.gameVersion ?? "unknown") : scannedGameVersion;
+  const rawPlayers = metadata.statsJson
+    ? (JSON.parse(metadata.statsJson) as Record<string, unknown>[])
     : [];
+  const players = rawPlayers.map(normalizePlayer);
 
   if (!classicContainer && container.metadataSource === "footer-size") {
     const footerContainer = parseFooterZstdContainer(
@@ -617,9 +687,13 @@ export function parseReplayBuffer(buffer: ArrayBuffer): ReplaySummary {
 
   capabilities.metadataAvailable = true;
   capabilities.playerStatsAvailable = players.length > 0;
+  capabilities.validatedFinalPlayerStatsAvailable = hasValidatedFinalPlayerStats(
+    gameVersion,
+    rawPlayers,
+  );
 
   return {
-    gameVersion: scanGameVersion(bytes) || metadata.gameVersion || "unknown",
+    gameVersion,
     fileSize: bytes.length,
     gameLengthMillis: metadata.gameLength ?? 0,
     lastGameChunkId: metadata.lastGameChunkId ?? 0,

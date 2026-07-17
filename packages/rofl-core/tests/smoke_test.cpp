@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <bit>
 #include <cstdlib>
 #include <cstdint>
@@ -79,7 +80,7 @@ void write_zstd_payload(std::vector<std::uint8_t>& bytes, std::size_t offset, st
 
 std::vector<std::uint8_t> build_classic_rofl_fixture() {
     const std::string metadata =
-        "{\"gameLength\":123456,\"lastGameChunkId\":66,\"lastKeyFrameId\":32,\"statsJson\":\"[{\\\"TEAM\\\":\\\"100\\\",\\\"SKIN\\\":\\\"Ornn\\\",\\\"RIOT_ID_GAME_NAME\\\":\\\"TheBearinator\\\",\\\"RIOT_ID_TAG_LINE\\\":\\\"BABBA\\\",\\\"TEAM_POSITION\\\":\\\"TOP\\\",\\\"WIN\\\":\\\"Win\\\",\\\"CHAMPIONS_KILLED\\\":\\\"3\\\",\\\"NUM_DEATHS\\\":\\\"7\\\",\\\"ASSISTS\\\":\\\"6\\\",\\\"GOLD_EARNED\\\":\\\"10373\\\",\\\"TOTAL_DAMAGE_DEALT_TO_CHAMPIONS\\\":\\\"27239\\\",\\\"VISION_SCORE\\\":\\\"17\\\"}]\"}";
+        "{\"gameLength\":123456,\"lastGameChunkId\":66,\"lastKeyFrameId\":32,\"statsJson\":\"[{\\\"TEAM\\\":\\\"100\\\",\\\"SKIN\\\":\\\"Ornn\\\",\\\"RIOT_ID_GAME_NAME\\\":\\\"TheBearinator\\\",\\\"RIOT_ID_TAG_LINE\\\":\\\"BABBA\\\",\\\"TEAM_POSITION\\\":\\\"TOP\\\",\\\"WIN\\\":\\\"Win\\\",\\\"CHAMPIONS_KILLED\\\":\\\"3\\\",\\\"NUM_DEATHS\\\":\\\"7\\\",\\\"ASSISTS\\\":\\\"6\\\",\\\"GOLD_EARNED\\\":\\\"10373\\\",\\\"TOTAL_DAMAGE_DEALT_TO_CHAMPIONS\\\":\\\"27239\\\",\\\"VISION_SCORE\\\":\\\"17\\\",\\\"LEVEL\\\":\\\"18\\\",\\\"EXP\\\":\\\"19342\\\",\\\"MINIONS_KILLED\\\":\\\"241\\\",\\\"NEUTRAL_MINIONS_KILLED\\\":\\\"17\\\",\\\"ITEM0\\\":\\\"1001\\\",\\\"ITEM1\\\":\\\"1002\\\",\\\"ITEM2\\\":\\\"1003\\\",\\\"ITEM3\\\":\\\"1004\\\",\\\"ITEM4\\\":\\\"1005\\\",\\\"ITEM5\\\":\\\"1006\\\",\\\"ITEM6\\\":\\\"0\\\",\\\"WARD_PLACED\\\":\\\"12\\\",\\\"WARD_KILLED\\\":\\\"4\\\"}]\"}";
     const std::string encrypted_key = "QUJDREVGR0g=";
 
     const std::size_t metadata_offset = 288;
@@ -381,6 +382,97 @@ std::vector<std::uint8_t> build_footer_objective_fixture() {
     return bytes;
 }
 
+std::vector<std::uint8_t> build_classic_invalid_final_stats_fixture() {
+    std::vector<std::uint8_t> bytes = build_classic_rofl_fixture();
+    const std::string needle_text = "\\\"EXP\\\":\\\"19342\\\"";
+    const std::vector<std::uint8_t> needle(needle_text.begin(), needle_text.end());
+    const auto found = std::search(bytes.begin(), bytes.end(), needle.begin(), needle.end());
+    if (found == bytes.end()) return {};
+    const std::size_t digit_offset = needle_text.find("19342");
+    *(found + static_cast<std::ptrdiff_t>(digit_offset)) = static_cast<std::uint8_t>('x');
+    return bytes;
+}
+
+std::vector<std::uint8_t> build_footer_ward_fixture() {
+    constexpr std::uint32_t champion_base = 0x400000AD;
+    constexpr std::uint16_t placement_marker_packet_type = 0x0041;
+    constexpr std::uint16_t placement_owner_packet_type = 0x04AC;
+    constexpr std::uint16_t removal_packet_type = 0x02E6;
+    constexpr std::uint16_t killer_owner_packet_type = 0x02F6;
+    constexpr std::uint32_t first_ward_id = 0x50000001;
+    constexpr std::uint32_t second_ward_id = 0x50000002;
+    constexpr std::uint32_t ignored_ward_id = 0x50000003;
+    std::vector<std::uint8_t> payload;
+
+    const auto placement_content = [](std::uint8_t discriminator) {
+        return std::vector<std::uint8_t>{0, 0, discriminator};
+    };
+
+    append_packet_block_with_content(
+        payload, 1.0F, placement_marker_packet_type, ignored_ward_id,
+        placement_content(0xB0)
+    );  // Classified marker without an owner.
+    append_packet_block_with_content(
+        payload, 1.1F, placement_marker_packet_type, ignored_ward_id + 1,
+        placement_content(0x00)
+    );  // Profile opcode and length, but an unrecognized discriminator.
+    append_packet_block(payload, 1.2F, placement_marker_packet_type, ignored_ward_id + 2, 2);
+
+    append_packet_block(payload, 2.0F, placement_owner_packet_type, champion_base + 1, 2);
+    append_packet_block_with_content(
+        payload, 2.0F, placement_marker_packet_type, first_ward_id,
+        placement_content(0xB0)
+    );
+    append_packet_block_with_content(
+        payload, 2.0F, placement_marker_packet_type, ignored_ward_id + 3,
+        placement_content(0xB0)
+    );  // Only the first classified marker after the owner may be emitted.
+
+    append_packet_block(payload, 3.0F, placement_owner_packet_type, champion_base + 2, 4);
+    append_packet_block_with_content(
+        payload, 3.0F, placement_marker_packet_type, second_ward_id,
+        placement_content(0xB0)
+    );
+
+    append_packet_block(payload, 4.0F, killer_owner_packet_type, champion_base + 4, 6);
+    append_packet_block(payload, 4.0F, killer_owner_packet_type, champion_base + 3, 7);
+    append_packet_block(payload, 4.0F, removal_packet_type, first_ward_id, 28);
+    append_packet_block(payload, 4.1F, removal_packet_type, ignored_ward_id, 28);
+
+    append_packet_block(payload, 5.0F, killer_owner_packet_type, champion_base + 5, 6);
+    append_packet_block(payload, 5.0F, removal_packet_type, second_ward_id, 27);
+
+    const std::string metadata =
+        R"({"gameLength":60000,"lastGameChunkId":1,"lastKeyFrameId":0,"statsJson":"[]"})";
+    const auto compressed = compress_zstd_payload(std::string(
+        reinterpret_cast<const char*>(payload.data()),
+        payload.size()
+    ));
+    if (compressed.empty()) return {};
+
+    constexpr std::size_t header_offset = 32;
+    constexpr std::size_t payload_offset = header_offset + 17;
+    const std::size_t metadata_offset = payload_offset + compressed.size();
+    const std::size_t total_size = metadata_offset + metadata.size() + 4;
+    std::vector<std::uint8_t> bytes(total_size, 0);
+    write_ascii(bytes, 0, "RIOT");
+    bytes[4] = 0x02;
+    write_ascii(bytes, 16, "16.9.772.8292");
+    write_zstd_record_header(
+        bytes,
+        header_offset,
+        1,
+        2,
+        1,
+        static_cast<std::uint32_t>(payload.size()),
+        static_cast<std::uint32_t>(compressed.size())
+    );
+    std::copy(compressed.begin(), compressed.end(), bytes.begin() + payload_offset);
+    write_ascii(bytes, metadata_offset, metadata);
+    write_u32_le(bytes, total_size - 4, static_cast<std::uint32_t>(metadata.size()));
+    return bytes;
+}
+
 
 bool test_classic_fixture() {
     const auto summary = rofl::core::parse_replay_bytes(build_classic_rofl_fixture());
@@ -408,19 +500,46 @@ bool test_classic_fixture() {
     if (summary.players.size() != 1) {
         return false;
     }
+    if (!summary.capabilities.validated_final_player_stats_available) {
+        return false;
+    }
 
     const auto& player = summary.players.front();
-    if (player.champion != "Ornn" || player.team != 100 || player.kills != 3 || player.deaths != 7 || player.assists != 6) {
+    if (player.champion != "Ornn" || player.team != 100 || player.kills != 3 ||
+        player.deaths != 7 || player.assists != 6 || player.level != 18 ||
+        player.experience != 19342 || player.lane_minions_killed != 241 ||
+        player.neutral_minions_killed != 17 ||
+        player.items != std::array<int, 7>{1001, 1002, 1003, 1004, 1005, 1006, 0} ||
+        player.wards_placed != 12 || player.wards_killed != 4) {
         return false;
     }
 
     const std::string json = rofl::core::replay_summary_to_json(summary);
     const std::string probe = rofl::core::probe_replay_bytes(build_classic_rofl_fixture());
     return json.find("\"segmentTableAvailable\":true") != std::string::npos &&
+           json.find("\"validatedFinalPlayerStatsAvailable\":true") != std::string::npos &&
            json.find("\"payloadOffset\":") != std::string::npos &&
+           json.find("\"level\":18") != std::string::npos &&
+           json.find("\"experience\":19342") != std::string::npos &&
+           json.find("\"laneMinionsKilled\":241") != std::string::npos &&
+           json.find("\"neutralMinionsKilled\":17") != std::string::npos &&
+           json.find("\"items\":[1001,1002,1003,1004,1005,1006,0]") != std::string::npos &&
+           json.find("\"wardsPlaced\":12") != std::string::npos &&
+           json.find("\"wardsKilled\":4") != std::string::npos &&
            probe.find("Classic header valid: yes") != std::string::npos &&
            probe.find("Container format: classic-rofl") != std::string::npos &&
            probe.find("Metadata source: binary-header") != std::string::npos;
+}
+
+bool test_invalid_final_player_stats_capability() {
+    const auto summary =
+        rofl::core::parse_replay_bytes(build_classic_invalid_final_stats_fixture());
+    if (summary.players.size() != 1 ||
+        summary.capabilities.validated_final_player_stats_available) {
+        return false;
+    }
+    const std::string json = rofl::core::replay_summary_to_json(summary);
+    return json.find("\"validatedFinalPlayerStatsAvailable\":false") != std::string::npos;
 }
 
 bool test_footer_fixture() {
@@ -444,6 +563,7 @@ bool test_footer_fixture() {
     const std::string json = rofl::core::replay_summary_to_json(summary);
     const std::string probe = rofl::core::probe_replay_bytes(build_footer_fixture());
     return json.find("\"metadataSource\":\"footer-size\"") != std::string::npos &&
+           json.find("\"validatedFinalPlayerStatsAvailable\":false") != std::string::npos &&
            probe.find("Classic header valid: no") != std::string::npos &&
            probe.find("Metadata source: footer-size") != std::string::npos &&
            probe.find("Parser summary available: yes") != std::string::npos;
@@ -551,10 +671,55 @@ bool test_replay_objective_extractor_fixture() {
            json.find("\"elementalDragonSubtypeAvailable\":false") != std::string::npos;
 }
 
+bool test_replay_ward_extractor_fixture() {
+    const std::string json =
+        rofl::core::extract_replay_wards_json(build_footer_ward_fixture());
+    return json.find("\"schema\":\"rofl-replay-wards/v1\"") != std::string::npos &&
+           json.find("\"replayPath\":null") != std::string::npos &&
+           json.find("\"versionGroup\":\"16.9\"") != std::string::npos &&
+           json.find("\"placementMarkerPacketTypeHex\":\"0x0041\"") != std::string::npos &&
+           json.find("\"placementDiscriminatorValuesHex\":[\"0xB0\"]") != std::string::npos &&
+           json.find("\"type\":\"WARD_PLACED\",\"timestampMillis\":2000,\"wardEntityNetworkId\":1342177281") != std::string::npos &&
+           json.find("\"ownerParticipantId\":1,\"ownerNetworkId\":1073741998,\"ownerNetworkIdHex\":\"0x400000AE\"") != std::string::npos &&
+           json.find("\"type\":\"WARD_PLACED\",\"timestampMillis\":3000,\"wardEntityNetworkId\":1342177282") != std::string::npos &&
+           json.find("\"type\":\"WARD_KILL\",\"timestampMillis\":4000,\"wardEntityNetworkId\":1342177281") != std::string::npos &&
+           json.find("\"killerParticipantId\":3,\"killerNetworkId\":1073742000,\"killerNetworkIdHex\":\"0x400000B0\"") != std::string::npos &&
+           json.find("\"wardType\":null,\"position\":null") != std::string::npos &&
+           json.find("\"removalReason\":null") != std::string::npos &&
+           json.find("\"ownerBlock\":{\"segmentType\":\"chunk\"") != std::string::npos &&
+           json.find("\"markerBlock\":{\"segmentType\":\"chunk\"") != std::string::npos &&
+           json.find("\"killerOwnerBlock\":{\"segmentType\":\"chunk\"") != std::string::npos &&
+           json.find("\"removalBlock\":{\"segmentType\":\"chunk\"") != std::string::npos &&
+           json.find("\"candidatePlacementMarkerBlockCount\":6") != std::string::npos &&
+           json.find("\"classifiedPlacementMarkerBlockCount\":4") != std::string::npos &&
+           json.find("\"rejectedPlacementContentLengthBlockCount\":1") != std::string::npos &&
+           json.find("\"rejectedPlacementClassifierBlockCount\":1") != std::string::npos &&
+           json.find("\"rejectedUnpairedPlacementMarkerBlockCount\":2") != std::string::npos &&
+           json.find("\"decodedWardPlacementEventCount\":2") != std::string::npos &&
+           json.find("\"candidateRemovalBlockCount\":3") != std::string::npos &&
+           json.find("\"rejectedUntrackedRemovalBlockCount\":1") != std::string::npos &&
+           json.find("\"rejectedTrackedUnprofiledRemovalBlockCount\":1") != std::string::npos &&
+           json.find("\"rejectedMissingKillerOwnerBlockCount\":0") != std::string::npos &&
+           json.find("\"killerOwnerCandidateCollisionCount\":1") != std::string::npos &&
+           json.find("\"decodedWardKillEventCount\":1") != std::string::npos &&
+           json.find("\"exactPacketFraming\":true") != std::string::npos &&
+           json.find("\"placementCoverage\":\"exact-on-validated-corpus\"") != std::string::npos &&
+           json.find("\"removalCoverage\":\"conservative-partial\"") != std::string::npos &&
+           json.find("\"wardTypeAvailable\":false") != std::string::npos &&
+           json.find("\"positionAvailable\":false") != std::string::npos &&
+           json.find("\"visionRadiusAvailable\":false") != std::string::npos &&
+           json.find("\"removalReasonAvailable\":false") != std::string::npos &&
+           json.find("0x50000003") == std::string::npos;
+}
+
 }  // namespace
 
 int main() {
     if (!test_classic_fixture()) {
+        return EXIT_FAILURE;
+    }
+
+    if (!test_invalid_final_player_stats_capability()) {
         return EXIT_FAILURE;
     }
 
@@ -575,6 +740,10 @@ int main() {
     }
 
     if (!test_replay_objective_extractor_fixture()) {
+        return EXIT_FAILURE;
+    }
+
+    if (!test_replay_ward_extractor_fixture()) {
         return EXIT_FAILURE;
     }
 

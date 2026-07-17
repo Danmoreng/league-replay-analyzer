@@ -1,5 +1,13 @@
 # Packet ward and vision lifecycle findings
 
+## Runtime promotion status
+
+The validated lifecycle is now productive as `rofl-replay-wards/v1` in the
+shared C++ core, native CLI, Wasm boundary, typed TypeScript contract, and Vue
+product timeline. Runtime extraction receives only the loaded `.rofl`. The
+schema deliberately leaves ward subtype, position, vision radius, and removal
+reason as `null`/unavailable and labels removal coverage as conservative partial.
+
 ## Scope and provenance
 
 This report covers 47 saved `.rofl` files across patch groups 15.22, 15.23,
@@ -28,6 +36,16 @@ packet has content length 27. The same type and length occurs 1,124 additional
 times for tracked ward IDs without a `WARD_KILL` label, so promoting length 27
 would create a large false-positive class. The payload reason field must be
 decoded before that variant is enabled.
+
+The independent native promotion gate is reproduced with:
+
+```powershell
+.\scripts\build-native.ps1 -UseNinja
+node .\scripts\validate_replay_wards_corpus.mjs
+```
+
+It requires all 47 replays, exact patch-group totals, zero placement extras or
+missing events, zero kill extras, and exactly the one deliberate 16.9 omission.
 
 ## Patch profiles
 

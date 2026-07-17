@@ -1,11 +1,18 @@
 # rofl-wasm
 
-Reserved package for the browser-facing WebAssembly bridge.
+Browser-facing WebAssembly bridge for the shared replay parser core.
 
-Planned responsibilities:
+The exported replay-only APIs currently cover:
 
-- Emscripten build glue
-- worker-facing wrapper APIs
-- generated Wasm artifacts for local browser parsing
+- replay metadata and final participant summaries
+- champion-kill events
+- elite-objective events
+- ward placements and conservative ward kills
+- packet-family research analyzers
 
-This package is intentionally a placeholder until the native parser core starts exposing stable parsing interfaces.
+Run `scripts/build-wasm.ps1` from the repository root to build the module and
+publish `rofl_wasm.js` and `rofl_wasm.wasm` into the web app.
+
+The web contract suite builds a small zstd ROFL in memory and crosses the real
+generated ward ABI, including the unsupported-version JSON error boundary.
+C++ exception handling is therefore enabled for the core and Wasm wrapper.

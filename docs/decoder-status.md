@@ -39,22 +39,25 @@ Wasm, and consumed by the Vue application unless noted otherwise.
 | Area | Replay-derived output | Validation / boundary |
 | --- | --- | --- |
 | Container | Metadata offsets, payload/header boundaries, match ID when present, chunk/keyframe counts, segment table, Zstd/footer records, and exact packet-block framing with timestamps, channels, packet types, block parameters, payload boundaries, and provenance | Container and packet framing are productive. `payloadDecodingAvailable` means payload packets are readable, not that every semantic stream is decoded. |
-| Participant summary | Champion, Riot ID name/tag, team, `teamPosition`/role (TOP, JUNGLE, and so on; not map coordinates), win, and final K/D/A, gold earned, damage to champions, and vision score from embedded `statsJson` | Final match state only; these are not timelines. `participantId = statsJson index + 1` is validated for all 470 corpus participants. |
+| Participant summary | Champion, Riot ID name/tag, team, `teamPosition`/role (TOP, JUNGLE, and so on; not map coordinates), win, and final K/D/A, level, XP, lane CS, neutral CS, seven item slots, ward aggregates, gold earned, damage to champions, and vision score from embedded `statsJson` | Final match state only; these are not timelines. The productive native summary validates level, XP, both CS fields, all item slots, and both ward aggregates exactly for 6,110/6,110 values across all 470 corpus participants. `validatedFinalPlayerStatsAvailable` requires one of the eight validated patch groups and a complete valid field set; otherwise the product shows unavailable. `participantId = statsJson index + 1` is validated for the same participants. Gold remains replay-native cumulative earned gold and is not part of that exact 6,110-field claim. |
 | Champion kills | Timestamp, victim, killer or execution, ordered assists, network IDs, and source provenance in `rofl-replay-kills/v1` | 2,796/2,796 kills over 47 replays, maximum 1 ms delta; victim, killer, ordered assists, final K/D/A, and participant identity all validate exactly. Kill position, damage source, and gold/bounty are unresolved. |
 | Elite objectives | Timestamp, broad monster class, discriminator, and source provenance in `rofl-replay-objectives/v1` | 425/425 events over 47 replays with zero extras, missing events, or unknown emitted classes. Supports Dragon, Baron, Rift Herald, Horde/Void Grubs, and Atakhan where present. Killer/team, elemental dragon subtype, and position are unresolved. |
+| Ward lifecycle | Standard-ward placement timestamp, ward entity ID, owner participant, conservative ward-kill timestamp, linked ward entity ID, killer participant, and source provenance in `rofl-replay-wards/v1` | 6,168/6,168 placements with zero extras or missing events. 1,882/1,883 removals with zero extras; one ambiguous patch-16.9 packet form is deliberately omitted. Ward subtype, position, vision radius, and removal reason are unavailable. |
 
-The exact kill and objective profiles currently cover patch groups `15.22`,
+The exact kill, objective, ward, and promoted final-summary profiles currently cover patch groups `15.22`,
 `15.23`, `15.24`, `16.1`, `16.5`, `16.6`, `16.7`, and `16.9`.
 
 The browser currently renders the real Wasm participant summary, kill timeline,
-and objective timeline for the locally loaded replay.
+objective timeline, and ward lifecycle for the locally loaded replay.
 
 The default browser landing page is now a dedicated product replay view. It
-combines replay-native kills and elite objectives on one scrubber, shows the
-final replay metadata participant summaries in team rosters, and reserves
-explicit unavailable states for movement, inventory, health, resources, and
-other dynamic streams that have not passed promotion. The previous summary,
-data browser, and decoder inspector remain available as Research & Debug views.
+combines replay-native kills, elite objectives, ward placements, and conservative
+ward kills on one scrubber. Team rosters show exact final level, XP, lane and
+neutral CS, seven item slots, and ward aggregates alongside the existing final
+summary fields. It reserves explicit unavailable states for movement, inventory
+history, health, resources, ward positions, and other dynamic streams that have
+not passed promotion. The previous summary, data browser, and decoder inspector
+remain available as Research & Debug views.
 
 ### Rich final-state export
 
@@ -92,21 +95,6 @@ packet families through Wasm, but heuristic candidates are not normalized game
 state and must not be presented as decoded facts.
 
 ## Validated Research That Is Not Runtime Yet
-
-### Wards and vision lifecycle
-
-This is the nearest replay-native event stream to promotion:
-
-- 6,168/6,168 standard ward placements have exact timestamp, ward entity ID,
-  and owner participant; the pairing state machine emits zero extra placements.
-- 1,882/1,883 conservative removals have exact timestamp, entity ID, and killer
-  for every emitted event, with zero extras.
-- One ambiguous patch-16.9 length-27 removal is intentionally rejected because
-  the same shape occurs frequently outside labelled ward kills.
-
-Missing: ward subtype, position, vision radius, removal reason, and safe support
-for the ambiguous removal form. No C++/Wasm ward API exists yet. See
-[`packet-ward-semantic-findings.md`](packet-ward-semantic-findings.md).
 
 ### Inventory transactions
 
@@ -213,17 +201,17 @@ it does not prove what those bytes mean.
 
 ## Recommended Next Work
 
-1. Promote the validated ward lifecycle into a versioned C++ schema, native
-   corpus gate, Wasm export, and Vue timeline. Render a position only after ward
-   coordinates are separately decoded.
-2. Decode the real movement/waypoint protocol and entity identity. Validate raw
+1. Decode the real movement/waypoint protocol and entity identity. Validate raw
    waypoints before considering interpolation, pathfinding, or movement-speed
    reconstruction.
-3. Complete inventory slot/instance/removal decoding and reconstruct inventory
+2. Complete inventory slot/instance/removal decoding and reconstruct inventory
    state; then expose item events and a scrubber-synchronized inventory panel.
-4. Decode the inner keyframe replication/component grammar and use final
+3. Decode the inner keyframe replication/component grammar and use final
    `statsJson` values plus controlled transitions as replay-only constraints for
    health, gold, level, XP, CS, and resources.
+4. Decode ward subtype, position, vision radius, removal reason, and the one
+   intentionally omitted ambiguous removal form without weakening the zero-extra
+   lifecycle boundary.
 5. Promote buildings/plates and then pursue damage, spells, combat effects, and
    other world entities.
 
@@ -248,6 +236,8 @@ Run the exact event corpus gates after building `rofl_core_cli`:
 node .\scripts\validate_replay_kills_corpus.mjs
 node .\scripts\validate_replay_objectives_corpus.mjs
 node .\scripts\validate_packet_ward_lifecycle.mjs
+node .\scripts\validate_replay_wards_corpus.mjs
+node .\scripts\validate_replay_final_player_stats_corpus.mjs
 ```
 
 Inventory and keyframe research have their own reproduction commands in their

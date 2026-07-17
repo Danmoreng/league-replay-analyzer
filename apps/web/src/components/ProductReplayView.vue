@@ -9,60 +9,90 @@ import {
   type ReplayObjectiveEvent,
   type ReplayObjectiveResult,
 } from "../replayObjectives";
+import type { ReplayWardEvent, ReplayWardResult } from "../replayWards";
 
 const props = defineProps<{
   summary: ReplaySummary;
   replayName: string;
   kills: ReplayKillResult | null;
   objectives: ReplayObjectiveResult | null;
+  wards: ReplayWardResult | null;
   killsLoading: boolean;
   objectivesLoading: boolean;
+  wardsLoading: boolean;
   killsError?: string;
   objectivesError?: string;
+  wardsError?: string;
 }>();
 
 type ProductEvent =
   | { id: string; kind: "kill"; timestampMillis: number; event: ReplayKillEvent }
-  | { id: string; kind: "objective"; timestampMillis: number; event: ReplayObjectiveEvent };
+  | { id: string; kind: "objective"; timestampMillis: number; event: ReplayObjectiveEvent }
+  | {
+      id: string;
+      kind: "ward-placement" | "ward-kill";
+      timestampMillis: number;
+      event: ReplayWardEvent;
+    };
 
 const { currentTime, duration, isPlaying, playbackSpeed, togglePlayback, seek } = usePlayback();
 const selectedParticipantId = ref<number | null>(null);
 const speeds = [1, 2, 4, 8];
 
 const participantsById = computed(
-  () => new Map((props.kills?.participants ?? []).map((participant) => [participant.participantId, participant])),
+  () => new Map(props.summary.players.map((player, index) => [index + 1, player])),
 );
 
-const events = computed<ProductEvent[]>(() => [
-  ...(props.kills?.events ?? []).map((event, index) => ({
-    id: `kill-${index}-${event.timestampMillis}`,
-    kind: "kill" as const,
-    timestampMillis: event.timestampMillis,
-    event,
-  })),
-  ...(props.objectives?.events ?? []).map((event, index) => ({
-    id: `objective-${index}-${event.timestampMillis}`,
-    kind: "objective" as const,
-    timestampMillis: event.timestampMillis,
-    event,
-  })),
-].sort((left, right) => left.timestampMillis - right.timestampMillis));
+const events = computed<ProductEvent[]>(() =>
+  [
+    ...(props.kills?.events ?? []).map((event, index) => ({
+      id: `kill-${index}-${event.timestampMillis}`,
+      kind: "kill" as const,
+      timestampMillis: event.timestampMillis,
+      event,
+    })),
+    ...(props.objectives?.events ?? []).map((event, index) => ({
+      id: `objective-${index}-${event.timestampMillis}`,
+      kind: "objective" as const,
+      timestampMillis: event.timestampMillis,
+      event,
+    })),
+    ...(props.wards?.events ?? []).map((event, index) => ({
+      id: `ward-${index}-${event.timestampMillis}-${event.wardEntityNetworkId}`,
+      kind: event.type === "WARD_PLACED" ? ("ward-placement" as const) : ("ward-kill" as const),
+      timestampMillis: event.timestampMillis,
+      event,
+    })),
+  ].sort((left, right) => left.timestampMillis - right.timestampMillis),
+);
 
-const teams = computed(() => [100, 200].map((teamId) => {
-  const players = props.summary.players
-    .map((player, index) => ({ player, participantId: index + 1 }))
-    .filter(({ player }) => Number(player.team) === teamId)
-    .sort((left, right) => roleRank(left.player.teamPosition) - roleRank(right.player.teamPosition));
-
-  return {
-    id: teamId,
-    label: teamId === 100 ? "Blue Team" : "Red Team",
-    players,
-    winner: players.some(({ player }) => player.win === "Win"),
-    kills: players.reduce((sum, { player }) => sum + player.kills, 0),
-    gold: players.reduce((sum, { player }) => sum + player.goldEarned, 0),
-  };
+const wardCounts = computed(() => ({
+  placements: props.wards?.events.filter((event) => event.type === "WARD_PLACED").length ?? 0,
+  kills: props.wards?.events.filter((event) => event.type === "WARD_KILL").length ?? 0,
 }));
+const finalPlayerStatsAvailable = computed(
+  () => props.summary.capabilities.validatedFinalPlayerStatsAvailable === true,
+);
+
+const teams = computed(() =>
+  [100, 200].map((teamId) => {
+    const players = props.summary.players
+      .map((player, index) => ({ player, participantId: index + 1 }))
+      .filter(({ player }) => Number(player.team) === teamId)
+      .sort(
+        (left, right) => roleRank(left.player.teamPosition) - roleRank(right.player.teamPosition),
+      );
+
+    return {
+      id: teamId,
+      label: teamId === 100 ? "Blue Team" : "Red Team",
+      players,
+      winner: players.some(({ player }) => player.win === "Win"),
+      kills: players.reduce((sum, { player }) => sum + player.kills, 0),
+      gold: players.reduce((sum, { player }) => sum + player.goldEarned, 0),
+    };
+  }),
+);
 
 const nearbyEvents = computed(() => {
   if (events.value.length === 0) return [];
@@ -72,9 +102,11 @@ const nearbyEvents = computed(() => {
 });
 
 const decoderState = computed(() => {
-  if (props.killsLoading || props.objectivesLoading) return "Replay-Ereignisse werden dekodiert …";
-  if (props.killsError || props.objectivesError) return "Ein Teil der Ereignisse ist für dieses Replay nicht verfügbar.";
-  return `${props.kills?.events.length ?? 0} Kills und ${props.objectives?.events.length ?? 0} Objectives aus Replay-Daten`;
+  if (props.killsLoading || props.objectivesLoading || props.wardsLoading)
+    return "Replay-Ereignisse werden dekodiert …";
+  if (props.killsError || props.objectivesError || props.wardsError)
+    return "Ein Teil der Ereignisse ist für dieses Replay nicht verfügbar.";
+  return `${props.kills?.events.length ?? 0} Kills · ${props.objectives?.events.length ?? 0} Objectives · ${wardCounts.value.placements} exakte Standard-Ward-Platzierungen · ${wardCounts.value.kills} konservative Ward-Kills`;
 });
 
 function formatTime(ms: number): string {
@@ -83,7 +115,9 @@ function formatTime(ms: number): string {
 }
 
 function formatCompact(value: number): string {
-  return new Intl.NumberFormat("de-DE", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+  return new Intl.NumberFormat("de-DE", { notation: "compact", maximumFractionDigits: 1 }).format(
+    value,
+  );
 }
 
 function roleRank(role: string): number {
@@ -103,17 +137,34 @@ function roleLabel(role: string): string {
 
 function playerName(player: PlayerSummary): string {
   if (!player.riotIdGameName) return "Unknown Player";
-  return player.riotIdTagLine ? `${player.riotIdGameName}#${player.riotIdTagLine}` : player.riotIdGameName;
+  return player.riotIdTagLine
+    ? `${player.riotIdGameName}#${player.riotIdTagLine}`
+    : player.riotIdGameName;
+}
+
+function ddragonVersion(): string {
+  const match = props.summary.gameVersion.match(/^(\d+)\.(\d+)/);
+  return match ? `${match[1]}.${match[2]}.1` : "16.9.1";
 }
 
 function championIcon(champion: string): string {
-  const match = props.summary.gameVersion.match(/^(\d+)\.(\d+)/);
-  const version = match ? `${match[1]}.${match[2]}.1` : "16.9.1";
-  return `https://ddragon.leagueoflegends.com/cdn/${version}/img/champion/${encodeURIComponent(champion)}.png`;
+  return `https://ddragon.leagueoflegends.com/cdn/${ddragonVersion()}/img/champion/${encodeURIComponent(champion)}.png`;
+}
+
+function itemIcon(itemId: number): string {
+  return `https://ddragon.leagueoflegends.com/cdn/${ddragonVersion()}/img/item/${itemId}.png`;
+}
+
+function finalItems(player: PlayerSummary): number[] {
+  return [...player.items, 0, 0, 0, 0, 0, 0, 0].slice(0, 7);
+}
+
+function totalCs(player: PlayerSummary): number {
+  return player.laneMinionsKilled + player.neutralMinionsKilled;
 }
 
 function participantChampion(participantId: number): string {
-  return participantsById.value.get(participantId)?.championName ?? `P${participantId}`;
+  return participantsById.value.get(participantId)?.champion ?? `P${participantId}`;
 }
 
 function markerLeft(timestampMillis: number): string {
@@ -122,10 +173,24 @@ function markerLeft(timestampMillis: number): string {
 
 function eventLabel(event: ProductEvent): string {
   if (event.kind === "objective") return replayObjectiveMonsterLabel(event.event.monsterType);
-  const killer = event.event.killerParticipantId > 0
-    ? participantChampion(event.event.killerParticipantId)
-    : "Execution";
+  if (event.kind === "ward-placement" && event.event.type === "WARD_PLACED") {
+    return `${participantChampion(event.event.ownerParticipantId)} platziert Ward`;
+  }
+  if (event.kind === "ward-kill" && event.event.type === "WARD_KILL") {
+    return `${participantChampion(event.event.killerParticipantId)} zerstört Ward`;
+  }
+  if (event.kind !== "kill") return "Ward-Ereignis";
+  const killer =
+    event.event.killerParticipantId > 0
+      ? participantChampion(event.event.killerParticipantId)
+      : "Execution";
   return `${killer} → ${participantChampion(event.event.victimParticipantId)}`;
+}
+
+function eventIcon(event: ProductEvent): string {
+  if (event.kind === "kill") return "bi-lightning-charge-fill";
+  if (event.kind === "objective") return "bi-shield-fill";
+  return event.kind === "ward-placement" ? "bi-eye-fill" : "bi-eye-slash-fill";
 }
 
 function onScrub(event: Event): void {
@@ -137,9 +202,11 @@ function onScrub(event: Event): void {
   <section class="product-view" aria-label="Replay viewer">
     <header class="match-scoreboard">
       <div class="score-team score-team-blue">
-        <span class="score-result" :class="{ winner: teams[0].winner }">{{ teams[0].winner ? "VICTORY" : "DEFEAT" }}</span>
+        <span class="score-result" :class="{ winner: teams[0].winner }">{{
+          teams[0].winner ? "VICTORY" : "DEFEAT"
+        }}</span>
         <strong>{{ teams[0].kills }}</strong>
-        <small>{{ formatCompact(teams[0].gold) }} Gold · final</small>
+        <small>{{ formatCompact(teams[0].gold) }} Gold verdient · final</small>
       </div>
       <div class="match-identity">
         <span class="eyebrow">REPLAY-ONLY VIEWER</span>
@@ -152,8 +219,10 @@ function onScrub(event: Event): void {
       </div>
       <div class="score-team score-team-red">
         <strong>{{ teams[1].kills }}</strong>
-        <span class="score-result" :class="{ winner: teams[1].winner }">{{ teams[1].winner ? "VICTORY" : "DEFEAT" }}</span>
-        <small>{{ formatCompact(teams[1].gold) }} Gold · final</small>
+        <span class="score-result" :class="{ winner: teams[1].winner }">{{
+          teams[1].winner ? "VICTORY" : "DEFEAT"
+        }}</span>
+        <small>{{ formatCompact(teams[1].gold) }} Gold verdient · final</small>
       </div>
     </header>
 
@@ -169,24 +238,69 @@ function onScrub(event: Event): void {
           :key="entry.participantId"
           class="player-card"
           :class="{ selected: selectedParticipantId === entry.participantId }"
-          @click="selectedParticipantId = selectedParticipantId === entry.participantId ? null : entry.participantId"
+          @click="
+            selectedParticipantId =
+              selectedParticipantId === entry.participantId ? null : entry.participantId
+          "
         >
           <img :src="championIcon(entry.player.champion)" :alt="entry.player.champion" />
           <span class="player-main">
             <span class="player-heading">
-              <span><b>{{ entry.player.champion }}</b><small>{{ playerName(entry.player) }}</small></span>
+              <span
+                ><b>{{ entry.player.champion }}</b
+                ><small>{{ playerName(entry.player) }}</small></span
+              >
               <em>{{ entry.player.kills }}/{{ entry.player.deaths }}/{{ entry.player.assists }}</em>
             </span>
             <span class="state-bars">
               <span class="unknown-bar health"><i></i><small>Leben nicht dekodiert</small></span>
               <span class="unknown-bar mana"><i></i><small>Ressource nicht dekodiert</small></span>
             </span>
+            <span v-if="finalPlayerStatsAvailable" class="final-stats">
+              <span :title="`${entry.player.experience.toLocaleString('de-DE')} XP · final`"
+                ><i class="bi bi-star-fill"></i> Lv {{ entry.player.level }}</span
+              >
+              <span
+                :title="`${entry.player.laneMinionsKilled} Lane + ${entry.player.neutralMinionsKilled} Neutral · final`"
+                ><i class="bi bi-stack"></i> {{ totalCs(entry.player) }} CS</span
+              >
+              <span
+                :title="`${entry.player.wardsPlaced} platziert / ${entry.player.wardsKilled} zerstört · exakter finaler Replay-Wert`"
+                ><i class="bi bi-eye-fill"></i> {{ entry.player.wardsPlaced }}/{{
+                  entry.player.wardsKilled
+                }}</span
+              >
+            </span>
+            <span v-else class="final-stats unavailable"
+              ><i class="bi bi-slash-circle"></i> Finaldaten für diesen Patch nicht validiert</span
+            >
             <span class="player-footer">
               <small>{{ roleLabel(entry.player.teamPosition) }}</small>
-              <span class="inventory-slots" title="Inventarverlauf noch nicht dekodiert">
-                <i v-for="slot in 6" :key="slot"></i>
+              <span
+                v-if="finalPlayerStatsAvailable"
+                class="inventory-slots"
+                title="Exaktes finales Inventar; kein Inventarverlauf"
+              >
+                <span
+                  v-for="(itemId, slot) in finalItems(entry.player)"
+                  :key="slot"
+                  class="inventory-slot"
+                  :class="{ empty: itemId === 0 }"
+                >
+                  <img v-if="itemId > 0" :src="itemIcon(itemId)" :alt="`Item ${itemId}`" />
+                </span>
               </span>
-              <b>{{ entry.player.goldEarned.toLocaleString("de-DE") }}g <small>final</small></b>
+              <span
+                v-else
+                class="inventory-slots unavailable"
+                title="Finaldaten für diesen Patch nicht validiert"
+              >
+                <span v-for="slot in 7" :key="slot" class="inventory-slot empty"></span>
+              </span>
+              <b
+                >{{ entry.player.goldEarned.toLocaleString("de-DE") }}g
+                <small>verdient · final</small></b
+              >
             </span>
           </span>
         </button>
@@ -199,7 +313,15 @@ function onScrub(event: Event): void {
           <div class="map-unavailable">
             <i class="bi bi-crosshair"></i>
             <strong>Positionsdaten noch nicht dekodiert</strong>
-            <span>Die Karte ist bereit. Champion-Marker erscheinen erst, wenn replay-native Bewegung semantisch validiert ist.</span>
+            <span v-if="wards"
+              >Standard-Ward-Zeitpunkte und Besitzer sind aus dem Replay dekodiert. Champion- und
+              Ward-Marker erscheinen erst, wenn replay-native Positionen semantisch validiert
+              sind.</span
+            >
+            <span v-else
+              >Die Karte ist bereit. Marker erscheinen erst, wenn replay-native Positionen
+              semantisch validiert sind.</span
+            >
           </div>
           <div class="map-badge"><span></span> Replay source · lokal</div>
         </div>
@@ -216,10 +338,12 @@ function onScrub(event: Event): void {
             @click="seek(event.timestampMillis)"
           >
             <time>{{ formatTime(event.timestampMillis) }}</time>
-            <i class="bi" :class="event.kind === 'kill' ? 'bi-lightning-charge-fill' : 'bi-shield-fill'"></i>
+            <i class="bi" :class="eventIcon(event)"></i>
             <span>{{ eventLabel(event) }}</span>
           </button>
-          <div v-if="!nearbyEvents.length" class="event-empty">Keine dekodierten Ereignisse vorhanden.</div>
+          <div v-if="!nearbyEvents.length" class="event-empty">
+            Keine dekodierten Ereignisse vorhanden.
+          </div>
         </div>
       </main>
 
@@ -234,24 +358,69 @@ function onScrub(event: Event): void {
           :key="entry.participantId"
           class="player-card player-card-red"
           :class="{ selected: selectedParticipantId === entry.participantId }"
-          @click="selectedParticipantId = selectedParticipantId === entry.participantId ? null : entry.participantId"
+          @click="
+            selectedParticipantId =
+              selectedParticipantId === entry.participantId ? null : entry.participantId
+          "
         >
           <img :src="championIcon(entry.player.champion)" :alt="entry.player.champion" />
           <span class="player-main">
             <span class="player-heading">
-              <span><b>{{ entry.player.champion }}</b><small>{{ playerName(entry.player) }}</small></span>
+              <span
+                ><b>{{ entry.player.champion }}</b
+                ><small>{{ playerName(entry.player) }}</small></span
+              >
               <em>{{ entry.player.kills }}/{{ entry.player.deaths }}/{{ entry.player.assists }}</em>
             </span>
             <span class="state-bars">
               <span class="unknown-bar health"><i></i><small>Leben nicht dekodiert</small></span>
               <span class="unknown-bar mana"><i></i><small>Ressource nicht dekodiert</small></span>
             </span>
+            <span v-if="finalPlayerStatsAvailable" class="final-stats">
+              <span :title="`${entry.player.experience.toLocaleString('de-DE')} XP · final`"
+                ><i class="bi bi-star-fill"></i> Lv {{ entry.player.level }}</span
+              >
+              <span
+                :title="`${entry.player.laneMinionsKilled} Lane + ${entry.player.neutralMinionsKilled} Neutral · final`"
+                ><i class="bi bi-stack"></i> {{ totalCs(entry.player) }} CS</span
+              >
+              <span
+                :title="`${entry.player.wardsPlaced} platziert / ${entry.player.wardsKilled} zerstört · exakter finaler Replay-Wert`"
+                ><i class="bi bi-eye-fill"></i> {{ entry.player.wardsPlaced }}/{{
+                  entry.player.wardsKilled
+                }}</span
+              >
+            </span>
+            <span v-else class="final-stats unavailable"
+              ><i class="bi bi-slash-circle"></i> Finaldaten für diesen Patch nicht validiert</span
+            >
             <span class="player-footer">
               <small>{{ roleLabel(entry.player.teamPosition) }}</small>
-              <span class="inventory-slots" title="Inventarverlauf noch nicht dekodiert">
-                <i v-for="slot in 6" :key="slot"></i>
+              <span
+                v-if="finalPlayerStatsAvailable"
+                class="inventory-slots"
+                title="Exaktes finales Inventar; kein Inventarverlauf"
+              >
+                <span
+                  v-for="(itemId, slot) in finalItems(entry.player)"
+                  :key="slot"
+                  class="inventory-slot"
+                  :class="{ empty: itemId === 0 }"
+                >
+                  <img v-if="itemId > 0" :src="itemIcon(itemId)" :alt="`Item ${itemId}`" />
+                </span>
               </span>
-              <b>{{ entry.player.goldEarned.toLocaleString("de-DE") }}g <small>final</small></b>
+              <span
+                v-else
+                class="inventory-slots unavailable"
+                title="Finaldaten für diesen Patch nicht validiert"
+              >
+                <span v-for="slot in 7" :key="slot" class="inventory-slot empty"></span>
+              </span>
+              <b
+                >{{ entry.player.goldEarned.toLocaleString("de-DE") }}g
+                <small>verdient · final</small></b
+              >
             </span>
           </span>
         </button>
@@ -260,13 +429,25 @@ function onScrub(event: Event): void {
 
     <footer class="unified-timeline">
       <div class="timeline-controls">
-        <button class="play-control" :aria-label="isPlaying ? 'Pause' : 'Play'" @click="togglePlayback">
+        <button
+          class="play-control"
+          :aria-label="isPlaying ? 'Pause' : 'Play'"
+          @click="togglePlayback"
+        >
           <i class="bi" :class="isPlaying ? 'bi-pause-fill' : 'bi-play-fill'"></i>
         </button>
-        <div class="timecode"><strong>{{ formatTime(currentTime) }}</strong><span>/ {{ formatTime(duration) }}</span></div>
+        <div class="timecode">
+          <strong>{{ formatTime(currentTime) }}</strong
+          ><span>/ {{ formatTime(duration) }}</span>
+        </div>
       </div>
       <div class="timeline-main">
-        <div class="timeline-labels"><span>ALLE EREIGNISSE</span><small>Kills + Elite-Objectives</small></div>
+        <div class="timeline-labels">
+          <span>ALLE EREIGNISSE</span
+          ><small
+            >Kills · Elite-Objectives · Standard-Ward platziert · Ward zerstört (konservativ)</small
+          >
+        </div>
         <div class="timeline-track">
           <div class="timeline-progress" :style="{ width: markerLeft(currentTime) }"></div>
           <button
@@ -277,7 +458,9 @@ function onScrub(event: Event): void {
             :style="{ left: markerLeft(event.timestampMillis) }"
             :title="`${formatTime(event.timestampMillis)} · ${eventLabel(event)}`"
             @click="seek(event.timestampMillis)"
-          ><i class="bi" :class="event.kind === 'kill' ? 'bi-lightning-charge-fill' : 'bi-shield-fill'"></i></button>
+          >
+            <i class="bi" :class="eventIcon(event)"></i>
+          </button>
           <input
             type="range"
             :min="0"
@@ -288,123 +471,698 @@ function onScrub(event: Event): void {
             @input="onScrub"
           />
         </div>
-        <div class="timeline-ticks"><span>0:00</span><span>{{ formatTime(duration * 0.25) }}</span><span>{{ formatTime(duration * 0.5) }}</span><span>{{ formatTime(duration * 0.75) }}</span><span>{{ formatTime(duration) }}</span></div>
+        <div class="timeline-ticks">
+          <span>0:00</span><span>{{ formatTime(duration * 0.25) }}</span
+          ><span>{{ formatTime(duration * 0.5) }}</span
+          ><span>{{ formatTime(duration * 0.75) }}</span
+          ><span>{{ formatTime(duration) }}</span>
+        </div>
       </div>
       <div class="speed-controls">
-        <button v-for="speed in speeds" :key="speed" :class="{ active: playbackSpeed === speed }" @click="playbackSpeed = speed">{{ speed }}×</button>
+        <button
+          v-for="speed in speeds"
+          :key="speed"
+          :class="{ active: playbackSpeed === speed }"
+          @click="playbackSpeed = speed"
+        >
+          {{ speed }}×
+        </button>
       </div>
     </footer>
   </section>
 </template>
 
 <style scoped>
-.product-view { --blue: #26a7ff; --red: #ff5964; --gold: #d6af58; min-width: 0; color: #edf4ff; }
-.match-scoreboard { min-height: 92px; display: grid; grid-template-columns: 1fr minmax(260px, 1.35fr) 1fr; align-items: center; gap: 20px; padding: 14px 22px; border: 1px solid rgba(143, 171, 202, .16); border-radius: 12px; background: linear-gradient(100deg, rgba(18, 62, 93, .52), rgba(7, 12, 20, .96) 43%, rgba(7, 12, 20, .96) 57%, rgba(95, 24, 35, .48)); box-shadow: 0 18px 50px rgba(0, 0, 0, .22); }
-.match-identity { text-align: center; min-width: 0; }
-.match-identity h2 { margin: 3px 0 5px; overflow: hidden; color: #fff; font-size: 1rem; text-overflow: ellipsis; white-space: nowrap; }
-.eyebrow, .roster-title, .timeline-labels span { color: #8292a8; font-size: .62rem; font-weight: 800; letter-spacing: .16em; }
-.match-meta { display: flex; justify-content: center; gap: 12px; color: #7f8b9d; font-size: .7rem; }
-.match-meta span + span::before { content: "·"; margin-right: 12px; }
-.score-team { display: grid; align-items: center; gap: 3px 12px; }
-.score-team-blue { grid-template-columns: auto auto 1fr; }
-.score-team-red { grid-template-columns: 1fr auto auto; text-align: right; }
-.score-team strong { grid-row: span 2; color: #fff; font-family: "Cascadia Code", monospace; font-size: 2.15rem; line-height: 1; }
-.score-team-blue strong { color: var(--blue); }
-.score-team-red strong { color: var(--red); order: -1; }
-.score-team small { color: #8190a4; font-size: .65rem; }
-.score-result { font-size: .72rem; font-weight: 900; letter-spacing: .12em; opacity: .66; }
-.score-result.winner { color: #f1ce73; opacity: 1; }
+.product-view {
+  --blue: #26a7ff;
+  --red: #ff5964;
+  --gold: #d6af58;
+  min-width: 0;
+  color: #edf4ff;
+}
+.match-scoreboard {
+  min-height: 92px;
+  display: grid;
+  grid-template-columns: 1fr minmax(260px, 1.35fr) 1fr;
+  align-items: center;
+  gap: 20px;
+  padding: 14px 22px;
+  border: 1px solid rgba(143, 171, 202, 0.16);
+  border-radius: 12px;
+  background: linear-gradient(
+    100deg,
+    rgba(18, 62, 93, 0.52),
+    rgba(7, 12, 20, 0.96) 43%,
+    rgba(7, 12, 20, 0.96) 57%,
+    rgba(95, 24, 35, 0.48)
+  );
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+}
+.match-identity {
+  text-align: center;
+  min-width: 0;
+}
+.match-identity h2 {
+  margin: 3px 0 5px;
+  overflow: hidden;
+  color: #fff;
+  font-size: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.eyebrow,
+.roster-title,
+.timeline-labels span {
+  color: #8292a8;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+.match-meta {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  color: #7f8b9d;
+  font-size: 0.7rem;
+}
+.match-meta span + span::before {
+  content: "·";
+  margin-right: 12px;
+}
+.score-team {
+  display: grid;
+  align-items: center;
+  gap: 3px 12px;
+}
+.score-team-blue {
+  grid-template-columns: auto auto 1fr;
+}
+.score-team-red {
+  grid-template-columns: 1fr auto auto;
+  text-align: right;
+}
+.score-team strong {
+  grid-row: span 2;
+  color: #fff;
+  font-family: "Cascadia Code", monospace;
+  font-size: 2.15rem;
+  line-height: 1;
+}
+.score-team-blue strong {
+  color: var(--blue);
+}
+.score-team-red strong {
+  color: var(--red);
+  order: -1;
+}
+.score-team small {
+  color: #8190a4;
+  font-size: 0.65rem;
+}
+.score-result {
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  opacity: 0.66;
+}
+.score-result.winner {
+  color: #f1ce73;
+  opacity: 1;
+}
 
-.viewer-grid { display: grid; grid-template-columns: minmax(245px, 305px) minmax(420px, 1fr) minmax(245px, 305px); gap: 10px; margin-top: 10px; }
-.roster, .map-stage { border: 1px solid rgba(143, 171, 202, .14); border-radius: 12px; background: rgba(8, 13, 21, .94); }
-.roster { overflow: hidden; }
-.roster-title { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; min-height: 38px; padding: 0 13px; border-bottom: 1px solid rgba(143, 171, 202, .12); }
-.roster-title small { color: #657388; font-size: .6rem; letter-spacing: 0; text-transform: none; }
-.team-pip { width: 6px; height: 6px; border-radius: 50%; background: var(--blue); box-shadow: 0 0 10px var(--blue); }
-.roster-red .team-pip { background: var(--red); box-shadow: 0 0 10px var(--red); }
-.player-card { width: 100%; min-height: 112px; display: flex; gap: 10px; padding: 10px; border: 0; border-bottom: 1px solid rgba(143, 171, 202, .09); background: transparent; color: inherit; text-align: left; transition: .16s ease; }
-.player-card:last-child { border-bottom: 0; }
-.player-card:hover, .player-card.selected { background: linear-gradient(90deg, rgba(38, 167, 255, .12), transparent); }
-.player-card-red:hover, .player-card-red.selected { background: linear-gradient(90deg, rgba(255, 89, 100, .12), transparent); }
-.player-card > img { width: 42px; height: 42px; flex: 0 0 42px; border: 2px solid rgba(38, 167, 255, .72); border-radius: 9px; object-fit: cover; }
-.player-card-red > img { border-color: rgba(255, 89, 100, .72); }
-.player-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 7px; }
-.player-heading, .player-footer { display: flex; justify-content: space-between; align-items: center; gap: 7px; }
-.player-heading > span { min-width: 0; display: flex; flex-direction: column; }
-.player-heading b { overflow: hidden; color: #f6f8fc; font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
-.player-heading small, .player-footer > small { overflow: hidden; color: #6f7c90; font-size: .58rem; text-overflow: ellipsis; white-space: nowrap; }
-.player-heading em { color: #d9e3f0; font-family: "Cascadia Code", monospace; font-size: .69rem; font-style: normal; font-weight: 700; }
-.state-bars { display: flex; flex-direction: column; gap: 3px; }
-.unknown-bar { position: relative; height: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,.06); border-radius: 2px; background: rgba(255,255,255,.045); }
-.unknown-bar i { position: absolute; inset: 0; background: repeating-linear-gradient(135deg, transparent 0 6px, rgba(255,255,255,.035) 6px 9px); }
-.unknown-bar small { position: absolute; inset: -1px 4px auto auto; color: rgba(210,220,234,.42); font-size: .43rem; line-height: 8px; }
-.health { box-shadow: inset 2px 0 #397f5c; }
-.mana { box-shadow: inset 2px 0 #315f93; }
-.player-footer b { margin-left: auto; color: #d7bd78; font-size: .62rem; white-space: nowrap; }
-.player-footer b small { color: #71684f; font-size: .48rem; font-weight: 500; }
-.inventory-slots { display: flex; gap: 2px; }
-.inventory-slots i { width: 12px; height: 12px; border: 1px solid rgba(151, 163, 180, .17); border-radius: 2px; background: rgba(0, 0, 0, .2); }
+.viewer-grid {
+  display: grid;
+  grid-template-columns: minmax(245px, 305px) minmax(420px, 1fr) minmax(245px, 305px);
+  gap: 10px;
+  margin-top: 10px;
+}
+.roster,
+.map-stage {
+  border: 1px solid rgba(143, 171, 202, 0.14);
+  border-radius: 12px;
+  background: rgba(8, 13, 21, 0.94);
+}
+.roster {
+  overflow: hidden;
+}
+.roster-title {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 13px;
+  border-bottom: 1px solid rgba(143, 171, 202, 0.12);
+}
+.roster-title small {
+  color: #657388;
+  font-size: 0.6rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.team-pip {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--blue);
+  box-shadow: 0 0 10px var(--blue);
+}
+.roster-red .team-pip {
+  background: var(--red);
+  box-shadow: 0 0 10px var(--red);
+}
+.player-card {
+  width: 100%;
+  min-height: 112px;
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  border: 0;
+  border-bottom: 1px solid rgba(143, 171, 202, 0.09);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  transition: 0.16s ease;
+}
+.player-card:last-child {
+  border-bottom: 0;
+}
+.player-card:hover,
+.player-card.selected {
+  background: linear-gradient(90deg, rgba(38, 167, 255, 0.12), transparent);
+}
+.player-card-red:hover,
+.player-card-red.selected {
+  background: linear-gradient(90deg, rgba(255, 89, 100, 0.12), transparent);
+}
+.player-card > img {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border: 2px solid rgba(38, 167, 255, 0.72);
+  border-radius: 9px;
+  object-fit: cover;
+}
+.player-card-red > img {
+  border-color: rgba(255, 89, 100, 0.72);
+}
+.player-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.player-heading,
+.player-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 7px;
+}
+.player-heading > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.player-heading b {
+  overflow: hidden;
+  color: #f6f8fc;
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.player-heading small,
+.player-footer > small {
+  overflow: hidden;
+  color: #6f7c90;
+  font-size: 0.58rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.player-heading em {
+  color: #d9e3f0;
+  font-family: "Cascadia Code", monospace;
+  font-size: 0.69rem;
+  font-style: normal;
+  font-weight: 700;
+}
+.state-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.unknown-bar {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.045);
+}
+.unknown-bar i {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    135deg,
+    transparent 0 6px,
+    rgba(255, 255, 255, 0.035) 6px 9px
+  );
+}
+.unknown-bar small {
+  position: absolute;
+  inset: -1px 4px auto auto;
+  color: rgba(210, 220, 234, 0.42);
+  font-size: 0.43rem;
+  line-height: 8px;
+}
+.health {
+  box-shadow: inset 2px 0 #397f5c;
+}
+.mana {
+  box-shadow: inset 2px 0 #315f93;
+}
+.final-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #8c9bb0;
+  font-size: 0.53rem;
+  font-weight: 700;
+}
+.final-stats span {
+  white-space: nowrap;
+}
+.final-stats i {
+  margin-right: 2px;
+  color: #8094ad;
+  font-size: 0.5rem;
+}
+.final-stats.unavailable {
+  color: #6f7c90;
+  font-weight: 600;
+}
+.player-footer b {
+  margin-left: auto;
+  color: #d7bd78;
+  font-size: 0.62rem;
+  white-space: nowrap;
+}
+.player-footer b small {
+  color: #71684f;
+  font-size: 0.48rem;
+  font-weight: 500;
+}
+.inventory-slots {
+  display: flex;
+  gap: 2px;
+}
+.inventory-slot {
+  width: 15px;
+  height: 15px;
+  overflow: hidden;
+  border: 1px solid rgba(151, 163, 180, 0.24);
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.3);
+}
+.inventory-slot.empty {
+  opacity: 0.42;
+}
+.inventory-slots.unavailable {
+  filter: saturate(0);
+  opacity: 0.62;
+}
+.inventory-slot img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
 
-.map-stage { display: flex; min-width: 0; flex-direction: column; padding: 10px; }
-.map-frame { position: relative; width: 100%; min-height: 420px; flex: 1; overflow: hidden; border: 1px solid rgba(151, 174, 201, .16); border-radius: 9px; background: #070b10; }
-.map-frame > img { width: 100%; height: 100%; position: absolute; inset: 0; object-fit: cover; filter: saturate(.72) brightness(.55) contrast(1.08); }
-.map-shade { position: absolute; inset: 0; background: radial-gradient(circle at center, transparent 15%, rgba(3,7,12,.24) 70%, rgba(3,7,12,.62)); }
-.map-unavailable { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 28px; text-align: center; }
-.map-unavailable i { width: 58px; height: 58px; display: grid; place-items: center; margin-bottom: 13px; border: 1px solid rgba(166,190,220,.22); border-radius: 50%; background: rgba(5,10,16,.66); color: #8ba4c0; font-size: 1.5rem; box-shadow: 0 12px 30px rgba(0,0,0,.28); }
-.map-unavailable strong { color: #dce7f5; font-size: .86rem; }
-.map-unavailable span { max-width: 46ch; margin-top: 5px; color: #8392a6; font-size: .66rem; line-height: 1.55; }
-.map-badge { position: absolute; top: 12px; left: 12px; padding: 5px 8px; border: 1px solid rgba(255,255,255,.12); border-radius: 5px; background: rgba(4,8,13,.76); color: #9cabbf; font-size: .55rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-.map-badge span { width: 5px; height: 5px; display: inline-block; margin-right: 5px; border-radius: 50%; background: #4fe093; box-shadow: 0 0 7px #4fe093; }
-.event-window { margin-top: 8px; border: 1px solid rgba(143,171,202,.12); border-radius: 8px; background: #080d14; }
-.event-window-header { min-height: 31px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 9px; border-bottom: 1px solid rgba(143,171,202,.1); color: #8393a8; font-size: .56rem; font-weight: 800; letter-spacing: .1em; }
-.event-window-header small { color: #5f6e82; font-size: .52rem; font-weight: 500; letter-spacing: 0; }
-.event-row { width: 100%; display: grid; grid-template-columns: 38px 16px 1fr; gap: 5px; padding: 5px 9px; border: 0; border-bottom: 1px solid rgba(143,171,202,.07); background: transparent; color: #aab8ca; text-align: left; font-size: .62rem; }
-.event-row:hover { background: rgba(255,255,255,.04); }
-.event-row.past { opacity: .56; }
-.event-row time { color: #6f7d91; font-family: monospace; }
-.event-row.kill i { color: var(--red); }
-.event-row.objective i { color: var(--gold); }
-.event-empty { padding: 16px; color: #69778b; font-size: .65rem; text-align: center; }
+.map-stage {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 10px;
+}
+.map-frame {
+  position: relative;
+  width: 100%;
+  min-height: 420px;
+  flex: 1;
+  overflow: hidden;
+  border: 1px solid rgba(151, 174, 201, 0.16);
+  border-radius: 9px;
+  background: #070b10;
+}
+.map-frame > img {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  inset: 0;
+  object-fit: cover;
+  filter: saturate(0.72) brightness(0.55) contrast(1.08);
+}
+.map-shade {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at center,
+    transparent 15%,
+    rgba(3, 7, 12, 0.24) 70%,
+    rgba(3, 7, 12, 0.62)
+  );
+}
+.map-unavailable {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 28px;
+  text-align: center;
+}
+.map-unavailable i {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 13px;
+  border: 1px solid rgba(166, 190, 220, 0.22);
+  border-radius: 50%;
+  background: rgba(5, 10, 16, 0.66);
+  color: #8ba4c0;
+  font-size: 1.5rem;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
+}
+.map-unavailable strong {
+  color: #dce7f5;
+  font-size: 0.86rem;
+}
+.map-unavailable span {
+  max-width: 46ch;
+  margin-top: 5px;
+  color: #8392a6;
+  font-size: 0.66rem;
+  line-height: 1.55;
+}
+.map-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  background: rgba(4, 8, 13, 0.76);
+  color: #9cabbf;
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.map-badge span {
+  width: 5px;
+  height: 5px;
+  display: inline-block;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: #4fe093;
+  box-shadow: 0 0 7px #4fe093;
+}
+.event-window {
+  margin-top: 8px;
+  border: 1px solid rgba(143, 171, 202, 0.12);
+  border-radius: 8px;
+  background: #080d14;
+}
+.event-window-header {
+  min-height: 31px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 9px;
+  border-bottom: 1px solid rgba(143, 171, 202, 0.1);
+  color: #8393a8;
+  font-size: 0.56rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+.event-window-header small {
+  color: #5f6e82;
+  font-size: 0.52rem;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.event-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 38px 16px 1fr;
+  gap: 5px;
+  padding: 5px 9px;
+  border: 0;
+  border-bottom: 1px solid rgba(143, 171, 202, 0.07);
+  background: transparent;
+  color: #aab8ca;
+  text-align: left;
+  font-size: 0.62rem;
+}
+.event-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.event-row.past {
+  opacity: 0.56;
+}
+.event-row time {
+  color: #6f7d91;
+  font-family: monospace;
+}
+.event-row.kill i {
+  color: var(--red);
+}
+.event-row.objective i {
+  color: var(--gold);
+}
+.event-row.ward-placement i {
+  color: #56d6c2;
+}
+.event-row.ward-kill i {
+  color: #b596ee;
+}
+.event-empty {
+  padding: 16px;
+  color: #69778b;
+  font-size: 0.65rem;
+  text-align: center;
+}
 
-.unified-timeline { display: grid; grid-template-columns: auto minmax(300px, 1fr) auto; align-items: center; gap: 18px; min-height: 104px; margin-top: 10px; padding: 12px 18px; border: 1px solid rgba(143,171,202,.16); border-radius: 12px; background: #080d14; }
-.timeline-controls { display: flex; align-items: center; gap: 12px; }
-.play-control { width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid rgba(70,182,255,.42); border-radius: 50%; background: rgba(30,140,212,.14); color: #7bcbff; font-size: 1.1rem; }
-.timecode { display: flex; min-width: 88px; flex-direction: column; font-family: "Cascadia Code", monospace; }
-.timecode strong { color: #f3f7fc; font-size: .92rem; }
-.timecode span { color: #627086; font-size: .58rem; }
-.timeline-main { min-width: 0; }
-.timeline-labels { display: flex; align-items: center; justify-content: space-between; margin-bottom: 11px; }
-.timeline-labels small { color: #627086; font-size: .56rem; }
-.timeline-track { position: relative; height: 8px; border-radius: 4px; background: #1a2330; }
-.timeline-track input { position: absolute; z-index: 4; inset: -7px 0; width: 100%; height: 22px; margin: 0; opacity: 0; cursor: pointer; }
-.timeline-progress { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: linear-gradient(90deg, #297eb6, #4db9f7); }
-.event-marker { position: absolute; z-index: 5; top: 50%; width: 18px; height: 18px; display: grid; place-items: center; padding: 0; transform: translate(-50%, -50%); border: 1px solid currentColor; border-radius: 50%; background: #0a111a; font-size: .52rem; cursor: pointer; }
-.event-marker.kill { color: var(--red); }
-.event-marker.objective { color: var(--gold); }
-.timeline-ticks { display: flex; justify-content: space-between; margin-top: 10px; color: #536176; font-family: monospace; font-size: .5rem; }
-.speed-controls { display: flex; gap: 3px; padding: 3px; border: 1px solid rgba(143,171,202,.1); border-radius: 6px; background: rgba(255,255,255,.025); }
-.speed-controls button { padding: 4px 7px; border: 0; border-radius: 4px; background: transparent; color: #67758a; font-size: .6rem; font-weight: 700; }
-.speed-controls button.active { background: #1b5b82; color: #d9f1ff; }
+.unified-timeline {
+  display: grid;
+  grid-template-columns: auto minmax(300px, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  min-height: 104px;
+  margin-top: 10px;
+  padding: 12px 18px;
+  border: 1px solid rgba(143, 171, 202, 0.16);
+  border-radius: 12px;
+  background: #080d14;
+}
+.timeline-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.play-control {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(70, 182, 255, 0.42);
+  border-radius: 50%;
+  background: rgba(30, 140, 212, 0.14);
+  color: #7bcbff;
+  font-size: 1.1rem;
+}
+.timecode {
+  display: flex;
+  min-width: 88px;
+  flex-direction: column;
+  font-family: "Cascadia Code", monospace;
+}
+.timecode strong {
+  color: #f3f7fc;
+  font-size: 0.92rem;
+}
+.timecode span {
+  color: #627086;
+  font-size: 0.58rem;
+}
+.timeline-main {
+  min-width: 0;
+}
+.timeline-labels {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 11px;
+}
+.timeline-labels small {
+  color: #627086;
+  font-size: 0.56rem;
+}
+.timeline-track {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: #1a2330;
+}
+.timeline-track input {
+  position: absolute;
+  z-index: 4;
+  inset: -7px 0;
+  width: 100%;
+  height: 22px;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.timeline-progress {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #297eb6, #4db9f7);
+}
+.event-marker {
+  position: absolute;
+  z-index: 5;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: #0a111a;
+  font-size: 0.52rem;
+  cursor: pointer;
+}
+.event-marker.kill {
+  color: var(--red);
+}
+.event-marker.objective {
+  color: var(--gold);
+}
+.event-marker.ward-placement,
+.event-marker.ward-kill {
+  z-index: 5;
+  top: calc(100% + 5px);
+  width: 8px;
+  height: 8px;
+  border-width: 0;
+  background: currentColor;
+  font-size: 0;
+  opacity: 0.72;
+}
+.event-marker.ward-placement {
+  color: #56d6c2;
+}
+.event-marker.ward-kill {
+  color: #b596ee;
+}
+.event-marker.ward-placement:hover,
+.event-marker.ward-kill:hover {
+  z-index: 6;
+  width: 12px;
+  height: 12px;
+  opacity: 1;
+}
+.timeline-ticks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+  color: #536176;
+  font-family: monospace;
+  font-size: 0.5rem;
+}
+.speed-controls {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid rgba(143, 171, 202, 0.1);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.025);
+}
+.speed-controls button {
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #67758a;
+  font-size: 0.6rem;
+  font-weight: 700;
+}
+.speed-controls button.active {
+  background: #1b5b82;
+  color: #d9f1ff;
+}
 
 @media (max-width: 1280px) {
-  .viewer-grid { grid-template-columns: 240px minmax(380px, 1fr) 240px; }
-  .player-card { min-height: 105px; padding: 8px; }
-  .player-card > img { width: 36px; height: 36px; flex-basis: 36px; }
-  .inventory-slots i { width: 9px; height: 9px; }
+  .viewer-grid {
+    grid-template-columns: 240px minmax(380px, 1fr) 240px;
+  }
+  .player-card {
+    min-height: 105px;
+    padding: 8px;
+  }
+  .player-card > img {
+    width: 36px;
+    height: 36px;
+    flex-basis: 36px;
+  }
+  .inventory-slot {
+    width: 11px;
+    height: 11px;
+  }
 }
 
 @media (max-width: 980px) {
-  .viewer-grid { grid-template-columns: 1fr 1fr; }
-  .map-stage { grid-column: 1 / -1; grid-row: 1; }
-  .roster { grid-row: 2; }
+  .viewer-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .map-stage {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  .roster {
+    grid-row: 2;
+  }
 }
 
 @media (max-width: 680px) {
-  .match-scoreboard { grid-template-columns: 1fr 1fr; }
-  .match-identity { grid-column: 1 / -1; grid-row: 1; }
-  .viewer-grid { grid-template-columns: 1fr; }
-  .map-stage, .roster { grid-column: auto; grid-row: auto; }
-  .unified-timeline { grid-template-columns: 1fr; }
-  .speed-controls { justify-self: start; }
+  .match-scoreboard {
+    grid-template-columns: 1fr 1fr;
+  }
+  .match-identity {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  .viewer-grid {
+    grid-template-columns: 1fr;
+  }
+  .map-stage,
+  .roster {
+    grid-column: auto;
+    grid-row: auto;
+  }
+  .unified-timeline {
+    grid-template-columns: 1fr;
+  }
+  .speed-controls {
+    justify-self: start;
+  }
 }
 </style>

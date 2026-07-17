@@ -2,6 +2,7 @@
 #include "rofl/core/packet_blocks.hpp"
 #include <array>
 #include <bit>
+#include <charconv>
 #include <cmath>
 #include <limits>
 #include <numeric>
@@ -428,6 +429,36 @@ void write_number_array(std::ostringstream& output, const std::vector<Number>& v
     return negative ? -value : value;
 }
 
+[[nodiscard]] bool try_parse_int_field(
+    std::string_view json,
+    std::string_view key,
+    int& value
+) {
+    const std::size_t value_offset = find_value_start(json, key);
+    if (value_offset == std::string::npos || value_offset >= json.size()) return false;
+
+    const bool quoted = json[value_offset] == '"';
+    const std::size_t number_offset = value_offset + (quoted ? 1 : 0);
+    if (number_offset >= json.size()) return false;
+    const char* begin = json.data() + number_offset;
+    const char* end = json.data() + json.size();
+    int parsed = 0;
+    const auto [parsed_end, error] = std::from_chars(begin, end, parsed);
+    if (error != std::errc{} || parsed_end == begin) return false;
+
+    if (quoted) {
+        if (parsed_end >= end || *parsed_end != '"') return false;
+    } else {
+        const char* cursor = parsed_end;
+        while (cursor < end && std::isspace(static_cast<unsigned char>(*cursor)) != 0) {
+            ++cursor;
+        }
+        if (cursor < end && *cursor != ',' && *cursor != '}') return false;
+    }
+    value = parsed;
+    return true;
+}
+
 [[nodiscard]] std::string parse_string_field(std::string_view json, std::string_view key) {
     const std::size_t value_offset = find_value_start(json, key);
     if (value_offset == std::string::npos || value_offset >= json.size() || json[value_offset] != '"') {
@@ -522,9 +553,14 @@ void write_number_array(std::ostringstream& output, const std::vector<Number>& v
     return objects;
 }
 
-[[nodiscard]] std::vector<PlayerSummary> parse_players_from_stats_json(const std::string& stats_json) {
+[[nodiscard]] std::vector<PlayerSummary> parse_players_from_stats_json(
+    const std::string& stats_json,
+    bool& validated_final_fields
+) {
     std::vector<PlayerSummary> players;
-    for (const std::string& object_json : split_top_level_objects(stats_json)) {
+    const std::vector<std::string> participant_objects = split_top_level_objects(stats_json);
+    validated_final_fields = !participant_objects.empty();
+    for (const std::string& object_json : participant_objects) {
         PlayerSummary player;
         player.champion = parse_string_field(object_json, "SKIN");
         player.riot_id_game_name = parse_string_field(object_json, "RIOT_ID_GAME_NAME");
@@ -541,10 +577,51 @@ void write_number_array(std::ostringstream& output, const std::vector<Number>& v
         player.gold_earned = parse_int_field(object_json, "GOLD_EARNED");
         player.total_damage_to_champions = parse_int_field(object_json, "TOTAL_DAMAGE_DEALT_TO_CHAMPIONS");
         player.vision_score = parse_int_field(object_json, "VISION_SCORE");
+        validated_final_fields =
+            try_parse_int_field(object_json, "LEVEL", player.level) &&
+            validated_final_fields;
+        validated_final_fields =
+            try_parse_int_field(object_json, "EXP", player.experience) &&
+            validated_final_fields;
+        validated_final_fields =
+            try_parse_int_field(object_json, "MINIONS_KILLED", player.lane_minions_killed) &&
+            validated_final_fields;
+        validated_final_fields =
+            try_parse_int_field(
+                object_json,
+                "NEUTRAL_MINIONS_KILLED",
+                player.neutral_minions_killed
+            ) && validated_final_fields;
+        for (std::size_t item_index = 0; item_index < player.items.size(); ++item_index) {
+            validated_final_fields = try_parse_int_field(
+                object_json,
+                "ITEM" + std::to_string(item_index),
+                player.items[item_index]
+            ) && validated_final_fields;
+        }
+        validated_final_fields =
+            try_parse_int_field(object_json, "WARD_PLACED", player.wards_placed) &&
+            validated_final_fields;
+        validated_final_fields =
+            try_parse_int_field(object_json, "WARD_KILLED", player.wards_killed) &&
+            validated_final_fields;
         players.push_back(std::move(player));
     }
 
     return players;
+}
+
+[[nodiscard]] bool supports_validated_final_player_stats(std::string_view game_version) {
+    const std::size_t first_dot = game_version.find('.');
+    if (first_dot == std::string_view::npos) return false;
+    const std::size_t second_dot = game_version.find('.', first_dot + 1);
+    const std::string_view group = second_dot == std::string_view::npos
+        ? game_version
+        : game_version.substr(0, second_dot);
+    static constexpr std::array<std::string_view, 8> supported{{
+        "15.22", "15.23", "15.24", "16.1", "16.5", "16.6", "16.7", "16.9",
+    }};
+    return std::find(supported.begin(), supported.end(), group) != supported.end();
 }
 
 [[nodiscard]] std::vector<std::uint8_t> read_file_bytes(const std::string& path) {
@@ -1591,8 +1668,12 @@ ReplaySummary parse_replay_bytes(const std::vector<std::uint8_t>& bytes) {
     try {
         const std::string stats_json = parse_string_field(summary.metadata_json, "statsJson");
         if (!stats_json.empty()) {
-            summary.players = parse_players_from_stats_json(stats_json);
+            bool validated_final_fields = false;
+            summary.players = parse_players_from_stats_json(stats_json, validated_final_fields);
             summary.capabilities.player_stats_available = true;
+            summary.capabilities.validated_final_player_stats_available =
+                supports_validated_final_player_stats(summary.game_version) &&
+                validated_final_fields;
         }
     } catch (const std::exception& exception) {
         throw std::runtime_error("Failed while parsing statsJson from embedded metadata: " + std::string(exception.what()));
@@ -3140,6 +3221,462 @@ void write_objective_block_provenance_json(std::ostringstream& output, const Pac
     return output.str();
 }
 
+struct WardPacketProfile {
+    std::string_view version_group;
+    std::uint16_t placement_marker_packet_type = 0;
+    std::array<std::uint8_t, 3> placement_discriminator_values{};
+    std::size_t placement_discriminator_value_count = 0;
+    std::uint16_t placement_owner_packet_type = 0;
+    std::array<std::size_t, 3> placement_owner_content_lengths{};
+    std::uint16_t removal_packet_type = 0;
+    std::array<std::size_t, 3> removal_content_lengths{};
+    std::size_t removal_content_length_count = 0;
+    std::uint16_t killer_owner_packet_type = 0;
+    std::array<std::size_t, 2> killer_owner_content_lengths{};
+    std::uint32_t champion_network_id_base = 0;
+};
+
+constexpr std::array<WardPacketProfile, 8> kWardPacketProfiles{{
+    {"15.22", 0x0308, {0x09, 0, 0}, 1, 0x0420, {2, 3, 4}, 0x0017, {21, 28, 29}, 3, 0x044E, {6, 7}, 0x40000099},
+    {"15.23", 0x0368, {0xD5, 0, 0}, 1, 0x01BF, {2, 3, 4}, 0x020A, {28, 29, 0}, 2, 0x028B, {6, 7}, 0x400004CC},
+    {"15.24", 0x02CE, {0xE1, 0, 0}, 1, 0x0227, {2, 3, 4}, 0x009C, {28, 29, 0}, 2, 0x0220, {6, 7}, 0x40000147},
+    {"16.1", 0x037F, {0x01, 0x92, 0}, 2, 0x0335, {2, 3, 4}, 0x0059, {28, 29, 0}, 2, 0x021A, {6, 7}, 0x400000AD},
+    {"16.5", 0x03F8, {0x50, 0, 0}, 1, 0x024F, {2, 3, 4}, 0x023F, {28, 29, 0}, 2, 0x01FE, {6, 7}, 0x400000AD},
+    {"16.6", 0x0311, {0x14, 0, 0}, 1, 0x011D, {2, 3, 4}, 0x0271, {21, 28, 29}, 3, 0x03FD, {6, 7}, 0x400000AD},
+    {"16.7", 0x0162, {0x80, 0xF4, 0xF7}, 3, 0x033B, {2, 3, 4}, 0x039C, {28, 29, 0}, 2, 0x0301, {6, 7}, 0x400000AD},
+    {"16.9", 0x0041, {0xB0, 0, 0}, 1, 0x04AC, {2, 3, 4}, 0x02E6, {28, 29, 0}, 2, 0x02F6, {6, 7}, 0x400000AD},
+}};
+
+constexpr long long kWardTimestampToleranceMillis = 1;
+constexpr std::size_t kWardPlacementContentLength = 3;
+constexpr std::size_t kWardPlacementDiscriminatorOffset = 2;
+
+struct WardRelevantBlock {
+    PacketBlock block;
+    long long timestamp_millis = 0;
+};
+
+struct ReplayWardPlacementEvent {
+    long long timestamp_millis = 0;
+    std::uint32_t ward_entity_network_id = 0;
+    int owner_participant_id = 0;
+    std::uint32_t owner_network_id = 0;
+    WardRelevantBlock owner_block;
+    WardRelevantBlock marker_block;
+};
+
+struct ReplayWardKillEvent {
+    long long timestamp_millis = 0;
+    std::uint32_t ward_entity_network_id = 0;
+    int killer_participant_id = 0;
+    std::uint32_t killer_network_id = 0;
+    WardRelevantBlock killer_owner_block;
+    WardRelevantBlock removal_block;
+};
+
+struct WardEventOrder {
+    long long timestamp_millis = 0;
+    int chunk_id = 0;
+    std::size_t block_index = 0;
+    bool placement = false;
+    std::size_t event_index = 0;
+};
+
+[[nodiscard]] const WardPacketProfile* find_ward_packet_profile(std::string_view version_group) {
+    const auto found = std::find_if(
+        kWardPacketProfiles.begin(),
+        kWardPacketProfiles.end(),
+        [version_group](const WardPacketProfile& profile) {
+            return profile.version_group == version_group;
+        }
+    );
+    return found == kWardPacketProfiles.end() ? nullptr : &*found;
+}
+
+[[nodiscard]] bool ward_length_is_profiled(
+    std::size_t value,
+    const std::array<std::size_t, 3>& lengths,
+    std::size_t count
+) {
+    return std::find(lengths.begin(), lengths.begin() + static_cast<std::ptrdiff_t>(count), value) !=
+        lengths.begin() + static_cast<std::ptrdiff_t>(count);
+}
+
+[[nodiscard]] bool ward_owner_length_is_profiled(
+    std::size_t value,
+    const std::array<std::size_t, 2>& lengths
+) {
+    return std::find(lengths.begin(), lengths.end(), value) != lengths.end();
+}
+
+[[nodiscard]] bool ward_discriminator_is_profiled(
+    std::uint8_t value,
+    const WardPacketProfile& profile
+) {
+    return std::find(
+        profile.placement_discriminator_values.begin(),
+        profile.placement_discriminator_values.begin() +
+            static_cast<std::ptrdiff_t>(profile.placement_discriminator_value_count),
+        value
+    ) != profile.placement_discriminator_values.begin() +
+        static_cast<std::ptrdiff_t>(profile.placement_discriminator_value_count);
+}
+
+[[nodiscard]] int ward_owner_to_participant_id(
+    std::uint32_t owner,
+    const WardPacketProfile& profile
+) {
+    if (owner <= profile.champion_network_id_base) return 0;
+    const std::uint32_t participant_id = owner - profile.champion_network_id_base;
+    return participant_id <= 10 ? static_cast<int>(participant_id) : 0;
+}
+
+[[nodiscard]] long long ward_timestamp_delta(long long left, long long right) {
+    return left >= right ? left - right : right - left;
+}
+
+void write_ward_block_provenance_json(
+    std::ostringstream& output,
+    const WardRelevantBlock& relevant
+) {
+    write_objective_block_provenance_json(output, relevant.block);
+}
+
+void write_size_array_json(
+    std::ostringstream& output,
+    const std::array<std::size_t, 3>& values,
+    std::size_t count
+) {
+    output << '[';
+    for (std::size_t index = 0; index < count; ++index) {
+        if (index > 0) output << ',';
+        output << values[index];
+    }
+    output << ']';
+}
+
+[[nodiscard]] std::string extract_replay_wards_impl(
+    const std::vector<std::uint8_t>& bytes,
+    const KillSourceInfo& source
+) {
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const std::string version_group = packet_version_group(summary.game_version);
+    const WardPacketProfile* profile = find_ward_packet_profile(version_group);
+    if (profile == nullptr) {
+        throw std::runtime_error(
+            "Unsupported replay version " + summary.game_version +
+            ". Supported groups: 15.22, 15.23, 15.24, 16.1, 16.5, 16.6, 16.7, 16.9."
+        );
+    }
+
+    std::vector<WardRelevantBlock> classified_placement_markers;
+    std::vector<WardRelevantBlock> placement_owner_blocks;
+    std::vector<WardRelevantBlock> removal_blocks;
+    std::vector<WardRelevantBlock> killer_owner_blocks;
+    std::size_t candidate_placement_marker_block_count = 0;
+    std::size_t rejected_placement_content_length_block_count = 0;
+    std::size_t rejected_placement_classifier_block_count = 0;
+
+    const PacketFileScan scan = scan_packet_segments(
+        bytes,
+        summary,
+        "chunk",
+        [&](const ReplaySegmentSummary&, const std::vector<std::uint8_t>& decompressed,
+            const PacketBlockParseResult& result) {
+            for (const PacketBlock& block : result.blocks) {
+                if (block.channel != 1) continue;
+                const WardRelevantBlock relevant{
+                    block,
+                    packet_timestamp_millis(block.timestamp_seconds),
+                };
+                if (block.packet_type == profile->placement_marker_packet_type) {
+                    candidate_placement_marker_block_count += 1;
+                    if (block.content_length != kWardPlacementContentLength) {
+                        rejected_placement_content_length_block_count += 1;
+                    } else {
+                        const std::uint8_t discriminator =
+                            decompressed[block.content_offset + kWardPlacementDiscriminatorOffset];
+                        if (ward_discriminator_is_profiled(discriminator, *profile)) {
+                            classified_placement_markers.push_back(relevant);
+                        } else {
+                            rejected_placement_classifier_block_count += 1;
+                        }
+                    }
+                }
+                if (block.packet_type == profile->placement_owner_packet_type &&
+                    ward_length_is_profiled(
+                        block.content_length,
+                        profile->placement_owner_content_lengths,
+                        profile->placement_owner_content_lengths.size()
+                    ) &&
+                    ward_owner_to_participant_id(block.block_param, *profile) != 0) {
+                    placement_owner_blocks.push_back(relevant);
+                }
+                if (block.packet_type == profile->removal_packet_type) {
+                    removal_blocks.push_back(relevant);
+                }
+                if (block.packet_type == profile->killer_owner_packet_type &&
+                    ward_owner_length_is_profiled(
+                        block.content_length,
+                        profile->killer_owner_content_lengths
+                    ) &&
+                    ward_owner_to_participant_id(block.block_param, *profile) != 0) {
+                    killer_owner_blocks.push_back(relevant);
+                }
+            }
+        }
+    );
+    if (scan.selected_segment_count == 0) {
+        throw std::runtime_error("Replay contains no footer-style chunk records.");
+    }
+    if (scan.exact_segment_count != scan.selected_segment_count || !scan.errors.empty()) {
+        const std::string detail = scan.errors.empty()
+            ? "one or more chunks were not exactly consumed"
+            : scan.errors.front().code + ": " + scan.errors.front().message;
+        throw std::runtime_error("Replay chunk packet framing failed: " + detail);
+    }
+
+    std::vector<ReplayWardPlacementEvent> placements;
+    for (std::size_t marker_index = 0;
+         marker_index < classified_placement_markers.size();
+         ++marker_index) {
+        const WardRelevantBlock& marker = classified_placement_markers[marker_index];
+        const WardRelevantBlock* owner = nullptr;
+        for (const WardRelevantBlock& candidate : placement_owner_blocks) {
+            if (candidate.block.provenance.chunk_id != marker.block.provenance.chunk_id ||
+                candidate.block.block_index >= marker.block.block_index ||
+                ward_timestamp_delta(candidate.timestamp_millis, marker.timestamp_millis) >
+                    kWardTimestampToleranceMillis) {
+                continue;
+            }
+            if (owner == nullptr || candidate.block.block_index > owner->block.block_index) {
+                owner = &candidate;
+            }
+        }
+        if (owner == nullptr) continue;
+
+        std::size_t first_marker_index = classified_placement_markers.size();
+        std::size_t first_marker_block_index = std::numeric_limits<std::size_t>::max();
+        for (std::size_t candidate_index = 0;
+             candidate_index < classified_placement_markers.size();
+             ++candidate_index) {
+            const WardRelevantBlock& candidate = classified_placement_markers[candidate_index];
+            if (candidate.block.provenance.chunk_id != owner->block.provenance.chunk_id ||
+                candidate.block.block_index <= owner->block.block_index ||
+                ward_timestamp_delta(candidate.timestamp_millis, owner->timestamp_millis) >
+                    kWardTimestampToleranceMillis) {
+                continue;
+            }
+            if (candidate.block.block_index < first_marker_block_index) {
+                first_marker_block_index = candidate.block.block_index;
+                first_marker_index = candidate_index;
+            }
+        }
+        if (first_marker_index != marker_index) continue;
+
+        placements.push_back({
+            marker.timestamp_millis,
+            marker.block.block_param,
+            ward_owner_to_participant_id(owner->block.block_param, *profile),
+            owner->block.block_param,
+            *owner,
+            marker,
+        });
+    }
+
+    std::set<std::uint32_t> tracked_ward_entity_ids;
+    for (const ReplayWardPlacementEvent& placement : placements) {
+        tracked_ward_entity_ids.insert(placement.ward_entity_network_id);
+    }
+
+    std::vector<ReplayWardKillEvent> kills;
+    std::size_t rejected_untracked_removal_block_count = 0;
+    std::size_t rejected_tracked_unprofiled_removal_block_count = 0;
+    std::size_t rejected_missing_killer_owner_block_count = 0;
+    std::size_t killer_owner_candidate_collision_count = 0;
+    for (const WardRelevantBlock& removal : removal_blocks) {
+        if (!tracked_ward_entity_ids.contains(removal.block.block_param)) {
+            rejected_untracked_removal_block_count += 1;
+            continue;
+        }
+        if (!ward_length_is_profiled(
+                removal.block.content_length,
+                profile->removal_content_lengths,
+                profile->removal_content_length_count
+            )) {
+            rejected_tracked_unprofiled_removal_block_count += 1;
+            continue;
+        }
+
+        const WardRelevantBlock* killer_owner = nullptr;
+        std::size_t killer_owner_candidate_count = 0;
+        for (const WardRelevantBlock& candidate : killer_owner_blocks) {
+            if (candidate.block.provenance.chunk_id != removal.block.provenance.chunk_id ||
+                candidate.block.block_index >= removal.block.block_index ||
+                ward_timestamp_delta(candidate.timestamp_millis, removal.timestamp_millis) >
+                    kWardTimestampToleranceMillis) {
+                continue;
+            }
+            killer_owner_candidate_count += 1;
+            if (killer_owner == nullptr ||
+                candidate.block.block_index > killer_owner->block.block_index) {
+                killer_owner = &candidate;
+            }
+        }
+        if (killer_owner == nullptr) {
+            rejected_missing_killer_owner_block_count += 1;
+            continue;
+        }
+        if (killer_owner_candidate_count > 1) {
+            killer_owner_candidate_collision_count += 1;
+        }
+        kills.push_back({
+            removal.timestamp_millis,
+            removal.block.block_param,
+            ward_owner_to_participant_id(killer_owner->block.block_param, *profile),
+            killer_owner->block.block_param,
+            *killer_owner,
+            removal,
+        });
+    }
+
+    std::vector<WardEventOrder> event_order;
+    event_order.reserve(placements.size() + kills.size());
+    for (std::size_t index = 0; index < placements.size(); ++index) {
+        event_order.push_back({
+            placements[index].timestamp_millis,
+            placements[index].marker_block.block.provenance.chunk_id,
+            placements[index].marker_block.block.block_index,
+            true,
+            index,
+        });
+    }
+    for (std::size_t index = 0; index < kills.size(); ++index) {
+        event_order.push_back({
+            kills[index].timestamp_millis,
+            kills[index].removal_block.block.provenance.chunk_id,
+            kills[index].removal_block.block.block_index,
+            false,
+            index,
+        });
+    }
+    std::sort(event_order.begin(), event_order.end(), [](const auto& left, const auto& right) {
+        if (left.timestamp_millis != right.timestamp_millis) {
+            return left.timestamp_millis < right.timestamp_millis;
+        }
+        if (left.chunk_id != right.chunk_id) return left.chunk_id < right.chunk_id;
+        if (left.block_index != right.block_index) return left.block_index < right.block_index;
+        return left.placement && !right.placement;
+    });
+
+    std::ostringstream output;
+    output << "{\"schema\":\"rofl-replay-wards/v1\",\"generatedAtUtc\":\""
+           << current_utc_iso8601() << "\",";
+    output << "\"source\":{\"replayPath\":";
+    if (source.has_file) output << '"' << json_escape(source.replay_path) << '"'; else output << "null";
+    output << ",\"replayId\":";
+    if (source.has_file) output << '"' << json_escape(source.replay_id) << '"'; else output << "null";
+    output << ",\"matchId\":";
+    if (source.has_file) output << '"' << json_escape(source.match_id) << '"'; else output << "null";
+    output << ",\"runtimeInput\":\"rofl-only\",\"riotApiInput\":false},";
+    output << "\"gameVersion\":\"" << json_escape(summary.game_version)
+           << "\",\"versionGroup\":\"" << version_group << "\",";
+    output << "\"profile\":{\"channel\":1";
+    output << ",\"placementMarkerPacketType\":" << profile->placement_marker_packet_type;
+    output << ",\"placementMarkerPacketTypeHex\":\"" << fixed_hex(profile->placement_marker_packet_type, 4) << "\"";
+    output << ",\"placementContentLength\":" << kWardPlacementContentLength;
+    output << ",\"placementDiscriminatorOffset\":" << kWardPlacementDiscriminatorOffset;
+    output << ",\"placementDiscriminatorValues\":[";
+    for (std::size_t index = 0; index < profile->placement_discriminator_value_count; ++index) {
+        if (index > 0) output << ',';
+        output << static_cast<unsigned int>(profile->placement_discriminator_values[index]);
+    }
+    output << "],\"placementDiscriminatorValuesHex\":[";
+    for (std::size_t index = 0; index < profile->placement_discriminator_value_count; ++index) {
+        if (index > 0) output << ',';
+        output << '"' << fixed_hex(profile->placement_discriminator_values[index], 2) << '"';
+    }
+    output << ']';
+    output << ",\"placementOwnerPacketType\":" << profile->placement_owner_packet_type;
+    output << ",\"placementOwnerPacketTypeHex\":\"" << fixed_hex(profile->placement_owner_packet_type, 4) << "\"";
+    output << ",\"placementOwnerContentLengths\":";
+    write_size_array_json(output, profile->placement_owner_content_lengths, profile->placement_owner_content_lengths.size());
+    output << ",\"removalPacketType\":" << profile->removal_packet_type;
+    output << ",\"removalPacketTypeHex\":\"" << fixed_hex(profile->removal_packet_type, 4) << "\"";
+    output << ",\"removalContentLengths\":";
+    write_size_array_json(output, profile->removal_content_lengths, profile->removal_content_length_count);
+    output << ",\"killerOwnerPacketType\":" << profile->killer_owner_packet_type;
+    output << ",\"killerOwnerPacketTypeHex\":\"" << fixed_hex(profile->killer_owner_packet_type, 4) << "\"";
+    output << ",\"killerOwnerContentLengths\":["
+           << profile->killer_owner_content_lengths[0] << ','
+           << profile->killer_owner_content_lengths[1] << ']';
+    output << ",\"championNetworkIdBase\":" << profile->champion_network_id_base;
+    output << ",\"championNetworkIdBaseHex\":\"" << fixed_hex(profile->champion_network_id_base, 8) << "\"";
+    output << ",\"timestampToleranceMillis\":" << kWardTimestampToleranceMillis << "},";
+    output << "\"replay\":{\"gameLengthMillis\":";
+    if (summary.game_length_millis > 0) output << summary.game_length_millis; else output << "null";
+    output << ",\"lastGameChunkId\":";
+    if (summary.last_game_chunk_id > 0) output << summary.last_game_chunk_id; else output << "null";
+    output << ",\"lastKeyFrameId\":";
+    if (summary.last_keyframe_id > 0) output << summary.last_keyframe_id; else output << "null";
+    output << "},\"events\":[";
+    for (std::size_t order_index = 0; order_index < event_order.size(); ++order_index) {
+        if (order_index > 0) output << ',';
+        const WardEventOrder& ordered = event_order[order_index];
+        if (ordered.placement) {
+            const ReplayWardPlacementEvent& event = placements[ordered.event_index];
+            output << "{\"type\":\"WARD_PLACED\",\"timestampMillis\":" << event.timestamp_millis;
+            output << ",\"wardEntityNetworkId\":" << event.ward_entity_network_id;
+            output << ",\"wardEntityNetworkIdHex\":\"" << fixed_hex(event.ward_entity_network_id, 8) << "\"";
+            output << ",\"ownerParticipantId\":" << event.owner_participant_id;
+            output << ",\"ownerNetworkId\":" << event.owner_network_id;
+            output << ",\"ownerNetworkIdHex\":\"" << fixed_hex(event.owner_network_id, 8) << "\"";
+            output << ",\"wardType\":null,\"position\":null,\"provenance\":{\"ownerBlock\":";
+            write_ward_block_provenance_json(output, event.owner_block);
+            output << ",\"markerBlock\":";
+            write_ward_block_provenance_json(output, event.marker_block);
+            output << "}}";
+        } else {
+            const ReplayWardKillEvent& event = kills[ordered.event_index];
+            output << "{\"type\":\"WARD_KILL\",\"timestampMillis\":" << event.timestamp_millis;
+            output << ",\"wardEntityNetworkId\":" << event.ward_entity_network_id;
+            output << ",\"wardEntityNetworkIdHex\":\"" << fixed_hex(event.ward_entity_network_id, 8) << "\"";
+            output << ",\"killerParticipantId\":" << event.killer_participant_id;
+            output << ",\"killerNetworkId\":" << event.killer_network_id;
+            output << ",\"killerNetworkIdHex\":\"" << fixed_hex(event.killer_network_id, 8) << "\"";
+            output << ",\"wardType\":null,\"position\":null,\"removalReason\":null,\"provenance\":{\"killerOwnerBlock\":";
+            write_ward_block_provenance_json(output, event.killer_owner_block);
+            output << ",\"removalBlock\":";
+            write_ward_block_provenance_json(output, event.removal_block);
+            output << "}}";
+        }
+    }
+    output << "],\"diagnostics\":{\"footerRecordCount\":" << summary.container.segments.size();
+    output << ",\"chunkRecordCount\":" << scan.selected_segment_count;
+    output << ",\"decompressedChunkBytes\":" << scan.input_bytes;
+    output << ",\"packetBlockCount\":" << scan.packet_count;
+    output << ",\"candidatePlacementMarkerBlockCount\":" << candidate_placement_marker_block_count;
+    output << ",\"classifiedPlacementMarkerBlockCount\":" << classified_placement_markers.size();
+    output << ",\"rejectedPlacementContentLengthBlockCount\":" << rejected_placement_content_length_block_count;
+    output << ",\"rejectedPlacementClassifierBlockCount\":" << rejected_placement_classifier_block_count;
+    output << ",\"rejectedUnpairedPlacementMarkerBlockCount\":"
+           << classified_placement_markers.size() - placements.size();
+    output << ",\"decodedWardPlacementEventCount\":" << placements.size();
+    output << ",\"candidateRemovalBlockCount\":" << removal_blocks.size();
+    output << ",\"rejectedUntrackedRemovalBlockCount\":" << rejected_untracked_removal_block_count;
+    output << ",\"rejectedTrackedUnprofiledRemovalBlockCount\":" << rejected_tracked_unprofiled_removal_block_count;
+    output << ",\"rejectedMissingKillerOwnerBlockCount\":" << rejected_missing_killer_owner_block_count;
+    output << ",\"killerOwnerCandidateCollisionCount\":" << killer_owner_candidate_collision_count;
+    output << ",\"decodedWardKillEventCount\":" << kills.size();
+    output << ",\"exactPacketFraming\":true";
+    output << ",\"placementCoverage\":\"exact-on-validated-corpus\"";
+    output << ",\"removalCoverage\":\"conservative-partial\"";
+    output << ",\"wardTypeAvailable\":false";
+    output << ",\"positionAvailable\":false";
+    output << ",\"visionRadiusAvailable\":false";
+    output << ",\"removalReasonAvailable\":false}}";
+    return output.str();
+}
 }  // namespace
 
 std::string extract_replay_kills_json(const std::vector<std::uint8_t>& bytes) {
@@ -3178,6 +3715,25 @@ std::string extract_replay_objectives_file_json(const std::string& path) {
     const std::size_t separator = source.match_id.find('-');
     if (separator != std::string::npos) source.match_id[separator] = '_';
     return extract_replay_objectives_impl(read_file_bytes(source.replay_path), source);
+}
+
+std::string extract_replay_wards_json(const std::vector<std::uint8_t>& bytes) {
+    return extract_replay_wards_impl(bytes, {});
+}
+
+std::string extract_replay_wards_file_json(const std::string& path) {
+    std::error_code error;
+    std::filesystem::path absolute = std::filesystem::absolute(path, error);
+    if (error) absolute = std::filesystem::path(path);
+    absolute = absolute.lexically_normal();
+    KillSourceInfo source;
+    source.has_file = true;
+    source.replay_path = absolute.string();
+    source.replay_id = absolute.stem().string();
+    source.match_id = source.replay_id;
+    const std::size_t separator = source.match_id.find('-');
+    if (separator != std::string::npos) source.match_id[separator] = '_';
+    return extract_replay_wards_impl(read_file_bytes(source.replay_path), source);
 }
 
 std::string replay_summary_to_json(const ReplaySummary& summary) {
@@ -3231,6 +3787,8 @@ std::string replay_summary_to_json(const ReplaySummary& summary) {
     output << "\"capabilities\":{";
     output << "\"metadataAvailable\":" << bool_to_json(summary.capabilities.metadata_available) << ',';
     output << "\"playerStatsAvailable\":" << bool_to_json(summary.capabilities.player_stats_available) << ',';
+    output << "\"validatedFinalPlayerStatsAvailable\":"
+           << bool_to_json(summary.capabilities.validated_final_player_stats_available) << ',';
     output << "\"binaryHeaderAvailable\":" << bool_to_json(summary.capabilities.binary_header_available) << ',';
     output << "\"payloadHeaderAvailable\":" << bool_to_json(summary.capabilities.payload_header_available) << ',';
     output << "\"segmentTableAvailable\":" << bool_to_json(summary.capabilities.segment_table_available) << ',';
@@ -3266,7 +3824,19 @@ std::string replay_summary_to_json(const ReplaySummary& summary) {
         output << "\"assists\":" << player.assists << ',';
         output << "\"goldEarned\":" << player.gold_earned << ',';
         output << "\"totalDamageToChampions\":" << player.total_damage_to_champions << ',';
-        output << "\"visionScore\":" << player.vision_score;
+        output << "\"visionScore\":" << player.vision_score << ',';
+        output << "\"level\":" << player.level << ',';
+        output << "\"experience\":" << player.experience << ',';
+        output << "\"laneMinionsKilled\":" << player.lane_minions_killed << ',';
+        output << "\"neutralMinionsKilled\":" << player.neutral_minions_killed << ',';
+        output << "\"items\":[";
+        for (std::size_t item_index = 0; item_index < player.items.size(); ++item_index) {
+            if (item_index > 0) output << ',';
+            output << player.items[item_index];
+        }
+        output << "],";
+        output << "\"wardsPlaced\":" << player.wards_placed << ',';
+        output << "\"wardsKilled\":" << player.wards_killed;
         output << '}';
     }
     output << "],";

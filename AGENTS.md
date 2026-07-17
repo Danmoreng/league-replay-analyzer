@@ -59,13 +59,15 @@ Current state:
 - `replays/` contains local replay samples for manual testing.
 - the parser extracts embedded replay metadata and per-player final `statsJson`
 - the shared C++ core implements exact packet-block framing with timestamps, channels, packet types, signed compact block parameters, payload boundaries, and source provenance
-- native CLI tools validate framing, catalog packet types, dump bounded payload samples, and emit normalized replay-only champion-kill and elite-objective events
+- native CLI tools validate framing, catalog packet types, dump bounded payload samples, and emit normalized replay-only champion-kill, elite-objective, and ward-lifecycle events
 - the kill decoder is version-profiled for patches 15.22 through 16.9 and validates 2,796/2,796 corpus kills plus final K/D/A for all 470 participants
 - the elite-objective decoder is version-profiled for the same patch groups and validates 425/425 events with zero extras, missing events, or unknown emitted classes
-- the current web app loads a `.rofl` locally, calls the real Wasm decoder, and renders replay-derived participant summaries, kills, and elite objectives with diagnostics
-- the default web landing page is a product-oriented replay viewer with one combined kill/objective timeline, final-state team rosters, and honest unavailable states for movement, inventories, health, mana, and other unresolved dynamic streams; the earlier summary and decoder tools remain under Research & Debug
+- the current web app loads a `.rofl` locally, calls the real Wasm decoder, and renders replay-derived participant summaries, kills, elite objectives, and ward lifecycle events with diagnostics
+- the default web landing page is a product-oriented replay viewer with one combined kill/objective/ward timeline and final-state team rosters showing level, XP, lane and neutral CS, seven item slots, ward aggregates, and gold; movement, inventory history, health, mana, and other unresolved dynamic streams remain explicitly unavailable, while the earlier summary and decoder tools remain under Research & Debug
 - objective killer/team, elemental dragon subtype, event positions, and kill damage/gold details remain unresolved
-- ward lifecycle research is close to runtime promotion: 6,168/6,168 placements are exact, while 1,882/1,883 conservative removals are high-confidence partial coverage with zero extras and exact fields for emitted events; subtype and position are not decoded and there is no C++/Wasm ward API yet
+- the ward lifecycle is promoted through C++, native CLI, Wasm, TypeScript, and Vue as `rofl-replay-wards/v1`: 6,168/6,168 placements are exact, while 1,882/1,883 conservative removals have zero extras and exact fields for emitted events; subtype, position, vision radius, and removal reason remain unavailable
+- embedded final `statsJson` level, XP, lane CS, neutral CS, seven item slots, and ward-placement/kill aggregates validate exactly through the productive native summary for 6,110/6,110 fields across all 470 corpus participants; `validatedFinalPlayerStatsAvailable` restricts display to the eight validated patch groups with a complete valid field set, and the values are final state rather than timelines
+- the Wasm suite includes a real in-memory zstd ROFL contract test for the ward ABI and unsupported-version error boundary; Wasm C++ exception handling must remain enabled for those JSON error boundaries
 - patch-16.9 inventory research decodes add/update item IDs and a sale-operation class, but an expanded corpus scan falsified the strongest simple slot-symbol candidate; slot/instance/removal linkage, swaps, undo, and full inventory state remain unresolved, and no inventory runtime API exists
 - keyframe outer framing and champion ownership are exact, but the inner replication/component grammar and all proposed dynamic state fields remain unresolved
 - there is no valid replay-native movement or position decoder; the provisional `0x00DC` raw-coordinate interpretation was disproven and removed from the runtime
@@ -79,10 +81,10 @@ Important browser caveat:
 
 Near-term engineering focus should be:
 
-1. promote the validated ward lifecycle through C++, Wasm, and Vue
-2. decode the real movement/waypoint message grammar and replay-native entity identity
-3. finish inventory slot/instance/removal decoding and reconstruct full inventory state
-4. decode keyframe replication/component state for health, resources, gold, XP, level, CS, and related timeseries
+1. decode the real movement/waypoint message grammar and replay-native entity identity
+2. finish inventory slot/instance/removal decoding and reconstruct full inventory state
+3. decode keyframe replication/component state for health, resources, gold, XP, level, CS, and related timeseries
+4. decode ward subtype/position/vision semantics while preserving the conservative lifecycle boundary
 5. promote buildings/plates and pursue damage, spell, combat-effect, and world-entity streams
 
 When starting a future session:

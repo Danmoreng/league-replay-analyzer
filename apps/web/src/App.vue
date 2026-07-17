@@ -24,9 +24,11 @@ import {
 import { type PlayerSummary, type ReplaySummary } from "./replayParser";
 import type { ReplayKillResult } from "./replayKills";
 import type { ReplayObjectiveResult } from "./replayObjectives";
+import type { ReplayWardResult } from "./replayWards";
 import {
   extractReplayKillsWithWasm,
   extractReplayObjectivesWithWasm,
+  extractReplayWardsWithWasm,
   parseReplayBufferWithWasm,
 } from "./wasmReplayParser";
 
@@ -43,6 +45,9 @@ const isLoadingReplayKills = ref(false);
 const replayObjectives = ref<ReplayObjectiveResult | null>(null);
 const replayObjectivesError = ref("");
 const isLoadingReplayObjectives = ref(false);
+const replayWards = ref<ReplayWardResult | null>(null);
+const replayWardsError = ref("");
+const isLoadingReplayWards = ref(false);
 const replayMovementStatus = ref("No replay-derived movement fixture loaded yet.");
 const parserEngine = ref("C++/Wasm");
 const replayBuffer = ref<ArrayBuffer | null>(null);
@@ -56,11 +61,20 @@ const headerStatus = computed(() => {
     return status.value;
   }
 
-  if (isLoading.value || isLoadingReplayKills.value || isLoadingReplayObjectives.value) {
+  if (
+    isLoading.value ||
+    isLoadingReplayKills.value ||
+    isLoadingReplayObjectives.value ||
+    isLoadingReplayWards.value
+  ) {
     return "Replay wird lokal dekodiert …";
   }
 
-  return `${replayKills.value?.events.length ?? 0} Kills · ${replayObjectives.value?.events.length ?? 0} Elite-Objectives · Replay-only · lokal verarbeitet`;
+  const wardStatus =
+    replayWardsError.value || !replayWards.value
+      ? "Ward-Lifecycle nicht verfügbar"
+      : `${replayWards.value.events.filter((event) => event.type === "WARD_PLACED").length} Standard-Ward-Platzierungen · ${replayWards.value.events.filter((event) => event.type === "WARD_KILL").length} konservative Ward-Kills`;
+  return `${replayKills.value?.events.length ?? 0} Kills · ${replayObjectives.value?.events.length ?? 0} Elite-Objectives · ${wardStatus} · Replay-only · lokal verarbeitet`;
 });
 function toDdragonVersion(version: string): string {
   const match = version.match(/^(\d+)\.(\d+)/);
@@ -104,7 +118,8 @@ function getRoleRank(roleLabel?: string): number {
   if (normalized.includes("top")) return 0;
   if (normalized.includes("jungle")) return 1;
   if (normalized.includes("mid")) return 2;
-  if (normalized.includes("bottom") || normalized.includes("bot") || normalized.includes("adc")) return 3;
+  if (normalized.includes("bottom") || normalized.includes("bot") || normalized.includes("adc"))
+    return 3;
   if (normalized.includes("support") || normalized.includes("utility")) return 4;
   return 5;
 }
@@ -132,16 +147,23 @@ const teams = computed(() => {
   });
 });
 
-
 const eventAnchoredTypes = new Set(["CHAMPION_KILL", "ELITE_MONSTER_KILL", "BUILDING_KILL"]);
 
-function createMovementPlayer(participantId: number, bundle: RiotFixtureBundle): PlayerMovementData {
-  const participant = bundle.match.info.participants.find((entry) => entry.participantId === participantId);
+function createMovementPlayer(
+  participantId: number,
+  bundle: RiotFixtureBundle,
+): PlayerMovementData {
+  const participant = bundle.match.info.participants.find(
+    (entry) => entry.participantId === participantId,
+  );
   return {
     champion: participant?.championName ?? `P${participantId}`,
     team: participant?.teamId ?? 100,
     playerName: getPlayerDisplayName(participant?.riotIdGameName, participant?.riotIdTagline),
-    championIconSrc: getChampionIconSrc(participant?.championName ?? `P${participantId}`, bundle.match.info.gameVersion),
+    championIconSrc: getChampionIconSrc(
+      participant?.championName ?? `P${participantId}`,
+      bundle.match.info.gameVersion,
+    ),
     roleLabel: getRoleLabel(participant?.lane, participant?.role),
     positions: [],
   };
@@ -167,7 +189,9 @@ function appendMovementPoint(
   player.positions.push({ x, y, timestamp, source });
 }
 
-function normalizeMovementPositions(positions: PlayerMovementData["positions"]): PlayerMovementData["positions"] {
+function normalizeMovementPositions(
+  positions: PlayerMovementData["positions"],
+): PlayerMovementData["positions"] {
   const sourceRank = { frame: 0, event: 1 } as const;
   const sorted = [...positions].sort(
     (left, right) =>
@@ -211,7 +235,10 @@ function buildApiMovementFromBundle(bundle: RiotFixtureBundle): PlayerMovementDa
   );
 
   for (const frame of bundle.timeline.info.frames) {
-    const participantFrames = frame.participantFrames as Record<string, { position?: { x: number; y: number } }>;
+    const participantFrames = frame.participantFrames as Record<
+      string,
+      { position?: { x: number; y: number } }
+    >;
     for (const [rawParticipantId, participantFrame] of Object.entries(participantFrames)) {
       if (!participantFrame.position) {
         continue;
@@ -289,9 +316,11 @@ function findBundleParticipantForReplayAssignment(
   )?.matchedParticipantId;
 
   if (matchedParticipantId != null) {
-    return bundle.match.info.participants.find(
-      (participant) => participant.participantId === matchedParticipantId,
-    ) ?? null;
+    return (
+      bundle.match.info.participants.find(
+        (participant) => participant.participantId === matchedParticipantId,
+      ) ?? null
+    );
   }
 
   let best: { participant: RiotMatchParticipant; score: number } | null = null;
@@ -334,7 +363,11 @@ function buildReplayMovementFromFixture(
         bundle,
       );
       const summaryPlayer = summaryPlayers[assignment.rosterIndex] ?? null;
-      const champion = assignment.champion || bundleParticipant?.championName || summaryPlayer?.champion || `P${assignment.rosterIndex + 1}`;
+      const champion =
+        assignment.champion ||
+        bundleParticipant?.championName ||
+        summaryPlayer?.champion ||
+        `P${assignment.rosterIndex + 1}`;
 
       return {
         champion,
@@ -344,7 +377,10 @@ function buildReplayMovementFromFixture(
           bundleParticipant?.riotIdTagline ?? summaryPlayer?.riotIdTagLine,
         ),
         championIconSrc: getChampionIconSrc(champion, gameVersion),
-        roleLabel: getRoleLabel(assignment.teamPosition, bundleParticipant?.lane ?? summaryPlayer?.teamPosition),
+        roleLabel: getRoleLabel(
+          assignment.teamPosition,
+          bundleParticipant?.lane ?? summaryPlayer?.teamPosition,
+        ),
         positions: normalizeMovementPositions(
           assignment.trajectory.map((position) => ({
             x: position.x,
@@ -362,12 +398,16 @@ function buildReplayMovementFromFixture(
     });
 }
 
-function summarizeReplayMovementFixture(fixture: LoadedReplayMovementFixture | null, playerCount: number): string {
+function summarizeReplayMovementFixture(
+  fixture: LoadedReplayMovementFixture | null,
+  playerCount: number,
+): string {
   if (!fixture) {
     return "(No replay-derived movement fixture published for this replay yet)";
   }
 
-  const assigned = fixture.validation?.summary?.assignmentCount ?? fixture.movement.assignments.length;
+  const assigned =
+    fixture.validation?.summary?.assignmentCount ?? fixture.movement.assignments.length;
   const passing = fixture.validation?.summary?.passingAssignmentCount ?? 0;
   if (playerCount <= 0) {
     return "(Replay-derived movement fixture loaded, but it had no assigned participant tracks)";
@@ -380,10 +420,18 @@ function summarizeReplayMovementFixture(fixture: LoadedReplayMovementFixture | n
   return `(Loaded replay-derived movement for ${playerCount} participants)`;
 }
 
-const hasApiMovement = computed(() => apiMovement.value.some((player) => player.positions.length > 0));
-const hasReplayMovement = computed(() => replayMovement.value.some((player) => player.positions.length > 0));
-const apiMovementCount = computed(() => apiMovement.value.filter((player) => player.positions.length > 0).length);
-const replayMovementCount = computed(() => replayMovement.value.filter((player) => player.positions.length > 0).length);
+const hasApiMovement = computed(() =>
+  apiMovement.value.some((player) => player.positions.length > 0),
+);
+const hasReplayMovement = computed(() =>
+  replayMovement.value.some((player) => player.positions.length > 0),
+);
+const apiMovementCount = computed(
+  () => apiMovement.value.filter((player) => player.positions.length > 0).length,
+);
+const replayMovementCount = computed(
+  () => replayMovement.value.filter((player) => player.positions.length > 0).length,
+);
 const hasDualMovement = computed(() => hasApiMovement.value && hasReplayMovement.value);
 const movementRosterPlayers = computed(() =>
   (summary.value?.players ?? [])
@@ -391,17 +439,25 @@ const movementRosterPlayers = computed(() =>
       champion: player.champion,
       team: Number(player.team ?? 100),
       playerName: getPlayerDisplayName(player.riotIdGameName, player.riotIdTagLine),
-      championIconSrc: getChampionIconSrc(player.champion ?? "Unknown", summary.value?.gameVersion ?? "16.5.1"),
+      championIconSrc: getChampionIconSrc(
+        player.champion ?? "Unknown",
+        summary.value?.gameVersion ?? "16.5.1",
+      ),
       roleLabel: getRoleLabel(player.teamPosition),
     }))
-    .sort((left, right) =>
-      left.team - right.team ||
-      getRoleRank(left.roleLabel) - getRoleRank(right.roleLabel) ||
-      left.champion.localeCompare(right.champion),
+    .sort(
+      (left, right) =>
+        left.team - right.team ||
+        getRoleRank(left.roleLabel) - getRoleRank(right.roleLabel) ||
+        left.champion.localeCompare(right.champion),
     ),
 );
-const movementBlueRoster = computed(() => movementRosterPlayers.value.filter((player) => player.team === 100));
-const movementRedRoster = computed(() => movementRosterPlayers.value.filter((player) => player.team === 200));
+const movementBlueRoster = computed(() =>
+  movementRosterPlayers.value.filter((player) => player.team === 100),
+);
+const movementRedRoster = computed(() =>
+  movementRosterPlayers.value.filter((player) => player.team === 200),
+);
 const apiMinimapEmptyMessage = computed(() =>
   hasReplayMovement.value
     ? "No Riot timeline movement fixture is available for this replay."
@@ -422,9 +478,10 @@ async function loadMovementData(matchId: string | null): Promise<string> {
   if (riotBundle.value) {
     apiMovement.value = buildApiMovementFromBundle(riotBundle.value);
     const apiValid = apiMovement.value.filter((player) => player.positions.length > 0).length;
-    apiStatus = apiValid > 0
-      ? `(Loaded Riot timeline movement plus event anchors for ${apiValid} players)`
-      : "(Riot timeline fixture did not contain participant positions)";
+    apiStatus =
+      apiValid > 0
+        ? `(Loaded Riot timeline movement plus event anchors for ${apiValid} players)`
+        : "(Riot timeline fixture did not contain participant positions)";
   } else {
     apiStatus = "(No replay-specific Riot research fixture available; fixed fallback disabled)";
   }
@@ -436,7 +493,10 @@ async function loadMovementData(matchId: string | null): Promise<string> {
       replayMovement.value = replayFixture
         ? buildReplayMovementFromFixture(replayFixture, riotBundle.value, summary.value)
         : [];
-      replayMovementStatus.value = summarizeReplayMovementFixture(replayFixture, replayMovementCount.value);
+      replayMovementStatus.value = summarizeReplayMovementFixture(
+        replayFixture,
+        replayMovementCount.value,
+      );
       replayStatus = replayMovementStatus.value;
     } catch (error) {
       replayMovement.value = [];
@@ -444,7 +504,8 @@ async function loadMovementData(matchId: string | null): Promise<string> {
       replayStatus = replayMovementStatus.value;
     }
   } else {
-    replayMovementStatus.value = "(Replay filename did not map to a published replay movement fixture)";
+    replayMovementStatus.value =
+      "(Replay filename did not map to a published replay movement fixture)";
     replayStatus = replayMovementStatus.value;
   }
 
@@ -472,10 +533,10 @@ const overviewMetrics = computed(() => {
   }
 
   return [
-    { label: "Patch", value: summary.value.gameVersion, icon: 'bi-patch-check' },
-    { label: "Duration", value: durationLabel.value, icon: 'bi-clock' },
-    { label: "File Size", value: formatFileSize(summary.value.fileSize), icon: 'bi-hdd' },
-    { label: "Container", value: summary.value.container.format, icon: 'bi-box' },
+    { label: "Patch", value: summary.value.gameVersion, icon: "bi-patch-check" },
+    { label: "Duration", value: durationLabel.value, icon: "bi-clock" },
+    { label: "File Size", value: formatFileSize(summary.value.fileSize), icon: "bi-hdd" },
+    { label: "Container", value: summary.value.container.format, icon: "bi-box" },
   ];
 });
 
@@ -575,6 +636,9 @@ async function loadReplay(file: File): Promise<void> {
   replayObjectives.value = null;
   replayObjectivesError.value = "";
   isLoadingReplayObjectives.value = true;
+  replayWards.value = null;
+  replayWardsError.value = "";
+  isLoadingReplayWards.value = true;
   loadedReplayName.value = file.name;
   status.value = `Parsing ${file.name}...`;
 
@@ -614,6 +678,24 @@ async function loadReplay(file: File): Promise<void> {
       isLoadingReplayObjectives.value = false;
     }
 
+    let wardStatus = "Ward timeline unavailable.";
+    status.value = `Decoded replay objectives for ${file.name}. Decoding ward events...`;
+    try {
+      replayWards.value = await extractReplayWardsWithWasm(buffer);
+      const wardPlacements = replayWards.value.events.filter(
+        (event) => event.type === "WARD_PLACED",
+      ).length;
+      const wardKills = replayWards.value.events.filter(
+        (event) => event.type === "WARD_KILL",
+      ).length;
+      wardStatus = `Decoded ${wardPlacements} exact standard-ward placements and ${wardKills} conservative replay-only ward kills.`;
+    } catch (wardError) {
+      replayWards.value = null;
+      replayWardsError.value = wardError instanceof Error ? wardError.message : String(wardError);
+    } finally {
+      isLoadingReplayWards.value = false;
+    }
+
     if (derivedMatchId) {
       try {
         riotBundle.value = await loadRiotFixtureBundle(derivedMatchId);
@@ -629,7 +711,7 @@ async function loadReplay(file: File): Promise<void> {
     setDuration(parsedSummary.gameLengthMillis);
     seek(0);
     const movementStatus = await loadMovementData(derivedMatchId);
-    status.value = `Parsed ${file.name} successfully. ${killStatus} ${objectiveStatus} ${movementStatus}`;
+    status.value = `Parsed ${file.name} successfully. ${killStatus} ${objectiveStatus} ${wardStatus} ${movementStatus}`;
   } catch (error) {
     summary.value = null;
     browserModel.value = null;
@@ -638,6 +720,8 @@ async function loadReplay(file: File): Promise<void> {
     replayKillsError.value = "";
     replayObjectives.value = null;
     replayObjectivesError.value = "";
+    replayWards.value = null;
+    replayWardsError.value = "";
     replayBuffer.value = null;
     errorMessage.value = error instanceof Error ? error.message : String(error);
     status.value = "Replay parsing failed.";
@@ -645,6 +729,7 @@ async function loadReplay(file: File): Promise<void> {
     isLoading.value = false;
     isLoadingReplayKills.value = false;
     isLoadingReplayObjectives.value = false;
+    isLoadingReplayWards.value = false;
   }
 }
 
@@ -655,7 +740,6 @@ function onFileChange(event: Event): void {
     void loadReplay(file);
   }
 }
-
 </script>
 
 <template>
@@ -667,9 +751,10 @@ function onFileChange(event: Event): void {
 
     <!-- Content Area -->
     <main class="main-content flex-grow-1 overflow-auto p-2 d-flex flex-column">
-      
       <!-- Top Action Bar -->
-      <header class="island p-3 mb-2 d-flex justify-content-between align-items-center flex-shrink-0">
+      <header
+        class="island p-3 mb-2 d-flex justify-content-between align-items-center flex-shrink-0"
+      >
         <div>
           <h1 class="fs-4 mb-0" v-if="loadedReplayName">{{ loadedReplayName }}</h1>
           <h1 class="fs-4 mb-0" v-else>League Replay Analyzer</h1>
@@ -678,7 +763,9 @@ function onFileChange(event: Event): void {
           </p>
         </div>
         <div class="d-flex gap-2 align-items-center">
-          <span class="badge bg-secondary opacity-75 d-none d-md-inline-block">{{ parserEngine }}</span>
+          <span class="badge bg-secondary opacity-75 d-none d-md-inline-block">{{
+            parserEngine
+          }}</span>
           <label class="btn btn-primary btn-sm px-3">
             <i class="bi bi-file-earmark-arrow-up me-1"></i>
             Load Replay
@@ -695,15 +782,17 @@ function onFileChange(event: Event): void {
           :replay-name="loadedReplayName"
           :kills="replayKills"
           :objectives="replayObjectives"
+          :wards="replayWards"
           :kills-loading="isLoadingReplayKills"
           :objectives-loading="isLoadingReplayObjectives"
+          :wards-loading="isLoadingReplayWards"
           :kills-error="replayKillsError"
           :objectives-error="replayObjectivesError"
+          :wards-error="replayWardsError"
         />
-        
+
         <!-- Summary View -->
         <div v-else-if="activePage === 'summary'" class="d-flex flex-column gap-2">
-          
           <!-- Metrics Row -->
           <div class="row g-2 flex-shrink-0">
             <div v-for="metric in overviewMetrics" :key="metric.label" class="col-6 col-md-3">
@@ -719,24 +808,44 @@ function onFileChange(event: Event): void {
             <div class="d-flex justify-content-between align-items-start">
               <div>
                 <h2 class="fs-5 mb-1">Match Timeline</h2>
-                <p class="text-muted small" v-if="hasDualMovement">Riot API and replay-derived positions are rendered side by side with the same playback timeline.</p>
-                <p class="text-muted small" v-else-if="hasReplayMovement">Showing replay-derived participant positions from the decoder artifacts.</p>
-                <p class="text-muted small" v-else-if="hasApiMovement">Riot timeline frame positions plus combat and objective event anchors rendered on the original Summoner&apos;s Rift minimap.</p>
+                <p class="text-muted small" v-if="hasDualMovement">
+                  Riot API and replay-derived positions are rendered side by side with the same
+                  playback timeline.
+                </p>
+                <p class="text-muted small" v-else-if="hasReplayMovement">
+                  Showing replay-derived participant positions from the decoder artifacts.
+                </p>
+                <p class="text-muted small" v-else-if="hasApiMovement">
+                  Riot timeline frame positions plus combat and objective event anchors rendered on
+                  the original Summoner&apos;s Rift minimap.
+                </p>
                 <p class="text-muted small" v-else>No decoded movement frames are available yet.</p>
               </div>
               <div class="d-flex flex-wrap gap-2 justify-content-end align-items-center">
-                <span v-if="hasApiMovement" class="badge bg-success-subtle text-success-emphasis">API {{ apiMovementCount }}</span>
-                <span v-else class="badge bg-secondary-subtle text-secondary-emphasis">API Missing</span>
-                <span v-if="hasReplayMovement" class="badge bg-info-subtle text-info-emphasis">Replay {{ replayMovementCount }}</span>
-                <span v-else class="badge bg-secondary-subtle text-secondary-emphasis">Replay Missing</span>
+                <span v-if="hasApiMovement" class="badge bg-success-subtle text-success-emphasis"
+                  >API {{ apiMovementCount }}</span
+                >
+                <span v-else class="badge bg-secondary-subtle text-secondary-emphasis"
+                  >API Missing</span
+                >
+                <span v-if="hasReplayMovement" class="badge bg-info-subtle text-info-emphasis"
+                  >Replay {{ replayMovementCount }}</span
+                >
+                <span v-else class="badge bg-secondary-subtle text-secondary-emphasis"
+                  >Replay Missing</span
+                >
               </div>
             </div>
-            <div class="d-flex flex-column flex-lg-row justify-content-between align-items-start align-items-lg-center gap-2">
+            <div
+              class="d-flex flex-column flex-lg-row justify-content-between align-items-start align-items-lg-center gap-2"
+            >
               <div class="d-flex flex-column gap-1">
                 <span class="text-muted x-small">{{ riotFixtureStatus }}</span>
                 <span class="text-muted x-small">{{ replayMovementStatus }}</span>
               </div>
-              <span v-if="hasDualMovement" class="badge bg-primary-subtle text-primary-emphasis">Synced Timeline</span>
+              <span v-if="hasDualMovement" class="badge bg-primary-subtle text-primary-emphasis"
+                >Synced Timeline</span
+              >
             </div>
 
             <div v-if="hasDualMovement" class="movement-compare-shell">
@@ -746,7 +855,12 @@ function onFileChange(event: Event): void {
                   :key="`${player.team}-${player.champion}-left`"
                   class="movement-roster-item"
                 >
-                  <img v-if="player.championIconSrc" :src="player.championIconSrc" :alt="player.champion" class="movement-roster-icon blue-team" />
+                  <img
+                    v-if="player.championIconSrc"
+                    :src="player.championIconSrc"
+                    :alt="player.champion"
+                    class="movement-roster-icon blue-team"
+                  />
                   <div v-else class="movement-roster-icon movement-roster-fallback blue-team"></div>
                   <div class="movement-roster-copy">
                     <div class="movement-roster-role">{{ player.roleLabel }}</div>
@@ -762,9 +876,13 @@ function onFileChange(event: Event): void {
                     <h3 class="fs-6 mb-1">Riot API</h3>
                     <p class="text-muted x-small mb-0">Timeline frames plus event anchors.</p>
                   </div>
-                  <span class="badge bg-success-subtle text-success-emphasis">{{ apiMovementCount }} players</span>
+                  <span class="badge bg-success-subtle text-success-emphasis"
+                    >{{ apiMovementCount }} players</span
+                  >
                 </div>
-                <div class="movement-map-frame d-flex justify-content-center bg-black bg-opacity-25 rounded-3 p-2 p-xl-3 border border-secondary border-opacity-10">
+                <div
+                  class="movement-map-frame d-flex justify-content-center bg-black bg-opacity-25 rounded-3 p-2 p-xl-3 border border-secondary border-opacity-10"
+                >
                   <Minimap
                     class="movement-map"
                     :player-data="apiMovement"
@@ -778,11 +896,17 @@ function onFileChange(event: Event): void {
                 <div class="movement-map-panel-header">
                   <div>
                     <h3 class="fs-6 mb-1">Replay Decoder</h3>
-                    <p class="text-muted x-small mb-0">Participant-labelled `timestamp, x, y` from artifacts.</p>
+                    <p class="text-muted x-small mb-0">
+                      Participant-labelled `timestamp, x, y` from artifacts.
+                    </p>
                   </div>
-                  <span class="badge bg-info-subtle text-info-emphasis">{{ replayMovementCount }} players</span>
+                  <span class="badge bg-info-subtle text-info-emphasis"
+                    >{{ replayMovementCount }} players</span
+                  >
                 </div>
-                <div class="movement-map-frame d-flex justify-content-center bg-black bg-opacity-25 rounded-3 p-2 p-xl-3 border border-secondary border-opacity-10">
+                <div
+                  class="movement-map-frame d-flex justify-content-center bg-black bg-opacity-25 rounded-3 p-2 p-xl-3 border border-secondary border-opacity-10"
+                >
                   <Minimap
                     class="movement-map"
                     :player-data="replayMovement"
@@ -803,7 +927,12 @@ function onFileChange(event: Event): void {
                     <div class="movement-roster-champion">{{ player.champion }}</div>
                     <div class="movement-roster-player">{{ player.playerName }}</div>
                   </div>
-                  <img v-if="player.championIconSrc" :src="player.championIconSrc" :alt="player.champion" class="movement-roster-icon red-team" />
+                  <img
+                    v-if="player.championIconSrc"
+                    :src="player.championIconSrc"
+                    :alt="player.champion"
+                    class="movement-roster-icon red-team"
+                  />
                   <div v-else class="movement-roster-icon movement-roster-fallback red-team"></div>
                 </div>
               </div>
@@ -813,23 +942,37 @@ function onFileChange(event: Event): void {
               <div class="movement-map-panel">
                 <div class="movement-map-panel-header">
                   <div>
-                    <h3 class="fs-6 mb-1">{{ hasReplayMovement ? "Replay Decoder" : "Riot API" }}</h3>
+                    <h3 class="fs-6 mb-1">
+                      {{ hasReplayMovement ? "Replay Decoder" : "Riot API" }}
+                    </h3>
                     <p class="text-muted x-small mb-0">
-                      {{ hasReplayMovement ? "Participant-labelled `timestamp, x, y` from artifacts." : "Timeline frames plus event anchors." }}
+                      {{
+                        hasReplayMovement
+                          ? "Participant-labelled `timestamp, x, y` from artifacts."
+                          : "Timeline frames plus event anchors."
+                      }}
                     </p>
                   </div>
                   <span
                     class="badge"
-                    :class="hasReplayMovement ? 'bg-info-subtle text-info-emphasis' : 'bg-success-subtle text-success-emphasis'"
+                    :class="
+                      hasReplayMovement
+                        ? 'bg-info-subtle text-info-emphasis'
+                        : 'bg-success-subtle text-success-emphasis'
+                    "
                   >
                     {{ hasReplayMovement ? replayMovementCount : apiMovementCount }} players
                   </span>
                 </div>
-                <div class="movement-map-frame d-flex justify-content-center bg-black bg-opacity-25 rounded-3 p-2 p-xl-3 border border-secondary border-opacity-10">
+                <div
+                  class="movement-map-frame d-flex justify-content-center bg-black bg-opacity-25 rounded-3 p-2 p-xl-3 border border-secondary border-opacity-10"
+                >
                   <Minimap
                     class="movement-map"
                     :player-data="hasReplayMovement ? replayMovement : apiMovement"
-                    :empty-message="hasReplayMovement ? replayMinimapEmptyMessage : apiMinimapEmptyMessage"
+                    :empty-message="
+                      hasReplayMovement ? replayMinimapEmptyMessage : apiMinimapEmptyMessage
+                    "
                   />
                 </div>
               </div>
@@ -869,11 +1012,19 @@ function onFileChange(event: Event): void {
                     <tbody class="small">
                       <tr v-for="segment in segmentPreview" :key="segment.id">
                         <td>{{ segment.id }}</td>
-                        <td><span class="badge bg-secondary-subtle text-secondary-emphasis">{{ segment.type }}</span></td>
-                        <td><code>{{ segment.codec || 'none' }}</code></td>
+                        <td>
+                          <span class="badge bg-secondary-subtle text-secondary-emphasis">{{
+                            segment.type
+                          }}</span>
+                        </td>
+                        <td>
+                          <code>{{ segment.codec || "none" }}</code>
+                        </td>
                         <td>{{ formatNumber(segment.length) }}</td>
                         <td>{{ formatOptionalNumber(segment.uncompressedLength) }}</td>
-                        <td><span class="text-muted">{{ formatNumber(segment.payloadOffset) }}</span></td>
+                        <td>
+                          <span class="text-muted">{{ formatNumber(segment.payloadOffset) }}</span>
+                        </td>
                       </tr>
                     </tbody>
                   </table>
@@ -886,9 +1037,22 @@ function onFileChange(event: Event): void {
                 <h2 class="fs-5 mb-3">Parser Capabilities</h2>
                 <div class="row g-2">
                   <div v-for="item in capabilityItems" :key="item.label" class="col-12">
-                    <div class="p-2 rounded-2 border border-opacity-10 d-flex align-items-center gap-2"
-                         :class="item.available ? 'border-success bg-success-subtle bg-opacity-10' : 'border-danger bg-danger-subtle bg-opacity-10'">
-                      <i class="bi" :class="item.available ? 'bi-check-circle-fill text-success' : 'bi-x-circle-fill text-danger'"></i>
+                    <div
+                      class="p-2 rounded-2 border border-opacity-10 d-flex align-items-center gap-2"
+                      :class="
+                        item.available
+                          ? 'border-success bg-success-subtle bg-opacity-10'
+                          : 'border-danger bg-danger-subtle bg-opacity-10'
+                      "
+                    >
+                      <i
+                        class="bi"
+                        :class="
+                          item.available
+                            ? 'bi-check-circle-fill text-success'
+                            : 'bi-x-circle-fill text-danger'
+                        "
+                      ></i>
                       <div>
                         <div class="fw-bold small">{{ item.label }}</div>
                         <div class="x-small text-muted">{{ item.detail }}</div>
@@ -912,7 +1076,10 @@ function onFileChange(event: Event): void {
                 <h2 class="fs-5 mb-2">Metadata JSON</h2>
                 <details class="small">
                   <summary class="text-muted cursor-pointer py-1">Expand raw metadata</summary>
-                  <pre class="bg-dark p-2 rounded text-info mt-2 mb-0 overflow-auto" style="max-height: 300px; font-size: 0.75rem;"><code>{{ summary.metadataJson }}</code></pre>
+                  <pre
+                    class="bg-dark p-2 rounded text-info mt-2 mb-0 overflow-auto"
+                    style="max-height: 300px; font-size: 0.75rem"
+                  ><code>{{ summary.metadataJson }}</code></pre>
                 </details>
               </div>
             </div>
@@ -921,11 +1088,14 @@ function onFileChange(event: Event): void {
           <!-- Teams Section -->
           <div class="row g-2 flex-shrink-0 mb-3">
             <div v-for="team in teams" :key="team.id" class="col-12 col-xl-6">
-              <div class="island p-3 border-top border-4" :class="team.winner ? 'border-success' : 'border-secondary'">
+              <div
+                class="island p-3 border-top border-4"
+                :class="team.winner ? 'border-success' : 'border-secondary'"
+              >
                 <div class="d-flex justify-content-between align-items-end mb-3">
                   <div>
                     <div class="x-small text-uppercase text-muted fw-bold">Team {{ team.id }}</div>
-                    <h3 class="fs-4 mb-0">{{ team.winner ? 'Victory' : 'Defeat' }}</h3>
+                    <h3 class="fs-4 mb-0">{{ team.winner ? "Victory" : "Defeat" }}</h3>
                   </div>
                   <div class="text-end x-small text-muted">
                     <span class="mx-1">{{ team.totalGold.toLocaleString() }} gold</span>
@@ -934,24 +1104,38 @@ function onFileChange(event: Event): void {
                 </div>
 
                 <div class="d-flex flex-column gap-2">
-                  <div v-for="player in team.members" :key="player.riotIdGameName" class="p-2 border rounded-2 bg-body-tertiary bg-opacity-25">
+                  <div
+                    v-for="player in team.members"
+                    :key="player.riotIdGameName"
+                    class="p-2 border rounded-2 bg-body-tertiary bg-opacity-25"
+                  >
                     <div class="d-flex justify-content-between align-items-start mb-2">
                       <div>
-                        <div class="x-small text-primary fw-bold text-uppercase">{{ player.teamPosition }}</div>
+                        <div class="x-small text-primary fw-bold text-uppercase">
+                          {{ player.teamPosition }}
+                        </div>
                         <div class="fw-bold">{{ player.champion }}</div>
                         <div class="x-small text-muted">{{ formatRiotId(player) }}</div>
                       </div>
                       <div class="text-end">
-                        <div class="fw-bold text-primary">{{ player.kills }}/{{ player.deaths }}/{{ player.assists }}</div>
+                        <div class="fw-bold text-primary">
+                          {{ player.kills }}/{{ player.deaths }}/{{ player.assists }}
+                        </div>
                       </div>
                     </div>
-                    
+
                     <div class="d-flex flex-column gap-1">
-                      <div class="progress" style="height: 4px;">
-                        <div class="progress-bar bg-warning" :style="{ width: percentage(player.goldEarned, maxGold) }"></div>
+                      <div class="progress" style="height: 4px">
+                        <div
+                          class="progress-bar bg-warning"
+                          :style="{ width: percentage(player.goldEarned, maxGold) }"
+                        ></div>
                       </div>
-                      <div class="progress" style="height: 4px;">
-                        <div class="progress-bar bg-danger" :style="{ width: percentage(player.totalDamageToChampions, maxDamage) }"></div>
+                      <div class="progress" style="height: 4px">
+                        <div
+                          class="progress-bar bg-danger"
+                          :style="{ width: percentage(player.totalDamageToChampions, maxDamage) }"
+                        ></div>
                       </div>
                     </div>
                   </div>
@@ -978,15 +1162,20 @@ function onFileChange(event: Event): void {
           :summary="summary"
           :riot-bundle="riotBundle"
         />
-
       </div>
 
       <!-- Welcome State -->
-      <div v-else-if="!isLoading" class="flex-grow-1 d-flex align-items-center justify-content-center">
-        <div class="island p-5 text-center" style="max-width: 500px;">
+      <div
+        v-else-if="!isLoading"
+        class="flex-grow-1 d-flex align-items-center justify-content-center"
+      >
+        <div class="island p-5 text-center" style="max-width: 500px">
           <i class="bi bi-file-earmark-bar-graph fs-1 text-primary mb-3 d-block"></i>
           <h2 class="fs-3">No Replay Loaded</h2>
-          <p class="text-muted">Load a <code>.rofl</code> file to begin analyzing match metadata, player stats, and record structure.</p>
+          <p class="text-muted">
+            Load a <code>.rofl</code> file to begin analyzing match metadata, player stats, and
+            record structure.
+          </p>
           <label class="btn btn-primary px-4 mt-3">
             <i class="bi bi-plus-lg me-1"></i>
             Select File
@@ -998,13 +1187,16 @@ function onFileChange(event: Event): void {
       <!-- Loading State -->
       <div v-if="isLoading" class="flex-grow-1 d-flex align-items-center justify-content-center">
         <div class="text-center">
-          <div class="spinner-border text-primary mb-3" role="status" style="width: 3rem; height: 3rem;">
+          <div
+            class="spinner-border text-primary mb-3"
+            role="status"
+            style="width: 3rem; height: 3rem"
+          >
             <span class="visually-hidden">Loading...</span>
           </div>
           <p class="text-muted">Parsing replay bytes...</p>
         </div>
       </div>
-
     </main>
   </div>
 </template>
@@ -1164,9 +1356,3 @@ code {
   }
 }
 </style>
-
-
-
-
-
-

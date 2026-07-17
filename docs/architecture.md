@@ -8,7 +8,7 @@ This repo is structured for a local-first web application with a shared replay c
 
 - `packages/rofl-core` owns container parsing, exact packet framing,
   patch-profiled semantic decoders, JSON normalization, tests, and native tooling
-- `packages/rofl-wasm` exposes replay summary, kill, objective, and research
+- `packages/rofl-wasm` exposes replay summary, kill, objective, ward, and research
   packet-analysis entry points to the browser
 - `apps/web` owns local file loading, Vue state, timelines, rendering, and the
   Wasm integration
@@ -16,9 +16,14 @@ This repo is structured for a local-first web application with a shared replay c
   reverse-engineering probes
 
 The productive browser path already parses the selected `.rofl` locally through
-Wasm and renders participant final summaries, champion kills, and elite-monster
-objectives. The minimap remains fixture-based research UI and is not a decoded
-movement stream.
+Wasm and renders participant final summaries, champion kills, elite-monster
+objectives, and the validated ward lifecycle. Final level, XP, CS, items, and
+ward aggregates come from embedded replay metadata; they are not timeseries.
+The product renders those newly promoted fields only when the core emits
+`validatedFinalPlayerStatsAvailable` for a complete field set in a validated
+patch group.
+The minimap remains fixture-based research UI and is not a decoded movement
+stream.
 
 ## Target Data Flow
 
@@ -69,12 +74,11 @@ schemas and capability flags, not packet opcodes or byte offsets.
 
 ## Near-Term Priorities
 
-1. Remove or isolate the fixed unrelated minimap fallback.
-2. Promote validated ward lifecycle events through C++, Wasm, and Vue.
-3. Decode replay-native movement messages and entity identity.
-4. Complete inventory state reconstruction.
-5. Decode keyframe component state for dynamic champion timeseries.
-6. Add structures, damage, spells, and additional world entities.
+1. Decode replay-native movement messages and entity identity.
+2. Complete inventory state reconstruction.
+3. Decode keyframe component state for dynamic champion timeseries.
+4. Decode ward subtype, position, vision radius, and removal reason.
+5. Add structures, damage, spells, and additional world entities.
 
 ## Product Constraints
 

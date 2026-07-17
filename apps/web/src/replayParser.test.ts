@@ -51,9 +51,14 @@ function writeZstdPayload(bytes: Uint8Array, offset: number, compressedLength: n
   }
 }
 
-function buildClassicFixture(): ArrayBuffer {
+function buildClassicFixture(
+  options: { version?: string; invalidLevel?: boolean } = {},
+): ArrayBuffer {
   const metadata =
-    '{"gameLength":123456,"lastGameChunkId":66,"lastKeyFrameId":32,"statsJson":"[{\\"TEAM\\":\\"100\\",\\"SKIN\\":\\"Ornn\\",\\"RIOT_ID_GAME_NAME\\":\\"TheBearinator\\",\\"RIOT_ID_TAG_LINE\\":\\"BABBA\\",\\"TEAM_POSITION\\":\\"TOP\\",\\"WIN\\":\\"Win\\",\\"CHAMPIONS_KILLED\\":\\"3\\",\\"NUM_DEATHS\\":\\"7\\",\\"ASSISTS\\":\\"6\\",\\"GOLD_EARNED\\":\\"10373\\",\\"TOTAL_DAMAGE_DEALT_TO_CHAMPIONS\\":\\"27239\\",\\"VISION_SCORE\\":\\"17\\"}]"}';
+    '{"gameLength":123456,"lastGameChunkId":66,"lastKeyFrameId":32,"statsJson":"[{\\"TEAM\\":\\"100\\",\\"SKIN\\":\\"Ornn\\",\\"RIOT_ID_GAME_NAME\\":\\"TheBearinator\\",\\"RIOT_ID_TAG_LINE\\":\\"BABBA\\",\\"TEAM_POSITION\\":\\"TOP\\",\\"WIN\\":\\"Win\\",\\"CHAMPIONS_KILLED\\":\\"3\\",\\"NUM_DEATHS\\":\\"7\\",\\"ASSISTS\\":\\"6\\",\\"LEVEL\\":\\"16\\",\\"EXP\\":\\"18423\\",\\"MINIONS_KILLED\\":\\"211\\",\\"NEUTRAL_MINIONS_KILLED\\":\\"17\\",\\"ITEM0\\":\\"3078\\",\\"ITEM1\\":\\"3110\\",\\"ITEM2\\":\\"0\\",\\"ITEM3\\":\\"3047\\",\\"ITEM4\\":\\"2504\\",\\"ITEM5\\":\\"3065\\",\\"ITEM6\\":\\"3340\\",\\"GOLD_EARNED\\":\\"10373\\",\\"TOTAL_DAMAGE_DEALT_TO_CHAMPIONS\\":\\"27239\\",\\"VISION_SCORE\\":\\"17\\",\\"WARD_PLACED\\":\\"9\\",\\"WARD_KILLED\\":\\"3\\"}]"}'.replace(
+      '\\"LEVEL\\":\\"16\\"',
+      `\\"LEVEL\\":\\"${options.invalidLevel ? "xx" : "16"}\\"`,
+    );
   const encryptedKey = "QUJDREVGR0g=";
 
   const metadataOffset = 288;
@@ -65,7 +70,7 @@ function buildClassicFixture(): ArrayBuffer {
   writeAscii(bytes, 0, "RIOT");
   bytes[4] = 0x02;
   bytes[5] = 0x00;
-  writeAscii(bytes, 16, "16.5.752.7101");
+  writeAscii(bytes, 16, options.version ?? "16.5.752.7101");
 
   writeU16LE(bytes, 262, 288);
   writeU32LE(bytes, 264, bytes.length);
@@ -175,6 +180,7 @@ describe("parseReplayBuffer", () => {
     expect(summary.capabilities).toMatchObject({
       metadataAvailable: true,
       playerStatsAvailable: true,
+      validatedFinalPlayerStatsAvailable: true,
       binaryHeaderAvailable: true,
       payloadHeaderAvailable: true,
       segmentTableAvailable: true,
@@ -190,6 +196,39 @@ describe("parseReplayBuffer", () => {
       uncompressedLength: 0,
       codec: "unknown",
     });
+    expect(summary.players[0]).toMatchObject({
+      level: 16,
+      experience: 18423,
+      laneMinionsKilled: 211,
+      neutralMinionsKilled: 17,
+      items: [3078, 3110, 0, 3047, 2504, 3065, 3340],
+      wardsPlaced: 9,
+      wardsKilled: 3,
+    });
+  });
+
+  it("does not promote complete final player stats outside validated patch groups", () => {
+    const summary = parseReplayBuffer(buildClassicFixture({ version: "16.4.752.7101" }));
+
+    expect(summary.capabilities.validatedFinalPlayerStatsAvailable).toBe(false);
+  });
+
+  it.each(["15.22", "15.23", "15.24", "16.1", "16.5", "16.6", "16.7", "16.9"])(
+    "promotes complete integer final player stats for validated patch group %s",
+    (versionGroup) => {
+      const summary = parseReplayBuffer(
+        buildClassicFixture({ version: `${versionGroup}.752.7101` }),
+      );
+
+      expect(summary.capabilities.validatedFinalPlayerStatsAvailable).toBe(true);
+    },
+  );
+
+  it("does not promote final player stats when any required raw field is not an integer", () => {
+    const summary = parseReplayBuffer(buildClassicFixture({ invalidLevel: true }));
+
+    expect(summary.players[0].level).toBe(0);
+    expect(summary.capabilities.validatedFinalPlayerStatsAvailable).toBe(false);
   });
 
   it("parses footer-sized metadata fallback when classic header layout is absent", () => {
@@ -205,6 +244,7 @@ describe("parseReplayBuffer", () => {
     expect(summary.capabilities).toMatchObject({
       metadataAvailable: true,
       playerStatsAvailable: false,
+      validatedFinalPlayerStatsAvailable: false,
       binaryHeaderAvailable: false,
       payloadHeaderAvailable: false,
       segmentTableAvailable: false,

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -27,6 +28,13 @@ struct PlayerSummary {
     int gold_earned = 0;
     int total_damage_to_champions = 0;
     int vision_score = 0;
+    int level = 0;
+    int experience = 0;
+    int lane_minions_killed = 0;
+    int neutral_minions_killed = 0;
+    std::array<int, 7> items{};
+    int wards_placed = 0;
+    int wards_killed = 0;
 };
 
 struct ReplaySegmentSummary {
@@ -64,6 +72,7 @@ struct ReplayContainerSummary {
 struct ReplayCapabilities {
     bool metadata_available = false;
     bool player_stats_available = false;
+    bool validated_final_player_stats_available = false;
     bool binary_header_available = false;
     bool payload_header_available = false;
     bool segment_table_available = false;
@@ -100,6 +109,8 @@ struct ReplaySummary {
 [[nodiscard]] std::string extract_replay_kills_file_json(const std::string& path);
 [[nodiscard]] std::string extract_replay_objectives_json(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] std::string extract_replay_objectives_file_json(const std::string& path);
+[[nodiscard]] std::string extract_replay_wards_json(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] std::string extract_replay_wards_file_json(const std::string& path);
 [[nodiscard]] std::string replay_summary_to_json(const ReplaySummary& summary);
 [[nodiscard]] std::string scan_replay_families_json(const std::vector<std::uint8_t>& bytes, std::size_t minimum_length, std::size_t minimum_records, std::size_t top_families, std::string_view segment_type = "chunk");
 [[nodiscard]] std::string scan_replay_families_file_json(const std::string& path, std::size_t minimum_length, std::size_t minimum_records, std::size_t top_families, std::string_view segment_type = "chunk");
