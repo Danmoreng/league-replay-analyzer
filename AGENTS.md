@@ -63,6 +63,7 @@ Current state:
 - the kill decoder is version-profiled for patches 15.22 through 16.9 and validates 2,796/2,796 corpus kills plus final K/D/A for all 470 participants
 - the elite-objective decoder is version-profiled for the same patch groups and validates 425/425 events with zero extras, missing events, or unknown emitted classes
 - the current web app loads a `.rofl` locally, calls the real Wasm decoder, and renders replay-derived participant summaries, kills, and elite objectives with diagnostics
+- the default web landing page is a product-oriented replay viewer with one combined kill/objective timeline, final-state team rosters, and honest unavailable states for movement, inventories, health, mana, and other unresolved dynamic streams; the earlier summary and decoder tools remain under Research & Debug
 - objective killer/team, elemental dragon subtype, event positions, and kill damage/gold details remain unresolved
 - ward lifecycle research is close to runtime promotion: 6,168/6,168 placements are exact, while 1,882/1,883 conservative removals are high-confidence partial coverage with zero extras and exact fields for emitted events; subtype and position are not decoded and there is no C++/Wasm ward API yet
 - patch-16.9 inventory research decodes add/update item IDs and a sale-operation class, but slot/instance/removal linkage, undo, and full inventory state are unresolved; no inventory runtime API exists
@@ -73,17 +74,16 @@ Current state:
 Important browser caveat:
 
 - the minimap is currently fixture/research UI, not live output from the loaded `.rofl`
-- its fixed `api-positions.json` fallback comes from one hard-coded replay and can display false movement for any other loaded replay; removing or isolating this fallback is the first product cleanup
+- the former fixed `api-positions.json` fallback is disabled; it is no longer loaded or relabelled for unrelated replays
 - precomputed `public/replay-movement-fixtures` are research artifacts and must not be described as Wasm-decoded movement
 
 Near-term engineering focus should be:
 
-1. remove or explicitly isolate the misleading fixed minimap fallback
-2. promote the validated ward lifecycle through C++, Wasm, and Vue
-3. decode the real movement/waypoint message grammar and replay-native entity identity
-4. finish inventory slot/instance/removal decoding and reconstruct full inventory state
-5. decode keyframe replication/component state for health, resources, gold, XP, level, CS, and related timeseries
-6. promote buildings/plates and pursue damage, spell, combat-effect, and world-entity streams
+1. promote the validated ward lifecycle through C++, Wasm, and Vue
+2. decode the real movement/waypoint message grammar and replay-native entity identity
+3. finish inventory slot/instance/removal decoding and reconstruct full inventory state
+4. decode keyframe replication/component state for health, resources, gold, XP, level, CS, and related timeseries
+5. promote buildings/plates and pursue damage, spell, combat-effect, and world-entity streams
 
 When starting a future session:
 

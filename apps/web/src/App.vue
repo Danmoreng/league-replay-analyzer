@@ -4,6 +4,7 @@ import { computed, ref } from "vue";
 import DataBrowser from "./components/DataBrowser.vue";
 import KillTimeline from "./components/KillTimeline.vue";
 import ObjectiveTimeline from "./components/ObjectiveTimeline.vue";
+import ProductReplayView from "./components/ProductReplayView.vue";
 import ReplayInspector from "./components/ReplayInspector.vue";
 import Minimap from "./components/Minimap.vue";
 import Timeline from "./components/Timeline.vue";
@@ -49,7 +50,18 @@ const loadedReplayName = ref("");
 const status = ref("Pick a replay file to parse it with the C++/Wasm replay parser.");
 const errorMessage = ref("");
 const isLoading = ref(false);
-const activePage = ref<"summary" | "browser" | "inspector">("summary");
+const activePage = ref<"product" | "summary" | "browser" | "inspector">("product");
+const headerStatus = computed(() => {
+  if (activePage.value !== "product" || !summary.value) {
+    return status.value;
+  }
+
+  if (isLoading.value || isLoadingReplayKills.value || isLoadingReplayObjectives.value) {
+    return "Replay wird lokal dekodiert …";
+  }
+
+  return `${replayKills.value?.events.length ?? 0} Kills · ${replayObjectives.value?.events.length ?? 0} Elite-Objectives · Replay-only · lokal verarbeitet`;
+});
 function toDdragonVersion(version: string): string {
   const match = version.match(/^(\d+)\.(\d+)/);
   if (!match) {
@@ -414,38 +426,7 @@ async function loadMovementData(matchId: string | null): Promise<string> {
       ? `(Loaded Riot timeline movement plus event anchors for ${apiValid} players)`
       : "(Riot timeline fixture did not contain participant positions)";
   } else {
-    try {
-      const apiRes = await fetch(`api-positions.json?t=${Date.now()}`);
-      if (!apiRes.ok) {
-        apiStatus = `(No API movement fixture available: ${apiRes.status})`;
-      } else {
-        const apiRaw = await apiRes.json();
-        const players = summary.value?.players ?? [];
-        apiMovement.value = apiRaw.map((player: any) => {
-          const summaryPlayer = players[player.participantId - 1];
-          return {
-            champion: summaryPlayer?.champion ?? `P${player.participantId}`,
-            team: Number(summaryPlayer?.team ?? 100),
-            playerName: getPlayerDisplayName(summaryPlayer?.riotIdGameName, summaryPlayer?.riotIdTagLine),
-            championIconSrc: getChampionIconSrc(summaryPlayer?.champion ?? `P${player.participantId}`, summary.value?.gameVersion ?? "16.5.1"),
-            roleLabel: getRoleLabel(summaryPlayer?.teamPosition),
-            positions: player.positions.map((position: any) => ({
-              x: position.x,
-              y: position.y,
-              timestamp: position.timestamp,
-            })),
-          };
-        });
-
-        const apiValid = apiMovement.value.filter((player) => player.positions.length > 0).length;
-        apiStatus = apiValid > 0
-          ? `(Loaded fallback API movement for ${apiValid} players)`
-          : "(Fallback API movement fixture had no positions)";
-      }
-    } catch (error) {
-      apiMovement.value = [];
-      apiStatus = `(API movement unavailable: ${error instanceof Error ? error.message : String(error)})`;
-    }
+    apiStatus = "(No replay-specific Riot research fixture available; fixed fallback disabled)";
   }
 
   let replayStatus = "(No replay-derived movement fixture available)";
@@ -674,6 +655,7 @@ function onFileChange(event: Event): void {
     void loadReplay(file);
   }
 }
+
 </script>
 
 <template>
@@ -692,7 +674,7 @@ function onFileChange(event: Event): void {
           <h1 class="fs-4 mb-0" v-if="loadedReplayName">{{ loadedReplayName }}</h1>
           <h1 class="fs-4 mb-0" v-else>League Replay Analyzer</h1>
           <p class="text-muted small mb-0" :class="{ 'text-danger': errorMessage }">
-            {{ errorMessage || status }}
+            {{ errorMessage || headerStatus }}
           </p>
         </div>
         <div class="d-flex gap-2 align-items-center">
@@ -707,9 +689,20 @@ function onFileChange(event: Event): void {
 
       <!-- Main Section -->
       <div v-if="summary" class="flex-grow-1 d-flex flex-column gap-2">
+        <ProductReplayView
+          v-if="activePage === 'product'"
+          :summary="summary"
+          :replay-name="loadedReplayName"
+          :kills="replayKills"
+          :objectives="replayObjectives"
+          :kills-loading="isLoadingReplayKills"
+          :objectives-loading="isLoadingReplayObjectives"
+          :kills-error="replayKillsError"
+          :objectives-error="replayObjectivesError"
+        />
         
         <!-- Summary View -->
-        <div v-if="activePage === 'summary'" class="d-flex flex-column gap-2">
+        <div v-else-if="activePage === 'summary'" class="d-flex flex-column gap-2">
           
           <!-- Metrics Row -->
           <div class="row g-2 flex-shrink-0">

@@ -49,6 +49,13 @@ The exact kill and objective profiles currently cover patch groups `15.22`,
 The browser currently renders the real Wasm participant summary, kill timeline,
 and objective timeline for the locally loaded replay.
 
+The default browser landing page is now a dedicated product replay view. It
+combines replay-native kills and elite objectives on one scrubber, shows the
+final replay metadata participant summaries in team rosters, and reserves
+explicit unavailable states for movement, inventory, health, resources, and
+other dynamic streams that have not passed promotion. The previous summary,
+data browser, and decoder inspector remain available as Research & Debug views.
+
 ### Rich final-state export
 
 A separate native/offline API-parity exporter can emit roughly 114 API-shaped
@@ -67,9 +74,9 @@ the entire API-shaped object as universally exact. See
 The current minimap is not a productive replay decoder output.
 
 - The "Riot API" side uses local Riot fixtures when present.
-- If no matching fixture is available, `App.vue` currently falls back to a
-  fixed `api-positions.json` generated from replay `EUW1_7779216102` and relabels
-  it with the loaded replay's roster. On another replay this is wrong data.
+- The former fixed `api-positions.json` fallback generated from replay
+  `EUW1_7779216102` is disabled. It is no longer loaded or relabelled when a
+  replay-specific Riot research fixture is unavailable.
 - The "Replay Decoder" side loads precomputed files from
   `public/replay-movement-fixtures`; it does not derive positions from the
   uploaded replay through Wasm. Only 17 of 76 stored assignments pass their own
@@ -77,9 +84,8 @@ The current minimap is not a productive replay decoder output.
 - The prior raw `0x00DC` coordinate/path-target overlay was removed after it
   was disproven against Riot positions and plausible issued destinations.
 
-The fixed fallback should be removed or made an explicitly isolated demo before
-more product work. Until a movement profile passes the replay-only promotion
-gate, the browser must say that movement is unavailable for the loaded replay.
+Until a movement profile passes the replay-only promotion gate, the product
+viewer says that movement is unavailable for the loaded replay.
 
 The packet inspector is also a research surface. It can expose replay-native
 packet families through Wasm, but heuristic candidates are not normalized game
@@ -198,20 +204,18 @@ it does not prove what those bytes mean.
 
 ## Recommended Next Work
 
-1. Remove the unrelated fixed `api-positions.json` minimap fallback and clearly
-   label all remaining fixture-only research views.
-2. Promote the validated ward lifecycle into a versioned C++ schema, native
+1. Promote the validated ward lifecycle into a versioned C++ schema, native
    corpus gate, Wasm export, and Vue timeline. Render a position only after ward
    coordinates are separately decoded.
-3. Decode the real movement/waypoint protocol and entity identity. Validate raw
+2. Decode the real movement/waypoint protocol and entity identity. Validate raw
    waypoints before considering interpolation, pathfinding, or movement-speed
    reconstruction.
-4. Complete inventory slot/instance/removal decoding and reconstruct inventory
+3. Complete inventory slot/instance/removal decoding and reconstruct inventory
    state; then expose item events and a scrubber-synchronized inventory panel.
-5. Decode the inner keyframe replication/component grammar and use final
+4. Decode the inner keyframe replication/component grammar and use final
    `statsJson` values plus controlled transitions as replay-only constraints for
    health, gold, level, XP, CS, and resources.
-6. Promote buildings/plates and then pursue damage, spells, combat effects, and
+5. Promote buildings/plates and then pursue damage, spells, combat effects, and
    other world entities.
 
 These workstreams can be researched in parallel, but each promotion should be

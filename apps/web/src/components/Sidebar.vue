@@ -1,11 +1,11 @@
 <script setup lang="ts">
 defineProps<{
-  activePage: "summary" | "browser" | "inspector";
+  activePage: "product" | "summary" | "browser" | "inspector";
   isLoaded: boolean;
 }>();
 
 const emit = defineEmits<{
-  (e: "update:activePage", page: "summary" | "browser" | "inspector"): void;
+  (e: "update:activePage", page: "product" | "summary" | "browser" | "inspector"): void;
 }>();
 </script>
 
@@ -17,7 +17,21 @@ const emit = defineEmits<{
     </div>
 
     <div class="flex-grow-1">
-      <h6 class="mb-2 px-1 x-small text-uppercase fw-bold text-muted">Analysis</h6>
+      <h6 class="mb-2 px-1 x-small text-uppercase fw-bold text-muted">Replay</h6>
+      <ul class="nav nav-pills flex-column gap-1">
+        <li class="nav-item">
+          <button
+            class="nav-link w-100 text-start d-flex align-items-center px-3 py-2"
+            :class="{ active: activePage === 'product', disabled: !isLoaded }"
+            @click="isLoaded && emit('update:activePage', 'product')"
+          >
+            <i class="bi bi-play-btn me-2"></i>
+            Replay Viewer
+          </button>
+        </li>
+      </ul>
+
+      <h6 class="mt-4 mb-2 px-1 x-small text-uppercase fw-bold text-muted">Research & Debug</h6>
       <ul class="nav nav-pills flex-column gap-1">
         <li class="nav-item">
           <button
