@@ -66,7 +66,7 @@ Current state:
 - the default web landing page is a product-oriented replay viewer with one combined kill/objective timeline, final-state team rosters, and honest unavailable states for movement, inventories, health, mana, and other unresolved dynamic streams; the earlier summary and decoder tools remain under Research & Debug
 - objective killer/team, elemental dragon subtype, event positions, and kill damage/gold details remain unresolved
 - ward lifecycle research is close to runtime promotion: 6,168/6,168 placements are exact, while 1,882/1,883 conservative removals are high-confidence partial coverage with zero extras and exact fields for emitted events; subtype and position are not decoded and there is no C++/Wasm ward API yet
-- patch-16.9 inventory research decodes add/update item IDs and a sale-operation class, but slot/instance/removal linkage, undo, and full inventory state are unresolved; no inventory runtime API exists
+- patch-16.9 inventory research decodes add/update item IDs and a sale-operation class, but an expanded corpus scan falsified the strongest simple slot-symbol candidate; slot/instance/removal linkage, swaps, undo, and full inventory state remain unresolved, and no inventory runtime API exists
 - keyframe outer framing and champion ownership are exact, but the inner replication/component grammar and all proposed dynamic state fields remain unresolved
 - there is no valid replay-native movement or position decoder; the provisional `0x00DC` raw-coordinate interpretation was disproven and removed from the runtime
 - building and turret-plate signatures are correlations with false positives, not runtime decoders

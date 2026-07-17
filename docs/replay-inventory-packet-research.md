@@ -19,12 +19,15 @@ Build the native CLI, then run:
 
 ```powershell
 node .\scripts\research_inventory_packets_16_9.mjs
+node .\scripts\research_inventory_slot_encoding_16_9.mjs
 ```
 
-The script writes
-`artifacts/inventory-packet-research-16.9.json`. It invokes the native packet
-dump with a `.rofl` path only. Match-V5 and timeline fixtures are read after
-packet extraction and are used exclusively as offline labels.
+The scripts write `artifacts/inventory-packet-research-16.9.json` and
+`artifacts/inventory-slot-encoding-research-16.9.json`. The first script
+invokes the native packet dump with a `.rofl` path only. Match-V5 and timeline
+fixtures are read after packet extraction and are used exclusively as offline
+labels. The second script consumes that research artifact and does not alter
+the runtime decoder.
 
 The checked corpus consists of 20 patch-16.9 replays.
 
@@ -127,17 +130,43 @@ is destroyed and re-added for the same champion at the same timestamp. Every
 pair contains one add/update and one removal packet.
 
 Two bits at add offset 48 exactly equal two bits at removal offset 16 for all
-151 pairs. The four observed values and the support-item context make this a
-better count/charge-state candidate than a slot identifier, so it is not
-promoted as slot data.
+151 pairs. A full-payload scan found 28 exact contiguous candidates, but these
+are overlapping wider views of the same four-value signal around add bits
+42-48 and removal bits 10-16, not 28 independent fields. The four observed
+values and support-item context make this a better count/charge-state candidate
+than a slot or item-instance identifier, so it is not promoted.
 
-An exhaustive contiguous-slice scan of the candidate add prefix (bits 0-33)
-against the candidate removal prefix (bits 0-15), for widths 2 through 10,
-found no stable bidirectional mapping at an 80% threshold. The best result was
-only 82/151 (54.30%). This rules out the simple direct-slice, XOR, or lookup
-link assumed by the first probes; it does not prove that the payload lacks a
-slot. League packet fields use patch-specific field transforms, so the slot may
-require decoding the complete serialized field.
+An initial-add oracle supplied 196 deterministic slot labels before each
+participant's first complex transaction. One tempting add symbol was:
+
+```text
+symbol = (readBit(payload, 0) << 3) | readBits(payload, 10, 3)
+symbol-to-slot candidate = {1:0, 4:1, 6:2, 3:3, 5:4, 7:5, 2:6}
+```
+
+It follows the first-empty-slot allocation pattern early in a match, but only
+matches 155/196 initial labels (79.08%) and 108/239 independently selected
+terminal final-item labels (45.19%). It is therefore falsified as a general
+slot decoder.
+
+Three further cross-checks also failed the exact promotion gate:
+
+| Cross-check | Samples | Best result |
+|---|---:|---:|
+| same-item replacement removal field | 151 | 72/151 (47.68%) |
+| offline-labelled add/removal lifecycle link, slot-sized field | 882 | 675/882 (76.53%) |
+| candidate-state removal slot field | 733 | 420/733 (57.30%) |
+
+The lifecycle scan's strongest unrestricted relationship is 880/882, but it
+has only three values and is another low-cardinality state/length correlation.
+The strongest instance-sized relationship reaches only 505/882 (57.26%). No
+exact, reusable slot or item-instance link is present in the tested raw
+contiguous fields.
+
+This rules out the simple direct-slice, XOR, lookup, and initial-allocation
+interpretations tested here; it does not prove that the payload lacks a slot.
+League packet fields use patch-specific transforms, so slot identity may
+require decoding the complete serialized field or a separate swap operation.
 
 ## Full inventory-state gate
 
@@ -160,12 +189,24 @@ The gate requires all of the following before adding C++ runtime output:
 
 ## Next decoder step
 
-The highest-value next step is the patch-16.9 field decoder for the slot/count
-portion of `0x0132` and `0x0415`. A decoded client-side packet trace or the
-patch-matched packet deserializer would provide a much stronger route than
-fitting more opcode/timestamp correlations. Once slot identity is available,
-the reducer can maintain seven slots per participant and use replay-native
-final `statsJson` items as an independent, ROFL-only validation oracle.
+The highest-value next step is to identify the patch-16.9 item-swap family and
+obtain the patch-matched field deserializer or symbol table for `0x0132` and
+`0x0415`. Older decoded packet schemas model buy, remove, swap, and use as
+separate messages, with explicit slot fields on buy/remove and source/target
+slots on swap. This is only a structural research clue from older patches, not
+a decoder dependency or proof for 16.9.
+
+A decoded patch-16.9 client-side packet trace or the patch-matched packet
+deserializer would provide a much stronger route than fitting more payload
+correlations. The locally installed client is patch 16.14, so it cannot safely
+define the 16.9 profile. Once slot identity and swaps are available, the
+reducer can maintain seven slots per participant and use replay-native final
+`statsJson` items as an independent, ROFL-only validation oracle.
+
+Structural reference only:
+
+- [Older decoded replay packet schema](https://huggingface.co/datasets/maknee/league-of-legends-decoded-replay-packets/blob/main/packets.py)
+- [Dataset scope and covered patches](https://huggingface.co/datasets/maknee/league-of-legends-decoded-replay-packets/blob/main/README.md)
 
 After patch 16.9 reaches the full-state gate, repeat the derivation behind a
 versioned profile for 16.7 before exposing inventory events through C++/Wasm.

@@ -124,6 +124,15 @@ unresolved. The full-inventory promotion gate is 0/20 because all 3,550 removal
 packets lack a decoded item target. No C++/Wasm inventory API exists yet. See
 [`replay-inventory-packet-research.md`](replay-inventory-packet-research.md).
 
+An expanded full-payload and offline-oracle scan falsified the strongest simple
+slot candidate: it matches 155/196 deterministic initial adds but only 108/239
+terminal final-item labels. Across 882 offline-linked add/removal lifecycles,
+the best slot-sized relationship reaches 675/882 and the best instance-sized
+relationship 505/882; a separately labelled removal-slot scan reaches 420/733.
+These correlations are useful search constraints but are not runtime fields.
+The next inventory lead is the separate swap packet family plus a patch-16.9
+field deserializer/symbol table.
+
 ### Keyframe champion state
 
 The outer structure is exact on two independent patch-16.9 replays:

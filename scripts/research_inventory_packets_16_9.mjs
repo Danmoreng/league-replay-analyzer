@@ -345,6 +345,42 @@ function scanCandidateSlotRegions(pairs) {
   };
 }
 
+function scanFullPayloadLinkage(pairs) {
+  const candidates = [];
+  const maxAddBits = Math.min(...pairs.map((pair) => pair.add.contentLength)) * 8;
+  const maxRemovalBits = Math.min(...pairs.map((pair) => pair.remove.contentLength)) * 8;
+  for (let width = 2; width <= 16; width += 1) {
+    for (let addOffset = 0; addOffset <= maxAddBits - width; addOffset += 1) {
+      for (let removeOffset = 0; removeOffset <= maxRemovalBits - width; removeOffset += 1) {
+        const result = bidirectionalMappingScore(pairs, addOffset, removeOffset, width);
+        if (
+          result.addValueCount < 3
+          || result.removeValueCount < 3
+          || result.addValueCount > 16
+          || result.removeValueCount > 16
+        ) continue;
+        candidates.push(result);
+      }
+    }
+  }
+  candidates.sort((left, right) =>
+    right.rate - left.rate
+    || Math.abs(left.addValueCount - left.removeValueCount)
+      - Math.abs(right.addValueCount - right.removeValueCount)
+    || right.width - left.width
+    || left.addOffset - right.addOffset
+    || left.removeOffset - right.removeOffset);
+  return {
+    pairCount: pairs.length,
+    searchedAddBitRange: [0, maxAddBits - 1],
+    searchedRemovalBitRange: [0, maxRemovalBits - 1],
+    searchedWidths: [2, 16],
+    maximumDistinctValueCount: 16,
+    exactCandidateCount: candidates.filter((candidate) => candidate.rate === 1).length,
+    topCandidates: candidates.slice(0, 50),
+  };
+}
+
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
@@ -371,6 +407,18 @@ function main() {
     replayRows.push({
       replayId: fixture.replayId,
       gameVersion: match.info?.gameVersion ?? null,
+      finalInventories: (match.info?.participants ?? []).map((participant) => ({
+        participantId: participant.participantId,
+        items: [
+          participant.item0,
+          participant.item1,
+          participant.item2,
+          participant.item3,
+          participant.item4,
+          participant.item5,
+          participant.item6,
+        ].map((itemId) => Number(itemId ?? 0)),
+      })),
       apiItemEventCount: apiEvents.length,
       apiEventTypeCounts: countBy(apiEvents, (event) => event.type),
       addOrUpdatePacketCount: blocks.addOrUpdates.length,
@@ -453,6 +501,7 @@ function main() {
     readBitsLittleEndian(Buffer.from(pair.add.contentHex, "hex"), 48, 2)
     === readBitsLittleEndian(Buffer.from(pair.remove.contentHex, "hex"), 16, 2)).length;
   const slotRegionScan = scanCandidateSlotRegions(sameItemReplacementPairs);
+  const fullPayloadLinkageScan = scanFullPayloadLinkage(sameItemReplacementPairs);
 
   const apiEventTypeCounts = countBy(apiEvents, (event) => event.type);
   const directItemIdMatchCount = uniquelyLabeledAdds
@@ -573,6 +622,7 @@ function main() {
         interpretation: "Likely stack/count/charge state; it is not promoted as a slot identifier.",
       },
       candidateSlotRegionScan: slotRegionScan,
+      fullPayloadLinkageScan,
       conclusion: "No exact slot or item-instance link is proven.",
     },
     inventoryStateValidation: {
@@ -585,6 +635,29 @@ function main() {
     expectedCorpus: EXPECTED_CORPUS,
     promotionGate,
     replayRows,
+    transactionSamples: allGroups.map((group) => ({
+      replayId: group.replayId,
+      participantId: group.participantId,
+      timestampMillis: group.timestampMillis,
+      apiEvents: group.events.map((event) => ({
+        type: event.type,
+        itemId: event.itemId,
+        beforeId: event.beforeId,
+        afterId: event.afterId,
+        goldGain: event.goldGain,
+      })),
+      addOrUpdates: group.addOrUpdates.map((block) => ({
+        contentHex: block.contentHex,
+        contentLength: block.contentLength,
+        decodedItemId: block.decodedItemId,
+        blockIndex: block.blockIndex,
+      })),
+      removals: group.removals.map((block) => ({
+        contentHex: block.contentHex,
+        contentLength: block.contentLength,
+        blockIndex: block.blockIndex,
+      })),
+    })),
   };
   const outputPath = path.resolve(args.outputPath);
   writeJson(outputPath, output);
