@@ -250,6 +250,21 @@ void append_packet_block(
     bytes.insert(bytes.end(), content_length, 0);
 }
 
+void append_packet_block_with_content(
+    std::vector<std::uint8_t>& bytes,
+    float timestamp_seconds,
+    std::uint16_t packet_type,
+    std::uint32_t block_param,
+    const std::vector<std::uint8_t>& content
+) {
+    bytes.push_back(0x01);  // channel 1, direct timestamp/length/type/parameter
+    append_u32_le(bytes, std::bit_cast<std::uint32_t>(timestamp_seconds));
+    append_u32_le(bytes, static_cast<std::uint32_t>(content.size()));
+    append_u16_le(bytes, packet_type);
+    append_u32_le(bytes, block_param);
+    bytes.insert(bytes.end(), content.begin(), content.end());
+}
+
 std::string escape_json_string(const std::string& input) {
     std::string escaped;
     for (const char ch : input) {
@@ -301,6 +316,65 @@ std::vector<std::uint8_t> build_footer_kill_fixture() {
     write_ascii(bytes, 16, "16.5.752.7101");
     write_zstd_record_header(bytes, header_offset, 1, 2, 1,
         static_cast<std::uint32_t>(payload.size()), static_cast<std::uint32_t>(compressed.size()));
+    std::copy(compressed.begin(), compressed.end(), bytes.begin() + payload_offset);
+    write_ascii(bytes, metadata_offset, metadata);
+    write_u32_le(bytes, total_size - 4, static_cast<std::uint32_t>(metadata.size()));
+    return bytes;
+}
+
+std::vector<std::uint8_t> build_footer_objective_fixture() {
+    constexpr std::uint16_t objective_packet_type = 0x01EB;
+    std::vector<std::uint8_t> payload;
+
+    auto append_objective = [&](float timestamp_seconds, std::size_t content_length,
+                                std::uint8_t discriminator) {
+        std::vector<std::uint8_t> content(content_length, 0);
+        content[2] = discriminator;
+        append_packet_block_with_content(
+            payload,
+            timestamp_seconds,
+            objective_packet_type,
+            0,
+            content
+        );
+    };
+
+    append_objective(1.0F, 18, 69);    // Same opcode, rejected content length.
+    append_objective(2.0F, 132, 0);    // Profile length, unknown discriminator.
+    append_objective(10.0F, 132, 69);  // Dragon.
+    append_objective(20.0F, 132, 172); // Baron Nashor.
+    append_objective(30.0F, 132, 118); // Rift Herald.
+    append_objective(40.0F, 133, 123); // Horde.
+
+    std::vector<std::uint8_t> unrelated_content(132, 0);
+    unrelated_content[2] = 69;
+    append_packet_block_with_content(payload, 50.0F, 0xFFFF, 0, unrelated_content);
+
+    const std::string metadata =
+        R"({"gameLength":60000,"lastGameChunkId":1,"lastKeyFrameId":0,"statsJson":"[]"})";
+    const auto compressed = compress_zstd_payload(std::string(
+        reinterpret_cast<const char*>(payload.data()),
+        payload.size()
+    ));
+    if (compressed.empty()) return {};
+
+    constexpr std::size_t header_offset = 32;
+    constexpr std::size_t payload_offset = header_offset + 17;
+    const std::size_t metadata_offset = payload_offset + compressed.size();
+    const std::size_t total_size = metadata_offset + metadata.size() + 4;
+    std::vector<std::uint8_t> bytes(total_size, 0);
+    write_ascii(bytes, 0, "RIOT");
+    bytes[4] = 0x02;
+    write_ascii(bytes, 16, "16.9.772.8292");
+    write_zstd_record_header(
+        bytes,
+        header_offset,
+        1,
+        2,
+        1,
+        static_cast<std::uint32_t>(payload.size()),
+        static_cast<std::uint32_t>(compressed.size())
+    );
     std::copy(compressed.begin(), compressed.end(), bytes.begin() + payload_offset);
     write_ascii(bytes, metadata_offset, metadata);
     write_u32_le(bytes, total_size - 4, static_cast<std::uint32_t>(metadata.size()));
@@ -450,6 +524,33 @@ bool test_replay_kill_extractor_fixture() {
            json.find("\"passingParticipantCount\":10,\"pass\":true") != std::string::npos;
 }
 
+bool test_replay_objective_extractor_fixture() {
+    const std::string json =
+        rofl::core::extract_replay_objectives_json(build_footer_objective_fixture());
+    return json.find("\"schema\":\"rofl-replay-objectives/v1\"") != std::string::npos &&
+           json.find("\"replayPath\":null") != std::string::npos &&
+           json.find("\"versionGroup\":\"16.9\"") != std::string::npos &&
+           json.find("\"packetTypeHex\":\"0x01EB\"") != std::string::npos &&
+           json.find("\"minimumContentLength\":132,\"maximumContentLength\":133") !=
+               std::string::npos &&
+           json.find("\"monsterType\":\"DRAGON\"") != std::string::npos &&
+           json.find("\"monsterType\":\"BARON_NASHOR\"") != std::string::npos &&
+           json.find("\"monsterType\":\"RIFTHERALD\"") != std::string::npos &&
+           json.find("\"monsterType\":\"HORDE\"") != std::string::npos &&
+           json.find("\"monsterType\":\"UNKNOWN\"") == std::string::npos &&
+           json.find("\"timestampMillis\":1000,") == std::string::npos &&
+           json.find("\"timestampMillis\":2000,") == std::string::npos &&
+           json.find("\"timestampMillis\":50000,") == std::string::npos &&
+           json.find("\"candidatePacketBlockCount\":6") != std::string::npos &&
+           json.find("\"profileLengthPacketBlockCount\":5") != std::string::npos &&
+           json.find("\"rejectedContentLengthBlockCount\":1") != std::string::npos &&
+           json.find("\"decodedObjectiveEventCount\":4") != std::string::npos &&
+           json.find("\"unknownMonsterTypeCount\":1") != std::string::npos &&
+           json.find("\"exactPacketFraming\":true") != std::string::npos &&
+           json.find("\"killerOwnershipAvailable\":false") != std::string::npos &&
+           json.find("\"elementalDragonSubtypeAvailable\":false") != std::string::npos;
+}
+
 }  // namespace
 
 int main() {
@@ -470,6 +571,10 @@ int main() {
     }
 
     if (!test_replay_kill_extractor_fixture()) {
+        return EXIT_FAILURE;
+    }
+
+    if (!test_replay_objective_extractor_fixture()) {
         return EXIT_FAILURE;
     }
 

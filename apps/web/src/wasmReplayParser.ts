@@ -1,5 +1,6 @@
 import type { ReplayEntitySlabAnalysisResult, ReplayFamilyAnalysisResult, ReplayFamilyScanResult, ReplayScalarFamilyAnalysisResult } from "./replayInvestigation";
 import type { ReplayKillResult } from "./replayKills";
+import type { ReplayObjectiveResult } from "./replayObjectives";
 import type { ReplaySummary } from "./replayParser";
 import createReplayModule from "./generated/wasm/rofl_wasm.js";
 
@@ -90,6 +91,23 @@ export async function extractReplayKillsWithWasm(buffer: ArrayBuffer): Promise<R
     );
 
     return parseJsonResult<ReplayKillResult>(module, extractKills(replayPointer, size));
+  });
+}
+
+export async function extractReplayObjectivesWithWasm(
+  buffer: ArrayBuffer,
+): Promise<ReplayObjectiveResult> {
+  return withReplayBuffer(buffer, (module, replayPointer, size) => {
+    const extractObjectives = module.cwrap<(input: number, size: number) => number>(
+      "lra_extract_replay_objectives_buffer",
+      "number",
+      ["number", "number"],
+    );
+
+    return parseJsonResult<ReplayObjectiveResult>(
+      module,
+      extractObjectives(replayPointer, size),
+    );
   });
 }
 

@@ -115,6 +115,7 @@
     "extract:replay-kills": "node ./scripts/extract_replay_kills.mjs",
     "validate:replay-kills-corpus": "node ./scripts/validate_replay_kills_corpus.mjs",
     "validate:packet-kill-decoder": "node ./scripts/validate_packet_kill_decoder.mjs",
+    "discover:packet-movement": "node ./scripts/discover_packet_movement.mjs",
     "test:native": "pwsh -File ./scripts/test-native.ps1 -UseNinja",
     "fetch:riot": "node ./scripts/fetch-riot-match-data.mjs",
     "publish:riot-fixtures": "node ./scripts/publish-riot-fixtures.mjs",

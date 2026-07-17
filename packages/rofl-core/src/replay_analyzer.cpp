@@ -1968,7 +1968,7 @@ ReplaySummary parse_replay_file(const std::string& path) {
 
 namespace {
 
-constexpr std::size_t kPacketDumpHexLimit = 256;
+constexpr std::size_t kPacketDumpHexLimit = 4096;
 
 [[nodiscard]] PacketSegmentKind packet_segment_kind_from_name(std::string_view type) {
     if (type == "startup") return PacketSegmentKind::startup;
@@ -2861,6 +2861,285 @@ void write_kda_validation_json(std::ostringstream& output, const KillKdaValidati
     return output.str();
 }
 
+enum class EliteMonsterKind {
+    dragon,
+    atakhan,
+    baron,
+    herald,
+    horde,
+    unknown,
+};
+
+struct ObjectivePacketProfile {
+    std::string_view version_group;
+    std::uint16_t packet_type = 0;
+    std::size_t minimum_content_length = 0;
+    std::size_t maximum_content_length = 0;
+    std::size_t discriminator_offset = 0;
+    bool horde_uses_maximum_length = false;
+};
+
+constexpr std::array<ObjectivePacketProfile, 8> kObjectivePacketProfiles{{
+    {"15.22", 0x02DE, 126, 126, 124, false},
+    {"15.23", 0x026E, 126, 127, 1, false},
+    {"15.24", 0x00FF, 126, 127, 122, false},
+    {"16.1", 0x03C3, 126, 127, 122, false},
+    {"16.5", 0x0328, 126, 127, 3, true},
+    {"16.6", 0x00F2, 126, 127, 122, false},
+    {"16.7", 0x03AE, 126, 127, 1, false},
+    {"16.9", 0x01EB, 132, 133, 2, false},
+}};
+
+struct ReplayObjectiveEvent {
+    long long timestamp_millis = 0;
+    EliteMonsterKind monster_kind = EliteMonsterKind::unknown;
+    std::uint8_t discriminator = 0;
+    PacketBlock block;
+};
+
+[[nodiscard]] const ObjectivePacketProfile* find_objective_packet_profile(std::string_view version_group) {
+    const auto found = std::find_if(
+        kObjectivePacketProfiles.begin(),
+        kObjectivePacketProfiles.end(),
+        [version_group](const ObjectivePacketProfile& profile) {
+            return profile.version_group == version_group;
+        }
+    );
+    return found == kObjectivePacketProfiles.end() ? nullptr : &*found;
+}
+
+[[nodiscard]] std::string_view elite_monster_kind_name(EliteMonsterKind kind) {
+    switch (kind) {
+        case EliteMonsterKind::dragon: return "DRAGON";
+        case EliteMonsterKind::atakhan: return "ATAKHAN";
+        case EliteMonsterKind::baron: return "BARON_NASHOR";
+        case EliteMonsterKind::herald: return "RIFTHERALD";
+        case EliteMonsterKind::horde: return "HORDE";
+        case EliteMonsterKind::unknown: return "UNKNOWN";
+    }
+    return "UNKNOWN";
+}
+
+[[nodiscard]] EliteMonsterKind classify_elite_monster(
+    const ObjectivePacketProfile& profile,
+    std::span<const std::uint8_t> payload
+) {
+    if (payload.size() < profile.minimum_content_length ||
+        payload.size() > profile.maximum_content_length) {
+        return EliteMonsterKind::unknown;
+    }
+    if (profile.horde_uses_maximum_length && payload.size() == profile.maximum_content_length) {
+        return EliteMonsterKind::horde;
+    }
+    if (profile.discriminator_offset >= payload.size()) {
+        return EliteMonsterKind::unknown;
+    }
+
+    const std::uint8_t discriminator = payload[profile.discriminator_offset];
+    if (profile.version_group == "15.22") {
+        if (discriminator == 149) return EliteMonsterKind::dragon;
+        if (discriminator == 103) return EliteMonsterKind::atakhan;
+        if (discriminator == 241) return EliteMonsterKind::baron;
+        if (discriminator == 82) return EliteMonsterKind::herald;
+        if (discriminator == 126) return EliteMonsterKind::horde;
+    } else if (profile.version_group == "15.23") {
+        if (discriminator == 108) return EliteMonsterKind::dragon;
+        if (discriminator == 134) return EliteMonsterKind::atakhan;
+        if (discriminator == 114) return EliteMonsterKind::baron;
+        if (discriminator == 47) return EliteMonsterKind::herald;
+        if (discriminator == 42) return EliteMonsterKind::horde;
+    } else if (profile.version_group == "15.24") {
+        if (discriminator == 43) return EliteMonsterKind::dragon;
+        if (discriminator == 62) return EliteMonsterKind::atakhan;
+        if (discriminator == 247) return EliteMonsterKind::herald;
+        if (discriminator == 198) return EliteMonsterKind::horde;
+    } else if (profile.version_group == "16.1") {
+        if (discriminator == 111) return EliteMonsterKind::dragon;
+        if (discriminator == 178) return EliteMonsterKind::baron;
+        if (discriminator == 204) return EliteMonsterKind::herald;
+        if (discriminator == 170) return EliteMonsterKind::horde;
+    } else if (profile.version_group == "16.5") {
+        if (discriminator == 184) return EliteMonsterKind::dragon;
+        if (discriminator == 30) return EliteMonsterKind::baron;
+        if (discriminator == 222) return EliteMonsterKind::herald;
+    } else if (profile.version_group == "16.6") {
+        if (discriminator == 255) return EliteMonsterKind::dragon;
+        if (discriminator == 12) return EliteMonsterKind::baron;
+        if (discriminator == 199) return EliteMonsterKind::herald;
+        if (discriminator == 31) return EliteMonsterKind::horde;
+    } else if (profile.version_group == "16.7") {
+        if (discriminator == 71) return EliteMonsterKind::dragon;
+        if (discriminator == 42) return EliteMonsterKind::baron;
+        if (discriminator == 8) return EliteMonsterKind::herald;
+        if (discriminator == 170) return EliteMonsterKind::horde;
+    } else if (profile.version_group == "16.9") {
+        if (discriminator == 69) return EliteMonsterKind::dragon;
+        if (discriminator == 172) return EliteMonsterKind::baron;
+        if (discriminator == 118) return EliteMonsterKind::herald;
+        if (discriminator == 123) return EliteMonsterKind::horde;
+    }
+    return EliteMonsterKind::unknown;
+}
+
+void write_objective_block_provenance_json(std::ostringstream& output, const PacketBlock& block) {
+    output << '{';
+    output << "\"segmentType\":\"" << packet_segment_kind_name(block.provenance.kind) << "\",";
+    output << "\"segmentId\":" << block.provenance.segment_id << ',';
+    output << "\"chunkId\":" << block.provenance.chunk_id << ',';
+    output << "\"segmentHeaderOffset\":" << block.provenance.segment_header_offset << ',';
+    output << "\"segmentPayloadOffset\":" << block.provenance.segment_payload_offset << ',';
+    output << "\"blockIndex\":" << block.block_index << ',';
+    output << "\"decompressedHeaderOffset\":" << block.header_offset << ',';
+    output << "\"decompressedContentOffset\":" << block.content_offset << ',';
+    output << "\"decompressedEndOffset\":" << block.end_offset << '}';
+}
+
+[[nodiscard]] std::string objective_profile_classifier_description(
+    const ObjectivePacketProfile& profile
+) {
+    if (profile.horde_uses_maximum_length) {
+        return "contentLength=127 identifies HORDE; otherwise payload[" +
+            std::to_string(profile.discriminator_offset) + "] identifies the monster class.";
+    }
+    return "payload[" + std::to_string(profile.discriminator_offset) +
+        "] identifies the monster class.";
+}
+
+[[nodiscard]] std::string extract_replay_objectives_impl(
+    const std::vector<std::uint8_t>& bytes,
+    const KillSourceInfo& source
+) {
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const std::string version_group = packet_version_group(summary.game_version);
+    const ObjectivePacketProfile* profile = find_objective_packet_profile(version_group);
+    if (profile == nullptr) {
+        throw std::runtime_error(
+            "Unsupported replay version " + summary.game_version +
+            ". Supported groups: 15.22, 15.23, 15.24, 16.1, 16.5, 16.6, 16.7, 16.9."
+        );
+    }
+
+    std::vector<ReplayObjectiveEvent> events;
+    std::size_t candidate_packet_block_count = 0;
+    std::size_t rejected_content_length_block_count = 0;
+    std::size_t unknown_monster_type_count = 0;
+    const PacketFileScan scan = scan_packet_segments(
+        bytes,
+        summary,
+        "chunk",
+        [&](const ReplaySegmentSummary&, const std::vector<std::uint8_t>& decompressed,
+            const PacketBlockParseResult& result) {
+            for (const PacketBlock& block : result.blocks) {
+                if (block.channel != 1 || block.packet_type != profile->packet_type) {
+                    continue;
+                }
+                candidate_packet_block_count += 1;
+                if (block.content_length < profile->minimum_content_length ||
+                    block.content_length > profile->maximum_content_length) {
+                    rejected_content_length_block_count += 1;
+                    continue;
+                }
+                const std::span<const std::uint8_t> payload(
+                    decompressed.data() + block.content_offset,
+                    block.content_length
+                );
+                const EliteMonsterKind monster_kind = classify_elite_monster(*profile, payload);
+                if (monster_kind == EliteMonsterKind::unknown) {
+                    unknown_monster_type_count += 1;
+                    continue;
+                }
+                const std::uint8_t discriminator =
+                    profile->discriminator_offset < payload.size()
+                        ? payload[profile->discriminator_offset]
+                        : 0;
+                events.push_back({
+                    packet_timestamp_millis(block.timestamp_seconds),
+                    monster_kind,
+                    discriminator,
+                    block,
+                });
+            }
+        }
+    );
+    if (scan.selected_segment_count == 0) {
+        throw std::runtime_error("Replay contains no footer-style chunk records.");
+    }
+    if (scan.exact_segment_count != scan.selected_segment_count || !scan.errors.empty()) {
+        const std::string detail = scan.errors.empty()
+            ? "one or more chunks were not exactly consumed"
+            : scan.errors.front().code + ": " + scan.errors.front().message;
+        throw std::runtime_error("Replay chunk packet framing failed: " + detail);
+    }
+
+    std::map<std::string_view, std::size_t> monster_counts;
+    for (const ReplayObjectiveEvent& event : events) {
+        const std::string_view name = elite_monster_kind_name(event.monster_kind);
+        monster_counts[name] += 1;
+    }
+
+    std::ostringstream output;
+    output << "{\"schema\":\"rofl-replay-objectives/v1\",\"generatedAtUtc\":\""
+           << current_utc_iso8601() << "\",";
+    output << "\"source\":{\"replayPath\":";
+    if (source.has_file) output << '"' << json_escape(source.replay_path) << '"'; else output << "null";
+    output << ",\"replayId\":";
+    if (source.has_file) output << '"' << json_escape(source.replay_id) << '"'; else output << "null";
+    output << ",\"matchId\":";
+    if (source.has_file) output << '"' << json_escape(source.match_id) << '"'; else output << "null";
+    output << ",\"runtimeInput\":\"rofl-only\",\"riotApiInput\":false},";
+    output << "\"gameVersion\":\"" << json_escape(summary.game_version)
+           << "\",\"versionGroup\":\"" << version_group << "\",";
+    output << "\"profile\":{\"channel\":1,\"packetType\":" << profile->packet_type;
+    output << ",\"packetTypeHex\":\"" << fixed_hex(profile->packet_type, 4) << "\"";
+    output << ",\"minimumContentLength\":" << profile->minimum_content_length;
+    output << ",\"maximumContentLength\":" << profile->maximum_content_length;
+    output << ",\"discriminatorOffset\":" << profile->discriminator_offset;
+    output << ",\"classifier\":\""
+           << json_escape(objective_profile_classifier_description(*profile)) << "\"},";
+    output << "\"replay\":{\"gameLengthMillis\":";
+    if (summary.game_length_millis > 0) output << summary.game_length_millis; else output << "null";
+    output << ",\"lastGameChunkId\":";
+    if (summary.last_game_chunk_id > 0) output << summary.last_game_chunk_id; else output << "null";
+    output << ",\"lastKeyFrameId\":";
+    if (summary.last_keyframe_id > 0) output << summary.last_keyframe_id; else output << "null";
+    output << "},\"events\":[";
+    for (std::size_t index = 0; index < events.size(); ++index) {
+        if (index > 0) output << ',';
+        const ReplayObjectiveEvent& event = events[index];
+        output << "{\"type\":\"ELITE_MONSTER_KILL\",\"timestampMillis\":"
+               << event.timestamp_millis;
+        output << ",\"monsterType\":\"" << elite_monster_kind_name(event.monster_kind) << "\"";
+        output << ",\"monsterSubtype\":null,\"killerParticipantId\":null,\"killerTeamId\":null";
+        output << ",\"contentLength\":" << event.block.content_length;
+        output << ",\"discriminator\":" << static_cast<unsigned int>(event.discriminator);
+        output << ",\"provenance\":";
+        write_objective_block_provenance_json(output, event.block);
+        output << '}';
+    }
+    output << "],\"diagnostics\":{\"footerRecordCount\":" << summary.container.segments.size();
+    output << ",\"chunkRecordCount\":" << scan.selected_segment_count;
+    output << ",\"decompressedChunkBytes\":" << scan.input_bytes;
+    output << ",\"packetBlockCount\":" << scan.packet_count;
+    output << ",\"candidatePacketBlockCount\":" << candidate_packet_block_count;
+    output << ",\"profileLengthPacketBlockCount\":"
+           << candidate_packet_block_count - rejected_content_length_block_count;
+    output << ",\"rejectedContentLengthBlockCount\":"
+           << rejected_content_length_block_count;
+    output << ",\"decodedObjectiveEventCount\":" << events.size();
+    output << ",\"unknownMonsterTypeCount\":" << unknown_monster_type_count;
+    output << ",\"monsterCounts\":{";
+    bool first_count = true;
+    for (const auto& [name, count] : monster_counts) {
+        if (!first_count) output << ',';
+        first_count = false;
+        output << '"' << name << "\":" << count;
+    }
+    output << "},\"exactPacketFraming\":true";
+    output << ",\"killerOwnershipAvailable\":false";
+    output << ",\"elementalDragonSubtypeAvailable\":false}}";
+    return output.str();
+}
+
 }  // namespace
 
 std::string extract_replay_kills_json(const std::vector<std::uint8_t>& bytes) {
@@ -2880,6 +3159,25 @@ std::string extract_replay_kills_file_json(const std::string& path) {
     const std::size_t separator = source.match_id.find('-');
     if (separator != std::string::npos) source.match_id[separator] = '_';
     return extract_replay_kills_impl(read_file_bytes(source.replay_path), source);
+}
+
+std::string extract_replay_objectives_json(const std::vector<std::uint8_t>& bytes) {
+    return extract_replay_objectives_impl(bytes, {});
+}
+
+std::string extract_replay_objectives_file_json(const std::string& path) {
+    std::error_code error;
+    std::filesystem::path absolute = std::filesystem::absolute(path, error);
+    if (error) absolute = std::filesystem::path(path);
+    absolute = absolute.lexically_normal();
+    KillSourceInfo source;
+    source.has_file = true;
+    source.replay_path = absolute.string();
+    source.replay_id = absolute.stem().string();
+    source.match_id = source.replay_id;
+    const std::size_t separator = source.match_id.find('-');
+    if (separator != std::string::npos) source.match_id[separator] = '_';
+    return extract_replay_objectives_impl(read_file_bytes(source.replay_path), source);
 }
 
 std::string replay_summary_to_json(const ReplaySummary& summary) {

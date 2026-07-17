@@ -98,6 +98,8 @@ struct ReplaySummary {
 [[nodiscard]] std::string dump_packet_type_file_json(const std::string& path, std::uint16_t packet_type, std::string_view segment_type = "all", std::size_t max_blocks = 64);
 [[nodiscard]] std::string extract_replay_kills_json(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] std::string extract_replay_kills_file_json(const std::string& path);
+[[nodiscard]] std::string extract_replay_objectives_json(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] std::string extract_replay_objectives_file_json(const std::string& path);
 [[nodiscard]] std::string replay_summary_to_json(const ReplaySummary& summary);
 [[nodiscard]] std::string scan_replay_families_json(const std::vector<std::uint8_t>& bytes, std::size_t minimum_length, std::size_t minimum_records, std::size_t top_families, std::string_view segment_type = "chunk");
 [[nodiscard]] std::string scan_replay_families_file_json(const std::string& path, std::size_t minimum_length, std::size_t minimum_records, std::size_t top_families, std::string_view segment_type = "chunk");

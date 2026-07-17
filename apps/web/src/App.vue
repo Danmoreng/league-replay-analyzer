@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 
 import DataBrowser from "./components/DataBrowser.vue";
 import KillTimeline from "./components/KillTimeline.vue";
+import ObjectiveTimeline from "./components/ObjectiveTimeline.vue";
 import ReplayInspector from "./components/ReplayInspector.vue";
 import Minimap from "./components/Minimap.vue";
 import Timeline from "./components/Timeline.vue";
@@ -21,7 +22,12 @@ import {
 } from "./replayMovementFixtures";
 import { type PlayerSummary, type ReplaySummary } from "./replayParser";
 import type { ReplayKillResult } from "./replayKills";
-import { extractReplayKillsWithWasm, parseReplayBufferWithWasm } from "./wasmReplayParser";
+import type { ReplayObjectiveResult } from "./replayObjectives";
+import {
+  extractReplayKillsWithWasm,
+  extractReplayObjectivesWithWasm,
+  parseReplayBufferWithWasm,
+} from "./wasmReplayParser";
 
 const { seek, setDuration } = usePlayback();
 const summary = ref<ReplaySummary | null>(null);
@@ -33,6 +39,9 @@ const riotFixtureStatus = ref("No Riot fixture loaded yet.");
 const replayKills = ref<ReplayKillResult | null>(null);
 const replayKillsError = ref("");
 const isLoadingReplayKills = ref(false);
+const replayObjectives = ref<ReplayObjectiveResult | null>(null);
+const replayObjectivesError = ref("");
+const isLoadingReplayObjectives = ref(false);
 const replayMovementStatus = ref("No replay-derived movement fixture loaded yet.");
 const parserEngine = ref("C++/Wasm");
 const replayBuffer = ref<ArrayBuffer | null>(null);
@@ -582,6 +591,9 @@ async function loadReplay(file: File): Promise<void> {
   replayKills.value = null;
   replayKillsError.value = "";
   isLoadingReplayKills.value = true;
+  replayObjectives.value = null;
+  replayObjectivesError.value = "";
+  isLoadingReplayObjectives.value = true;
   loadedReplayName.value = file.name;
   status.value = `Parsing ${file.name}...`;
 
@@ -608,6 +620,19 @@ async function loadReplay(file: File): Promise<void> {
       isLoadingReplayKills.value = false;
     }
 
+    let objectiveStatus = "Objective timeline unavailable.";
+    status.value = `Decoded replay kills for ${file.name}. Decoding objective events...`;
+    try {
+      replayObjectives.value = await extractReplayObjectivesWithWasm(buffer);
+      objectiveStatus = `Decoded ${replayObjectives.value.events.length} replay-only objective events.`;
+    } catch (objectiveError) {
+      replayObjectives.value = null;
+      replayObjectivesError.value =
+        objectiveError instanceof Error ? objectiveError.message : String(objectiveError);
+    } finally {
+      isLoadingReplayObjectives.value = false;
+    }
+
     if (derivedMatchId) {
       try {
         riotBundle.value = await loadRiotFixtureBundle(derivedMatchId);
@@ -623,19 +648,22 @@ async function loadReplay(file: File): Promise<void> {
     setDuration(parsedSummary.gameLengthMillis);
     seek(0);
     const movementStatus = await loadMovementData(derivedMatchId);
-    status.value = `Parsed ${file.name} successfully. ${killStatus} ${movementStatus}`;
+    status.value = `Parsed ${file.name} successfully. ${killStatus} ${objectiveStatus} ${movementStatus}`;
   } catch (error) {
     summary.value = null;
     browserModel.value = null;
     riotBundle.value = null;
     replayKills.value = null;
     replayKillsError.value = "";
+    replayObjectives.value = null;
+    replayObjectivesError.value = "";
     replayBuffer.value = null;
     errorMessage.value = error instanceof Error ? error.message : String(error);
     status.value = "Replay parsing failed.";
   } finally {
     isLoading.value = false;
     isLoadingReplayKills.value = false;
+    isLoadingReplayObjectives.value = false;
   }
 }
 
@@ -821,6 +849,12 @@ function onFileChange(event: Event): void {
             :result="replayKills"
             :is-loading="isLoadingReplayKills"
             :error-message="replayKillsError"
+          />
+
+          <ObjectiveTimeline
+            :result="replayObjectives"
+            :is-loading="isLoadingReplayObjectives"
+            :error-message="replayObjectivesError"
           />
 
           <div class="row g-2">

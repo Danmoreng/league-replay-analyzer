@@ -149,6 +149,34 @@ EMSCRIPTEN_KEEPALIVE const char* lra_extract_replay_kills_buffer(
     }
 }
 
+EMSCRIPTEN_KEEPALIVE const char* lra_extract_replay_objectives_buffer(
+    const std::uint8_t* data,
+    int size
+) {
+    try {
+        if (data == nullptr || size <= 0) {
+            log_error("[lra/wasm] Replay buffer was empty while decoding objectives.");
+            const std::string empty = "{\"error\":\"Replay buffer was empty.\"}";
+            char* output = new char[empty.size() + 1];
+            std::memcpy(output, empty.c_str(), empty.size() + 1);
+            return output;
+        }
+
+        log_info("[lra/wasm] Decoding replay elite-monster objectives from packet blocks.");
+        const std::vector<std::uint8_t> bytes(data, data + size);
+        const std::string json = rofl::core::extract_replay_objectives_json(bytes);
+        char* output = new char[json.size() + 1];
+        std::memcpy(output, json.c_str(), json.size() + 1);
+        return output;
+    } catch (const std::exception& exception) {
+        log_error(std::string{"[lra/wasm] Replay objective decoding failed: "} + exception.what());
+        const std::string error_json = std::string{"{\"error\":\""} + exception.what() + "\"}";
+        char* output = new char[error_json.size() + 1];
+        std::memcpy(output, error_json.c_str(), error_json.size() + 1);
+        return output;
+    }
+}
+
 EMSCRIPTEN_KEEPALIVE const char* lra_scan_replay_families_buffer(
     const std::uint8_t* data,
     int size,
