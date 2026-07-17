@@ -148,6 +148,21 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
+
+    if (first_arg == "--extract-replay-ward-position-candidates-json" &&
+        argc > 2) {
+        try {
+            std::cout
+                << rofl::core::
+                    extract_replay_ward_position_candidates_file_json(
+                        argv[2]
+                    );
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
     if (first_arg == "--summarize-subrecord-families" && argc > 2) {
         try {
             std::string path = argv[2];
@@ -1133,6 +1148,7 @@ int main(int argc, char** argv) {
     std::cout << "Use --extract-replay-kills-json <path-to-rofl> to emit ROFL-only normalized champion kill events with participant and packet provenance.\n";
     std::cout << "Use --extract-replay-objectives-json <path-to-rofl> to emit ROFL-only elite-monster objective events with monster class and packet provenance.\n";
     std::cout << "Use --extract-replay-wards-json <path-to-rofl> to emit ROFL-only standard ward placement and conservative ward-kill events with entity and participant provenance.\n";
+    std::cout << "Use --extract-replay-ward-position-candidates-json <path-to-rofl> to emit strictly research-only replay-byte ward marker hypotheses without promoting decoded positions.\n";
     std::cout << "Use --dump-chunk-subrecords <path-to-rofl> --chunk-id <id> to dump subrecords for a chunk.\n";
     std::cout << "Use --summarize-subrecord-families <path-to-rofl> [--min-length <n>] [--min-records <n>] [--top-families <n>] to rank recurring subrecord families across the replay.\n";
     std::cout << "Use --dump-subrecord-family <path-to-rofl> --length <len> --first-byte <byte> to dump matching records.\n";

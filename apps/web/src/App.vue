@@ -24,10 +24,12 @@ import {
 import { type PlayerSummary, type ReplaySummary } from "./replayParser";
 import type { ReplayKillResult } from "./replayKills";
 import type { ReplayObjectiveResult } from "./replayObjectives";
+import type { ReplayWardPositionResearchResult } from "./replayWardPositionResearch";
 import type { ReplayWardResult } from "./replayWards";
 import {
   extractReplayKillsWithWasm,
   extractReplayObjectivesWithWasm,
+  extractReplayWardPositionCandidatesWithWasm,
   extractReplayWardsWithWasm,
   parseReplayBufferWithWasm,
 } from "./wasmReplayParser";
@@ -48,6 +50,9 @@ const isLoadingReplayObjectives = ref(false);
 const replayWards = ref<ReplayWardResult | null>(null);
 const replayWardsError = ref("");
 const isLoadingReplayWards = ref(false);
+const replayWardPositionCandidates = ref<ReplayWardPositionResearchResult | null>(null);
+const replayWardPositionCandidatesError = ref("");
+const isLoadingReplayWardPositionCandidates = ref(false);
 const replayMovementStatus = ref("No replay-derived movement fixture loaded yet.");
 const parserEngine = ref("C++/Wasm");
 const replayBuffer = ref<ArrayBuffer | null>(null);
@@ -65,7 +70,8 @@ const headerStatus = computed(() => {
     isLoading.value ||
     isLoadingReplayKills.value ||
     isLoadingReplayObjectives.value ||
-    isLoadingReplayWards.value
+    isLoadingReplayWards.value ||
+    isLoadingReplayWardPositionCandidates.value
   ) {
     return "Replay wird lokal dekodiert …";
   }
@@ -639,6 +645,9 @@ async function loadReplay(file: File): Promise<void> {
   replayWards.value = null;
   replayWardsError.value = "";
   isLoadingReplayWards.value = true;
+  replayWardPositionCandidates.value = null;
+  replayWardPositionCandidatesError.value = "";
+  isLoadingReplayWardPositionCandidates.value = true;
   loadedReplayName.value = file.name;
   status.value = `Parsing ${file.name}...`;
 
@@ -696,6 +705,22 @@ async function loadReplay(file: File): Promise<void> {
       isLoadingReplayWards.value = false;
     }
 
+    let wardPositionResearchStatus = "Ward position hypotheses unavailable.";
+    status.value = `Decoded replay wards for ${file.name}. Building replay-only ward position hypotheses...`;
+    try {
+      replayWardPositionCandidates.value =
+        await extractReplayWardPositionCandidatesWithWasm(buffer);
+      wardPositionResearchStatus = `Built ${replayWardPositionCandidates.value.hypotheses?.length ?? 0} experimental replay-only ward position hypotheses.`;
+    } catch (wardPositionResearchError) {
+      replayWardPositionCandidates.value = null;
+      replayWardPositionCandidatesError.value =
+        wardPositionResearchError instanceof Error
+          ? wardPositionResearchError.message
+          : String(wardPositionResearchError);
+    } finally {
+      isLoadingReplayWardPositionCandidates.value = false;
+    }
+
     if (derivedMatchId) {
       try {
         riotBundle.value = await loadRiotFixtureBundle(derivedMatchId);
@@ -711,7 +736,7 @@ async function loadReplay(file: File): Promise<void> {
     setDuration(parsedSummary.gameLengthMillis);
     seek(0);
     const movementStatus = await loadMovementData(derivedMatchId);
-    status.value = `Parsed ${file.name} successfully. ${killStatus} ${objectiveStatus} ${wardStatus} ${movementStatus}`;
+    status.value = `Parsed ${file.name} successfully. ${killStatus} ${objectiveStatus} ${wardStatus} ${wardPositionResearchStatus} ${movementStatus}`;
   } catch (error) {
     summary.value = null;
     browserModel.value = null;
@@ -722,6 +747,8 @@ async function loadReplay(file: File): Promise<void> {
     replayObjectivesError.value = "";
     replayWards.value = null;
     replayWardsError.value = "";
+    replayWardPositionCandidates.value = null;
+    replayWardPositionCandidatesError.value = "";
     replayBuffer.value = null;
     errorMessage.value = error instanceof Error ? error.message : String(error);
     status.value = "Replay parsing failed.";
@@ -730,6 +757,7 @@ async function loadReplay(file: File): Promise<void> {
     isLoadingReplayKills.value = false;
     isLoadingReplayObjectives.value = false;
     isLoadingReplayWards.value = false;
+    isLoadingReplayWardPositionCandidates.value = false;
   }
 }
 
@@ -783,12 +811,15 @@ function onFileChange(event: Event): void {
           :kills="replayKills"
           :objectives="replayObjectives"
           :wards="replayWards"
+          :ward-position-candidates="replayWardPositionCandidates"
           :kills-loading="isLoadingReplayKills"
           :objectives-loading="isLoadingReplayObjectives"
           :wards-loading="isLoadingReplayWards"
+          :ward-position-candidates-loading="isLoadingReplayWardPositionCandidates"
           :kills-error="replayKillsError"
           :objectives-error="replayObjectivesError"
           :wards-error="replayWardsError"
+          :ward-position-candidates-error="replayWardPositionCandidatesError"
         />
 
         <!-- Summary View -->

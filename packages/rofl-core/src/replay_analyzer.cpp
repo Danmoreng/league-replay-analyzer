@@ -3234,27 +3234,120 @@ struct WardPacketProfile {
     std::uint16_t killer_owner_packet_type = 0;
     std::array<std::size_t, 2> killer_owner_content_lengths{};
     std::uint32_t champion_network_id_base = 0;
+    std::uint16_t research_primary_spawn_packet_type = 0;
+    std::uint16_t research_companion_spawn_packet_type = 0;
+    std::size_t research_primary_minimum_content_length = 0;
+    std::size_t research_primary_maximum_content_length = 0;
+    std::size_t research_companion_content_length = 0;
 };
 
 constexpr std::array<WardPacketProfile, 8> kWardPacketProfiles{{
-    {"15.22", 0x0308, {0x09, 0, 0}, 1, 0x0420, {2, 3, 4}, 0x0017, {21, 28, 29}, 3, 0x044E, {6, 7}, 0x40000099},
-    {"15.23", 0x0368, {0xD5, 0, 0}, 1, 0x01BF, {2, 3, 4}, 0x020A, {28, 29, 0}, 2, 0x028B, {6, 7}, 0x400004CC},
-    {"15.24", 0x02CE, {0xE1, 0, 0}, 1, 0x0227, {2, 3, 4}, 0x009C, {28, 29, 0}, 2, 0x0220, {6, 7}, 0x40000147},
-    {"16.1", 0x037F, {0x01, 0x92, 0}, 2, 0x0335, {2, 3, 4}, 0x0059, {28, 29, 0}, 2, 0x021A, {6, 7}, 0x400000AD},
-    {"16.5", 0x03F8, {0x50, 0, 0}, 1, 0x024F, {2, 3, 4}, 0x023F, {28, 29, 0}, 2, 0x01FE, {6, 7}, 0x400000AD},
-    {"16.6", 0x0311, {0x14, 0, 0}, 1, 0x011D, {2, 3, 4}, 0x0271, {21, 28, 29}, 3, 0x03FD, {6, 7}, 0x400000AD},
-    {"16.7", 0x0162, {0x80, 0xF4, 0xF7}, 3, 0x033B, {2, 3, 4}, 0x039C, {28, 29, 0}, 2, 0x0301, {6, 7}, 0x400000AD},
-    {"16.9", 0x0041, {0xB0, 0, 0}, 1, 0x04AC, {2, 3, 4}, 0x02E6, {28, 29, 0}, 2, 0x02F6, {6, 7}, 0x400000AD},
+    {"15.22", 0x0308, {0x09, 0, 0}, 1, 0x0420, {2, 3, 4}, 0x0017, {21, 28, 29}, 3, 0x044E, {6, 7}, 0x40000099, 0x00DC, 0x00BC, 64, 73, 63},
+    {"15.23", 0x0368, {0xD5, 0, 0}, 1, 0x01BF, {2, 3, 4}, 0x020A, {28, 29, 0}, 2, 0x028B, {6, 7}, 0x400004CC, 0x0393, 0x0060, 64, 73, 63},
+    {"15.24", 0x02CE, {0xE1, 0, 0}, 1, 0x0227, {2, 3, 4}, 0x009C, {28, 29, 0}, 2, 0x0220, {6, 7}, 0x40000147, 0x0342, 0x0218, 63, 73, 63},
+    {"16.1", 0x037F, {0x01, 0x92, 0}, 2, 0x0335, {2, 3, 4}, 0x0059, {28, 29, 0}, 2, 0x021A, {6, 7}, 0x400000AD, 0x02CC, 0x0428, 63, 73, 63},
+    {"16.5", 0x03F8, {0x50, 0, 0}, 1, 0x024F, {2, 3, 4}, 0x023F, {28, 29, 0}, 2, 0x01FE, {6, 7}, 0x400000AD, 0x0427, 0x01EE, 64, 73, 63},
+    {"16.6", 0x0311, {0x14, 0, 0}, 1, 0x011D, {2, 3, 4}, 0x0271, {21, 28, 29}, 3, 0x03FD, {6, 7}, 0x400000AD, 0x03D1, 0x034B, 63, 73, 63},
+    {"16.7", 0x0162, {0x80, 0xF4, 0xF7}, 3, 0x033B, {2, 3, 4}, 0x039C, {28, 29, 0}, 2, 0x0301, {6, 7}, 0x400000AD, 0x0449, 0x0219, 63, 73, 63},
+    {"16.9", 0x0041, {0xB0, 0, 0}, 1, 0x04AC, {2, 3, 4}, 0x02E6, {28, 29, 0}, 2, 0x02F6, {6, 7}, 0x400000AD, 0x00D6, 0x01AD, 62, 73, 63},
 }};
 
 constexpr long long kWardTimestampToleranceMillis = 1;
 constexpr std::size_t kWardPlacementContentLength = 3;
 constexpr std::size_t kWardPlacementDiscriminatorOffset = 2;
+constexpr std::size_t kWardResearchMaximumPrecedingBlocks = 48;
 
 struct WardRelevantBlock {
     PacketBlock block;
     long long timestamp_millis = 0;
 };
+
+struct WardPositionResearchPayloadBlock {
+    WardRelevantBlock relevant;
+    std::vector<std::uint8_t> payload;
+};
+
+struct WardPositionResearchPlacement {
+    long long timestamp_millis = 0;
+    std::uint32_t ward_entity_network_id = 0;
+    int owner_participant_id = 0;
+    std::uint32_t owner_network_id = 0;
+    WardRelevantBlock marker;
+    WardPositionResearchPayloadBlock primary;
+    WardPositionResearchPayloadBlock companion;
+};
+
+struct WardPositionResearchHypothesis {
+    std::string_view id;
+    std::string_view label;
+    std::string_view description;
+    std::string_view x_source;
+    std::string_view y_source;
+};
+
+struct WardPositionResearchCoordinate {
+    double x = 0.0;
+    double y = 0.0;
+};
+
+constexpr std::array<WardPositionResearchHypothesis, 8> kWardPositionResearchHypotheses{{
+    {
+        "CONTROL-U16-7-11",
+        "Primary U16 cluster control",
+        "Low-distinctness control for visually rejecting clustered non-position structure.",
+        "N16(primary[7] | primary[8] << 8)",
+        "N16(primary[11] | primary[12] << 8)",
+    },
+    {
+        "P16-BE-FY",
+        "Primary U16 BE, flip Y",
+        "Big-endian primary shared-lane hypothesis with the Y axis mirrored.",
+        "N16(primary[9] << 8 | primary[10])",
+        "15000 - N16(primary[13] << 8 | primary[14])",
+    },
+    {
+        "P16-BE-SWAP-FX",
+        "Primary U16 BE, swap and flip X",
+        "Redundant orientation probe using the same primary bytes with swapped axes.",
+        "15000 - N16(primary[13] << 8 | primary[14])",
+        "N16(primary[9] << 8 | primary[10])",
+    },
+    {
+        "P16-LE",
+        "Primary U16 LE",
+        "Little-endian primary shared-lane hypothesis without axis transforms.",
+        "N16(primary[9] | primary[10] << 8)",
+        "N16(primary[13] | primary[14] << 8)",
+    },
+    {
+        "C16A-LE",
+        "Companion leading lanes U16 LE",
+        "Leading two-byte lanes from the variable companion regions.",
+        "N16(companion[34] | companion[36] << 8)",
+        "N16(companion[42] | companion[44] << 8)",
+    },
+    {
+        "C16B-BE",
+        "Companion trailing lanes U16 BE",
+        "Trailing two-byte lanes from the variable companion regions.",
+        "N16(companion[36] << 8 | companion[38])",
+        "N16(companion[44] << 8 | companion[46])",
+    },
+    {
+        "C24-LE-SWAP-FY",
+        "Companion U24 LE, swap and flip Y",
+        "Three-byte companion lanes with swapped axes and the source X lane mirrored.",
+        "N24(companion[42] | companion[44] << 8 | companion[46] << 16)",
+        "15000 - N24(companion[34] | companion[36] << 8 | companion[38] << 16)",
+    },
+    {
+        "C24-BE-FX",
+        "Companion U24 BE, flip X",
+        "Three-byte big-endian companion lanes with the X axis mirrored.",
+        "15000 - N24(companion[34] << 16 | companion[36] << 8 | companion[38])",
+        "N24(companion[42] << 16 | companion[44] << 8 | companion[46])",
+    },
+}};
 
 struct ReplayWardPlacementEvent {
     long long timestamp_millis = 0;
@@ -3335,6 +3428,72 @@ struct WardEventOrder {
     return left >= right ? left - right : right - left;
 }
 
+[[nodiscard]] std::vector<ReplayWardPlacementEvent> pair_ward_placements(
+    const std::vector<WardRelevantBlock>& classified_placement_markers,
+    const std::vector<WardRelevantBlock>& placement_owner_blocks,
+    const WardPacketProfile& profile
+) {
+    std::vector<ReplayWardPlacementEvent> placements;
+    for (std::size_t marker_index = 0;
+         marker_index < classified_placement_markers.size();
+         ++marker_index) {
+        const WardRelevantBlock& marker =
+            classified_placement_markers[marker_index];
+        const WardRelevantBlock* owner = nullptr;
+        for (const WardRelevantBlock& candidate : placement_owner_blocks) {
+            if (candidate.block.provenance.chunk_id !=
+                    marker.block.provenance.chunk_id ||
+                candidate.block.block_index >= marker.block.block_index ||
+                ward_timestamp_delta(
+                    candidate.timestamp_millis,
+                    marker.timestamp_millis
+                ) > kWardTimestampToleranceMillis) {
+                continue;
+            }
+            if (owner == nullptr ||
+                candidate.block.block_index > owner->block.block_index) {
+                owner = &candidate;
+            }
+        }
+        if (owner == nullptr) continue;
+
+        std::size_t first_marker_index =
+            classified_placement_markers.size();
+        std::size_t first_marker_block_index =
+            std::numeric_limits<std::size_t>::max();
+        for (std::size_t candidate_index = 0;
+             candidate_index < classified_placement_markers.size();
+             ++candidate_index) {
+            const WardRelevantBlock& candidate =
+                classified_placement_markers[candidate_index];
+            if (candidate.block.provenance.chunk_id !=
+                    owner->block.provenance.chunk_id ||
+                candidate.block.block_index <= owner->block.block_index ||
+                ward_timestamp_delta(
+                    candidate.timestamp_millis,
+                    owner->timestamp_millis
+                ) > kWardTimestampToleranceMillis) {
+                continue;
+            }
+            if (candidate.block.block_index < first_marker_block_index) {
+                first_marker_block_index = candidate.block.block_index;
+                first_marker_index = candidate_index;
+            }
+        }
+        if (first_marker_index != marker_index) continue;
+
+        placements.push_back({
+            marker.timestamp_millis,
+            marker.block.block_param,
+            ward_owner_to_participant_id(owner->block.block_param, profile),
+            owner->block.block_param,
+            *owner,
+            marker,
+        });
+    }
+    return placements;
+}
+
 void write_ward_block_provenance_json(
     std::ostringstream& output,
     const WardRelevantBlock& relevant
@@ -3353,6 +3512,373 @@ void write_size_array_json(
         output << values[index];
     }
     output << ']';
+}
+
+[[nodiscard]] std::uint32_t ward_research_u16_le(
+    const std::vector<std::uint8_t>& payload,
+    std::size_t low_offset,
+    std::size_t high_offset
+) {
+    return static_cast<std::uint32_t>(payload[low_offset]) |
+        (static_cast<std::uint32_t>(payload[high_offset]) << 8U);
+}
+
+[[nodiscard]] std::uint32_t ward_research_u16_be(
+    const std::vector<std::uint8_t>& payload,
+    std::size_t high_offset,
+    std::size_t low_offset
+) {
+    return (static_cast<std::uint32_t>(payload[high_offset]) << 8U) |
+        static_cast<std::uint32_t>(payload[low_offset]);
+}
+
+[[nodiscard]] std::uint32_t ward_research_u24_le(
+    const std::vector<std::uint8_t>& payload,
+    std::size_t low_offset,
+    std::size_t middle_offset,
+    std::size_t high_offset
+) {
+    return static_cast<std::uint32_t>(payload[low_offset]) |
+        (static_cast<std::uint32_t>(payload[middle_offset]) << 8U) |
+        (static_cast<std::uint32_t>(payload[high_offset]) << 16U);
+}
+
+[[nodiscard]] std::uint32_t ward_research_u24_be(
+    const std::vector<std::uint8_t>& payload,
+    std::size_t high_offset,
+    std::size_t middle_offset,
+    std::size_t low_offset
+) {
+    return (static_cast<std::uint32_t>(payload[high_offset]) << 16U) |
+        (static_cast<std::uint32_t>(payload[middle_offset]) << 8U) |
+        static_cast<std::uint32_t>(payload[low_offset]);
+}
+
+[[nodiscard]] double ward_research_n16(std::uint32_t value) {
+    return static_cast<double>(value) * 15000.0 / 65535.0;
+}
+
+[[nodiscard]] double ward_research_n24(std::uint32_t value) {
+    return static_cast<double>(value) * 15000.0 / 16777215.0;
+}
+
+[[nodiscard]] WardPositionResearchCoordinate ward_research_coordinate(
+    std::size_t hypothesis_index,
+    const std::vector<std::uint8_t>& primary,
+    const std::vector<std::uint8_t>& companion
+) {
+    if (primary.size() < 15 || companion.size() < 47) {
+        return {
+            std::numeric_limits<double>::quiet_NaN(),
+            std::numeric_limits<double>::quiet_NaN(),
+        };
+    }
+    switch (hypothesis_index) {
+    case 0:
+        return {
+            ward_research_n16(ward_research_u16_le(primary, 7, 8)),
+            ward_research_n16(ward_research_u16_le(primary, 11, 12)),
+        };
+    case 1:
+        return {
+            ward_research_n16(ward_research_u16_be(primary, 9, 10)),
+            15000.0 - ward_research_n16(ward_research_u16_be(primary, 13, 14)),
+        };
+    case 2:
+        return {
+            15000.0 - ward_research_n16(ward_research_u16_be(primary, 13, 14)),
+            ward_research_n16(ward_research_u16_be(primary, 9, 10)),
+        };
+    case 3:
+        return {
+            ward_research_n16(ward_research_u16_le(primary, 9, 10)),
+            ward_research_n16(ward_research_u16_le(primary, 13, 14)),
+        };
+    case 4:
+        return {
+            ward_research_n16(ward_research_u16_le(companion, 34, 36)),
+            ward_research_n16(ward_research_u16_le(companion, 42, 44)),
+        };
+    case 5:
+        return {
+            ward_research_n16(ward_research_u16_be(companion, 36, 38)),
+            ward_research_n16(ward_research_u16_be(companion, 44, 46)),
+        };
+    case 6:
+        return {
+            ward_research_n24(ward_research_u24_le(companion, 42, 44, 46)),
+            15000.0 - ward_research_n24(
+                ward_research_u24_le(companion, 34, 36, 38)
+            ),
+        };
+    case 7:
+        return {
+            15000.0 - ward_research_n24(
+                ward_research_u24_be(companion, 34, 36, 38)
+            ),
+            ward_research_n24(ward_research_u24_be(companion, 42, 44, 46)),
+        };
+    default:
+        return {
+            std::numeric_limits<double>::quiet_NaN(),
+            std::numeric_limits<double>::quiet_NaN(),
+        };
+    }
+}
+
+[[nodiscard]] std::string ward_research_payload_hex(
+    const std::vector<std::uint8_t>& payload
+) {
+    std::ostringstream output;
+    output << std::hex << std::setfill('0');
+    for (const std::uint8_t byte : payload) {
+        output << std::setw(2) << static_cast<unsigned int>(byte);
+    }
+    return output.str();
+}
+
+void write_ward_research_payload_block_json(
+    std::ostringstream& output,
+    std::string_view packet_role,
+    const WardPositionResearchPayloadBlock& payload_block
+) {
+    const PacketBlock& block = payload_block.relevant.block;
+    output << "{\"packetRole\":\"" << json_escape(packet_role) << "\"";
+    output << ",\"packetType\":" << block.packet_type;
+    output << ",\"packetTypeHex\":\"" << fixed_hex(block.packet_type, 4) << "\"";
+    output << ",\"blockParam\":" << block.block_param;
+    output << ",\"blockParamHex\":\"" << fixed_hex(block.block_param, 8) << "\"";
+    output << ",\"contentLength\":" << block.content_length;
+    output << ",\"payloadHex\":\""
+           << ward_research_payload_hex(payload_block.payload) << "\"";
+    output << ",\"provenance\":";
+    write_ward_block_provenance_json(output, payload_block.relevant);
+    output << '}';
+}
+
+struct WardPositionResearchExtraction {
+    PacketFileScan scan;
+    std::vector<WardRelevantBlock> classified_placement_markers;
+    std::vector<ReplayWardPlacementEvent> productive_placements;
+    std::vector<WardPositionResearchPayloadBlock> primary_blocks;
+    std::vector<WardPositionResearchPayloadBlock> companion_blocks;
+    std::vector<WardPositionResearchPlacement> research_placements;
+    std::size_t candidate_placement_marker_block_count = 0;
+    std::size_t rejected_placement_content_length_block_count = 0;
+    std::size_t rejected_placement_classifier_block_count = 0;
+    std::size_t rejected_primary_profile_length_count = 0;
+    std::size_t rejected_companion_profile_length_count = 0;
+    std::size_t rejected_primary_missing_count = 0;
+    std::size_t rejected_primary_ambiguous_count = 0;
+    std::size_t rejected_companion_missing_count = 0;
+    std::size_t rejected_companion_ambiguous_count = 0;
+    std::size_t rejected_spawn_order_count = 0;
+    std::size_t rejected_payload_length_count = 0;
+};
+
+[[nodiscard]] WardPositionResearchExtraction
+collect_ward_position_research(
+    const std::vector<std::uint8_t>& bytes,
+    const ReplaySummary& summary,
+    const WardPacketProfile& profile,
+    bool candidate_version_supported
+) {
+    WardPositionResearchExtraction extraction;
+    std::vector<WardRelevantBlock> placement_owner_blocks;
+    extraction.scan = scan_packet_segments(
+        bytes,
+        summary,
+        "chunk",
+        [&](const ReplaySegmentSummary&,
+            const std::vector<std::uint8_t>& decompressed,
+            const PacketBlockParseResult& result) {
+            for (const PacketBlock& block : result.blocks) {
+                if (block.channel != 1) continue;
+                const WardRelevantBlock relevant{
+                    block,
+                    packet_timestamp_millis(block.timestamp_seconds),
+                };
+                if (block.packet_type == profile.placement_marker_packet_type) {
+                    extraction.candidate_placement_marker_block_count += 1;
+                    if (block.content_length != kWardPlacementContentLength) {
+                        extraction.rejected_placement_content_length_block_count += 1;
+                    } else {
+                        const std::uint8_t discriminator =
+                            decompressed[
+                                block.content_offset +
+                                kWardPlacementDiscriminatorOffset
+                            ];
+                        if (ward_discriminator_is_profiled(
+                                discriminator,
+                                profile
+                            )) {
+                            extraction.classified_placement_markers.push_back(
+                                relevant
+                            );
+                        } else {
+                            extraction.rejected_placement_classifier_block_count += 1;
+                        }
+                    }
+                }
+                if (block.packet_type == profile.placement_owner_packet_type &&
+                    ward_length_is_profiled(
+                        block.content_length,
+                        profile.placement_owner_content_lengths,
+                        profile.placement_owner_content_lengths.size()
+                    ) &&
+                    ward_owner_to_participant_id(
+                        block.block_param,
+                        profile
+                    ) != 0) {
+                    placement_owner_blocks.push_back(relevant);
+                }
+                if (!candidate_version_supported) {
+                    continue;
+                }
+                if (block.packet_type !=
+                        profile.research_primary_spawn_packet_type &&
+                    block.packet_type !=
+                        profile.research_companion_spawn_packet_type) {
+                    continue;
+                }
+                if (block.packet_type ==
+                        profile.research_primary_spawn_packet_type &&
+                    (block.content_length <
+                        profile.research_primary_minimum_content_length ||
+                     block.content_length >
+                        profile.research_primary_maximum_content_length)) {
+                    extraction.rejected_primary_profile_length_count += 1;
+                    continue;
+                }
+                if (block.packet_type ==
+                        profile.research_companion_spawn_packet_type &&
+                    block.content_length !=
+                        profile.research_companion_content_length) {
+                    extraction.rejected_companion_profile_length_count += 1;
+                    continue;
+                }
+
+                WardPositionResearchPayloadBlock payload_block;
+                payload_block.relevant = relevant;
+                payload_block.payload.assign(
+                    decompressed.begin() +
+                        static_cast<std::ptrdiff_t>(block.content_offset),
+                    decompressed.begin() +
+                        static_cast<std::ptrdiff_t>(block.end_offset)
+                );
+                if (block.packet_type ==
+                    profile.research_primary_spawn_packet_type) {
+                    extraction.primary_blocks.push_back(
+                        std::move(payload_block)
+                    );
+                } else {
+                    extraction.companion_blocks.push_back(
+                        std::move(payload_block)
+                    );
+                }
+            }
+        }
+    );
+    if (extraction.scan.selected_segment_count == 0) {
+        throw std::runtime_error(
+            "Replay contains no footer-style chunk records."
+        );
+    }
+    if (extraction.scan.exact_segment_count !=
+            extraction.scan.selected_segment_count ||
+        !extraction.scan.errors.empty()) {
+        const std::string detail = extraction.scan.errors.empty()
+            ? "one or more chunks were not exactly consumed"
+            : extraction.scan.errors.front().code + ": " +
+                extraction.scan.errors.front().message;
+        throw std::runtime_error(
+            "Replay chunk packet framing failed: " + detail
+        );
+    }
+
+    extraction.productive_placements = pair_ward_placements(
+        extraction.classified_placement_markers,
+        placement_owner_blocks,
+        profile
+    );
+    if (!candidate_version_supported) {
+        return extraction;
+    }
+
+    for (const ReplayWardPlacementEvent& placement :
+         extraction.productive_placements) {
+        const PacketBlock& marker = placement.marker_block.block;
+        const auto matches_placement = [&](const auto& candidate) {
+            const PacketBlock& block = candidate.relevant.block;
+            return
+                block.block_param == placement.ward_entity_network_id &&
+                block.provenance.segment_id ==
+                    marker.provenance.segment_id &&
+                block.provenance.chunk_id == marker.provenance.chunk_id &&
+                block.block_index < marker.block_index &&
+                marker.block_index - block.block_index <=
+                    kWardResearchMaximumPrecedingBlocks &&
+                ward_timestamp_delta(
+                    candidate.relevant.timestamp_millis,
+                    placement.timestamp_millis
+                ) <= kWardTimestampToleranceMillis;
+        };
+
+        const WardPositionResearchPayloadBlock* primary = nullptr;
+        std::size_t primary_match_count = 0;
+        for (const auto& candidate : extraction.primary_blocks) {
+            if (!matches_placement(candidate)) continue;
+            primary = &candidate;
+            primary_match_count += 1;
+        }
+        const WardPositionResearchPayloadBlock* companion = nullptr;
+        std::size_t companion_match_count = 0;
+        for (const auto& candidate : extraction.companion_blocks) {
+            if (!matches_placement(candidate)) continue;
+            companion = &candidate;
+            companion_match_count += 1;
+        }
+
+        if (primary_match_count == 0) {
+            extraction.rejected_primary_missing_count += 1;
+            continue;
+        }
+        if (primary_match_count > 1) {
+            extraction.rejected_primary_ambiguous_count += 1;
+            continue;
+        }
+        if (companion_match_count == 0) {
+            extraction.rejected_companion_missing_count += 1;
+            continue;
+        }
+        if (companion_match_count > 1) {
+            extraction.rejected_companion_ambiguous_count += 1;
+            continue;
+        }
+        if (primary == nullptr || companion == nullptr ||
+            primary->relevant.block.block_index >=
+                companion->relevant.block.block_index ||
+            companion->relevant.block.block_index >= marker.block_index) {
+            extraction.rejected_spawn_order_count += 1;
+            continue;
+        }
+        if (primary->payload.size() < 15 ||
+            companion->payload.size() < 47) {
+            extraction.rejected_payload_length_count += 1;
+            continue;
+        }
+
+        extraction.research_placements.push_back({
+            placement.timestamp_millis,
+            placement.ward_entity_network_id,
+            placement.owner_participant_id,
+            placement.owner_network_id,
+            placement.marker_block,
+            *primary,
+            *companion,
+        });
+    }
+    return extraction;
 }
 
 [[nodiscard]] std::string extract_replay_wards_impl(
@@ -3436,53 +3962,12 @@ void write_size_array_json(
         throw std::runtime_error("Replay chunk packet framing failed: " + detail);
     }
 
-    std::vector<ReplayWardPlacementEvent> placements;
-    for (std::size_t marker_index = 0;
-         marker_index < classified_placement_markers.size();
-         ++marker_index) {
-        const WardRelevantBlock& marker = classified_placement_markers[marker_index];
-        const WardRelevantBlock* owner = nullptr;
-        for (const WardRelevantBlock& candidate : placement_owner_blocks) {
-            if (candidate.block.provenance.chunk_id != marker.block.provenance.chunk_id ||
-                candidate.block.block_index >= marker.block.block_index ||
-                ward_timestamp_delta(candidate.timestamp_millis, marker.timestamp_millis) >
-                    kWardTimestampToleranceMillis) {
-                continue;
-            }
-            if (owner == nullptr || candidate.block.block_index > owner->block.block_index) {
-                owner = &candidate;
-            }
-        }
-        if (owner == nullptr) continue;
-
-        std::size_t first_marker_index = classified_placement_markers.size();
-        std::size_t first_marker_block_index = std::numeric_limits<std::size_t>::max();
-        for (std::size_t candidate_index = 0;
-             candidate_index < classified_placement_markers.size();
-             ++candidate_index) {
-            const WardRelevantBlock& candidate = classified_placement_markers[candidate_index];
-            if (candidate.block.provenance.chunk_id != owner->block.provenance.chunk_id ||
-                candidate.block.block_index <= owner->block.block_index ||
-                ward_timestamp_delta(candidate.timestamp_millis, owner->timestamp_millis) >
-                    kWardTimestampToleranceMillis) {
-                continue;
-            }
-            if (candidate.block.block_index < first_marker_block_index) {
-                first_marker_block_index = candidate.block.block_index;
-                first_marker_index = candidate_index;
-            }
-        }
-        if (first_marker_index != marker_index) continue;
-
-        placements.push_back({
-            marker.timestamp_millis,
-            marker.block.block_param,
-            ward_owner_to_participant_id(owner->block.block_param, *profile),
-            owner->block.block_param,
-            *owner,
-            marker,
-        });
-    }
+    const std::vector<ReplayWardPlacementEvent> placements =
+        pair_ward_placements(
+            classified_placement_markers,
+            placement_owner_blocks,
+            *profile
+        );
 
     std::set<std::uint32_t> tracked_ward_entity_ids;
     for (const ReplayWardPlacementEvent& placement : placements) {
@@ -3677,6 +4162,242 @@ void write_size_array_json(
     output << ",\"removalReasonAvailable\":false}}";
     return output.str();
 }
+
+[[nodiscard]] std::string
+extract_replay_ward_position_candidates_impl(
+    const std::vector<std::uint8_t>& bytes,
+    const KillSourceInfo& source
+) {
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const std::string version_group =
+        packet_version_group(summary.game_version);
+    const WardPacketProfile* profile =
+        find_ward_packet_profile(version_group);
+    if (profile == nullptr) {
+        throw std::runtime_error(
+            "Unsupported replay version " + summary.game_version +
+            ". Supported groups: 15.22, 15.23, 15.24, 16.1, 16.5, "
+            "16.6, 16.7, 16.9."
+        );
+    }
+    const bool candidate_version_supported =
+        version_group == "16.9";
+    const WardPositionResearchExtraction extraction =
+        collect_ward_position_research(
+            bytes,
+            summary,
+            *profile,
+            candidate_version_supported
+        );
+
+    std::ostringstream output;
+    output << std::setprecision(12);
+    output << "{\"schema\":"
+           << "\"rofl-ward-position-candidates-research/v1\"";
+    output << ",\"generatedAtUtc\":\""
+           << current_utc_iso8601() << "\"";
+    output << ",\"researchOnly\":true";
+    output << ",\"promotionGate\":false";
+    output << ",\"positionAvailable\":false";
+    output << ",\"source\":{\"replayPath\":";
+    if (source.has_file) {
+        output << '"' << json_escape(source.replay_path) << '"';
+    } else {
+        output << "null";
+    }
+    output << ",\"replayId\":";
+    if (source.has_file) {
+        output << '"' << json_escape(source.replay_id) << '"';
+    } else {
+        output << "null";
+    }
+    output << ",\"matchId\":";
+    if (source.has_file) {
+        output << '"' << json_escape(source.match_id) << '"';
+    } else {
+        output << "null";
+    }
+    output << ",\"runtimeInput\":\"rofl-only\"";
+    output << ",\"riotApiInput\":false";
+    output << ",\"clientBinaryInput\":false}";
+    output << ",\"gameVersion\":\""
+           << json_escape(summary.game_version) << "\"";
+    output << ",\"versionGroup\":\""
+           << json_escape(version_group) << "\"";
+    output << ",\"profile\":{\"channel\":1";
+    output << ",\"primarySpawnPacketType\":"
+           << profile->research_primary_spawn_packet_type;
+    output << ",\"primarySpawnPacketTypeHex\":\""
+           << fixed_hex(
+                profile->research_primary_spawn_packet_type,
+                4
+              ) << "\"";
+    output << ",\"companionSpawnPacketType\":"
+           << profile->research_companion_spawn_packet_type;
+    output << ",\"companionSpawnPacketTypeHex\":\""
+           << fixed_hex(
+                profile->research_companion_spawn_packet_type,
+                4
+              ) << "\"";
+    output << ",\"primaryMinimumContentLength\":"
+           << profile->research_primary_minimum_content_length;
+    output << ",\"primaryMaximumContentLength\":"
+           << profile->research_primary_maximum_content_length;
+    output << ",\"companionContentLength\":"
+           << profile->research_companion_content_length;
+    output << ",\"placementMarkerPacketType\":"
+           << profile->placement_marker_packet_type;
+    output << ",\"placementMarkerPacketTypeHex\":\""
+           << fixed_hex(profile->placement_marker_packet_type, 4)
+           << "\"";
+    output << ",\"timestampToleranceMillis\":"
+           << kWardTimestampToleranceMillis;
+    output << ",\"maximumPrecedingBlocks\":"
+           << kWardResearchMaximumPrecedingBlocks << "}";
+
+    output << ",\"hypotheses\":[";
+    if (candidate_version_supported) {
+        for (std::size_t index = 0;
+             index < kWardPositionResearchHypotheses.size();
+             ++index) {
+            if (index > 0) output << ',';
+            const auto& hypothesis =
+                kWardPositionResearchHypotheses[index];
+            output << "{\"id\":\""
+                   << json_escape(hypothesis.id) << "\"";
+            output << ",\"label\":\""
+                   << json_escape(hypothesis.label) << "\"";
+            output << ",\"description\":\""
+                   << json_escape(hypothesis.description) << "\"}";
+        }
+    }
+    output << "],\"placements\":[";
+    std::size_t emitted_candidate_count = 0;
+    std::size_t rejected_coordinate_candidate_count = 0;
+    for (std::size_t placement_index = 0;
+         placement_index < extraction.research_placements.size();
+         ++placement_index) {
+        if (placement_index > 0) output << ',';
+        const auto& placement =
+            extraction.research_placements[placement_index];
+        output << "{\"timestampMillis\":"
+               << placement.timestamp_millis;
+        output << ",\"wardEntityNetworkId\":"
+               << placement.ward_entity_network_id;
+        output << ",\"wardEntityNetworkIdHex\":\""
+               << fixed_hex(
+                    placement.ward_entity_network_id,
+                    8
+                  ) << "\"";
+        output << ",\"ownerParticipantId\":"
+               << placement.owner_participant_id;
+        output << ",\"ownerNetworkId\":"
+               << placement.owner_network_id;
+        output << ",\"ownerNetworkIdHex\":\""
+               << fixed_hex(
+                    placement.owner_network_id,
+                    8
+                  ) << "\"";
+        output << ",\"spawnBlocks\":{\"primary\":";
+        write_ward_research_payload_block_json(
+            output,
+            "primary",
+            placement.primary
+        );
+        output << ",\"companion\":";
+        write_ward_research_payload_block_json(
+            output,
+            "companion",
+            placement.companion
+        );
+        output << "},\"candidates\":[";
+        bool first_candidate = true;
+        for (std::size_t hypothesis_index = 0;
+             hypothesis_index <
+                kWardPositionResearchHypotheses.size();
+             ++hypothesis_index) {
+            const auto& hypothesis =
+                kWardPositionResearchHypotheses[hypothesis_index];
+            const WardPositionResearchCoordinate coordinate =
+                ward_research_coordinate(
+                    hypothesis_index,
+                    placement.primary.payload,
+                    placement.companion.payload
+                );
+            if (!std::isfinite(coordinate.x) ||
+                !std::isfinite(coordinate.y) ||
+                coordinate.x < 0.0 || coordinate.x > 15000.0 ||
+                coordinate.y < 0.0 || coordinate.y > 15000.0) {
+                rejected_coordinate_candidate_count += 1;
+                continue;
+            }
+            if (!first_candidate) output << ',';
+            first_candidate = false;
+            emitted_candidate_count += 1;
+            output << "{\"hypothesisId\":\""
+                   << json_escape(hypothesis.id) << "\"";
+            output << ",\"label\":\""
+                   << json_escape(hypothesis.label) << "\"";
+            output << ",\"description\":\""
+                   << json_escape(hypothesis.description) << "\"";
+            output << ",\"xSource\":\""
+                   << json_escape(hypothesis.x_source) << "\"";
+            output << ",\"ySource\":\""
+                   << json_escape(hypothesis.y_source) << "\"";
+            output << ",\"x\":" << coordinate.x;
+            output << ",\"y\":" << coordinate.y << '}';
+        }
+        output << "]}";
+    }
+    output << "],\"diagnostics\":{\"footerRecordCount\":"
+           << summary.container.segments.size();
+    output << ",\"chunkRecordCount\":"
+           << extraction.scan.selected_segment_count;
+    output << ",\"packetBlockCount\":"
+           << extraction.scan.packet_count;
+    output << ",\"candidateVersionSupported\":"
+           << (candidate_version_supported ? "true" : "false");
+    output << ",\"candidatePlacementMarkerBlockCount\":"
+           << extraction.candidate_placement_marker_block_count;
+    output << ",\"classifiedPlacementMarkerBlockCount\":"
+           << extraction.classified_placement_markers.size();
+    output << ",\"rejectedPlacementContentLengthBlockCount\":"
+           << extraction.rejected_placement_content_length_block_count;
+    output << ",\"rejectedPlacementClassifierBlockCount\":"
+           << extraction.rejected_placement_classifier_block_count;
+    output << ",\"rejectedPrimaryProfileLengthCount\":"
+           << extraction.rejected_primary_profile_length_count;
+    output << ",\"rejectedCompanionProfileLengthCount\":"
+           << extraction.rejected_companion_profile_length_count;
+    output << ",\"productivePlacementCount\":"
+           << extraction.productive_placements.size();
+    output << ",\"primarySpawnPacketBlockCount\":"
+           << extraction.primary_blocks.size();
+    output << ",\"companionSpawnPacketBlockCount\":"
+           << extraction.companion_blocks.size();
+    output << ",\"researchPlacementCount\":"
+           << extraction.research_placements.size();
+    output << ",\"emittedCandidateCount\":"
+           << emitted_candidate_count;
+    output << ",\"rejectedCoordinateCandidateCount\":"
+           << rejected_coordinate_candidate_count;
+    output << ",\"rejectedPrimaryMissingCount\":"
+           << extraction.rejected_primary_missing_count;
+    output << ",\"rejectedPrimaryAmbiguousCount\":"
+           << extraction.rejected_primary_ambiguous_count;
+    output << ",\"rejectedCompanionMissingCount\":"
+           << extraction.rejected_companion_missing_count;
+    output << ",\"rejectedCompanionAmbiguousCount\":"
+           << extraction.rejected_companion_ambiguous_count;
+    output << ",\"rejectedSpawnOrderCount\":"
+           << extraction.rejected_spawn_order_count;
+    output << ",\"rejectedPayloadLengthCount\":"
+           << extraction.rejected_payload_length_count;
+    output << ",\"exactPacketFraming\":true";
+    output << ",\"coordinateClampingApplied\":false";
+    output << ",\"positionAvailable\":false}}";
+    return output.str();
+}
 }  // namespace
 
 std::string extract_replay_kills_json(const std::vector<std::uint8_t>& bytes) {
@@ -3734,6 +4455,35 @@ std::string extract_replay_wards_file_json(const std::string& path) {
     const std::size_t separator = source.match_id.find('-');
     if (separator != std::string::npos) source.match_id[separator] = '_';
     return extract_replay_wards_impl(read_file_bytes(source.replay_path), source);
+}
+
+std::string extract_replay_ward_position_candidates_json(
+    const std::vector<std::uint8_t>& bytes
+) {
+    return extract_replay_ward_position_candidates_impl(bytes, {});
+}
+
+std::string extract_replay_ward_position_candidates_file_json(
+    const std::string& path
+) {
+    std::error_code error;
+    std::filesystem::path absolute =
+        std::filesystem::absolute(path, error);
+    if (error) absolute = std::filesystem::path(path);
+    absolute = absolute.lexically_normal();
+    KillSourceInfo source;
+    source.has_file = true;
+    source.replay_path = absolute.string();
+    source.replay_id = absolute.stem().string();
+    source.match_id = source.replay_id;
+    const std::size_t separator = source.match_id.find('-');
+    if (separator != std::string::npos) {
+        source.match_id[separator] = '_';
+    }
+    return extract_replay_ward_position_candidates_impl(
+        read_file_bytes(source.replay_path),
+        source
+    );
 }
 
 std::string replay_summary_to_json(const ReplaySummary& summary) {

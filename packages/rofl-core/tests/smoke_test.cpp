@@ -399,6 +399,8 @@ std::vector<std::uint8_t> build_footer_ward_fixture() {
     constexpr std::uint16_t placement_owner_packet_type = 0x04AC;
     constexpr std::uint16_t removal_packet_type = 0x02E6;
     constexpr std::uint16_t killer_owner_packet_type = 0x02F6;
+    constexpr std::uint16_t primary_spawn_packet_type = 0x00D6;
+    constexpr std::uint16_t companion_spawn_packet_type = 0x01AD;
     constexpr std::uint32_t first_ward_id = 0x50000001;
     constexpr std::uint32_t second_ward_id = 0x50000002;
     constexpr std::uint32_t ignored_ward_id = 0x50000003;
@@ -406,6 +408,15 @@ std::vector<std::uint8_t> build_footer_ward_fixture() {
 
     const auto placement_content = [](std::uint8_t discriminator) {
         return std::vector<std::uint8_t>{0, 0, discriminator};
+    };
+    const auto research_spawn_content = [](std::uint8_t seed) {
+        std::vector<std::uint8_t> content(63);
+        for (std::size_t index = 0; index < content.size(); ++index) {
+            content[index] = static_cast<std::uint8_t>(
+                seed + static_cast<std::uint8_t>(index * 3)
+            );
+        }
+        return content;
     };
 
     append_packet_block_with_content(
@@ -420,6 +431,20 @@ std::vector<std::uint8_t> build_footer_ward_fixture() {
 
     append_packet_block(payload, 2.0F, placement_owner_packet_type, champion_base + 1, 2);
     append_packet_block_with_content(
+        payload,
+        2.0F,
+        primary_spawn_packet_type,
+        first_ward_id,
+        research_spawn_content(0x10)
+    );
+    append_packet_block_with_content(
+        payload,
+        2.0F,
+        companion_spawn_packet_type,
+        first_ward_id,
+        research_spawn_content(0x20)
+    );
+    append_packet_block_with_content(
         payload, 2.0F, placement_marker_packet_type, first_ward_id,
         placement_content(0xB0)
     );
@@ -429,6 +454,20 @@ std::vector<std::uint8_t> build_footer_ward_fixture() {
     );  // Only the first classified marker after the owner may be emitted.
 
     append_packet_block(payload, 3.0F, placement_owner_packet_type, champion_base + 2, 4);
+    append_packet_block_with_content(
+        payload,
+        3.0F,
+        primary_spawn_packet_type,
+        second_ward_id,
+        research_spawn_content(0x30)
+    );
+    append_packet_block_with_content(
+        payload,
+        3.0F,
+        companion_spawn_packet_type,
+        second_ward_id,
+        research_spawn_content(0x40)
+    );
     append_packet_block_with_content(
         payload, 3.0F, placement_marker_packet_type, second_ward_id,
         placement_content(0xB0)
@@ -712,6 +751,86 @@ bool test_replay_ward_extractor_fixture() {
            json.find("0x50000003") == std::string::npos;
 }
 
+bool test_replay_ward_position_research_fixture() {
+    const std::vector<std::uint8_t> fixture =
+        build_footer_ward_fixture();
+    const std::string productive_json =
+        rofl::core::extract_replay_wards_json(fixture);
+    const std::string research_json =
+        rofl::core::extract_replay_ward_position_candidates_json(
+            fixture
+        );
+    return
+        productive_json.find(
+            "\"wardType\":null,\"position\":null"
+        ) != std::string::npos &&
+        research_json.find(
+            "\"schema\":"
+            "\"rofl-ward-position-candidates-research/v1\""
+        ) != std::string::npos &&
+        research_json.find("\"researchOnly\":true") !=
+            std::string::npos &&
+        research_json.find("\"promotionGate\":false") !=
+            std::string::npos &&
+        research_json.find("\"positionAvailable\":false") !=
+            std::string::npos &&
+        research_json.find("\"runtimeInput\":\"rofl-only\"") !=
+            std::string::npos &&
+        research_json.find("\"riotApiInput\":false") !=
+            std::string::npos &&
+        research_json.find("\"clientBinaryInput\":false") !=
+            std::string::npos &&
+        research_json.find(
+            "\"primarySpawnPacketTypeHex\":\"0x00D6\""
+        ) != std::string::npos &&
+        research_json.find(
+            "\"companionSpawnPacketTypeHex\":\"0x01AD\""
+        ) != std::string::npos &&
+        research_json.find("\"primaryMinimumContentLength\":62") !=
+            std::string::npos &&
+        research_json.find("\"primaryMaximumContentLength\":73") !=
+            std::string::npos &&
+        research_json.find("\"companionContentLength\":63") !=
+            std::string::npos &&
+        research_json.find(
+            "\"id\":\"CONTROL-U16-7-11\""
+        ) != std::string::npos &&
+        research_json.find("\"id\":\"C24-BE-FX\"") !=
+            std::string::npos &&
+        research_json.find(
+            "\"timestampMillis\":2000,"
+            "\"wardEntityNetworkId\":1342177281"
+        ) != std::string::npos &&
+        research_json.find(
+            "\"ownerParticipantId\":1,"
+            "\"ownerNetworkId\":1073741998"
+        ) != std::string::npos &&
+        research_json.find(
+            "\"spawnBlocks\":{\"primary\":"
+            "{\"packetRole\":\"primary\""
+        ) != std::string::npos &&
+        research_json.find(
+            "\"companion\":{\"packetRole\":\"companion\""
+        ) != std::string::npos &&
+        research_json.find("\"payloadHex\":\"") !=
+            std::string::npos &&
+        research_json.find(
+            "\"hypothesisId\":\"CONTROL-U16-7-11\""
+        ) != std::string::npos &&
+        research_json.find("\"xSource\":\"N16(primary[7]") !=
+            std::string::npos &&
+        research_json.find("\"researchPlacementCount\":2") !=
+            std::string::npos &&
+        research_json.find("\"emittedCandidateCount\":16") !=
+            std::string::npos &&
+        research_json.find(
+            "\"rejectedCoordinateCandidateCount\":0"
+        ) != std::string::npos &&
+        research_json.find(
+            "\"coordinateClampingApplied\":false"
+        ) != std::string::npos;
+}
+
 }  // namespace
 
 int main() {
@@ -744,6 +863,10 @@ int main() {
     }
 
     if (!test_replay_ward_extractor_fixture()) {
+        return EXIT_FAILURE;
+    }
+
+    if (!test_replay_ward_position_research_fixture()) {
         return EXIT_FAILURE;
     }
 

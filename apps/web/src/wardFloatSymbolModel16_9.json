@@ -1,0 +1,1816 @@
+{
+  "schema": "rofl-ward-float-symbol-model-research/v1",
+  "versionGroup": "16.9",
+  "researchOnly": true,
+  "promotionGate": false,
+  "positionAvailable": false,
+  "warning": "Offline API-fitted visual research candidate only. Unknown symbols remain unavailable. Visual plausibility cannot promote this model.",
+  "source": {
+    "runtimeCandidateInput": "loaded ROFL packet bytes only",
+    "offlineTrainingOracle": "saved Riot Timeline CHAMPION_KILL positions",
+    "riotApiRuntimeInput": false,
+    "clientBinaryInput": false,
+    "vanguardInput": false
+  },
+  "packetGrammar": {
+    "primaryPacketTypeHex": "0x00D6",
+    "companionPacketTypeHex": "0x01AD",
+    "primaryAxisLanes": {
+      "x": [8, 9, 10, 11],
+      "y": [12, 13, 14, 15]
+    },
+    "companionEquivalentLanes": {
+      "x": [40, 42, 44, 46],
+      "y": [32, 34, 36, 38]
+    },
+    "primaryToCompanionWardCorpus": {
+      "placementCount": 2625,
+      "comparedByteCount": 21000,
+      "distinctSymbols": 256,
+      "bijectionPurity": 1
+    }
+  },
+  "model": {
+    "id": "P16-FLOAT32-BE-API-FIT-COARSE",
+    "description": "p[8..10] -> X Float32 BE bytes 0..2; p[12..14] -> Y; byte 3 forced zero and not decoded",
+    "lookup": {
+      "x": [
+        {
+          "primaryOffset": 8,
+          "targetFloatByteIndex": 0,
+          "pairs": [
+            {
+              "from": 69,
+              "to": 69,
+              "observationCount": 43,
+              "replayCount": 13
+            },
+            {
+              "from": 139,
+              "to": 68,
+              "observationCount": 3,
+              "replayCount": 3
+            },
+            {
+              "from": 169,
+              "to": 70,
+              "observationCount": 49,
+              "replayCount": 10
+            }
+          ]
+        },
+        {
+          "primaryOffset": 9,
+          "targetFloatByteIndex": 1,
+          "pairs": [
+            {
+              "from": 5,
+              "to": 219,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 6,
+              "to": 245,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 17,
+              "to": 112,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 20,
+              "to": 91,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 23,
+              "to": 217,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 24,
+              "to": 7,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 25,
+              "to": 207,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 26,
+              "to": 186,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 27,
+              "to": 214,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 31,
+              "to": 2,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 37,
+              "to": 61,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 38,
+              "to": 188,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 41,
+              "to": 216,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 45,
+              "to": 246,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 48,
+              "to": 17,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 52,
+              "to": 208,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 57,
+              "to": 169,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 58,
+              "to": 86,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 68,
+              "to": 79,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 71,
+              "to": 11,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 72,
+              "to": 204,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 74,
+              "to": 59,
+              "observationCount": 3,
+              "replayCount": 3
+            },
+            {
+              "from": 88,
+              "to": 150,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 89,
+              "to": 218,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 92,
+              "to": 1,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 98,
+              "to": 179,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 103,
+              "to": 38,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 104,
+              "to": 231,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 105,
+              "to": 41,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 106,
+              "to": 34,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 113,
+              "to": 86,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 115,
+              "to": 56,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 118,
+              "to": 78,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 120,
+              "to": 158,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 124,
+              "to": 156,
+              "observationCount": 3,
+              "replayCount": 3
+            },
+            {
+              "from": 126,
+              "to": 37,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 133,
+              "to": 36,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 136,
+              "to": 42,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 137,
+              "to": 48,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 138,
+              "to": 213,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 142,
+              "to": 250,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 143,
+              "to": 145,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 146,
+              "to": 3,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 150,
+              "to": 27,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 157,
+              "to": 76,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 160,
+              "to": 174,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 168,
+              "to": 50,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 169,
+              "to": 70,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 172,
+              "to": 209,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 176,
+              "to": 57,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 177,
+              "to": 36,
+              "observationCount": 2,
+              "replayCount": 1
+            },
+            {
+              "from": 178,
+              "to": 82,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 180,
+              "to": 184,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 181,
+              "to": 19,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 188,
+              "to": 248,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 189,
+              "to": 152,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 191,
+              "to": 47,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 194,
+              "to": 85,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 197,
+              "to": 201,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 198,
+              "to": 8,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 205,
+              "to": 49,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 213,
+              "to": 202,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 218,
+              "to": 132,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 219,
+              "to": 211,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 232,
+              "to": 81,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 234,
+              "to": 30,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 236,
+              "to": 89,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 249,
+              "to": 176,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 250,
+              "to": 18,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 251,
+              "to": 204,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 252,
+              "to": 231,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 253,
+              "to": 28,
+              "observationCount": 1,
+              "replayCount": 1
+            }
+          ]
+        },
+        {
+          "primaryOffset": 10,
+          "targetFloatByteIndex": 2,
+          "pairs": [
+            {
+              "from": 1,
+              "to": 64,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 5,
+              "to": 216,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 8,
+              "to": 168,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 11,
+              "to": 132,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 17,
+              "to": 112,
+              "observationCount": 3,
+              "replayCount": 2
+            },
+            {
+              "from": 19,
+              "to": 88,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 23,
+              "to": 248,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 29,
+              "to": 160,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 38,
+              "to": 64,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 41,
+              "to": 216,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 49,
+              "to": 72,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 50,
+              "to": 64,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 51,
+              "to": 52,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 54,
+              "to": 200,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 56,
+              "to": 176,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 58,
+              "to": 192,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 64,
+              "to": 76,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 65,
+              "to": 128,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 66,
+              "to": 168,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 67,
+              "to": 56,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 68,
+              "to": 96,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 70,
+              "to": 64,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 73,
+              "to": 188,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 75,
+              "to": 220,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 77,
+              "to": 168,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 80,
+              "to": 96,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 83,
+              "to": 184,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 84,
+              "to": 140,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 89,
+              "to": 184,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 92,
+              "to": 0,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 106,
+              "to": 32,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 110,
+              "to": 172,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 111,
+              "to": 232,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 113,
+              "to": 80,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 119,
+              "to": 104,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 124,
+              "to": 156,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 126,
+              "to": 36,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 127,
+              "to": 160,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 128,
+              "to": 204,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 131,
+              "to": 28,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 132,
+              "to": 8,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 134,
+              "to": 132,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 141,
+              "to": 224,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 142,
+              "to": 244,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 148,
+              "to": 160,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 152,
+              "to": 72,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 156,
+              "to": 208,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 159,
+              "to": 72,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 160,
+              "to": 200,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 163,
+              "to": 160,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 166,
+              "to": 88,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 170,
+              "to": 120,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 177,
+              "to": 36,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 188,
+              "to": 248,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 206,
+              "to": 8,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 209,
+              "to": 76,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 217,
+              "to": 232,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 218,
+              "to": 148,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 224,
+              "to": 120,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 227,
+              "to": 92,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 232,
+              "to": 80,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 236,
+              "to": 88,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 240,
+              "to": 104,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 249,
+              "to": 168,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 251,
+              "to": 220,
+              "observationCount": 1,
+              "replayCount": 1
+            }
+          ]
+        }
+      ],
+      "y": [
+        {
+          "primaryOffset": 12,
+          "targetFloatByteIndex": 0,
+          "pairs": [
+            {
+              "from": 69,
+              "to": 69,
+              "observationCount": 47,
+              "replayCount": 13
+            },
+            {
+              "from": 139,
+              "to": 68,
+              "observationCount": 6,
+              "replayCount": 3
+            },
+            {
+              "from": 169,
+              "to": 70,
+              "observationCount": 42,
+              "replayCount": 9
+            }
+          ]
+        },
+        {
+          "primaryOffset": 13,
+          "targetFloatByteIndex": 1,
+          "pairs": [
+            {
+              "from": 2,
+              "to": 243,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 6,
+              "to": 252,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 7,
+              "to": 144,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 8,
+              "to": 166,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 10,
+              "to": 242,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 13,
+              "to": 166,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 16,
+              "to": 0,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 20,
+              "to": 92,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 24,
+              "to": 7,
+              "observationCount": 2,
+              "replayCount": 1
+            },
+            {
+              "from": 31,
+              "to": 2,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 32,
+              "to": 30,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 37,
+              "to": 61,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 39,
+              "to": 23,
+              "observationCount": 3,
+              "replayCount": 3
+            },
+            {
+              "from": 47,
+              "to": 232,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 48,
+              "to": 17,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 49,
+              "to": 240,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 50,
+              "to": 129,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 58,
+              "to": 74,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 66,
+              "to": 160,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 76,
+              "to": 255,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 81,
+              "to": 71,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 83,
+              "to": 191,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 84,
+              "to": 141,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 86,
+              "to": 164,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 92,
+              "to": 1,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 93,
+              "to": 84,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 104,
+              "to": 231,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 105,
+              "to": 41,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 109,
+              "to": 6,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 114,
+              "to": 178,
+              "observationCount": 3,
+              "replayCount": 3
+            },
+            {
+              "from": 115,
+              "to": 56,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 118,
+              "to": 13,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 122,
+              "to": 146,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 123,
+              "to": 192,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 124,
+              "to": 155,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 129,
+              "to": 121,
+              "observationCount": 2,
+              "replayCount": 1
+            },
+            {
+              "from": 131,
+              "to": 29,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 132,
+              "to": 16,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 135,
+              "to": 252,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 145,
+              "to": 9,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 148,
+              "to": 162,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 150,
+              "to": 27,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 151,
+              "to": 20,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 152,
+              "to": 74,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 161,
+              "to": 185,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 167,
+              "to": 40,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 168,
+              "to": 50,
+              "observationCount": 3,
+              "replayCount": 3
+            },
+            {
+              "from": 171,
+              "to": 46,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 173,
+              "to": 55,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 181,
+              "to": 19,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 182,
+              "to": 249,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 184,
+              "to": 152,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 188,
+              "to": 248,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 194,
+              "to": 85,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 198,
+              "to": 8,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 201,
+              "to": 22,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 205,
+              "to": 49,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 207,
+              "to": 148,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 211,
+              "to": 230,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 213,
+              "to": 202,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 216,
+              "to": 229,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 220,
+              "to": 148,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 231,
+              "to": 197,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 233,
+              "to": 206,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 234,
+              "to": 15,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 235,
+              "to": 52,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 239,
+              "to": 181,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 240,
+              "to": 106,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 243,
+              "to": 25,
+              "observationCount": 3,
+              "replayCount": 2
+            },
+            {
+              "from": 251,
+              "to": 226,
+              "observationCount": 1,
+              "replayCount": 1
+            }
+          ]
+        },
+        {
+          "primaryOffset": 14,
+          "targetFloatByteIndex": 2,
+          "pairs": [
+            {
+              "from": 5,
+              "to": 216,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 10,
+              "to": 240,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 19,
+              "to": 88,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 21,
+              "to": 128,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 27,
+              "to": 208,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 31,
+              "to": 0,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 33,
+              "to": 176,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 42,
+              "to": 24,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 43,
+              "to": 124,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 44,
+              "to": 120,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 45,
+              "to": 244,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 48,
+              "to": 224,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 49,
+              "to": 232,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 54,
+              "to": 0,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 55,
+              "to": 128,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 58,
+              "to": 80,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 61,
+              "to": 32,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 68,
+              "to": 76,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 76,
+              "to": 136,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 82,
+              "to": 8,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 84,
+              "to": 188,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 85,
+              "to": 176,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 89,
+              "to": 144,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 90,
+              "to": 140,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 92,
+              "to": 0,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 95,
+              "to": 188,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 96,
+              "to": 192,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 101,
+              "to": 216,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 102,
+              "to": 56,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 108,
+              "to": 4,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 109,
+              "to": 0,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 113,
+              "to": 84,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 115,
+              "to": 48,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 122,
+              "to": 96,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 125,
+              "to": 136,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 129,
+              "to": 40,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 140,
+              "to": 112,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 152,
+              "to": 72,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 153,
+              "to": 72,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 154,
+              "to": 144,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 156,
+              "to": 208,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 159,
+              "to": 64,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 160,
+              "to": 172,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 164,
+              "to": 48,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 167,
+              "to": 40,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 168,
+              "to": 48,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 173,
+              "to": 52,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 174,
+              "to": 248,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 179,
+              "to": 96,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 181,
+              "to": 40,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 183,
+              "to": 12,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 185,
+              "to": 88,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 188,
+              "to": 248,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 189,
+              "to": 156,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 193,
+              "to": 124,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 195,
+              "to": 144,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 196,
+              "to": 128,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 197,
+              "to": 200,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 200,
+              "to": 32,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 209,
+              "to": 72,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 215,
+              "to": 192,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 220,
+              "to": 140,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 225,
+              "to": 248,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 227,
+              "to": 92,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 230,
+              "to": 80,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 232,
+              "to": 80,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 234,
+              "to": 32,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 240,
+              "to": 104,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 249,
+              "to": 48,
+              "observationCount": 2,
+              "replayCount": 2
+            },
+            {
+              "from": 250,
+              "to": 16,
+              "observationCount": 1,
+              "replayCount": 1
+            },
+            {
+              "from": 255,
+              "to": 88,
+              "observationCount": 1,
+              "replayCount": 1
+            }
+          ]
+        }
+      ],
+      "byte3": {
+        "mode": "forced-zero-not-decoded",
+        "xPrimaryOffset": 11,
+        "yPrimaryOffset": 15,
+        "value": 0
+      }
+    },
+    "corpusCoverage": {
+      "wardPlacementCount": 2625,
+      "decodedCount": 48,
+      "inBoundsCount": 48,
+      "distinctReplayCount": 19,
+      "ownerFrameOracleCount": 9,
+      "ownerFrameMeanDistance": 871.7,
+      "ownerFrameMedianDistance": 549.2686,
+      "linkedRemovalCount": 16,
+      "linkedRemovalExactFingerprintCount": 15
+    }
+  },
+  "placementRemovalInvariant": {
+    "linkedRemovalCount": 745,
+    "removalSpawnCandidateMultiplicity": {
+      "two": 739,
+      "three": 4,
+      "four": 1,
+      "five": 1
+    },
+    "exactCompletePrimaryAndCompanionFingerprintCount": 701,
+    "exactRate": 0.9409395973154362,
+    "exactSiblingMultiplicity": "two exact siblings for each of 701; zero for 44",
+    "primaryOffsets": [8, 9, 10, 11, 12, 13, 14, 15],
+    "companionOffsets": [32, 34, 36, 38, 40, 42, 44, 46],
+    "primaryPerOffsetEqualCounts": [745, 722, 701, 710, 745, 716, 702, 710],
+    "companionPerOffsetEqualCounts": [745, 716, 702, 710, 745, 722, 701, 710]
+  }
+}

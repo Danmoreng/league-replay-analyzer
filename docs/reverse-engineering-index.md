@@ -4,6 +4,16 @@ Updated: 2026-07-17
 
 This file consolidates the replay reverse-engineering documentation into a smaller set of active references.
 
+## Hard Safety Boundary
+
+Reverse engineering in this repository means analysis of saved `.rofl` files
+and patch-versioned packet bytes with the repository's own parser. Saved Riot
+fixtures may be used only as offline oracles. Do not execute, inspect,
+instrument, patch, or emulate installed League/Riot client or game binaries,
+running League/Riot processes, Vanguard, or Vanguard-managed data. Do not
+disable or bypass Vanguard. Client-binary RVA or machine-code-emulation paths
+are outside scope even when described by historical community work.
+
 ## Read These First
 
 1. `docs/decoder-status.md`
@@ -26,6 +36,8 @@ This file consolidates the replay reverse-engineering documentation into a small
 - `docs/packet-block-semantic-findings.md`
 - `docs/replay-objective-decoder-validation.md`
 - `docs/packet-ward-semantic-findings.md`
+- `docs/ward-position-spawn-packet-research.md` (eight replay-only patch-16.9
+  visual hypotheses, all explicitly `NOT DECODED`)
 - `docs/replay-inventory-packet-research.md`
 - `docs/keyframe-champion-state-discovery.md`
 - `docs/replay-movement-packet-research.md`
@@ -56,3 +68,6 @@ These are still useful for provenance, but they should not be treated as the lat
 - Keep `docs/replay-format-notes.md` focused on relatively stable format/container notes.
 - Keep one-off hypotheses, AI handoffs, and session logs as historical references instead of rewriting the project state into many places.
 - When a historical doc is still valuable but superseded, add a short note pointing back to `docs/decoder-status.md`.
+- Do not turn historical client-binary, RVA, process, Vanguard, or emulation
+  techniques into active reproduction steps; preserve only replay-format context
+  that can be tested from saved packet data.

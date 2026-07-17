@@ -6,6 +6,7 @@ import type {
 } from "./replayInvestigation";
 import type { ReplayKillResult } from "./replayKills";
 import type { ReplayObjectiveResult } from "./replayObjectives";
+import type { ReplayWardPositionResearchResult } from "./replayWardPositionResearch";
 import type { ReplayWardResult } from "./replayWards";
 import type { ReplaySummary } from "./replayParser";
 import createReplayModule from "./generated/wasm/rofl_wasm.js";
@@ -123,6 +124,25 @@ export async function extractReplayWardsWithWasm(buffer: ArrayBuffer): Promise<R
     );
 
     return parseJsonResult<ReplayWardResult>(module, extractWards(replayPointer, size));
+  });
+}
+
+/**
+ * Returns replay-byte coordinate hypotheses for visual research only. This is
+ * intentionally a separate ABI from the productive ward lifecycle decoder.
+ */
+export async function extractReplayWardPositionCandidatesWithWasm(
+  buffer: ArrayBuffer,
+): Promise<ReplayWardPositionResearchResult> {
+  return withReplayBuffer(buffer, (module, replayPointer, size) => {
+    const extractWardPositionCandidates = module.cwrap<
+      (input: number, size: number) => number
+    >("lra_extract_replay_ward_position_candidates_buffer", "number", ["number", "number"]);
+
+    return parseJsonResult<ReplayWardPositionResearchResult>(
+      module,
+      extractWardPositionCandidates(replayPointer, size),
+    );
   });
 }
 

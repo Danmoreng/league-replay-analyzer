@@ -111,6 +111,8 @@ struct ReplaySummary {
 [[nodiscard]] std::string extract_replay_objectives_file_json(const std::string& path);
 [[nodiscard]] std::string extract_replay_wards_json(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] std::string extract_replay_wards_file_json(const std::string& path);
+[[nodiscard]] std::string extract_replay_ward_position_candidates_json(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] std::string extract_replay_ward_position_candidates_file_json(const std::string& path);
 [[nodiscard]] std::string replay_summary_to_json(const ReplaySummary& summary);
 [[nodiscard]] std::string scan_replay_families_json(const std::vector<std::uint8_t>& bytes, std::size_t minimum_length, std::size_t minimum_records, std::size_t top_families, std::string_view segment_type = "chunk");
 [[nodiscard]] std::string scan_replay_families_file_json(const std::string& path, std::size_t minimum_length, std::size_t minimum_records, std::size_t top_families, std::string_view segment_type = "chunk");

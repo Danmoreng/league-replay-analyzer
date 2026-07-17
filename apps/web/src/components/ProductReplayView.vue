@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 
 import { usePlayback } from "../composables/usePlayback";
 import type { PlayerSummary, ReplaySummary } from "../replayParser";
@@ -9,6 +9,14 @@ import {
   type ReplayObjectiveEvent,
   type ReplayObjectiveResult,
 } from "../replayObjectives";
+import {
+  buildReplayWardPositionResearchMarkers,
+  listReplayWardPositionHypotheses,
+  replayWardPositionResearchCompatibility,
+  wardFloatApiFitHypothesisId,
+  type ReplayWardPositionResearchMarker,
+  type ReplayWardPositionResearchResult,
+} from "../replayWardPositionResearch";
 import type { ReplayWardEvent, ReplayWardResult } from "../replayWards";
 
 const props = defineProps<{
@@ -17,12 +25,15 @@ const props = defineProps<{
   kills: ReplayKillResult | null;
   objectives: ReplayObjectiveResult | null;
   wards: ReplayWardResult | null;
+  wardPositionCandidates: ReplayWardPositionResearchResult | null;
   killsLoading: boolean;
   objectivesLoading: boolean;
   wardsLoading: boolean;
+  wardPositionCandidatesLoading: boolean;
   killsError?: string;
   objectivesError?: string;
   wardsError?: string;
+  wardPositionCandidatesError?: string;
 }>();
 
 type ProductEvent =
@@ -37,6 +48,11 @@ type ProductEvent =
 
 const { currentTime, duration, isPlaying, playbackSpeed, togglePlayback, seek } = usePlayback();
 const selectedParticipantId = ref<number | null>(null);
+const wardResearchEnabled = ref(true);
+const wardResearchVisibility = ref<"all-placements" | "timeline">("all-placements");
+const wardResearchShowActive = ref(true);
+const wardResearchShowPulses = ref(true);
+const selectedWardHypothesisId = ref("");
 const speeds = [1, 2, 4, 8];
 
 const participantsById = computed(
@@ -70,6 +86,64 @@ const wardCounts = computed(() => ({
   placements: props.wards?.events.filter((event) => event.type === "WARD_PLACED").length ?? 0,
   kills: props.wards?.events.filter((event) => event.type === "WARD_KILL").length ?? 0,
 }));
+const wardResearchBinding = computed(() => {
+  if (!props.wards || !props.wardPositionCandidates) return null;
+  return replayWardPositionResearchCompatibility(props.wards, props.wardPositionCandidates);
+});
+const wardHypotheses = computed(() => {
+  if (!props.wards || !props.wardPositionCandidates) return [];
+  return listReplayWardPositionHypotheses(props.wards, props.wardPositionCandidates);
+});
+const selectedWardHypothesis = computed(
+  () =>
+    wardHypotheses.value.find((hypothesis) => hypothesis.id === selectedWardHypothesisId.value) ??
+    null,
+);
+const wardResearchMarkers = computed(() => {
+  if (
+    !wardResearchEnabled.value ||
+    !props.wards ||
+    !props.wardPositionCandidates ||
+    !selectedWardHypothesisId.value
+  ) {
+    return [];
+  }
+
+  return buildReplayWardPositionResearchMarkers(
+    props.wards,
+    props.wardPositionCandidates,
+    selectedWardHypothesisId.value,
+    currentTime.value,
+    {
+      visibilityMode: wardResearchVisibility.value,
+      showActiveLinkedWards: wardResearchShowActive.value,
+      showEventPulses: wardResearchShowPulses.value,
+    },
+  );
+});
+const wardResearchStatus = computed(() => {
+  if (props.wardPositionCandidatesLoading) return "Replay-Pakete werden ausgewertet …";
+  if (props.wardPositionCandidatesError) return props.wardPositionCandidatesError;
+  if (!props.wards) return "Produktiver Ward-Lifecycle ist nicht verfügbar.";
+  if (!props.wardPositionCandidates) return "Keine Positionshypothesen für dieses Replay.";
+  if (wardResearchBinding.value && !wardResearchBinding.value.compatible) {
+    return wardResearchBinding.value.reason ?? "Research-Daten passen nicht zum Replay.";
+  }
+  if (!wardHypotheses.value.length) return "Keine in-bounds Kandidaten in diesem Replay.";
+  return `${wardResearchMarkers.value.length} von ${selectedWardHypothesis.value?.placementCount ?? 0} Kandidaten sichtbar`;
+});
+
+watch(
+  wardHypotheses,
+  (hypotheses) => {
+    if (hypotheses.some((hypothesis) => hypothesis.id === selectedWardHypothesisId.value)) return;
+    selectedWardHypothesisId.value =
+      hypotheses.find((hypothesis) => hypothesis.id === wardFloatApiFitHypothesisId)?.id ??
+      hypotheses[0]?.id ??
+      "";
+  },
+  { immediate: true },
+);
 const finalPlayerStatsAvailable = computed(
   () => props.summary.capabilities.validatedFinalPlayerStatsAvailable === true,
 );
@@ -165,6 +239,20 @@ function totalCs(player: PlayerSummary): number {
 
 function participantChampion(participantId: number): string {
   return participantsById.value.get(participantId)?.champion ?? `P${participantId}`;
+}
+
+function participantTeamClass(participantId: number): "blue" | "red" | "unknown" {
+  const team = Number(participantsById.value.get(participantId)?.team);
+  if (team === 100) return "blue";
+  if (team === 200) return "red";
+  return "unknown";
+}
+
+function wardResearchMarkerTitle(marker: ReplayWardPositionResearchMarker): string {
+  const removal = marker.removalTimestampMillis
+    ? ` · entfernt ${formatTime(marker.removalTimestampMillis)}`
+    : " · Entfernung nicht sicher dekodiert";
+  return `EXPERIMENTELL / API-OFFLINE-FIT / NICHT PROMOTET · ${participantChampion(marker.ownerParticipantId)} · platziert ${formatTime(marker.placementTimestampMillis)}${removal} · X ${marker.x.toFixed(1)} / Y ${marker.y.toFixed(1)} · ${marker.xSource} + ${marker.ySource}`;
 }
 
 function markerLeft(timestampMillis: number): string {
@@ -307,20 +395,112 @@ function onScrub(event: Event): void {
       </aside>
 
       <main class="map-stage">
-        <div class="map-frame">
+        <section class="ward-research-controls" aria-label="Experimentelle Live-Ward-Positionen">
+          <div class="ward-research-heading">
+            <span>EXPERIMENTELL · ROFL-LIVE / API-OFFLINE-FIT</span>
+            <strong>Live-Ward-Kandidaten</strong>
+            <small>{{ wardResearchStatus }}</small>
+          </div>
+          <label class="ward-hypothesis-select">
+            <span>Modell</span>
+            <select
+              v-model="selectedWardHypothesisId"
+              :disabled="!wardHypotheses.length || !wardResearchEnabled"
+            >
+              <option
+                v-for="hypothesis in wardHypotheses"
+                :key="hypothesis.id"
+                :value="hypothesis.id"
+              >
+                {{ hypothesis.label }} · {{ Math.round(hypothesis.coverage * 100) }}%
+              </option>
+            </select>
+          </label>
+          <div class="ward-research-modes" aria-label="Ward marker visibility">
+            <button
+              :class="{ active: wardResearchVisibility === 'all-placements' }"
+              :disabled="!wardResearchEnabled"
+              @click="wardResearchVisibility = 'all-placements'"
+            >
+              Alle Platzierungen
+            </button>
+            <button
+              :class="{ active: wardResearchVisibility === 'timeline' }"
+              :disabled="!wardResearchEnabled"
+              @click="wardResearchVisibility = 'timeline'"
+            >
+              Timeline / Lifecycle
+            </button>
+          </div>
+          <button
+            class="ward-layer-toggle"
+            :class="{ active: wardResearchEnabled }"
+            :aria-pressed="wardResearchEnabled"
+            @click="wardResearchEnabled = !wardResearchEnabled"
+          >
+            <i class="bi" :class="wardResearchEnabled ? 'bi-eye-fill' : 'bi-eye-slash'"></i>
+            {{ wardResearchEnabled ? "Layer an" : "Layer aus" }}
+          </button>
+          <div
+            v-if="wardResearchVisibility === 'timeline' && wardResearchEnabled"
+            class="ward-timeline-options"
+          >
+            <label>
+              <input v-model="wardResearchShowActive" type="checkbox" />
+              verknüpfte aktive Wards
+            </label>
+            <label>
+              <input v-model="wardResearchShowPulses" type="checkbox" />
+              5-Sekunden-Ereignispulse
+            </label>
+          </div>
+          <p v-if="selectedWardHypothesis" class="ward-hypothesis-description">
+            <b>{{ selectedWardHypothesis.id }}</b>
+            <span v-if="selectedWardHypothesis.description">
+              · {{ selectedWardHypothesis.description }}
+            </span>
+            <small>
+              X: {{ selectedWardHypothesis.xSource }} · Y: {{ selectedWardHypothesis.ySource }}
+            </small>
+            <small>
+              Lifecycle-Invariant: 701/745 verknüpfte Removals besitzen denselben vollständigen
+              Primary+Companion-Spawn-Fingerprint wie ihre Platzierung.
+            </small>
+          </p>
+        </section>
+
+        <div class="map-frame" :class="{ 'research-layer-visible': wardResearchMarkers.length }">
           <img src="/summoners-rift-minimap.png" alt="Summoner's Rift" />
           <div class="map-shade"></div>
-          <div class="map-unavailable">
-            <i class="bi bi-crosshair"></i>
-            <strong>Positionsdaten noch nicht dekodiert</strong>
-            <span v-if="wards"
-              >Standard-Ward-Zeitpunkte und Besitzer sind aus dem Replay dekodiert. Champion- und
-              Ward-Marker erscheinen erst, wenn replay-native Positionen semantisch validiert
-              sind.</span
+          <div v-if="wardResearchMarkers.length" class="ward-research-layer">
+            <button
+              v-for="marker in wardResearchMarkers"
+              :key="`${marker.hypothesisId}-${marker.wardEntityNetworkId}`"
+              class="ward-research-marker"
+              :class="[
+                `team-${participantTeamClass(marker.ownerParticipantId)}`,
+                `state-${marker.state}`,
+              ]"
+              :style="{ left: `${marker.leftPercent}%`, top: `${marker.topPercent}%` }"
+              :title="wardResearchMarkerTitle(marker)"
+              :aria-label="wardResearchMarkerTitle(marker)"
+              @click="seek(marker.placementTimestampMillis)"
             >
-            <span v-else
-              >Die Karte ist bereit. Marker erscheinen erst, wenn replay-native Positionen
-              semantisch validiert sind.</span
+              <i class="bi" :class="marker.state === 'kill-pulse' ? 'bi-x-lg' : 'bi-eye-fill'"></i>
+            </button>
+          </div>
+          <div v-else class="map-unavailable">
+            <i class="bi bi-crosshair"></i>
+            <strong>Keine experimentellen Marker sichtbar</strong>
+            <span>{{ wardResearchStatus }}</span>
+          </div>
+          <div class="ward-research-warning">
+            <strong>NICHT PROMOTET · VISUELL PRÜFEN</strong>
+            <span
+              >Die Marker werden live aus den Spawn-Paketbytes des geladenen .rofl berechnet. Die
+              Symbol→Float-Tabelle wurde offline an 95 gespeicherten Riot-Timeline-Killankern
+              gefittet; zur Laufzeit fließen keine API-, Client- oder Vanguard-Daten ein. Nur
+              48/2.625 Corpus-Platzierungen sind abgedeckt.</span
             >
           </div>
           <div class="map-badge"><span></span> Replay source · lokal</div>
@@ -805,11 +985,131 @@ function onScrub(event: Event): void {
   flex-direction: column;
   padding: 10px;
 }
+.ward-research-controls {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(170px, 1.2fr) auto auto;
+  align-items: end;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 9px;
+  border: 1px solid rgba(255, 178, 72, 0.24);
+  border-radius: 8px;
+  background: linear-gradient(100deg, rgba(88, 48, 12, 0.22), rgba(8, 13, 20, 0.98));
+}
+.ward-research-heading {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.ward-research-heading > span {
+  color: #ffb348;
+  font-size: 0.52rem;
+  font-weight: 900;
+  letter-spacing: 0.13em;
+}
+.ward-research-heading strong {
+  color: #f2f5fa;
+  font-size: 0.75rem;
+}
+.ward-research-heading small {
+  overflow: hidden;
+  color: #8e9caf;
+  font-size: 0.54rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ward-hypothesis-select {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  color: #8190a4;
+  font-size: 0.52rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.ward-hypothesis-select select {
+  width: 100%;
+  min-height: 29px;
+  border: 1px solid rgba(255, 181, 73, 0.25);
+  border-radius: 5px;
+  background: #0d141e;
+  color: #dce7f3;
+  font-size: 0.61rem;
+}
+.ward-research-modes {
+  display: flex;
+  padding: 3px;
+  border: 1px solid rgba(143, 171, 202, 0.12);
+  border-radius: 6px;
+  background: #080d14;
+}
+.ward-research-modes button,
+.ward-layer-toggle {
+  min-height: 27px;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #738197;
+  font-size: 0.55rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.ward-research-modes button.active,
+.ward-layer-toggle.active {
+  background: rgba(236, 155, 51, 0.18);
+  color: #ffc46f;
+}
+.ward-layer-toggle {
+  border: 1px solid rgba(143, 171, 202, 0.12);
+  background: #080d14;
+}
+.ward-timeline-options,
+.ward-hypothesis-description {
+  grid-column: 1 / -1;
+}
+.ward-timeline-options {
+  display: flex;
+  gap: 18px;
+  color: #8a99ad;
+  font-size: 0.57rem;
+}
+.ward-timeline-options label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.ward-hypothesis-description {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  color: #9eabbc;
+  font-size: 0.55rem;
+}
+.ward-hypothesis-description b {
+  color: #d7e0eb;
+}
+.ward-hypothesis-description small {
+  margin-left: auto;
+  overflow: hidden;
+  color: #66758a;
+  font-family: "Cascadia Code", monospace;
+  font-size: 0.5rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .map-frame {
   position: relative;
   width: 100%;
-  min-height: 420px;
-  flex: 1;
+  max-width: min(100%, 820px);
+  min-height: 0;
+  aspect-ratio: 1 / 1;
+  align-self: center;
+  flex: none;
   overflow: hidden;
   border: 1px solid rgba(151, 174, 201, 0.16);
   border-radius: 9px;
@@ -820,8 +1120,11 @@ function onScrub(event: Event): void {
   height: 100%;
   position: absolute;
   inset: 0;
-  object-fit: cover;
+  object-fit: contain;
   filter: saturate(0.72) brightness(0.55) contrast(1.08);
+}
+.map-frame.research-layer-visible > img {
+  filter: saturate(0.9) brightness(0.67) contrast(1.08);
 }
 .map-shade {
   position: absolute;
@@ -833,8 +1136,79 @@ function onScrub(event: Event): void {
     rgba(3, 7, 12, 0.62)
   );
 }
+.ward-research-layer {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+}
+.ward-research-marker {
+  --marker-color: #e3eaf2;
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(255, 255, 255, 0.84);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--marker-color) 78%, #06101a);
+  color: #fff;
+  font-size: 0.56rem;
+  box-shadow:
+    0 0 0 2px rgba(4, 9, 15, 0.72),
+    0 0 11px var(--marker-color);
+  cursor: pointer;
+}
+.ward-research-marker:hover,
+.ward-research-marker:focus-visible {
+  z-index: 5;
+  transform: translate(-50%, -50%) scale(1.42);
+  outline: 2px solid #fff;
+}
+.ward-research-marker.team-blue {
+  --marker-color: #23a9ff;
+}
+.ward-research-marker.team-red {
+  --marker-color: #ff5964;
+}
+.ward-research-marker.state-all-placement {
+  opacity: 0.76;
+}
+.ward-research-marker.state-active-linked {
+  opacity: 1;
+}
+.ward-research-marker.state-placement-pulse {
+  animation: ward-placement-pulse 1.2s ease-out infinite;
+}
+.ward-research-marker.state-kill-pulse {
+  --marker-color: #c49aff;
+  animation: ward-kill-pulse 0.8s ease-in-out infinite alternate;
+}
+.ward-research-warning {
+  position: absolute;
+  z-index: 4;
+  right: 10px;
+  bottom: 10px;
+  max-width: min(72%, 440px);
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 178, 72, 0.35);
+  border-radius: 6px;
+  background: rgba(20, 14, 7, 0.88);
+  color: #ac9c88;
+  font-size: 0.52rem;
+  line-height: 1.4;
+  pointer-events: none;
+}
+.ward-research-warning strong {
+  margin-right: 6px;
+  color: #ffb348;
+  font-size: 0.54rem;
+  letter-spacing: 0.08em;
+}
 .map-unavailable {
   position: absolute;
+  z-index: 2;
   inset: 0;
   display: flex;
   align-items: center;
@@ -869,6 +1243,7 @@ function onScrub(event: Event): void {
 }
 .map-badge {
   position: absolute;
+  z-index: 4;
   top: 12px;
   left: 12px;
   padding: 5px 8px;
@@ -889,6 +1264,27 @@ function onScrub(event: Event): void {
   border-radius: 50%;
   background: #4fe093;
   box-shadow: 0 0 7px #4fe093;
+}
+@keyframes ward-placement-pulse {
+  0% {
+    box-shadow:
+      0 0 0 2px rgba(4, 9, 15, 0.72),
+      0 0 0 0 var(--marker-color);
+  }
+  100% {
+    box-shadow:
+      0 0 0 2px rgba(4, 9, 15, 0.72),
+      0 0 0 12px transparent;
+  }
+}
+@keyframes ward-kill-pulse {
+  from {
+    opacity: 0.52;
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.24);
+  }
 }
 .event-window {
   margin-top: 8px;
@@ -1127,6 +1523,9 @@ function onScrub(event: Event): void {
     width: 11px;
     height: 11px;
   }
+  .ward-research-controls {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 @media (max-width: 980px) {
@@ -1163,6 +1562,28 @@ function onScrub(event: Event): void {
   }
   .speed-controls {
     justify-self: start;
+  }
+  .ward-research-controls {
+    grid-template-columns: 1fr;
+  }
+  .ward-research-heading,
+  .ward-hypothesis-select,
+  .ward-research-modes,
+  .ward-layer-toggle,
+  .ward-timeline-options,
+  .ward-hypothesis-description {
+    grid-column: 1;
+  }
+  .ward-hypothesis-description {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .ward-hypothesis-description small {
+    max-width: 100%;
+    margin-left: 0;
+  }
+  .ward-research-warning {
+    max-width: calc(100% - 20px);
   }
 }
 </style>

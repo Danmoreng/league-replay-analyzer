@@ -16,6 +16,11 @@ The intended product is not a standalone 3D replay client. The target is an anal
 
 - Keep the tool post-game and replay-file based.
 - Do not depend on live memory reading, process injection, or any other live-game integration.
+- Apply a hard local safety boundary to all decoder research:
+  - never execute, inspect, instrument, patch, emulate, or reverse engineer installed League of Legends client/game binaries or running League/Riot processes
+  - never access Vanguard, Vanguard-managed processes, or Vanguard-managed game/client data for tests or discovery
+  - do not ask the user to disable, bypass, or weaken Vanguard or any Riot security mechanism
+  - decoder discovery may use only saved `.rofl` files and their patch-versioned packet bytes, this repository's own parser/tools, and saved Riot API fixtures as offline validation oracles
 - Treat Riot policy conservatively:
   - replay analysis is acceptable only if it stays offline/post-game
   - do not add live overlays, automation, or unfair-advantage features
@@ -66,6 +71,10 @@ Current state:
 - the default web landing page is a product-oriented replay viewer with one combined kill/objective/ward timeline and final-state team rosters showing level, XP, lane and neutral CS, seven item slots, ward aggregates, and gold; movement, inventory history, health, mana, and other unresolved dynamic streams remain explicitly unavailable, while the earlier summary and decoder tools remain under Research & Debug
 - objective killer/team, elemental dragon subtype, event positions, and kill damage/gold details remain unresolved
 - the ward lifecycle is promoted through C++, native CLI, Wasm, TypeScript, and Vue as `rofl-replay-wards/v1`: 6,168/6,168 placements are exact, while 1,882/1,883 conservative removals have zero extras and exact fields for emitted events; subtype, position, vision radius, and removal reason remain unavailable
+- ward-position research isolates exactly one patch-versioned high-entropy spawn family plus one fixed 63-byte companion family for 6,168/6,168 placements and placement-to-removal differential pairs for 1,882/1,882 linked removals; patch 16.9 uses `0x00D6` plus `0x01AD`, but zero strict coordinate candidates pass, so productive ward position remains unavailable
+- the separate `rofl-ward-position-candidates-research/v1` C++/Wasm/UI surface keeps `researchOnly: true`, `promotionGate: false`, `positionAvailable: false`, and `clientBinaryInput: false`; the eight visually falsified raw-coordinate variants are hidden, and the live UI now exposes only `P16-FLOAT32-BE-API-FIT-COARSE`, calculated from the loaded `.rofl` with a symbol lookup fitted offline from 95 saved kill-position anchors
+- the patch-16.9 coarse ward-position model resolves only 48/2,625 placements across 19/20 replays because a marker requires all six mapped bytes: the per-lane lookup sizes are 3, 72, 65 for X offsets `p[8..10]` and 3, 70, 71 for Y offsets `p[12..14]`; any missing symbol makes the coordinate unavailable rather than guessed
+- primary/companion lanes form a conflict-free 256-symbol permutation across 2,625 placements, and 701/745 linked removals have an exact full primary+companion spawn fingerprint match, but these equality constraints do not reveal the numeric coordinate assigned to an unknown symbol
 - embedded final `statsJson` level, XP, lane CS, neutral CS, seven item slots, and ward-placement/kill aggregates validate exactly through the productive native summary for 6,110/6,110 fields across all 470 corpus participants; `validatedFinalPlayerStatsAvailable` restricts display to the eight validated patch groups with a complete valid field set, and the values are final state rather than timelines
 - the Wasm suite includes a real in-memory zstd ROFL contract test for the ward ABI and unsupported-version error boundary; Wasm C++ exception handling must remain enabled for those JSON error boundaries
 - patch-16.9 inventory research decodes add/update item IDs and a sale-operation class, but an expanded corpus scan falsified the strongest simple slot-symbol candidate; slot/instance/removal linkage, swaps, undo, and full inventory state remain unresolved, and no inventory runtime API exists
@@ -76,16 +85,17 @@ Current state:
 Important browser caveat:
 
 - the minimap is currently fixture/research UI, not live output from the loaded `.rofl`
+- experimental ward markers are generated live from the loaded `.rofl` by the single API-offline-fitted coarse Float32 symbol model; they are not productive decoded ward positions, and visual plausibility cannot promote them
 - the former fixed `api-positions.json` fallback is disabled; it is no longer loaded or relabelled for unrelated replays
 - precomputed `public/replay-movement-fixtures` are research artifacts and must not be described as Wasm-decoded movement
 
 Near-term engineering focus should be:
 
-1. decode the real movement/waypoint message grammar and replay-native entity identity
-2. finish inventory slot/instance/removal decoding and reconstruct full inventory state
-3. decode keyframe replication/component state for health, resources, gold, XP, level, CS, and related timeseries
-4. decode ward subtype/position/vision semantics while preserving the conservative lifecycle boundary
-5. promote buildings/plates and pursue damage, spell, combat-effect, and world-entity streams
+1. expand or structurally decode the patch-16.9 ward symbol-to-Float32 mapping, prioritizing the sparse `p[9]`, `p[10]`, `p[13]`, and `p[14]` lanes; use new replay-native spatial anchors plus the exact primary/companion permutation and placement/removal equality constraints, never interpolation or visual plausibility, then rerun holdout and full-corpus gates
+2. decode the real movement/waypoint message grammar and replay-native entity identity
+3. finish inventory slot/instance/removal decoding and reconstruct full inventory state
+4. decode keyframe replication/component state for health, resources, gold, XP, level, CS, and related timeseries
+5. continue ward subtype/vision semantics and promote buildings/plates, damage, spell, combat-effect, and world-entity streams
 
 When starting a future session:
 
@@ -107,6 +117,11 @@ Runtime match data must come only from the loaded replay. Riot Match-V5 and
 Timeline files are allowed as offline discovery and validation oracles, never as
 runtime inputs or silent fallback data. Every normalized field must carry a
 versioned decoder boundary and degrade to unavailable when not proven.
+
+This replay-only contract also governs research tooling. Installed League/Riot
+client binaries, game processes, Vanguard, and Vanguard-managed data are outside
+the project scope and must not be executed, inspected, instrumented, patched, or
+emulated. Saved replay packet bytes are the sole decoder input and evidence.
 
 Promotion requires all of the following:
 

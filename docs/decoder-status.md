@@ -25,6 +25,13 @@ and Timeline fixtures may be used offline to discover and validate semantics,
 but they must never be required by the decoder or silently fill missing replay
 fields in the product.
 
+Decoder research has the same hard local safety boundary. It may inspect saved
+`.rofl` files and their patch-versioned packet bytes with this repository's own
+parser and may compare results with saved Riot fixtures offline. It must never
+execute, inspect, instrument, patch, or emulate installed League/Riot client or
+game binaries, running League/Riot processes, Vanguard, or Vanguard-managed
+data. Disabling or bypassing Vanguard is not part of this project.
+
 The intended result is an analytics-grade reconstruction, not a replacement
 for Riot's 3D game engine. The model should eventually include champion and
 entity movement, combat and objective events, wards and vision, inventories,
@@ -59,6 +66,15 @@ history, health, resources, ward positions, and other dynamic streams that have
 not passed promotion. The previous summary, data browser, and decoder inspector
 remain available as Research & Debug views.
 
+The product view additionally has a visually isolated ward-position research
+layer. For patch 16.9 it computes the experimental
+`P16-FLOAT32-BE-API-FIT-COARSE` markers live from spawn-packet bytes in the
+loaded replay. The byte-symbol lookup was fitted offline from saved Riot
+Timeline kill anchors and is always labelled API-offline-fit / not promoted.
+No API file is read at runtime. This layer is not the productive ward position
+field and does not change `rofl-replay-wards/v1`, where `position` and
+`visionRadius` remain unavailable.
+
 ### Rich final-state export
 
 A separate native/offline API-parity exporter can emit roughly 114 API-shaped
@@ -90,11 +106,74 @@ The current minimap is not a productive replay decoder output.
 Until a movement profile passes the replay-only promotion gate, the product
 viewer says that movement is unavailable for the loaded replay.
 
+Ward markers shown by the optional research layer are a narrower exception to
+the empty-map presentation, not to the truth boundary. They are emitted through
+the separate `rofl-ward-position-candidates-research/v1` schema with
+`researchOnly: true`, `promotionGate: false`, `positionAvailable: false`, and
+`source.clientBinaryInput: false`. The UI rejects a replay/patch mismatch,
+discards coordinates outside 0-15,000 instead of clamping them, and does not
+draw a vision radius. A plausible-looking marker cannot promote a hypothesis.
+
 The packet inspector is also a research surface. It can expose replay-native
 packet families through Wasm, but heuristic candidates are not normalized game
 state and must not be presented as decoded facts.
 
 ## Validated Research That Is Not Runtime Yet
+
+### Ward spawn packets and position
+
+A 47-replay scan over all 6,168 exact ward placements and 1,882 exact
+placement-to-removal links isolates a versioned two-packet spawn sequence. Every
+placement has exactly one high-entropy packet family plus exactly one fixed
+63-byte companion family. In patch 16.9 these are `0x00D6` and `0x01AD`;
+equivalent packet IDs are profiled for every supported group from 15.22 through
+16.9. The same two families recur on new entity IDs around all 1,882 linked
+removals, with shared variable byte regions between placement and probable
+WardCorpse spawns.
+
+This isolates the next packet grammar but does not decode a coordinate
+transform. Simple raw/scaled integer and float pair scans produced zero strict
+X/Y candidates. Riot Timeline ward events do not contain ward coordinates, so
+participant-frame positions are only a weak falsification oracle, not a ward
+position label. Productive ward position therefore remains unavailable. See
+[`ward-position-spawn-packet-research.md`](ward-position-spawn-packet-research.md).
+
+For patch 16.9, the eight earlier raw-coordinate hypotheses were visually
+falsified and are no longer offered in the product UI. The replacement research
+model interprets primary lanes `p[8..10]` and `p[12..14]` as the first three
+bytes of big-endian Float32 values and forces the unresolved low byte to zero.
+Its symbol lookup was fitted offline from 95 saved exact-time kill anchors.
+
+The coarse model produces 48/2,625 in-bounds ward candidates across 19/20 patch
+16.9 replays; the stricter full-integer-LSB variant produces 45, while a
+holdout-pure model requiring evidence from at least two independent replays
+produces zero. Runtime candidate bytes still come only from the loaded `.rofl`.
+The active UI warning therefore says API-offline-fit, research-only, and not
+promoted.
+
+Coverage is low because every X/Y candidate requires six successful symbol
+lookups. The tables contain 3, 72, and 65 mapped input symbols for primary X
+offsets `p[8..10]`, and 3, 70, and 71 for primary Y offsets `p[12..14]`.
+The leading lanes cover the observed Float32 range with only three symbols, but
+the four variable mantissa lanes remain sparse relative to 256 possible byte
+values. A single unknown symbol suppresses the entire marker; values are never
+interpolated, clamped, or copied from an API fixture. The six simultaneous gates
+therefore reduce 2,625 exact placements to 48 coordinate candidates.
+
+Riot Timeline ward events supply no ward-coordinate labels. The current lookup
+can only be learned from 95 independently matched kill-position anchors.
+Placement/removal equality can validate or propagate an already known mapping,
+but cannot assign a numeric coordinate to a symbol that is unknown on both
+sides. The next session should therefore seek additional replay-native spatial
+anchors or recover the symbol codec itself, concentrating on `p[9]`, `p[10]`,
+`p[13]`, and `p[14]`, then require replay holdout and full-corpus validation.
+
+Independent replay-only evidence strongly identifies the underlying spawn-state
+field: primary lanes `p[8..11]` and `p[12..15]` map bijectively to companion
+lanes with purity 1.0 over all 2,625 placements, and 701/745 linked removals have
+an exact full primary+companion fingerprint match to their placement. This
+supports field identity, not coordinate correctness. Visual plausibility cannot
+satisfy the promotion gate.
 
 ### Inventory transactions
 
@@ -209,7 +288,9 @@ it does not prove what those bytes mean.
 3. Decode the inner keyframe replication/component grammar and use final
    `statsJson` values plus controlled transitions as replay-only constraints for
    health, gold, level, XP, CS, and resources.
-4. Decode ward subtype, position, vision radius, removal reason, and the one
+4. Decode the isolated versioned ward spawn/companion grammar into X/Y, then
+   validate the transform against an independent spatial oracle before exposing
+   position. Continue subtype, vision radius, removal reason, and the one
    intentionally omitted ambiguous removal form without weakening the zero-extra
    lifecycle boundary.
 5. Promote buildings/plates and then pursue damage, spells, combat effects, and

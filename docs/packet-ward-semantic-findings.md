@@ -16,6 +16,12 @@ replay packet stream. Saved Riot timeline data is joined afterward as an
 offline validation oracle; it is not a runtime dependency and is never copied
 into decoder output.
 
+This workflow never executes, inspects, instruments, patches, or emulates an
+installed League/Riot client or game binary, a running League/Riot process,
+Vanguard, or Vanguard-managed data. Decoder evidence is limited to saved
+`.rofl` packet bytes processed by this repository's own parser. No test requires
+disabling or bypassing Vanguard.
+
 The validated scope is the four standard Riot timeline ward classes:
 `BLUE_TRINKET`, `CONTROL_WARD`, `SIGHT_WARD`, and `YELLOW_TRINKET`.
 `UNDEFINED` entries, traps, and Teemo mushrooms remain outside this profile.
@@ -29,7 +35,31 @@ The validated scope is the four standard Riot timeline ward classes:
 | Conservative ward kill/removal | tracked ward entity ID plus profiled removal length | 1,882 / 1,883, zero extras | high-confidence partial |
 | Killer of decoded removal | last short owner block before the linked removal | 1,882 / 1,882 | exact for emitted removals |
 | Ward subtype | not present in the validated marker sequence | not resolved | correlation only |
-| Position and vision radius | not decoded by this profile | not resolved | future work |
+| Position and vision radius | patch-versioned spawn families isolated, but no coordinate transform decoded | zero strict X/Y candidates | validated research only |
+
+Position research now isolates exactly one high-entropy spawn packet plus one
+fixed 63-byte companion packet for each of the 6,168 placements. Patch 16.9
+uses `0x00D6` plus `0x01AD`; the packet IDs change by patch. The same families
+recur around all 1,882 linked removals and share variable byte regions with
+probable WardCorpse entities. This is strong packet-grammar evidence, but no
+raw or scaled X/Y interpretation passes the corpus gate, so position remains
+unavailable. See
+[`ward-position-spawn-packet-research.md`](ward-position-spawn-packet-research.md).
+
+For visual falsification, the separate
+`rofl-ward-position-candidates-research/v1` contract exposes eight patch-16.9
+interpretations: `CONTROL-U16-7-11`, `P16-BE-FY`, `P16-BE-SWAP-FX`, `P16-LE`,
+`C16A-LE`, `C16B-BE`, `C24-LE-SWAP-FY`, and `C24-BE-FX`. Every result is marked
+`researchOnly: true`, `promotionGate: false`, `positionAvailable: false`, and
+`source.clientBinaryInput: false`. The productive lifecycle schema remains
+unchanged with `position: null`.
+
+The research UI binds candidates to the exact loaded replay, patch group, ward
+entity, owner, and placement timestamp. It rejects out-of-bounds values rather
+than clamping them, never draws a vision radius, and labels the layer
+`EXPERIMENTAL / NOT DECODED`. Visual plausibility may falsify an interpretation;
+it cannot promote one. Exact formulas and their low-uniqueness warnings are in
+[`ward-position-spawn-packet-research.md`](ward-position-spawn-packet-research.md).
 
 The one deliberately unsupported `WARD_KILL` is in patch 16.9. Its linked
 packet has content length 27. The same type and length occurs 1,124 additional
@@ -82,6 +112,9 @@ is instead the created ward entity network ID.
    block before it in the same chunk and packet timestamp.
 6. Preserve raw provenance and confidence. Do not infer subtype, position, or
    a kill reason for unprofiled removal lengths.
+
+The experimental candidate schema is not a seventh productive state-machine
+step and must not feed normalized ward position or vision state.
 
 This sequence is suitable for a versioned C++ decoder module and normalized
 Wasm output. The validator should remain a corpus gate: any profile change

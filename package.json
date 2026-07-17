@@ -108,6 +108,8 @@
     "summarize:movement-hidden-oracles": "node ./scripts/summarize_movement_hidden_oracle_sources.mjs",
     "verify:movement-hidden-oracles": "node ./scripts/verify_movement_hidden_oracle_sources.mjs",
     "audit:movement-position-goal": "node ./scripts/audit_movement_position_goal.mjs",
+    "research:ward-positions": "node ./scripts/research_ward_entity_positions.mjs --neighborhood-radius 48 --minimum-candidate-support 20 --output artifacts/ward-entity-position-research.json",
+    "research:ward-position-hypotheses": "node ./scripts/research_ward_position_hypotheses.mjs",
     "run:movement-extraction-probe": "node ./scripts/run_movement_extraction_probe.mjs",
     "extract:api-static-state": "node ./scripts/extract_api_static_state.mjs",
     "diagnose:static-metrics": "node ./scripts/diagnose_static_metric_alignment.mjs",
