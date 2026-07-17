@@ -1,3 +1,10 @@
+> **Historical product discussion:** This file preserves the original project
+> conversation and early assumptions. It is not the current implementation
+> status. Read [`decoder-status.md`](decoder-status.md) and the repository
+> `AGENTS.md` first. In particular, early claims below about readily available
+> movement, ward, or state extraction from community tools are not capabilities
+> of this from-scratch replay-only decoder.
+
 Are there tools to view league of legends replay files rofl format outside of the original game engine?
 
 I’m checking what exists today for .rofl replays and whether any tools can actually view them without launching the Riot client/game.

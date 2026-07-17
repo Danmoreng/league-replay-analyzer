@@ -45,7 +45,8 @@ Do not start by building a mandatory backend unless the user asks for shared sto
 
 ## Current Repo Reality
 
-This repo is already scaffolded and has a working vertical slice.
+This repo is already scaffolded and has a working replay-only vertical slice.
+The canonical detailed handoff is `docs/decoder-status.md`.
 
 Current state:
 
@@ -56,21 +57,65 @@ Current state:
 - `scripts/build-native.ps1` builds the native target.
 - `scripts/build-wasm.ps1` builds the Wasm target and publishes generated artifacts into `apps/web/src/generated/wasm`.
 - `replays/` contains local replay samples for manual testing.
-- the parser extracts embedded replay metadata and per-player `statsJson`
+- the parser extracts embedded replay metadata and per-player final `statsJson`
 - the shared C++ core implements exact packet-block framing with timestamps, channels, packet types, signed compact block parameters, payload boundaries, and source provenance
-- native CLI tools validate framing, catalog packet types, dump bounded payload samples, and emit normalized replay-only champion-kill events
+- native CLI tools validate framing, catalog packet types, dump bounded payload samples, and emit normalized replay-only champion-kill and elite-objective events
 - the kill decoder is version-profiled for patches 15.22 through 16.9 and validates 2,796/2,796 corpus kills plus final K/D/A for all 470 participants
-- the current web app loads a `.rofl` locally, calls the real Wasm decoder, and renders the replay-derived kill timeline with participant labels and diagnostics
-- exact elite-monster objective profiles are documented but not yet promoted into the runtime event schema
+- the elite-objective decoder is version-profiled for the same patch groups and validates 425/425 events with zero extras, missing events, or unknown emitted classes
+- the current web app loads a `.rofl` locally, calls the real Wasm decoder, and renders replay-derived participant summaries, kills, and elite objectives with diagnostics
+- objective killer/team, elemental dragon subtype, event positions, and kill damage/gold details remain unresolved
+- ward lifecycle research is close to runtime promotion: 6,168/6,168 placements are exact, while 1,882/1,883 conservative removals are high-confidence partial coverage with zero extras and exact fields for emitted events; subtype and position are not decoded and there is no C++/Wasm ward API yet
+- patch-16.9 inventory research decodes add/update item IDs and a sale-operation class, but slot/instance/removal linkage, undo, and full inventory state are unresolved; no inventory runtime API exists
+- keyframe outer framing and champion ownership are exact, but the inner replication/component grammar and all proposed dynamic state fields remain unresolved
+- there is no valid replay-native movement or position decoder; the provisional `0x00DC` raw-coordinate interpretation was disproven and removed from the runtime
+- building and turret-plate signatures are correlations with false positives, not runtime decoders
 
-Near-term engineering focus should move to elite-objective runtime events, bit-packed inventory transactions, scalar state/timeseries decoding, and replay-native movement coordinates.
+Important browser caveat:
+
+- the minimap is currently fixture/research UI, not live output from the loaded `.rofl`
+- its fixed `api-positions.json` fallback comes from one hard-coded replay and can display false movement for any other loaded replay; removing or isolating this fallback is the first product cleanup
+- precomputed `public/replay-movement-fixtures` are research artifacts and must not be described as Wasm-decoded movement
+
+Near-term engineering focus should be:
+
+1. remove or explicitly isolate the misleading fixed minimap fallback
+2. promote the validated ward lifecycle through C++, Wasm, and Vue
+3. decode the real movement/waypoint message grammar and replay-native entity identity
+4. finish inventory slot/instance/removal decoding and reconstruct full inventory state
+5. decode keyframe replication/component state for health, resources, gold, XP, level, CS, and related timeseries
+6. promote buildings/plates and pursue damage, spell, combat-effect, and world-entity streams
 
 When starting a future session:
 
 1. read this file
-2. read `docs/chat.md` if product context is needed
-3. inspect the actual repo state before assuming planned work is still unfinished
-4. prefer continuing from the current Wasm-backed frontend rather than rebuilding scaffolding
+2. read `docs/decoder-status.md` for the canonical implementation and research status
+3. use `docs/reverse-engineering-index.md` to find focused evidence and reproduction commands
+4. treat `docs/chat.md` only as historical product context, not current decoder truth
+5. inspect the actual repo state before assuming planned work is still unfinished
+6. prefer continuing from the current Wasm-backed frontend rather than rebuilding scaffolding
+
+## Replay-Only Reconstruction Contract
+
+The long-term target is a complete analytics-grade match reconstruction from the
+loaded `.rofl`: movement, events, wards/vision, inventories, gold, level, XP,
+CS, health/resources, damage, objectives, structures, and other useful entity
+state rendered on a synchronized 2D map and timeline.
+
+Runtime match data must come only from the loaded replay. Riot Match-V5 and
+Timeline files are allowed as offline discovery and validation oracles, never as
+runtime inputs or silent fallback data. Every normalized field must carry a
+versioned decoder boundary and degrade to unavailable when not proven.
+
+Promotion requires all of the following:
+
+- exact replay framing and source provenance
+- a replay-only semantic decode with replay-native participant/entity identity
+- corpus validation with explicit false-positive rejection
+- native tests, Wasm contract coverage, and honest UI availability labels
+
+Exact timing, in-bounds values, or champion ownership prove provenance but do
+not by themselves prove semantic meaning. Do not expose heuristic coordinates,
+state fields, or event classifications as decoded facts.
 
 ## Windows and Shell Assumptions
 

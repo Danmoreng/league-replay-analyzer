@@ -1,26 +1,35 @@
 # Reverse Engineering Docs Index
 
-Updated: 2026-04-27
+Updated: 2026-07-17
 
 This file consolidates the replay reverse-engineering documentation into a smaller set of active references.
 
 ## Read These First
 
 1. `docs/decoder-status.md`
-   Current decoder status, current working model, current tooling, and next steps.
+   Canonical productive/research status, browser truth boundary, promotion
+   rules, missing streams, and next steps.
 2. `docs/replay-format-notes.md`
    Container-level findings, stable format notes, and version-sensitive observations.
-3. `docs/riot-api-fixtures.md`
-   How Riot fixtures are used as supervision and where the local test data comes from.
-4. `docs/keyframe-api-parity.md`
-   Current implementation path for keyframe-only artifacts and API-frame parity scoring.
-5. `docs/architecture.md`
-   High-level project structure.
+3. `docs/packet-block-semantic-findings.md`
+   Exact champion-kill and elite-objective packet semantics plus unresolved
+   building/item correlations.
+4. `docs/architecture.md`
+   Current C++/Wasm/Vue boundaries and the target normalized pipeline.
+5. `docs/riot-api-fixtures.md`
+   How Riot fixtures are used strictly as offline supervision.
 
 ## Active Working References
 
 - `docs/decoder-development-loop.md`
 - `docs/decoder-status.md`
+- `docs/packet-block-semantic-findings.md`
+- `docs/replay-objective-decoder-validation.md`
+- `docs/packet-ward-semantic-findings.md`
+- `docs/replay-inventory-packet-research.md`
+- `docs/keyframe-champion-state-discovery.md`
+- `docs/replay-movement-packet-research.md`
+- `docs/rofl-api-parity.md`
 - `docs/keyframe-api-parity.md`
 - `docs/replay-format-notes.md`
 - `docs/riot-api-fixtures.md`
@@ -43,6 +52,7 @@ These are still useful for provenance, but they should not be treated as the lat
 ## Consolidation Policy
 
 - Put the latest decoder status in `docs/decoder-status.md`.
+- Keep exact corpus evidence and reproduction commands in focused decoder notes.
 - Keep `docs/replay-format-notes.md` focused on relatively stable format/container notes.
 - Keep one-off hypotheses, AI handoffs, and session logs as historical references instead of rewriting the project state into many places.
 - When a historical doc is still valuable but superseded, add a short note pointing back to `docs/decoder-status.md`.

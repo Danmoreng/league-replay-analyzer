@@ -1,6 +1,13 @@
 # ROFL API Parity Status
 
-Updated: 2026-05-08
+Updated: 2026-07-17
+
+Scope clarification: this document describes the separate API-shaped
+final-state/timeline parity exporter. The canonical overall decoder status is
+[`decoder-status.md`](decoder-status.md). Replay-only champion-kill and
+elite-objective decoders now exist in separate normalized C++/Wasm/Vue runtime
+schemas, but this API-shaped exporter's `frames[].events` integration remains
+unfinished.
 
 ## Goal
 
@@ -320,7 +327,7 @@ Current offline validation result:
 - corpus validation output: `artifacts-keyframes/rofl-api-parity-corpus-validation-16.9.json`
 - corpus validation schema: `rofl-api-parity-corpus-validation/v1`
 - corpus validation result across `20` patch `16.9` fixture-backed replays: participant final match stats `30598 / 30600`, team final stats `335 / 360`, final timeline scalar/damage stats `3400 / 3400`, metadata `140 / 140`
-- corpus validation `runtimeProofSummary` verifies all `20 / 20` generated runtime artifacts use replay-only runtime inputs, include all 10 participant proofs with final scalar/damage metrics, keep timeline `events` arrays empty until decoded, preserve the required remaining gap keys, and have `0 / 20` full API-shape parity
+- corpus validation `runtimeProofSummary` verifies all `20 / 20` generated runtime artifacts use replay-only runtime inputs, include all 10 participant proofs with final scalar/damage metrics, keep timeline `events` arrays empty until the separate kill/objective schemas are integrated and remaining event types are decoded, preserve the required remaining gap keys, and have `0 / 20` full API-shape parity
 - corpus validation timeline reconstruction block: `20 / 20` replays have API frames equal replay keyframes plus one, `20 / 20` pass the keyframe chunk formula, `20 / 20` pass the chunk record formula, `572 / 572` API intervals map to chunks, and the model is `keyframe-baseline-plus-chunk-deltas`
 - corpus validation known unstable fields: participant `perks.styles`, `totalHeal`; team objective kill counts for champion, tower, dragon, baron, horde, and inhibitor
 - `fieldCoverage.matchTeams.corpusValidation` marks team objective kill aggregates as `partially_stable`: they are ROFL-derived and validate on the focused replay, but corpus validation shows objective undercounts on some 16.9 replays
@@ -488,7 +495,7 @@ The verifier checks:
 - `fieldCoverage.matchParticipantGaps` lists unpromoted participant fields and explains why candidate ROFL values are not exposed as API parity data
 - `fieldCoverage.matchTeamGaps` separates decoded final objective kill counts from missing bans and first-objective event-order fields, with `objectives.*.first` and `bans[]` API-shaped as null and mapped in `roflDerivedFieldMap.match`
 - `fieldCoverage.timelineNonFinalParticipantFrames.apiShapedNotFoundFields` verifies unresolved timeline frame leaves such as `currentGold`, `goldPerSecond`, `position.x/y`, `timeEnemySpentControlled`, and `championStats.*` are API-shaped as `null` without being counted as decoded metric points
-- `fieldCoverage.timelineEvents.apiShapedNotFoundFields` enumerates the remaining `70` Riot timeline event leaf paths as `not_found`; runtime frames keep `events: []` until actual ROFL event decoding exists, rather than emitting fake null event objects
+- `fieldCoverage.timelineEvents.apiShapedNotFoundFields` enumerates the remaining `70` Riot timeline event leaf paths as `not_found`; this API-shaped exporter keeps `events: []` until the separate replay-only kill/objective schemas are integrated and the remaining event types are decoded, rather than emitting fake null event objects
 - `roflDerivedFieldMap.timeline["info.frames[].events"]` mirrors the same `70` event leaf gaps and the `empty-events-arrays` runtime policy, so field-map consumers do not need to infer event gaps from the offline shape report
 - `fieldCoverage.timelineEvents.rejectedItemEventEvidence`, `roflDerivedFieldMap.timeline["info.frames[].events"].rejectedItemEventEvidence`, and `rejectedCandidateArtifacts.inventoryTimeline.relatedCandidateArtifact` mirror the supervised item-event diagnostic counts, while keeping them offline-only and out of runtime `events`/inventory state
 - `parityChecklist` does not claim full API parity and lists known missing timeline/event/position/inventory/damage work
@@ -585,7 +592,7 @@ High-priority missing pieces:
 - replay-only calibration/schema for timeline scalar fields
 - reliable timeline `level`, `xp`, `totalGold`, and CS metrics without noisy affine artifacts
 - champion position extraction in Riot `position.x/y` form for patch `16.9`
-- timeline events such as champion kills, item purchases, objectives, wards, and level-up events
+- integration of the existing replay-only champion-kill and elite-objective schemas into this API-shaped timeline, plus still-missing item purchases, wards, level-up events, and other event types
 - item/inventory state over time
 - damage stat timelines
 - a stable verification gate that separates runtime ROFL-only extraction from offline Riot API validation
@@ -600,11 +607,18 @@ Important direction: do not treat isolated keyframe rows as complete Riot API ti
 
 For `EUW1-7840220945`, the movement pipeline has a `participant-movement.json` diagnostic, but it is not emitted into `timeline.info.frames` because it assigns 9 of 10 participants, only 7 of 9 assignments pass offline Riot validation, and the current assignment path uses identity priors. The unmatched participant is Malphite TOP on team 200; its best rejected entity candidates are already assigned to other participants, while the remaining unassigned entity tracks also keep their top rejected participant candidates. The API-shaped artifact records this under `rejectedCandidateArtifacts.positions`, including explicit `promotionBlockers`, `qualityGateSummary`, near-miss candidate summaries, and per-participant movement coverage so consumers can distinguish unstable assigned candidates, noisy failed-validation candidates, and the unmatched participant.
 
-The same position blocker now has a no-priors diagnostic: `participant-movement-no-priors.json` reruns the assignment with `movement-identity-priors.json` disabled, and `assigned-movement-no-priors-validation-report.json` validates that offline-only diagnostic. On `EUW1-7840220945`, this drops movement assignment from 9/10 to 8/10 participants while 7/8 assigned tracks pass offline validation. The API-shaped artifact records that under `rejectedCandidateArtifacts.positions.noPriorsDiagnostic`, mirrors it through `fieldCoverage.positions.noPriorsDiagnostic` and `roflDerivedFieldMap.timeline["info.frames[].participantFrames[].position"].noPriorsDiagnostic`, and keeps `runtimeApiData=false`; it is evidence that real x/y tracks exist, but replay-only participant identity is still too weak to emit `participantFrames.position`.
+The same position blocker now has a no-priors diagnostic: `participant-movement-no-priors.json` reruns the assignment with `movement-identity-priors.json` disabled, and `assigned-movement-no-priors-validation-report.json` validates that offline-only diagnostic. On `EUW1-7840220945`, this drops movement assignment from 9/10 to 8/10 participants while 7/8 assigned tracks pass offline validation. The API-shaped artifact records that under `rejectedCandidateArtifacts.positions.noPriorsDiagnostic`, mirrors it through `fieldCoverage.positions.noPriorsDiagnostic` and `roflDerivedFieldMap.timeline["info.frames[].participantFrames[].position"].noPriorsDiagnostic`, and keeps `runtimeApiData=false`; it records offline-correlated candidate trajectories, not proof of decoded coordinate semantics or participant-stable positions.
 
 The stricter `participant-movement-strict-replay-only-probe.json` diagnostic disables both identity priors and validation-derived `supportHypotheses`. The API-shaped artifact records it under `rejectedCandidateArtifacts.positions.strictReplayOnlyDiagnostic` with `runtimeApiData=false`. Current focused replay counts are 4/10 assigned and 3/4 offline-passing, which makes the true runtime-ready identity gap explicit.
 
-The same replay now has an offline `item-event-candidates.json` diagnostic with 689 candidates and 93 strong candidates, but it is not emitted into `timeline.info.frames[*].events` because the report is discovered against Riot API timeline item events and is not yet a ROFL-only event decoder. The API-shaped artifact records this under `rejectedCandidateArtifacts.itemEvents`.
+The same replay retains an offline `item-event-candidates.json` diagnostic with
+689 candidates and 93 strong candidates. That supervised artifact is not emitted
+into `timeline.info.frames[*].events`. Newer patch-16.9 packet research can
+decode replay-only inventory add/update item IDs and a sale-operation class, but
+slot/instance/removal linkage, undo, and full inventory state are still missing;
+therefore it is also not yet a safe normalized item-event timeline. The
+API-shaped artifact records the older diagnostic under
+`rejectedCandidateArtifacts.itemEvents`.
 
 Inventory timeline parity is tracked separately under `rejectedCandidateArtifacts.inventoryTimeline`: final item slots are ROFL-only in `match.info.participants`, but item state over time is not reconstructed because there is no accepted ROFL-only item-event or slot-state timeline decoder yet.
 
