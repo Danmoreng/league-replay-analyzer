@@ -1,6 +1,6 @@
 # Reverse Engineering Docs Index
 
-Updated: 2026-07-17
+Updated: 2026-07-18
 
 This file consolidates the replay reverse-engineering documentation into a smaller set of active references.
 
@@ -19,20 +19,24 @@ are outside scope even when described by historical community work.
 1. `docs/decoder-status.md`
    Canonical productive/research status, browser truth boundary, promotion
    rules, missing streams, and next steps.
-2. `docs/replay-format-notes.md`
+2. `docs/decoder-profiles.md`
+   External profile schema, Native/Wasm interpretation boundary, exact build
+   selection, provenance, fail-closed rules, and patch-update limits.
+3. `docs/replay-format-notes.md`
    Container-level findings, stable format notes, and version-sensitive observations.
-3. `docs/packet-block-semantic-findings.md`
+4. `docs/packet-block-semantic-findings.md`
    Exact champion-kill and elite-objective packet semantics plus unresolved
    building/item correlations.
-4. `docs/architecture.md`
+5. `docs/architecture.md`
    Current C++/Wasm/Vue boundaries and the target normalized pipeline.
-5. `docs/riot-api-fixtures.md`
+6. `docs/riot-api-fixtures.md`
    How Riot fixtures are used strictly as offline supervision.
 
 ## Active Working References
 
 - `docs/decoder-development-loop.md`
 - `docs/decoder-status.md`
+- `docs/decoder-profiles.md`
 - `docs/packet-block-semantic-findings.md`
 - `docs/replay-objective-decoder-validation.md`
 - `docs/packet-ward-semantic-findings.md`

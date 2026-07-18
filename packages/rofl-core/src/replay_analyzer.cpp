@@ -611,13 +611,17 @@ void write_number_array(std::ostringstream& output, const std::vector<Number>& v
     return players;
 }
 
-[[nodiscard]] bool supports_validated_final_player_stats(std::string_view game_version) {
+[[nodiscard]] std::string replay_version_group(std::string_view game_version) {
     const std::size_t first_dot = game_version.find('.');
-    if (first_dot == std::string_view::npos) return false;
+    if (first_dot == std::string_view::npos) return std::string(game_version);
     const std::size_t second_dot = game_version.find('.', first_dot + 1);
-    const std::string_view group = second_dot == std::string_view::npos
+    return std::string(second_dot == std::string_view::npos
         ? game_version
-        : game_version.substr(0, second_dot);
+        : game_version.substr(0, second_dot));
+}
+
+[[nodiscard]] bool supports_validated_final_player_stats(std::string_view game_version) {
+    const std::string group = replay_version_group(game_version);
     static constexpr std::array<std::string_view, 8> supported{{
         "15.22", "15.23", "15.24", "16.1", "16.5", "16.6", "16.7", "16.9",
     }};
@@ -1581,7 +1585,10 @@ std::string normalize_version_label(std::string_view version) {
     return version.empty() ? "unknown" : std::string(version);
 }
 
-ReplaySummary parse_replay_bytes(const std::vector<std::uint8_t>& bytes) {
+[[nodiscard]] static ReplaySummary parse_replay_bytes_impl(
+    const std::vector<std::uint8_t>& bytes,
+    const DecoderProfileRegistry* decoder_profiles
+) {
     ReplaySummary summary;
     summary.file_size = bytes.size();
     summary.game_version = scan_game_version(bytes);
@@ -1665,6 +1672,24 @@ ReplaySummary parse_replay_bytes(const std::vector<std::uint8_t>& bytes) {
         throw std::runtime_error("Failed while extracting embedded metadata JSON: " + std::string(exception.what()));
     }
 
+    const DecoderVersionProfile* selected_decoder_profile = nullptr;
+    summary.decoder_profile.version_group = replay_version_group(summary.game_version);
+    if (decoder_profiles != nullptr) {
+        const DecoderProfileProvenance& provenance =
+            decoder_profile_provenance(*decoder_profiles);
+        summary.decoder_profile.origin = "external";
+        summary.decoder_profile.schema = provenance.schema;
+        summary.decoder_profile.registry_id = provenance.registry_id;
+        summary.decoder_profile.revision = provenance.revision;
+        summary.decoder_profile.fingerprint = provenance.fingerprint;
+        selected_decoder_profile =
+            find_decoder_profile(*decoder_profiles, summary.game_version);
+        summary.decoder_profile.matched = selected_decoder_profile != nullptr;
+    } else {
+        summary.decoder_profile.matched =
+            supports_validated_final_player_stats(summary.game_version);
+    }
+
     try {
         const std::string stats_json = parse_string_field(summary.metadata_json, "statsJson");
         if (!stats_json.empty()) {
@@ -1672,7 +1697,10 @@ ReplaySummary parse_replay_bytes(const std::vector<std::uint8_t>& bytes) {
             summary.players = parse_players_from_stats_json(stats_json, validated_final_fields);
             summary.capabilities.player_stats_available = true;
             summary.capabilities.validated_final_player_stats_available =
-                supports_validated_final_player_stats(summary.game_version) &&
+                (decoder_profiles == nullptr
+                    ? supports_validated_final_player_stats(summary.game_version)
+                    : selected_decoder_profile != nullptr &&
+                        selected_decoder_profile->final_stats_validated.value_or(false)) &&
                 validated_final_fields;
         }
     } catch (const std::exception& exception) {
@@ -1718,6 +1746,17 @@ ReplaySummary parse_replay_bytes(const std::vector<std::uint8_t>& bytes) {
     }
 
     return summary;
+}
+
+ReplaySummary parse_replay_bytes(const std::vector<std::uint8_t>& bytes) {
+    return parse_replay_bytes_impl(bytes, nullptr);
+}
+
+ReplaySummary parse_replay_bytes(
+    const std::vector<std::uint8_t>& bytes,
+    const DecoderProfileRegistry& decoder_profiles
+) {
+    return parse_replay_bytes_impl(bytes, &decoder_profiles);
 }
 std::string probe_replay_bytes(const std::vector<std::uint8_t>& bytes) {
     std::ostringstream output;
@@ -2045,6 +2084,13 @@ std::string inspect_replay_file(const std::string& path) {
 
 ReplaySummary parse_replay_file(const std::string& path) {
     return parse_replay_bytes(read_file_bytes(path));
+}
+
+ReplaySummary parse_replay_file(
+    const std::string& path,
+    const DecoderProfileRegistry& decoder_profiles
+) {
+    return parse_replay_bytes(read_file_bytes(path), decoder_profiles);
 }
 
 namespace {
@@ -2592,21 +2638,25 @@ std::string dump_packet_type_file_json(
 namespace {
 
 struct KillPacketProfile {
-    std::string_view version_group;
+    std::string version_group;
+    std::uint8_t channel = 1;
     std::uint16_t owner_sequence_packet_type = 0;
     std::uint16_t death_marker_packet_type = 0;
+    std::size_t death_marker_content_length = 5;
     std::uint32_t champion_network_id_base = 0;
+    std::size_t timestamp_tolerance_millis = 1;
+    std::string owner_order = "victim-assists-killer";
 };
 
-constexpr std::array<KillPacketProfile, 8> kKillPacketProfiles{{
-    {"15.22", 0x0015, 0x01D4, 0x40000099},
-    {"15.23", 0x0105, 0x0343, 0x400004CC},
-    {"15.24", 0x01D8, 0x020E, 0x40000147},
-    {"16.1", 0x02D6, 0x0093, 0x400000AD},
-    {"16.5", 0x021A, 0x03EF, 0x400000AD},
-    {"16.6", 0x02EC, 0x001A, 0x400000AD},
-    {"16.7", 0x0052, 0x0452, 0x400000AD},
-    {"16.9", 0x0073, 0x02CB, 0x400000AD},
+const std::array<KillPacketProfile, 8> kKillPacketProfiles{{
+    {"15.22", 1, 0x0015, 0x01D4, 5, 0x40000099, 1},
+    {"15.23", 1, 0x0105, 0x0343, 5, 0x400004CC, 1},
+    {"15.24", 1, 0x01D8, 0x020E, 5, 0x40000147, 1},
+    {"16.1", 1, 0x02D6, 0x0093, 5, 0x400000AD, 1},
+    {"16.5", 1, 0x021A, 0x03EF, 5, 0x400000AD, 1},
+    {"16.6", 1, 0x02EC, 0x001A, 5, 0x400000AD, 1},
+    {"16.7", 1, 0x0052, 0x0452, 5, 0x400000AD, 1},
+    {"16.9", 1, 0x0073, 0x02CB, 5, 0x400000AD, 1},
 }};
 
 struct KillRelevantBlock { PacketBlock block; long long timestamp_millis = 0; };
@@ -2660,11 +2710,32 @@ struct KillSourceInfo {
     return found == kKillPacketProfiles.end() ? nullptr : &*found;
 }
 
+[[nodiscard]] KillPacketProfile adapt_kill_packet_profile(
+    std::string_view version_group,
+    const KillDecoderProfile& profile
+) {
+    return {
+        std::string(version_group),
+        profile.channel,
+        profile.owner_sequence_packet_type,
+        profile.death_marker_packet_type,
+        profile.death_marker_content_length,
+        profile.champion_network_id_base,
+        profile.timestamp_tolerance_millis,
+        profile.owner_order,
+    };
+}
+
 [[nodiscard]] std::string fixed_hex(std::uint32_t value, int width) {
     std::ostringstream output;
     output << "0x" << std::uppercase << std::hex << std::setw(width) << std::setfill('0') << value;
     return output.str();
 }
+
+void write_decoder_profile_provenance_fields(
+    std::ostringstream& output,
+    const DecoderProfileRegistry* decoder_profiles
+);
 
 [[nodiscard]] std::string current_utc_iso8601() {
     const auto now = std::chrono::system_clock::now();
@@ -2724,11 +2795,14 @@ void write_kill_block_provenance_json(std::ostringstream& output, const KillRele
             const long long delta = owner.timestamp_millis >= relevant.timestamp_millis
                 ? owner.timestamp_millis - relevant.timestamp_millis
                 : relevant.timestamp_millis - owner.timestamp_millis;
-            if (delta <= 1) owner_blocks.push_back(owner);
+            if (delta <= static_cast<long long>(profile.timestamp_tolerance_millis)) {
+                owner_blocks.push_back(owner);
+            }
         }
-        if (relevant.block.content_length != 5) {
+        if (relevant.block.content_length != profile.death_marker_content_length) {
             decoded.errors.push_back("unexpected-death-marker-length: Death marker length is " +
-                std::to_string(relevant.block.content_length) + ", expected 5.");
+                std::to_string(relevant.block.content_length) + ", expected " +
+                std::to_string(profile.death_marker_content_length) + ".");
         }
         if (owner_blocks.empty()) {
             decoded.ignored_markers.push_back(relevant);
@@ -2822,11 +2896,29 @@ void write_kda_validation_json(std::ostringstream& output, const KillKdaValidati
 
 [[nodiscard]] std::string extract_replay_kills_impl(
     const std::vector<std::uint8_t>& bytes,
-    const KillSourceInfo& source
+    const KillSourceInfo& source,
+    const DecoderProfileRegistry* decoder_profiles
 ) {
-    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const ReplaySummary summary = decoder_profiles == nullptr
+        ? parse_replay_bytes(bytes)
+        : parse_replay_bytes(bytes, *decoder_profiles);
     const std::string version_group = packet_version_group(summary.game_version);
-    const KillPacketProfile* profile = find_kill_packet_profile(version_group);
+    std::optional<KillPacketProfile> external_profile;
+    const KillPacketProfile* profile = nullptr;
+    if (decoder_profiles != nullptr) {
+        const DecoderVersionProfile* selected =
+            find_decoder_profile(*decoder_profiles, summary.game_version);
+        if (selected == nullptr || !selected->kill.has_value()) {
+            throw std::runtime_error(
+                "Unsupported replay version " + summary.game_version +
+                ": external decoder registry has no kill profile."
+            );
+        }
+        external_profile = adapt_kill_packet_profile(version_group, *selected->kill);
+        profile = &*external_profile;
+    } else {
+        profile = find_kill_packet_profile(version_group);
+    }
     if (profile == nullptr) {
         throw std::runtime_error("Unsupported replay version " + summary.game_version +
             ". Supported groups: 15.22, 15.23, 15.24, 16.1, 16.5, 16.6, 16.7, 16.9.");
@@ -2835,7 +2927,7 @@ void write_kda_validation_json(std::ostringstream& output, const KillKdaValidati
     const PacketFileScan scan = scan_packet_segments(bytes, summary, "chunk",
         [&](const ReplaySegmentSummary&, const std::vector<std::uint8_t>&, const PacketBlockParseResult& result) {
             for (const PacketBlock& block : result.blocks) {
-                if (block.channel == 1 && (block.packet_type == profile->owner_sequence_packet_type ||
+                if (block.channel == profile->channel && (block.packet_type == profile->owner_sequence_packet_type ||
                     block.packet_type == profile->death_marker_packet_type)) {
                     relevant_blocks.push_back({block, packet_timestamp_millis(block.timestamp_seconds)});
                 }
@@ -2869,14 +2961,19 @@ void write_kda_validation_json(std::ostringstream& output, const KillKdaValidati
     if (source.has_file) output << '"' << json_escape(source.match_id) << '"'; else output << "null";
     output << ",\"runtimeInput\":\"rofl-only\",\"riotApiInput\":false},";
     output << "\"gameVersion\":\"" << json_escape(summary.game_version) << "\",\"versionGroup\":\"" << version_group << "\",";
-    output << "\"profile\":{\"channel\":1,\"ownerSequencePacketType\":" << profile->owner_sequence_packet_type;
+    output << "\"profile\":{\"channel\":" << static_cast<unsigned int>(profile->channel)
+           << ",\"ownerSequencePacketType\":" << profile->owner_sequence_packet_type;
     output << ",\"ownerSequencePacketTypeHex\":\"" << fixed_hex(profile->owner_sequence_packet_type, 4) << "\"";
     output << ",\"deathMarkerPacketType\":" << profile->death_marker_packet_type;
     output << ",\"deathMarkerPacketTypeHex\":\"" << fixed_hex(profile->death_marker_packet_type, 4) << "\"";
     output << ",\"championNetworkIdBase\":" << profile->champion_network_id_base;
     output << ",\"championNetworkIdBaseHex\":\"" << fixed_hex(profile->champion_network_id_base, 8) << "\"";
+    output << ",\"deathMarkerContentLength\":" << profile->death_marker_content_length;
+    output << ",\"timestampToleranceMillis\":" << profile->timestamp_tolerance_millis;
     output << ",\"ownerOrder\":\"[victim, ...ordered assists, killer]\"";
-    output << ",\"executionRule\":\"A one-owner sequence has killerParticipantId=0.\"},";
+    output << ",\"executionRule\":\"A one-owner sequence has killerParticipantId=0.\"";
+    write_decoder_profile_provenance_fields(output, decoder_profiles);
+    output << "},";
     output << "\"replay\":{\"gameLengthMillis\":";
     if (summary.game_length_millis > 0) output << summary.game_length_millis; else output << "null";
     output << ",\"lastGameChunkId\":";
@@ -2952,23 +3049,45 @@ enum class EliteMonsterKind {
 };
 
 struct ObjectivePacketProfile {
-    std::string_view version_group;
+    std::string version_group;
+    std::uint8_t channel = 1;
     std::uint16_t packet_type = 0;
     std::size_t minimum_content_length = 0;
     std::size_t maximum_content_length = 0;
+    PayloadOffsetOrigin discriminator_origin = PayloadOffsetOrigin::start;
     std::size_t discriminator_offset = 0;
-    bool horde_uses_maximum_length = false;
+    std::vector<ObjectiveDiscriminatorRule> discriminators;
+    std::vector<ObjectiveContentLengthRule> content_length_classes;
 };
 
-constexpr std::array<ObjectivePacketProfile, 8> kObjectivePacketProfiles{{
-    {"15.22", 0x02DE, 126, 126, 124, false},
-    {"15.23", 0x026E, 126, 127, 1, false},
-    {"15.24", 0x00FF, 126, 127, 122, false},
-    {"16.1", 0x03C3, 126, 127, 122, false},
-    {"16.5", 0x0328, 126, 127, 3, true},
-    {"16.6", 0x00F2, 126, 127, 122, false},
-    {"16.7", 0x03AE, 126, 127, 1, false},
-    {"16.9", 0x01EB, 132, 133, 2, false},
+const std::array<ObjectivePacketProfile, 8> kObjectivePacketProfiles{{
+    {"15.22", 1, 0x02DE, 126, 126, PayloadOffsetOrigin::start, 124,
+        {{149, ObjectiveMonsterClass::dragon}, {103, ObjectiveMonsterClass::atakhan},
+         {241, ObjectiveMonsterClass::baron}, {82, ObjectiveMonsterClass::herald},
+         {126, ObjectiveMonsterClass::horde}}, {}},
+    {"15.23", 1, 0x026E, 126, 127, PayloadOffsetOrigin::start, 1,
+        {{108, ObjectiveMonsterClass::dragon}, {134, ObjectiveMonsterClass::atakhan},
+         {114, ObjectiveMonsterClass::baron}, {47, ObjectiveMonsterClass::herald},
+         {42, ObjectiveMonsterClass::horde}}, {}},
+    {"15.24", 1, 0x00FF, 126, 127, PayloadOffsetOrigin::start, 122,
+        {{43, ObjectiveMonsterClass::dragon}, {62, ObjectiveMonsterClass::atakhan},
+         {247, ObjectiveMonsterClass::herald}, {198, ObjectiveMonsterClass::horde}}, {}},
+    {"16.1", 1, 0x03C3, 126, 127, PayloadOffsetOrigin::start, 122,
+        {{111, ObjectiveMonsterClass::dragon}, {178, ObjectiveMonsterClass::baron},
+         {204, ObjectiveMonsterClass::herald}, {170, ObjectiveMonsterClass::horde}}, {}},
+    {"16.5", 1, 0x0328, 126, 127, PayloadOffsetOrigin::start, 3,
+        {{184, ObjectiveMonsterClass::dragon}, {30, ObjectiveMonsterClass::baron},
+         {222, ObjectiveMonsterClass::herald}},
+        {{127, ObjectiveMonsterClass::horde}}},
+    {"16.6", 1, 0x00F2, 126, 127, PayloadOffsetOrigin::start, 122,
+        {{255, ObjectiveMonsterClass::dragon}, {12, ObjectiveMonsterClass::baron},
+         {199, ObjectiveMonsterClass::herald}, {31, ObjectiveMonsterClass::horde}}, {}},
+    {"16.7", 1, 0x03AE, 126, 127, PayloadOffsetOrigin::start, 1,
+        {{71, ObjectiveMonsterClass::dragon}, {42, ObjectiveMonsterClass::baron},
+         {8, ObjectiveMonsterClass::herald}, {170, ObjectiveMonsterClass::horde}}, {}},
+    {"16.9", 1, 0x01EB, 132, 133, PayloadOffsetOrigin::start, 2,
+        {{69, ObjectiveMonsterClass::dragon}, {172, ObjectiveMonsterClass::baron},
+         {118, ObjectiveMonsterClass::herald}, {123, ObjectiveMonsterClass::horde}}, {}},
 }};
 
 struct ReplayObjectiveEvent {
@@ -2989,6 +3108,23 @@ struct ReplayObjectiveEvent {
     return found == kObjectivePacketProfiles.end() ? nullptr : &*found;
 }
 
+[[nodiscard]] ObjectivePacketProfile adapt_objective_packet_profile(
+    std::string_view version_group,
+    const ObjectiveDecoderProfile& profile
+) {
+    return {
+        std::string(version_group),
+        profile.channel,
+        profile.packet_type,
+        profile.minimum_content_length,
+        profile.maximum_content_length,
+        profile.discriminator_origin,
+        profile.discriminator_offset,
+        profile.discriminators,
+        profile.content_length_classes,
+    };
+}
+
 [[nodiscard]] std::string_view elite_monster_kind_name(EliteMonsterKind kind) {
     switch (kind) {
         case EliteMonsterKind::dragon: return "DRAGON";
@@ -3001,6 +3137,21 @@ struct ReplayObjectiveEvent {
     return "UNKNOWN";
 }
 
+[[nodiscard]] std::optional<std::size_t> objective_discriminator_index(
+    const ObjectivePacketProfile& profile,
+    std::size_t payload_size
+) {
+    if (profile.discriminator_origin == PayloadOffsetOrigin::end) {
+        if (profile.discriminator_offset == 0 ||
+            profile.discriminator_offset > payload_size) {
+            return std::nullopt;
+        }
+        return payload_size - profile.discriminator_offset;
+    }
+    if (profile.discriminator_offset >= payload_size) return std::nullopt;
+    return profile.discriminator_offset;
+}
+
 [[nodiscard]] EliteMonsterKind classify_elite_monster(
     const ObjectivePacketProfile& profile,
     std::span<const std::uint8_t> payload
@@ -3009,55 +3160,30 @@ struct ReplayObjectiveEvent {
         payload.size() > profile.maximum_content_length) {
         return EliteMonsterKind::unknown;
     }
-    if (profile.horde_uses_maximum_length && payload.size() == profile.maximum_content_length) {
-        return EliteMonsterKind::horde;
-    }
-    if (profile.discriminator_offset >= payload.size()) {
+    const auto to_elite_kind = [](ObjectiveMonsterClass monster_class) {
+        switch (monster_class) {
+            case ObjectiveMonsterClass::dragon: return EliteMonsterKind::dragon;
+            case ObjectiveMonsterClass::atakhan: return EliteMonsterKind::atakhan;
+            case ObjectiveMonsterClass::baron: return EliteMonsterKind::baron;
+            case ObjectiveMonsterClass::herald: return EliteMonsterKind::herald;
+            case ObjectiveMonsterClass::horde: return EliteMonsterKind::horde;
+        }
         return EliteMonsterKind::unknown;
+    };
+
+    for (const ObjectiveContentLengthRule& rule : profile.content_length_classes) {
+        if (rule.content_length == payload.size()) {
+            return to_elite_kind(rule.monster_class);
+        }
     }
 
-    const std::uint8_t discriminator = payload[profile.discriminator_offset];
-    if (profile.version_group == "15.22") {
-        if (discriminator == 149) return EliteMonsterKind::dragon;
-        if (discriminator == 103) return EliteMonsterKind::atakhan;
-        if (discriminator == 241) return EliteMonsterKind::baron;
-        if (discriminator == 82) return EliteMonsterKind::herald;
-        if (discriminator == 126) return EliteMonsterKind::horde;
-    } else if (profile.version_group == "15.23") {
-        if (discriminator == 108) return EliteMonsterKind::dragon;
-        if (discriminator == 134) return EliteMonsterKind::atakhan;
-        if (discriminator == 114) return EliteMonsterKind::baron;
-        if (discriminator == 47) return EliteMonsterKind::herald;
-        if (discriminator == 42) return EliteMonsterKind::horde;
-    } else if (profile.version_group == "15.24") {
-        if (discriminator == 43) return EliteMonsterKind::dragon;
-        if (discriminator == 62) return EliteMonsterKind::atakhan;
-        if (discriminator == 247) return EliteMonsterKind::herald;
-        if (discriminator == 198) return EliteMonsterKind::horde;
-    } else if (profile.version_group == "16.1") {
-        if (discriminator == 111) return EliteMonsterKind::dragon;
-        if (discriminator == 178) return EliteMonsterKind::baron;
-        if (discriminator == 204) return EliteMonsterKind::herald;
-        if (discriminator == 170) return EliteMonsterKind::horde;
-    } else if (profile.version_group == "16.5") {
-        if (discriminator == 184) return EliteMonsterKind::dragon;
-        if (discriminator == 30) return EliteMonsterKind::baron;
-        if (discriminator == 222) return EliteMonsterKind::herald;
-    } else if (profile.version_group == "16.6") {
-        if (discriminator == 255) return EliteMonsterKind::dragon;
-        if (discriminator == 12) return EliteMonsterKind::baron;
-        if (discriminator == 199) return EliteMonsterKind::herald;
-        if (discriminator == 31) return EliteMonsterKind::horde;
-    } else if (profile.version_group == "16.7") {
-        if (discriminator == 71) return EliteMonsterKind::dragon;
-        if (discriminator == 42) return EliteMonsterKind::baron;
-        if (discriminator == 8) return EliteMonsterKind::herald;
-        if (discriminator == 170) return EliteMonsterKind::horde;
-    } else if (profile.version_group == "16.9") {
-        if (discriminator == 69) return EliteMonsterKind::dragon;
-        if (discriminator == 172) return EliteMonsterKind::baron;
-        if (discriminator == 118) return EliteMonsterKind::herald;
-        if (discriminator == 123) return EliteMonsterKind::horde;
+    const std::optional<std::size_t> discriminator_index =
+        objective_discriminator_index(profile, payload.size());
+    if (!discriminator_index.has_value()) return EliteMonsterKind::unknown;
+
+    const std::uint8_t discriminator = payload[*discriminator_index];
+    for (const ObjectiveDiscriminatorRule& rule : profile.discriminators) {
+        if (rule.value == discriminator) return to_elite_kind(rule.monster_class);
     }
     return EliteMonsterKind::unknown;
 }
@@ -3078,21 +3204,45 @@ void write_objective_block_provenance_json(std::ostringstream& output, const Pac
 [[nodiscard]] std::string objective_profile_classifier_description(
     const ObjectivePacketProfile& profile
 ) {
-    if (profile.horde_uses_maximum_length) {
-        return "contentLength=127 identifies HORDE; otherwise payload[" +
-            std::to_string(profile.discriminator_offset) + "] identifies the monster class.";
+    std::string description;
+    if (!profile.content_length_classes.empty()) {
+        description = "profiled content lengths are classified first; otherwise ";
     }
-    return "payload[" + std::to_string(profile.discriminator_offset) +
+    if (profile.discriminator_origin == PayloadOffsetOrigin::end) {
+        return description + "payload[length-" +
+            std::to_string(profile.discriminator_offset) +
+            "] identifies the monster class.";
+    }
+    return description + "payload[" + std::to_string(profile.discriminator_offset) +
         "] identifies the monster class.";
 }
 
 [[nodiscard]] std::string extract_replay_objectives_impl(
     const std::vector<std::uint8_t>& bytes,
-    const KillSourceInfo& source
+    const KillSourceInfo& source,
+    const DecoderProfileRegistry* decoder_profiles
 ) {
-    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const ReplaySummary summary = decoder_profiles == nullptr
+        ? parse_replay_bytes(bytes)
+        : parse_replay_bytes(bytes, *decoder_profiles);
     const std::string version_group = packet_version_group(summary.game_version);
-    const ObjectivePacketProfile* profile = find_objective_packet_profile(version_group);
+    std::optional<ObjectivePacketProfile> external_profile;
+    const ObjectivePacketProfile* profile = nullptr;
+    if (decoder_profiles != nullptr) {
+        const DecoderVersionProfile* selected =
+            find_decoder_profile(*decoder_profiles, summary.game_version);
+        if (selected == nullptr || !selected->objective.has_value()) {
+            throw std::runtime_error(
+                "Unsupported replay version " + summary.game_version +
+                ": external decoder registry has no objective profile."
+            );
+        }
+        external_profile =
+            adapt_objective_packet_profile(version_group, *selected->objective);
+        profile = &*external_profile;
+    } else {
+        profile = find_objective_packet_profile(version_group);
+    }
     if (profile == nullptr) {
         throw std::runtime_error(
             "Unsupported replay version " + summary.game_version +
@@ -3111,7 +3261,7 @@ void write_objective_block_provenance_json(std::ostringstream& output, const Pac
         [&](const ReplaySegmentSummary&, const std::vector<std::uint8_t>& decompressed,
             const PacketBlockParseResult& result) {
             for (const PacketBlock& block : result.blocks) {
-                if (block.channel != 1 || block.packet_type != profile->packet_type) {
+                if (block.channel != profile->channel || block.packet_type != profile->packet_type) {
                     continue;
                 }
                 candidate_packet_block_count += 1;
@@ -3129,10 +3279,11 @@ void write_objective_block_provenance_json(std::ostringstream& output, const Pac
                     unknown_monster_type_count += 1;
                     continue;
                 }
-                const std::uint8_t discriminator =
-                    profile->discriminator_offset < payload.size()
-                        ? payload[profile->discriminator_offset]
-                        : 0;
+                const std::optional<std::size_t> discriminator_index =
+                    objective_discriminator_index(*profile, payload.size());
+                const std::uint8_t discriminator = discriminator_index.has_value()
+                    ? payload[*discriminator_index]
+                    : 0;
                 events.push_back({
                     packet_timestamp_millis(block.timestamp_seconds),
                     monster_kind,
@@ -3170,13 +3321,19 @@ void write_objective_block_provenance_json(std::ostringstream& output, const Pac
     output << ",\"runtimeInput\":\"rofl-only\",\"riotApiInput\":false},";
     output << "\"gameVersion\":\"" << json_escape(summary.game_version)
            << "\",\"versionGroup\":\"" << version_group << "\",";
-    output << "\"profile\":{\"channel\":1,\"packetType\":" << profile->packet_type;
+    output << "\"profile\":{\"channel\":" << static_cast<unsigned int>(profile->channel)
+           << ",\"packetType\":" << profile->packet_type;
     output << ",\"packetTypeHex\":\"" << fixed_hex(profile->packet_type, 4) << "\"";
     output << ",\"minimumContentLength\":" << profile->minimum_content_length;
     output << ",\"maximumContentLength\":" << profile->maximum_content_length;
     output << ",\"discriminatorOffset\":" << profile->discriminator_offset;
+    output << ",\"discriminatorOrigin\":\""
+           << (profile->discriminator_origin == PayloadOffsetOrigin::start ? "start" : "end")
+           << "\"";
     output << ",\"classifier\":\""
-           << json_escape(objective_profile_classifier_description(*profile)) << "\"},";
+           << json_escape(objective_profile_classifier_description(*profile)) << "\"";
+    write_decoder_profile_provenance_fields(output, decoder_profiles);
+    output << "},";
     output << "\"replay\":{\"gameLengthMillis\":";
     if (summary.game_length_millis > 0) output << summary.game_length_millis; else output << "null";
     output << ",\"lastGameChunkId\":";
@@ -3222,39 +3379,55 @@ void write_objective_block_provenance_json(std::ostringstream& output, const Pac
 }
 
 struct WardPacketProfile {
-    std::string_view version_group;
+    std::string version_group;
+    std::uint8_t channel = 1;
     std::uint16_t placement_marker_packet_type = 0;
-    std::array<std::uint8_t, 3> placement_discriminator_values{};
-    std::size_t placement_discriminator_value_count = 0;
+    std::size_t placement_content_length = 3;
+    std::size_t placement_discriminator_offset = 2;
+    std::vector<std::uint8_t> placement_discriminator_values;
     std::uint16_t placement_owner_packet_type = 0;
-    std::array<std::size_t, 3> placement_owner_content_lengths{};
+    ContentLengthConstraint placement_owner_content_lengths;
     std::uint16_t removal_packet_type = 0;
-    std::array<std::size_t, 3> removal_content_lengths{};
-    std::size_t removal_content_length_count = 0;
+    ContentLengthConstraint removal_content_lengths;
     std::uint16_t killer_owner_packet_type = 0;
-    std::array<std::size_t, 2> killer_owner_content_lengths{};
+    ContentLengthConstraint killer_owner_content_lengths;
     std::uint32_t champion_network_id_base = 0;
     std::uint16_t research_primary_spawn_packet_type = 0;
     std::uint16_t research_companion_spawn_packet_type = 0;
     std::size_t research_primary_minimum_content_length = 0;
     std::size_t research_primary_maximum_content_length = 0;
     std::size_t research_companion_content_length = 0;
+    bool research_spawn_available = false;
 };
 
-constexpr std::array<WardPacketProfile, 8> kWardPacketProfiles{{
-    {"15.22", 0x0308, {0x09, 0, 0}, 1, 0x0420, {2, 3, 4}, 0x0017, {21, 28, 29}, 3, 0x044E, {6, 7}, 0x40000099, 0x00DC, 0x00BC, 64, 73, 63},
-    {"15.23", 0x0368, {0xD5, 0, 0}, 1, 0x01BF, {2, 3, 4}, 0x020A, {28, 29, 0}, 2, 0x028B, {6, 7}, 0x400004CC, 0x0393, 0x0060, 64, 73, 63},
-    {"15.24", 0x02CE, {0xE1, 0, 0}, 1, 0x0227, {2, 3, 4}, 0x009C, {28, 29, 0}, 2, 0x0220, {6, 7}, 0x40000147, 0x0342, 0x0218, 63, 73, 63},
-    {"16.1", 0x037F, {0x01, 0x92, 0}, 2, 0x0335, {2, 3, 4}, 0x0059, {28, 29, 0}, 2, 0x021A, {6, 7}, 0x400000AD, 0x02CC, 0x0428, 63, 73, 63},
-    {"16.5", 0x03F8, {0x50, 0, 0}, 1, 0x024F, {2, 3, 4}, 0x023F, {28, 29, 0}, 2, 0x01FE, {6, 7}, 0x400000AD, 0x0427, 0x01EE, 64, 73, 63},
-    {"16.6", 0x0311, {0x14, 0, 0}, 1, 0x011D, {2, 3, 4}, 0x0271, {21, 28, 29}, 3, 0x03FD, {6, 7}, 0x400000AD, 0x03D1, 0x034B, 63, 73, 63},
-    {"16.7", 0x0162, {0x80, 0xF4, 0xF7}, 3, 0x033B, {2, 3, 4}, 0x039C, {28, 29, 0}, 2, 0x0301, {6, 7}, 0x400000AD, 0x0449, 0x0219, 63, 73, 63},
-    {"16.9", 0x0041, {0xB0, 0, 0}, 1, 0x04AC, {2, 3, 4}, 0x02E6, {28, 29, 0}, 2, 0x02F6, {6, 7}, 0x400000AD, 0x00D6, 0x01AD, 62, 73, 63},
+const std::array<WardPacketProfile, 8> kWardPacketProfiles{{
+    {"15.22", 1, 0x0308, 3, 2, {0x09}, 0x0420, {{2, 3, 4}, {}, {}},
+        0x0017, {{21, 28, 29}, {}, {}}, 0x044E, {{6, 7}, {}, {}},
+        0x40000099, 0x00DC, 0x00BC, 64, 73, 63, true},
+    {"15.23", 1, 0x0368, 3, 2, {0xD5}, 0x01BF, {{2, 3, 4}, {}, {}},
+        0x020A, {{28, 29}, {}, {}}, 0x028B, {{6, 7}, {}, {}},
+        0x400004CC, 0x0393, 0x0060, 64, 73, 63, true},
+    {"15.24", 1, 0x02CE, 3, 2, {0xE1}, 0x0227, {{2, 3, 4}, {}, {}},
+        0x009C, {{28, 29}, {}, {}}, 0x0220, {{6, 7}, {}, {}},
+        0x40000147, 0x0342, 0x0218, 63, 73, 63, true},
+    {"16.1", 1, 0x037F, 3, 2, {0x01, 0x92}, 0x0335, {{2, 3, 4}, {}, {}},
+        0x0059, {{28, 29}, {}, {}}, 0x021A, {{6, 7}, {}, {}},
+        0x400000AD, 0x02CC, 0x0428, 63, 73, 63, true},
+    {"16.5", 1, 0x03F8, 3, 2, {0x50}, 0x024F, {{2, 3, 4}, {}, {}},
+        0x023F, {{28, 29}, {}, {}}, 0x01FE, {{6, 7}, {}, {}},
+        0x400000AD, 0x0427, 0x01EE, 64, 73, 63, true},
+    {"16.6", 1, 0x0311, 3, 2, {0x14}, 0x011D, {{2, 3, 4}, {}, {}},
+        0x0271, {{21, 28, 29}, {}, {}}, 0x03FD, {{6, 7}, {}, {}},
+        0x400000AD, 0x03D1, 0x034B, 63, 73, 63, true},
+    {"16.7", 1, 0x0162, 3, 2, {0x80, 0xF4, 0xF7}, 0x033B, {{2, 3, 4}, {}, {}},
+        0x039C, {{28, 29}, {}, {}}, 0x0301, {{6, 7}, {}, {}},
+        0x400000AD, 0x0449, 0x0219, 63, 73, 63, true},
+    {"16.9", 1, 0x0041, 3, 2, {0xB0}, 0x04AC, {{2, 3, 4}, {}, {}},
+        0x02E6, {{28, 29}, {}, {}}, 0x02F6, {{6, 7}, {}, {}},
+        0x400000AD, 0x00D6, 0x01AD, 62, 73, 63, true},
 }};
 
 constexpr long long kWardTimestampToleranceMillis = 1;
-constexpr std::size_t kWardPlacementContentLength = 3;
-constexpr std::size_t kWardPlacementDiscriminatorOffset = 2;
 constexpr std::size_t kWardResearchMaximumPrecedingBlocks = 48;
 
 struct WardRelevantBlock {
@@ -3386,20 +3559,51 @@ struct WardEventOrder {
     return found == kWardPacketProfiles.end() ? nullptr : &*found;
 }
 
-[[nodiscard]] bool ward_length_is_profiled(
-    std::size_t value,
-    const std::array<std::size_t, 3>& lengths,
-    std::size_t count
+[[nodiscard]] WardPacketProfile adapt_ward_packet_profile(
+    std::string_view version_group,
+    const WardDecoderProfile& profile
 ) {
-    return std::find(lengths.begin(), lengths.begin() + static_cast<std::ptrdiff_t>(count), value) !=
-        lengths.begin() + static_cast<std::ptrdiff_t>(count);
+    WardPacketProfile adapted;
+    adapted.version_group = version_group;
+    adapted.channel = profile.channel;
+    adapted.placement_marker_packet_type = profile.placement_marker_packet_type;
+    adapted.placement_content_length = profile.placement_content_length;
+    adapted.placement_discriminator_offset = profile.placement_discriminator_offset;
+    adapted.placement_discriminator_values = profile.placement_discriminator_values;
+    adapted.placement_owner_packet_type = profile.placement_owner_packet_type;
+    adapted.placement_owner_content_lengths = profile.placement_owner_content_lengths;
+    adapted.removal_packet_type = profile.removal_packet_type;
+    adapted.removal_content_lengths = profile.removal_content_lengths;
+    adapted.killer_owner_packet_type = profile.killer_owner_packet_type;
+    adapted.killer_owner_content_lengths = profile.killer_owner_content_lengths;
+    adapted.champion_network_id_base = profile.champion_network_id_base;
+    if (profile.research_spawn.has_value()) {
+        const WardResearchSpawnProfile& research = *profile.research_spawn;
+        adapted.research_primary_spawn_packet_type = research.primary_spawn_packet_type;
+        adapted.research_companion_spawn_packet_type = research.companion_spawn_packet_type;
+        adapted.research_primary_minimum_content_length =
+            research.primary_minimum_content_length;
+        adapted.research_primary_maximum_content_length =
+            research.primary_maximum_content_length;
+        adapted.research_companion_content_length = research.companion_content_length;
+        adapted.research_spawn_available = true;
+    }
+    return adapted;
 }
 
-[[nodiscard]] bool ward_owner_length_is_profiled(
+[[nodiscard]] bool ward_length_is_profiled(
     std::size_t value,
-    const std::array<std::size_t, 2>& lengths
+    const ContentLengthConstraint& constraint
 ) {
-    return std::find(lengths.begin(), lengths.end(), value) != lengths.end();
+    const bool exact = std::find(
+        constraint.exact_values.begin(),
+        constraint.exact_values.end(),
+        value
+    ) != constraint.exact_values.end();
+    const bool in_range = constraint.minimum.has_value() &&
+        constraint.maximum.has_value() &&
+        value >= *constraint.minimum && value <= *constraint.maximum;
+    return exact || in_range;
 }
 
 [[nodiscard]] bool ward_discriminator_is_profiled(
@@ -3408,11 +3612,9 @@ struct WardEventOrder {
 ) {
     return std::find(
         profile.placement_discriminator_values.begin(),
-        profile.placement_discriminator_values.begin() +
-            static_cast<std::ptrdiff_t>(profile.placement_discriminator_value_count),
+        profile.placement_discriminator_values.end(),
         value
-    ) != profile.placement_discriminator_values.begin() +
-        static_cast<std::ptrdiff_t>(profile.placement_discriminator_value_count);
+    ) != profile.placement_discriminator_values.end();
 }
 
 [[nodiscard]] int ward_owner_to_participant_id(
@@ -3503,15 +3705,37 @@ void write_ward_block_provenance_json(
 
 void write_size_array_json(
     std::ostringstream& output,
-    const std::array<std::size_t, 3>& values,
-    std::size_t count
+    const ContentLengthConstraint& constraint
 ) {
+    std::vector<std::size_t> values = constraint.exact_values;
+    if (constraint.minimum.has_value() && constraint.maximum.has_value() &&
+        *constraint.maximum - *constraint.minimum <= 255) {
+        for (std::size_t value = *constraint.minimum;
+             value <= *constraint.maximum;
+             ++value) {
+            if (std::find(values.begin(), values.end(), value) == values.end()) {
+                values.push_back(value);
+            }
+        }
+    }
+    std::sort(values.begin(), values.end());
     output << '[';
-    for (std::size_t index = 0; index < count; ++index) {
+    for (std::size_t index = 0; index < values.size(); ++index) {
         if (index > 0) output << ',';
         output << values[index];
     }
     output << ']';
+}
+
+void write_content_length_range_json(
+    std::ostringstream& output,
+    const ContentLengthConstraint& constraint
+) {
+    if (!constraint.minimum.has_value() || !constraint.maximum.has_value()) {
+        output << "null";
+        return;
+    }
+    output << '[' << *constraint.minimum << ',' << *constraint.maximum << ']';
 }
 
 [[nodiscard]] std::uint32_t ward_research_u16_le(
@@ -3637,6 +3861,23 @@ void write_size_array_json(
     return output.str();
 }
 
+void write_decoder_profile_provenance_fields(
+    std::ostringstream& output,
+    const DecoderProfileRegistry* decoder_profiles
+) {
+    if (decoder_profiles == nullptr) {
+        output << ",\"origin\":\"built-in\"";
+        return;
+    }
+    const DecoderProfileProvenance& provenance =
+        decoder_profile_provenance(*decoder_profiles);
+    output << ",\"origin\":\"external\"";
+    output << ",\"schema\":\"" << json_escape(provenance.schema) << "\"";
+    output << ",\"registryId\":\"" << json_escape(provenance.registry_id) << "\"";
+    output << ",\"revision\":\"" << json_escape(provenance.revision) << "\"";
+    output << ",\"fingerprint\":\"" << json_escape(provenance.fingerprint) << "\"";
+}
+
 void write_ward_research_payload_block_json(
     std::ostringstream& output,
     std::string_view packet_role,
@@ -3693,20 +3934,20 @@ collect_ward_position_research(
             const std::vector<std::uint8_t>& decompressed,
             const PacketBlockParseResult& result) {
             for (const PacketBlock& block : result.blocks) {
-                if (block.channel != 1) continue;
+                if (block.channel != profile.channel) continue;
                 const WardRelevantBlock relevant{
                     block,
                     packet_timestamp_millis(block.timestamp_seconds),
                 };
                 if (block.packet_type == profile.placement_marker_packet_type) {
                     extraction.candidate_placement_marker_block_count += 1;
-                    if (block.content_length != kWardPlacementContentLength) {
+                    if (block.content_length != profile.placement_content_length) {
                         extraction.rejected_placement_content_length_block_count += 1;
                     } else {
                         const std::uint8_t discriminator =
                             decompressed[
                                 block.content_offset +
-                                kWardPlacementDiscriminatorOffset
+                                profile.placement_discriminator_offset
                             ];
                         if (ward_discriminator_is_profiled(
                                 discriminator,
@@ -3723,8 +3964,7 @@ collect_ward_position_research(
                 if (block.packet_type == profile.placement_owner_packet_type &&
                     ward_length_is_profiled(
                         block.content_length,
-                        profile.placement_owner_content_lengths,
-                        profile.placement_owner_content_lengths.size()
+                        profile.placement_owner_content_lengths
                     ) &&
                     ward_owner_to_participant_id(
                         block.block_param,
@@ -3883,11 +4123,29 @@ collect_ward_position_research(
 
 [[nodiscard]] std::string extract_replay_wards_impl(
     const std::vector<std::uint8_t>& bytes,
-    const KillSourceInfo& source
+    const KillSourceInfo& source,
+    const DecoderProfileRegistry* decoder_profiles
 ) {
-    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const ReplaySummary summary = decoder_profiles == nullptr
+        ? parse_replay_bytes(bytes)
+        : parse_replay_bytes(bytes, *decoder_profiles);
     const std::string version_group = packet_version_group(summary.game_version);
-    const WardPacketProfile* profile = find_ward_packet_profile(version_group);
+    std::optional<WardPacketProfile> external_profile;
+    const WardPacketProfile* profile = nullptr;
+    if (decoder_profiles != nullptr) {
+        const DecoderVersionProfile* selected =
+            find_decoder_profile(*decoder_profiles, summary.game_version);
+        if (selected == nullptr || !selected->ward.has_value()) {
+            throw std::runtime_error(
+                "Unsupported replay version " + summary.game_version +
+                ": external decoder registry has no ward profile."
+            );
+        }
+        external_profile = adapt_ward_packet_profile(version_group, *selected->ward);
+        profile = &*external_profile;
+    } else {
+        profile = find_ward_packet_profile(version_group);
+    }
     if (profile == nullptr) {
         throw std::runtime_error(
             "Unsupported replay version " + summary.game_version +
@@ -3910,18 +4168,21 @@ collect_ward_position_research(
         [&](const ReplaySegmentSummary&, const std::vector<std::uint8_t>& decompressed,
             const PacketBlockParseResult& result) {
             for (const PacketBlock& block : result.blocks) {
-                if (block.channel != 1) continue;
+                if (block.channel != profile->channel) continue;
                 const WardRelevantBlock relevant{
                     block,
                     packet_timestamp_millis(block.timestamp_seconds),
                 };
                 if (block.packet_type == profile->placement_marker_packet_type) {
                     candidate_placement_marker_block_count += 1;
-                    if (block.content_length != kWardPlacementContentLength) {
+                    if (block.content_length != profile->placement_content_length) {
                         rejected_placement_content_length_block_count += 1;
                     } else {
                         const std::uint8_t discriminator =
-                            decompressed[block.content_offset + kWardPlacementDiscriminatorOffset];
+                            decompressed[
+                                block.content_offset +
+                                profile->placement_discriminator_offset
+                            ];
                         if (ward_discriminator_is_profiled(discriminator, *profile)) {
                             classified_placement_markers.push_back(relevant);
                         } else {
@@ -3932,8 +4193,7 @@ collect_ward_position_research(
                 if (block.packet_type == profile->placement_owner_packet_type &&
                     ward_length_is_profiled(
                         block.content_length,
-                        profile->placement_owner_content_lengths,
-                        profile->placement_owner_content_lengths.size()
+                        profile->placement_owner_content_lengths
                     ) &&
                     ward_owner_to_participant_id(block.block_param, *profile) != 0) {
                     placement_owner_blocks.push_back(relevant);
@@ -3942,7 +4202,7 @@ collect_ward_position_research(
                     removal_blocks.push_back(relevant);
                 }
                 if (block.packet_type == profile->killer_owner_packet_type &&
-                    ward_owner_length_is_profiled(
+                    ward_length_is_profiled(
                         block.content_length,
                         profile->killer_owner_content_lengths
                     ) &&
@@ -3986,8 +4246,7 @@ collect_ward_position_research(
         }
         if (!ward_length_is_profiled(
                 removal.block.content_length,
-                profile->removal_content_lengths,
-                profile->removal_content_length_count
+                profile->removal_content_lengths
             )) {
             rejected_tracked_unprofiled_removal_block_count += 1;
             continue;
@@ -4066,18 +4325,18 @@ collect_ward_position_research(
     output << ",\"runtimeInput\":\"rofl-only\",\"riotApiInput\":false},";
     output << "\"gameVersion\":\"" << json_escape(summary.game_version)
            << "\",\"versionGroup\":\"" << version_group << "\",";
-    output << "\"profile\":{\"channel\":1";
+    output << "\"profile\":{\"channel\":" << static_cast<unsigned int>(profile->channel);
     output << ",\"placementMarkerPacketType\":" << profile->placement_marker_packet_type;
     output << ",\"placementMarkerPacketTypeHex\":\"" << fixed_hex(profile->placement_marker_packet_type, 4) << "\"";
-    output << ",\"placementContentLength\":" << kWardPlacementContentLength;
-    output << ",\"placementDiscriminatorOffset\":" << kWardPlacementDiscriminatorOffset;
+    output << ",\"placementContentLength\":" << profile->placement_content_length;
+    output << ",\"placementDiscriminatorOffset\":" << profile->placement_discriminator_offset;
     output << ",\"placementDiscriminatorValues\":[";
-    for (std::size_t index = 0; index < profile->placement_discriminator_value_count; ++index) {
+    for (std::size_t index = 0; index < profile->placement_discriminator_values.size(); ++index) {
         if (index > 0) output << ',';
         output << static_cast<unsigned int>(profile->placement_discriminator_values[index]);
     }
     output << "],\"placementDiscriminatorValuesHex\":[";
-    for (std::size_t index = 0; index < profile->placement_discriminator_value_count; ++index) {
+    for (std::size_t index = 0; index < profile->placement_discriminator_values.size(); ++index) {
         if (index > 0) output << ',';
         output << '"' << fixed_hex(profile->placement_discriminator_values[index], 2) << '"';
     }
@@ -4085,19 +4344,26 @@ collect_ward_position_research(
     output << ",\"placementOwnerPacketType\":" << profile->placement_owner_packet_type;
     output << ",\"placementOwnerPacketTypeHex\":\"" << fixed_hex(profile->placement_owner_packet_type, 4) << "\"";
     output << ",\"placementOwnerContentLengths\":";
-    write_size_array_json(output, profile->placement_owner_content_lengths, profile->placement_owner_content_lengths.size());
+    write_size_array_json(output, profile->placement_owner_content_lengths);
+    output << ",\"placementOwnerContentLengthRange\":";
+    write_content_length_range_json(output, profile->placement_owner_content_lengths);
     output << ",\"removalPacketType\":" << profile->removal_packet_type;
     output << ",\"removalPacketTypeHex\":\"" << fixed_hex(profile->removal_packet_type, 4) << "\"";
     output << ",\"removalContentLengths\":";
-    write_size_array_json(output, profile->removal_content_lengths, profile->removal_content_length_count);
+    write_size_array_json(output, profile->removal_content_lengths);
+    output << ",\"removalContentLengthRange\":";
+    write_content_length_range_json(output, profile->removal_content_lengths);
     output << ",\"killerOwnerPacketType\":" << profile->killer_owner_packet_type;
     output << ",\"killerOwnerPacketTypeHex\":\"" << fixed_hex(profile->killer_owner_packet_type, 4) << "\"";
-    output << ",\"killerOwnerContentLengths\":["
-           << profile->killer_owner_content_lengths[0] << ','
-           << profile->killer_owner_content_lengths[1] << ']';
+    output << ",\"killerOwnerContentLengths\":";
+    write_size_array_json(output, profile->killer_owner_content_lengths);
+    output << ",\"killerOwnerContentLengthRange\":";
+    write_content_length_range_json(output, profile->killer_owner_content_lengths);
     output << ",\"championNetworkIdBase\":" << profile->champion_network_id_base;
     output << ",\"championNetworkIdBaseHex\":\"" << fixed_hex(profile->champion_network_id_base, 8) << "\"";
-    output << ",\"timestampToleranceMillis\":" << kWardTimestampToleranceMillis << "},";
+    output << ",\"timestampToleranceMillis\":" << kWardTimestampToleranceMillis;
+    write_decoder_profile_provenance_fields(output, decoder_profiles);
+    output << "},";
     output << "\"replay\":{\"gameLengthMillis\":";
     if (summary.game_length_millis > 0) output << summary.game_length_millis; else output << "null";
     output << ",\"lastGameChunkId\":";
@@ -4166,13 +4432,30 @@ collect_ward_position_research(
 [[nodiscard]] std::string
 extract_replay_ward_position_candidates_impl(
     const std::vector<std::uint8_t>& bytes,
-    const KillSourceInfo& source
+    const KillSourceInfo& source,
+    const DecoderProfileRegistry* decoder_profiles
 ) {
-    const ReplaySummary summary = parse_replay_bytes(bytes);
+    const ReplaySummary summary = decoder_profiles == nullptr
+        ? parse_replay_bytes(bytes)
+        : parse_replay_bytes(bytes, *decoder_profiles);
     const std::string version_group =
         packet_version_group(summary.game_version);
-    const WardPacketProfile* profile =
-        find_ward_packet_profile(version_group);
+    std::optional<WardPacketProfile> external_profile;
+    const WardPacketProfile* profile = nullptr;
+    if (decoder_profiles != nullptr) {
+        const DecoderVersionProfile* selected =
+            find_decoder_profile(*decoder_profiles, summary.game_version);
+        if (selected == nullptr || !selected->ward.has_value()) {
+            throw std::runtime_error(
+                "Unsupported replay version " + summary.game_version +
+                ": external decoder registry has no ward profile."
+            );
+        }
+        external_profile = adapt_ward_packet_profile(version_group, *selected->ward);
+        profile = &*external_profile;
+    } else {
+        profile = find_ward_packet_profile(version_group);
+    }
     if (profile == nullptr) {
         throw std::runtime_error(
             "Unsupported replay version " + summary.game_version +
@@ -4181,7 +4464,7 @@ extract_replay_ward_position_candidates_impl(
         );
     }
     const bool candidate_version_supported =
-        version_group == "16.9";
+        version_group == "16.9" && profile->research_spawn_available;
     const WardPositionResearchExtraction extraction =
         collect_ward_position_research(
             bytes,
@@ -4224,7 +4507,7 @@ extract_replay_ward_position_candidates_impl(
            << json_escape(summary.game_version) << "\"";
     output << ",\"versionGroup\":\""
            << json_escape(version_group) << "\"";
-    output << ",\"profile\":{\"channel\":1";
+    output << ",\"profile\":{\"channel\":" << static_cast<unsigned int>(profile->channel);
     output << ",\"primarySpawnPacketType\":"
            << profile->research_primary_spawn_packet_type;
     output << ",\"primarySpawnPacketTypeHex\":\""
@@ -4253,7 +4536,9 @@ extract_replay_ward_position_candidates_impl(
     output << ",\"timestampToleranceMillis\":"
            << kWardTimestampToleranceMillis;
     output << ",\"maximumPrecedingBlocks\":"
-           << kWardResearchMaximumPrecedingBlocks << "}";
+           << kWardResearchMaximumPrecedingBlocks;
+    write_decoder_profile_provenance_fields(output, decoder_profiles);
+    output << "}";
 
     output << ",\"hypotheses\":[";
     if (candidate_version_supported) {
@@ -4401,7 +4686,14 @@ extract_replay_ward_position_candidates_impl(
 }  // namespace
 
 std::string extract_replay_kills_json(const std::vector<std::uint8_t>& bytes) {
-    return extract_replay_kills_impl(bytes, {});
+    return extract_replay_kills_impl(bytes, {}, nullptr);
+}
+
+std::string extract_replay_kills_json(
+    const std::vector<std::uint8_t>& bytes,
+    const DecoderProfileRegistry& decoder_profiles
+) {
+    return extract_replay_kills_impl(bytes, {}, &decoder_profiles);
 }
 
 std::string extract_replay_kills_file_json(const std::string& path) {
@@ -4416,11 +4708,40 @@ std::string extract_replay_kills_file_json(const std::string& path) {
     source.match_id = source.replay_id;
     const std::size_t separator = source.match_id.find('-');
     if (separator != std::string::npos) source.match_id[separator] = '_';
-    return extract_replay_kills_impl(read_file_bytes(source.replay_path), source);
+    return extract_replay_kills_impl(read_file_bytes(source.replay_path), source, nullptr);
+}
+
+std::string extract_replay_kills_file_json(
+    const std::string& path,
+    const DecoderProfileRegistry& decoder_profiles
+) {
+    std::error_code error;
+    std::filesystem::path absolute = std::filesystem::absolute(path, error);
+    if (error) absolute = std::filesystem::path(path);
+    absolute = absolute.lexically_normal();
+    KillSourceInfo source;
+    source.has_file = true;
+    source.replay_path = absolute.string();
+    source.replay_id = absolute.stem().string();
+    source.match_id = source.replay_id;
+    const std::size_t separator = source.match_id.find('-');
+    if (separator != std::string::npos) source.match_id[separator] = '_';
+    return extract_replay_kills_impl(
+        read_file_bytes(source.replay_path),
+        source,
+        &decoder_profiles
+    );
 }
 
 std::string extract_replay_objectives_json(const std::vector<std::uint8_t>& bytes) {
-    return extract_replay_objectives_impl(bytes, {});
+    return extract_replay_objectives_impl(bytes, {}, nullptr);
+}
+
+std::string extract_replay_objectives_json(
+    const std::vector<std::uint8_t>& bytes,
+    const DecoderProfileRegistry& decoder_profiles
+) {
+    return extract_replay_objectives_impl(bytes, {}, &decoder_profiles);
 }
 
 std::string extract_replay_objectives_file_json(const std::string& path) {
@@ -4435,11 +4756,40 @@ std::string extract_replay_objectives_file_json(const std::string& path) {
     source.match_id = source.replay_id;
     const std::size_t separator = source.match_id.find('-');
     if (separator != std::string::npos) source.match_id[separator] = '_';
-    return extract_replay_objectives_impl(read_file_bytes(source.replay_path), source);
+    return extract_replay_objectives_impl(read_file_bytes(source.replay_path), source, nullptr);
+}
+
+std::string extract_replay_objectives_file_json(
+    const std::string& path,
+    const DecoderProfileRegistry& decoder_profiles
+) {
+    std::error_code error;
+    std::filesystem::path absolute = std::filesystem::absolute(path, error);
+    if (error) absolute = std::filesystem::path(path);
+    absolute = absolute.lexically_normal();
+    KillSourceInfo source;
+    source.has_file = true;
+    source.replay_path = absolute.string();
+    source.replay_id = absolute.stem().string();
+    source.match_id = source.replay_id;
+    const std::size_t separator = source.match_id.find('-');
+    if (separator != std::string::npos) source.match_id[separator] = '_';
+    return extract_replay_objectives_impl(
+        read_file_bytes(source.replay_path),
+        source,
+        &decoder_profiles
+    );
 }
 
 std::string extract_replay_wards_json(const std::vector<std::uint8_t>& bytes) {
-    return extract_replay_wards_impl(bytes, {});
+    return extract_replay_wards_impl(bytes, {}, nullptr);
+}
+
+std::string extract_replay_wards_json(
+    const std::vector<std::uint8_t>& bytes,
+    const DecoderProfileRegistry& decoder_profiles
+) {
+    return extract_replay_wards_impl(bytes, {}, &decoder_profiles);
 }
 
 std::string extract_replay_wards_file_json(const std::string& path) {
@@ -4454,13 +4804,46 @@ std::string extract_replay_wards_file_json(const std::string& path) {
     source.match_id = source.replay_id;
     const std::size_t separator = source.match_id.find('-');
     if (separator != std::string::npos) source.match_id[separator] = '_';
-    return extract_replay_wards_impl(read_file_bytes(source.replay_path), source);
+    return extract_replay_wards_impl(read_file_bytes(source.replay_path), source, nullptr);
+}
+
+std::string extract_replay_wards_file_json(
+    const std::string& path,
+    const DecoderProfileRegistry& decoder_profiles
+) {
+    std::error_code error;
+    std::filesystem::path absolute = std::filesystem::absolute(path, error);
+    if (error) absolute = std::filesystem::path(path);
+    absolute = absolute.lexically_normal();
+    KillSourceInfo source;
+    source.has_file = true;
+    source.replay_path = absolute.string();
+    source.replay_id = absolute.stem().string();
+    source.match_id = source.replay_id;
+    const std::size_t separator = source.match_id.find('-');
+    if (separator != std::string::npos) source.match_id[separator] = '_';
+    return extract_replay_wards_impl(
+        read_file_bytes(source.replay_path),
+        source,
+        &decoder_profiles
+    );
 }
 
 std::string extract_replay_ward_position_candidates_json(
     const std::vector<std::uint8_t>& bytes
 ) {
-    return extract_replay_ward_position_candidates_impl(bytes, {});
+    return extract_replay_ward_position_candidates_impl(bytes, {}, nullptr);
+}
+
+std::string extract_replay_ward_position_candidates_json(
+    const std::vector<std::uint8_t>& bytes,
+    const DecoderProfileRegistry& decoder_profiles
+) {
+    return extract_replay_ward_position_candidates_impl(
+        bytes,
+        {},
+        &decoder_profiles
+    );
 }
 
 std::string extract_replay_ward_position_candidates_file_json(
@@ -4482,7 +4865,31 @@ std::string extract_replay_ward_position_candidates_file_json(
     }
     return extract_replay_ward_position_candidates_impl(
         read_file_bytes(source.replay_path),
-        source
+        source,
+        nullptr
+    );
+}
+
+std::string extract_replay_ward_position_candidates_file_json(
+    const std::string& path,
+    const DecoderProfileRegistry& decoder_profiles
+) {
+    std::error_code error;
+    std::filesystem::path absolute =
+        std::filesystem::absolute(path, error);
+    if (error) absolute = std::filesystem::path(path);
+    absolute = absolute.lexically_normal();
+    KillSourceInfo source;
+    source.has_file = true;
+    source.replay_path = absolute.string();
+    source.replay_id = absolute.stem().string();
+    source.match_id = source.replay_id;
+    const std::size_t separator = source.match_id.find('-');
+    if (separator != std::string::npos) source.match_id[separator] = '_';
+    return extract_replay_ward_position_candidates_impl(
+        read_file_bytes(source.replay_path),
+        source,
+        &decoder_profiles
     );
 }
 
@@ -4544,6 +4951,16 @@ std::string replay_summary_to_json(const ReplaySummary& summary) {
     output << "\"segmentTableAvailable\":" << bool_to_json(summary.capabilities.segment_table_available) << ',';
     output << "\"payloadDecodingAvailable\":" << bool_to_json(summary.capabilities.payload_decoding_available) << ',';
     output << "\"movementTimelineAvailable\":" << bool_to_json(summary.capabilities.movement_timeline_available);
+    output << "},";
+
+    output << "\"decoderProfile\":{";
+    output << "\"origin\":\"" << json_escape(summary.decoder_profile.origin) << "\",";
+    output << "\"matched\":" << bool_to_json(summary.decoder_profile.matched) << ',';
+    output << "\"schema\":\"" << json_escape(summary.decoder_profile.schema) << "\",";
+    output << "\"registryId\":\"" << json_escape(summary.decoder_profile.registry_id) << "\",";
+    output << "\"revision\":\"" << json_escape(summary.decoder_profile.revision) << "\",";
+    output << "\"fingerprint\":\"" << json_escape(summary.decoder_profile.fingerprint) << "\",";
+    output << "\"versionGroup\":\"" << json_escape(summary.decoder_profile.version_group) << "\"";
     output << "},";
 
     output << "\"warnings\":[";

@@ -1,6 +1,6 @@
 # Replay Decoder Status
 
-Updated: 2026-07-17
+Updated: 2026-07-18
 Baseline commit: `fe39e13`
 
 This is the canonical handoff for the current decoder state. Read it before
@@ -32,6 +32,23 @@ execute, inspect, instrument, patch, or emulate installed League/Riot client or
 game binaries, running League/Riot processes, Vanguard, or Vanguard-managed
 data. Disabling or bypassing Vanguard is not part of this project.
 
+## External decoder profiles
+
+The productive version/build grammar is supplied through the strict external
+`rofl-replay-decoder-profiles/v1` asset at
+[`packages/rofl-core/profiles/replay-decoder-profiles.v1.json`](../packages/rofl-core/profiles/replay-decoder-profiles.v1.json).
+Native and Wasm use the same C++ loader/interpreter. The CLI accepts optional
+`--decoder-profiles`; the product web path passes canonical JSON bytes through
+the per-call Wasm ABI. Built-in profiles are only a backwards-compatibility
+fallback for callers without an external asset.
+
+Selection is exact by replay version/build. The loader has a 256 KiB limit,
+strict validation, fail-closed behavior, and selected-profile provenance
+fingerprinting. An opcode-only patch update needs a profile/frontend-asset
+update, not a Wasm rebuild. A new semantic grammar still requires C++ code and
+replay-only validation; profiles do not infer semantics autonomously. See
+[`decoder-profiles.md`](decoder-profiles.md).
+
 The intended result is an analytics-grade reconstruction, not a replacement
 for Riot's 3D game engine. The model should eventually include champion and
 entity movement, combat and objective events, wards and vision, inventories,
@@ -47,12 +64,15 @@ Wasm, and consumed by the Vue application unless noted otherwise.
 | --- | --- | --- |
 | Container | Metadata offsets, payload/header boundaries, match ID when present, chunk/keyframe counts, segment table, Zstd/footer records, and exact packet-block framing with timestamps, channels, packet types, block parameters, payload boundaries, and provenance | Container and packet framing are productive. `payloadDecodingAvailable` means payload packets are readable, not that every semantic stream is decoded. |
 | Participant summary | Champion, Riot ID name/tag, team, `teamPosition`/role (TOP, JUNGLE, and so on; not map coordinates), win, and final K/D/A, level, XP, lane CS, neutral CS, seven item slots, ward aggregates, gold earned, damage to champions, and vision score from embedded `statsJson` | Final match state only; these are not timelines. The productive native summary validates level, XP, both CS fields, all item slots, and both ward aggregates exactly for 6,110/6,110 values across all 470 corpus participants. `validatedFinalPlayerStatsAvailable` requires one of the eight validated patch groups and a complete valid field set; otherwise the product shows unavailable. `participantId = statsJson index + 1` is validated for the same participants. Gold remains replay-native cumulative earned gold and is not part of that exact 6,110-field claim. |
-| Champion kills | Timestamp, victim, killer or execution, ordered assists, network IDs, and source provenance in `rofl-replay-kills/v1` | 2,796/2,796 kills over 47 replays, maximum 1 ms delta; victim, killer, ordered assists, final K/D/A, and participant identity all validate exactly. Kill position, damage source, and gold/bounty are unresolved. |
-| Elite objectives | Timestamp, broad monster class, discriminator, and source provenance in `rofl-replay-objectives/v1` | 425/425 events over 47 replays with zero extras, missing events, or unknown emitted classes. Supports Dragon, Baron, Rift Herald, Horde/Void Grubs, and Atakhan where present. Killer/team, elemental dragon subtype, and position are unresolved. |
-| Ward lifecycle | Standard-ward placement timestamp, ward entity ID, owner participant, conservative ward-kill timestamp, linked ward entity ID, killer participant, and source provenance in `rofl-replay-wards/v1` | 6,168/6,168 placements with zero extras or missing events. 1,882/1,883 removals with zero extras; one ambiguous patch-16.9 packet form is deliberately omitted. Ward subtype, position, vision radius, and removal reason are unavailable. |
+| Champion kills | Timestamp, victim, killer or execution, ordered assists, network IDs, and source provenance in `rofl-replay-kills/v1` | Historical corpus: 2,796/2,796 kills over 47 replays, maximum 1 ms delta. External profile build `16.14.794.5912`: 684/684. Victim, killer, ordered assists, final K/D/A, and participant identity all validate exactly. Kill position, damage source, and gold/bounty are unresolved. |
+| Elite objectives | Timestamp, broad monster class, discriminator, and source provenance in `rofl-replay-objectives/v1` | Historical corpus: 425/425. External profile build `16.14.794.5912`: 99/99. Supports Dragon, Baron, Rift Herald, Horde/Void Grubs, and Atakhan where present. Killer/team, elemental dragon subtype, and position are unresolved. |
+| Ward lifecycle | Standard-ward placement timestamp, ward entity ID, owner participant, conservative ward-kill timestamp, linked ward entity ID, killer participant, and source provenance in `rofl-replay-wards/v1` | Historical corpus: 6,168/6,168 placements; 1,882/1,883 removals with zero extras. External profile build `16.14.794.5912`: 1,477/1,477 placements and 484/484 removals. Ward subtype, position, vision radius, and removal reason are unavailable. |
 
-The exact kill, objective, ward, and promoted final-summary profiles currently cover patch groups `15.22`,
-`15.23`, `15.24`, `16.1`, `16.5`, `16.6`, `16.7`, and `16.9`.
+The historical built-in coverage includes patch groups `15.22`, `15.23`,
+`15.24`, `16.1`, `16.5`, `16.6`, `16.7`, and `16.9`. The externally supplied
+profile additionally validates exact build `16.14.794.5912`: 684/684 kills,
+99/99 objectives, 1,477/1,477 ward placements, 484/484 ward removals, and
+1,300/1,300 final player-stat values.
 
 The browser currently renders the real Wasm participant summary, kill timeline,
 objective timeline, and ward lifecycle for the locally loaded replay.
@@ -74,6 +94,10 @@ Timeline kill anchors and is always labelled API-offline-fit / not promoted.
 No API file is read at runtime. This layer is not the productive ward position
 field and does not change `rofl-replay-wards/v1`, where `position` and
 `visionRadius` remain unavailable.
+
+The 16.14 external profile does not alter that boundary: its ward-position
+research has zero valid coordinate candidates, so ward position remains
+unavailable.
 
 ### Rich final-state export
 

@@ -59,6 +59,17 @@ Current state:
 - the Vite+ project/configuration is scoped to `apps/web`; the repo root is a workspace/build orchestration layer, not the frontend project root
 - `packages/rofl-core` contains the shared C++ replay parser core.
 - `packages/rofl-wasm` builds the C++ parser to WebAssembly.
+- decoder profiles use strict external schema `rofl-replay-decoder-profiles/v1`
+  from `packages/rofl-core/profiles/replay-decoder-profiles.v1.json`; one C++
+  loader/interpreter serves Native and Wasm, the CLI may take
+  `--decoder-profiles`, and the productive web path passes canonical JSON bytes
+  through the per-call Wasm ABI
+- external profiles select exact version/build, are limited to 256 KiB,
+  strictly validated, fail closed, and emit a provenance fingerprint; built-ins
+  are backwards-compatibility fallback only, not the productive web path
+- opcode-only updates require only profile/frontend-asset updates; semantic new
+  grammar still requires C++ work and replay-only validation—profiles never
+  autonomously discover semantics
 - `scripts/build-native.ps1` builds the native target.
 - `scripts/build-wasm.ps1` builds the Wasm target and publishes generated artifacts into `apps/web/src/generated/wasm`.
 - `replays/` contains local replay samples for manual testing.
@@ -81,6 +92,10 @@ Current state:
 - keyframe outer framing and champion ownership are exact, but the inner replication/component grammar and all proposed dynamic state fields remain unresolved
 - there is no valid replay-native movement or position decoder; the provisional `0x00DC` raw-coordinate interpretation was disproven and removed from the runtime
 - building and turret-plate signatures are correlations with false positives, not runtime decoders
+- external profile build `16.14.794.5912` validates 684/684 kills, 99/99
+  objectives, 1,477/1,477 ward placements, 484/484 ward removals, and
+  1,300/1,300 final player-stat values across the ten new saved replay/API
+  fixtures; ward position has zero valid candidates and remains unavailable
 
 Important browser caveat:
 
@@ -101,7 +116,9 @@ When starting a future session:
 
 1. read this file
 2. read `docs/decoder-status.md` for the canonical implementation and research status
-3. use `docs/reverse-engineering-index.md` to find focused evidence and reproduction commands
+3. read `docs/decoder-profiles.md` before changing profile loading, version/build
+   selection, Wasm profile bytes, or profile provenance
+4. use `docs/reverse-engineering-index.md` to find focused evidence and reproduction commands
 4. treat `docs/chat.md` only as historical product context, not current decoder truth
 5. inspect the actual repo state before assuming planned work is still unfinished
 6. prefer continuing from the current Wasm-backed frontend rather than rebuilding scaffolding

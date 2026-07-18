@@ -18,6 +18,7 @@ const EXPECTED_BY_VERSION = Object.freeze({
   "16.6": Object.freeze({ placements: 1449, decodedKills: 437, apiKills: 437 }),
   "16.7": Object.freeze({ placements: 985, decodedKills: 287, apiKills: 287 }),
   "16.9": Object.freeze({ placements: 2625, decodedKills: 745, apiKills: 746 }),
+  "16.14": Object.freeze({ placements: 1477, decodedKills: 484, apiKills: 484 }),
 });
 
 function parseArgs(argv) {
@@ -27,6 +28,7 @@ function parseArgs(argv) {
     apiRoot: path.join("replays", "api"),
     outputPath: path.join("artifacts", "replay-wards-corpus-validation.json"),
     timestampToleranceMillis: 1,
+    decoderProfilesPath: null,
   };
   for (let index = 2; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -34,6 +36,9 @@ function parseArgs(argv) {
     else if (arg === "--replay-dir" && index + 1 < argv.length) args.replayDir = argv[++index];
     else if (arg === "--api-root" && index + 1 < argv.length) args.apiRoot = argv[++index];
     else if (arg === "--output" && index + 1 < argv.length) args.outputPath = argv[++index];
+    else if (arg === "--decoder-profiles" && index + 1 < argv.length) {
+      args.decoderProfilesPath = argv[++index];
+    }
     else if (arg === "--timestamp-tolerance-ms" && index + 1 < argv.length) {
       args.timestampToleranceMillis = Number.parseInt(argv[++index], 10);
     } else if (arg === "--help" || arg === "-h") {
@@ -136,8 +141,10 @@ function discoverFixtures(args) {
     .sort((left, right) => left.replayId.localeCompare(right.replayId));
 }
 
-function extractWards(cliPath, replayPath) {
-  const result = spawnSync(cliPath, ["--extract-replay-wards-json", replayPath], {
+function extractWards(cliPath, replayPath, decoderProfilesPath) {
+  const command = ["--extract-replay-wards-json", replayPath];
+  if (decoderProfilesPath) command.push("--decoder-profiles", decoderProfilesPath);
+  const result = spawnSync(cliPath, command, {
     encoding: "utf8",
     windowsHide: true,
     maxBuffer: 64 * 1024 * 1024,
@@ -178,6 +185,10 @@ function main() {
   const args = parseArgs(process.argv);
   const cliPath = path.resolve(args.cliPath);
   if (!fs.existsSync(cliPath)) throw new Error(`Native CLI not found: ${cliPath}`);
+  const decoderProfilesPath = args.decoderProfilesPath ? path.resolve(args.decoderProfilesPath) : null;
+  if (decoderProfilesPath && !fs.existsSync(decoderProfilesPath)) {
+    throw new Error(`Decoder profile bundle not found: ${decoderProfilesPath}`);
+  }
   const fixtures = discoverFixtures(args);
   if (fixtures.length === 0) throw new Error("No replay/API fixture pairs were found.");
 
@@ -189,7 +200,7 @@ function main() {
     const group = versionGroup(match.info?.gameVersion);
     let extracted;
     try {
-      extracted = extractWards(cliPath, fixture.replayPath);
+      extracted = extractWards(cliPath, fixture.replayPath, decoderProfilesPath);
     } catch (error) {
       rows.push({ replayId: fixture.replayId, versionGroup: group, status: "fail", error: error.message });
       continue;
@@ -277,9 +288,12 @@ function main() {
     group.apiWardKillEventCount === group.expected.apiKills
   );
   const pass =
-    totals.replayCount === 47 && totals.passingReplayCount === 47 &&
-    totals.decodedPlacementEventCount === 6168 && totals.apiPlacementEventCount === 6168 &&
-    totals.decodedWardKillEventCount === 1882 && totals.apiWardKillEventCount === 1883 &&
+    totals.replayCount === (decoderProfilesPath ? 57 : 47) &&
+    totals.passingReplayCount === (decoderProfilesPath ? 57 : 47) &&
+    totals.decodedPlacementEventCount === (decoderProfilesPath ? 7645 : 6168) &&
+    totals.apiPlacementEventCount === (decoderProfilesPath ? 7645 : 6168) &&
+    totals.decodedWardKillEventCount === (decoderProfilesPath ? 2366 : 1882) &&
+    totals.apiWardKillEventCount === (decoderProfilesPath ? 2367 : 1883) &&
     totals.placementExtraDecodedEventCount === 0 && totals.placementMissingApiEventCount === 0 &&
     totals.killExtraDecodedEventCount === 0 && totals.killMissingApiEventCount === 1 &&
     versionTotalsPass;
@@ -292,6 +306,7 @@ function main() {
       riotApiRuntimeInput: false,
       offlineValidationLabels: ["WARD_PLACED", "WARD_KILL", "creatorId", "killerId", "wardType"],
       timestampToleranceMillis: args.timestampToleranceMillis,
+      decoderProfileBundle: decoderProfilesPath,
     },
     totals,
     versionTotalsPass,

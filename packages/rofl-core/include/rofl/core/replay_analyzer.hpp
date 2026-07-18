@@ -7,6 +7,8 @@
 #include <string_view>
 #include <vector>
 
+#include "rofl/core/decoder_profiles.hpp"
+
 namespace rofl::core {
 
 struct BuildInfo {
@@ -80,6 +82,16 @@ struct ReplayCapabilities {
     bool movement_timeline_available = false;
 };
 
+struct ReplayDecoderProfileInfo {
+    std::string origin = "built-in";
+    bool matched = false;
+    std::string schema;
+    std::string registry_id;
+    std::string revision;
+    std::string fingerprint;
+    std::string version_group;
+};
+
 struct ReplaySummary {
     std::string game_version;
     std::string metadata_json;
@@ -89,6 +101,7 @@ struct ReplaySummary {
     int last_keyframe_id = 0;
     ReplayContainerSummary container;
     ReplayCapabilities capabilities;
+    ReplayDecoderProfileInfo decoder_profile;
     std::vector<std::string> warnings;
     std::vector<PlayerSummary> players;
 };
@@ -97,7 +110,15 @@ struct ReplaySummary {
 [[nodiscard]] std::string describe_scaffold();
 [[nodiscard]] std::string normalize_version_label(std::string_view version);
 [[nodiscard]] ReplaySummary parse_replay_bytes(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] ReplaySummary parse_replay_bytes(
+    const std::vector<std::uint8_t>& bytes,
+    const DecoderProfileRegistry& decoder_profiles
+);
 [[nodiscard]] ReplaySummary parse_replay_file(const std::string& path);
+[[nodiscard]] ReplaySummary parse_replay_file(
+    const std::string& path,
+    const DecoderProfileRegistry& decoder_profiles
+);
 [[nodiscard]] std::string probe_replay_bytes(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] std::string probe_replay_file(const std::string& path);
 [[nodiscard]] std::string inspect_replay_bytes(const std::vector<std::uint8_t>& bytes);
@@ -106,13 +127,45 @@ struct ReplaySummary {
 [[nodiscard]] std::string summarize_packet_types_file_json(const std::string& path, std::string_view segment_type = "all", std::size_t top_types = 0);
 [[nodiscard]] std::string dump_packet_type_file_json(const std::string& path, std::uint16_t packet_type, std::string_view segment_type = "all", std::size_t max_blocks = 64);
 [[nodiscard]] std::string extract_replay_kills_json(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] std::string extract_replay_kills_json(
+    const std::vector<std::uint8_t>& bytes,
+    const DecoderProfileRegistry& decoder_profiles
+);
 [[nodiscard]] std::string extract_replay_kills_file_json(const std::string& path);
+[[nodiscard]] std::string extract_replay_kills_file_json(
+    const std::string& path,
+    const DecoderProfileRegistry& decoder_profiles
+);
 [[nodiscard]] std::string extract_replay_objectives_json(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] std::string extract_replay_objectives_json(
+    const std::vector<std::uint8_t>& bytes,
+    const DecoderProfileRegistry& decoder_profiles
+);
 [[nodiscard]] std::string extract_replay_objectives_file_json(const std::string& path);
+[[nodiscard]] std::string extract_replay_objectives_file_json(
+    const std::string& path,
+    const DecoderProfileRegistry& decoder_profiles
+);
 [[nodiscard]] std::string extract_replay_wards_json(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] std::string extract_replay_wards_json(
+    const std::vector<std::uint8_t>& bytes,
+    const DecoderProfileRegistry& decoder_profiles
+);
 [[nodiscard]] std::string extract_replay_wards_file_json(const std::string& path);
+[[nodiscard]] std::string extract_replay_wards_file_json(
+    const std::string& path,
+    const DecoderProfileRegistry& decoder_profiles
+);
 [[nodiscard]] std::string extract_replay_ward_position_candidates_json(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] std::string extract_replay_ward_position_candidates_json(
+    const std::vector<std::uint8_t>& bytes,
+    const DecoderProfileRegistry& decoder_profiles
+);
 [[nodiscard]] std::string extract_replay_ward_position_candidates_file_json(const std::string& path);
+[[nodiscard]] std::string extract_replay_ward_position_candidates_file_json(
+    const std::string& path,
+    const DecoderProfileRegistry& decoder_profiles
+);
 [[nodiscard]] std::string replay_summary_to_json(const ReplaySummary& summary);
 [[nodiscard]] std::string scan_replay_families_json(const std::vector<std::uint8_t>& bytes, std::size_t minimum_length, std::size_t minimum_records, std::size_t top_families, std::string_view segment_type = "chunk");
 [[nodiscard]] std::string scan_replay_families_file_json(const std::string& path, std::size_t minimum_length, std::size_t minimum_records, std::size_t top_families, std::string_view segment_type = "chunk");

@@ -62,15 +62,23 @@ export interface ReplayWardResult {
     placementOwnerPacketType: number;
     placementOwnerPacketTypeHex: string;
     placementOwnerContentLengths: number[];
+    placementOwnerContentLengthRange?: [number, number] | null;
     removalPacketType: number;
     removalPacketTypeHex: string;
     removalContentLengths: number[];
+    removalContentLengthRange?: [number, number] | null;
     killerOwnerPacketType: number;
     killerOwnerPacketTypeHex: string;
     killerOwnerContentLengths: number[];
+    killerOwnerContentLengthRange?: [number, number] | null;
     championNetworkIdBase: number;
     championNetworkIdBaseHex: string;
     timestampToleranceMillis: number;
+    origin?: "built-in" | "external";
+    schema?: string;
+    registryId?: string;
+    revision?: string;
+    fingerprint?: string;
   };
   replay: {
     gameLengthMillis: number | null;

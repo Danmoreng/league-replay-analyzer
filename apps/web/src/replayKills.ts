@@ -83,8 +83,15 @@ export interface ReplayKillResult {
     deathMarkerPacketTypeHex: string;
     championNetworkIdBase: number;
     championNetworkIdBaseHex: string;
+    deathMarkerContentLength?: number;
+    timestampToleranceMillis?: number;
     ownerOrder: string;
     executionRule: string;
+    origin?: "built-in" | "external";
+    schema?: string;
+    registryId?: string;
+    revision?: string;
+    fingerprint?: string;
   };
   replay: {
     gameLengthMillis: number | null;

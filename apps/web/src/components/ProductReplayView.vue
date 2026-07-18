@@ -11,11 +11,15 @@ import {
 } from "../replayObjectives";
 import {
   buildReplayWardPositionResearchMarkers,
+  buildReplayWardPositionReviews,
+  filterReplayWardPositionReviews,
   listReplayWardPositionHypotheses,
   replayWardPositionResearchCompatibility,
   wardFloatApiFitHypothesisId,
   type ReplayWardPositionResearchMarker,
   type ReplayWardPositionResearchResult,
+  type ReplayWardPositionReview,
+  type ReplayWardPositionReviewFilter,
 } from "../replayWardPositionResearch";
 import type { ReplayWardEvent, ReplayWardResult } from "../replayWards";
 
@@ -53,7 +57,9 @@ const wardResearchVisibility = ref<"all-placements" | "timeline">("all-placement
 const wardResearchShowActive = ref(true);
 const wardResearchShowPulses = ref(true);
 const selectedWardHypothesisId = ref("");
+const wardReviewFilter = ref<ReplayWardPositionReviewFilter>("all");
 const speeds = [1, 2, 4, 8];
+const wardReviewFilters = ["all", "mapped", "unresolved"] as const;
 
 const participantsById = computed(
   () => new Map(props.summary.players.map((player, index) => [index + 1, player])),
@@ -99,6 +105,25 @@ const selectedWardHypothesis = computed(
     wardHypotheses.value.find((hypothesis) => hypothesis.id === selectedWardHypothesisId.value) ??
     null,
 );
+const wardPositionReviews = computed(() => {
+  if (!props.wards || !props.wardPositionCandidates) return [];
+  return buildReplayWardPositionReviews(
+    props.wards,
+    props.wardPositionCandidates,
+    selectedWardHypothesisId.value || wardFloatApiFitHypothesisId,
+  );
+});
+const wardReviewCounts = computed(() => {
+  const mapped = wardPositionReviews.value.filter((review) => review.status === "mapped").length;
+  return {
+    all: wardPositionReviews.value.length,
+    mapped,
+    unresolved: wardPositionReviews.value.length - mapped,
+  };
+});
+const filteredWardPositionReviews = computed(() =>
+  filterReplayWardPositionReviews(wardPositionReviews.value, wardReviewFilter.value),
+);
 const wardResearchMarkers = computed(() => {
   if (
     !wardResearchEnabled.value ||
@@ -129,8 +154,8 @@ const wardResearchStatus = computed(() => {
   if (wardResearchBinding.value && !wardResearchBinding.value.compatible) {
     return wardResearchBinding.value.reason ?? "Research-Daten passen nicht zum Replay.";
   }
-  if (!wardHypotheses.value.length) return "Keine in-bounds Kandidaten in diesem Replay.";
-  return `${wardResearchMarkers.value.length} von ${selectedWardHypothesis.value?.placementCount ?? 0} Kandidaten sichtbar`;
+  if (!wardPositionReviews.value.length) return "Keine Ward-Platzierungen in diesem Replay.";
+  return `${wardReviewCounts.value.mapped}/${wardReviewCounts.value.all} Platzierungen mit experimentellem Koordinatenkandidaten · ${wardResearchMarkers.value.length} sichtbar`;
 });
 
 watch(
@@ -253,6 +278,13 @@ function wardResearchMarkerTitle(marker: ReplayWardPositionResearchMarker): stri
     ? ` · entfernt ${formatTime(marker.removalTimestampMillis)}`
     : " · Entfernung nicht sicher dekodiert";
   return `EXPERIMENTELL / API-OFFLINE-FIT / NICHT PROMOTET · ${participantChampion(marker.ownerParticipantId)} · platziert ${formatTime(marker.placementTimestampMillis)}${removal} · X ${marker.x.toFixed(1)} / Y ${marker.y.toFixed(1)} · ${marker.xSource} + ${marker.ySource}`;
+}
+
+function wardReviewEvidence(review: ReplayWardPositionReview): string {
+  if (review.candidate) {
+    return `X ${review.candidate.x.toFixed(1)} · Y ${review.candidate.y.toFixed(1)}`;
+  }
+  return review.missingEvidence[0] ?? "Koordinatenevidenz fehlt.";
 }
 
 function markerLeft(timestampMillis: number): string {
@@ -422,7 +454,7 @@ function onScrub(event: Event): void {
               :disabled="!wardResearchEnabled"
               @click="wardResearchVisibility = 'all-placements'"
             >
-              Alle Platzierungen
+              Alle mappbaren Kandidaten
             </button>
             <button
               :class="{ active: wardResearchVisibility === 'timeline' }"
@@ -505,6 +537,54 @@ function onScrub(event: Event): void {
           </div>
           <div class="map-badge"><span></span> Replay source · lokal</div>
         </div>
+        <section class="ward-review-panel" aria-label="Ward position research review">
+          <header class="ward-review-header">
+            <span>
+              <strong>WARD-PLACEMENT-PRÜFLISTE</strong>
+              <small>
+                {{ wardReviewCounts.mapped }}/{{ wardReviewCounts.all }} mit Kandidat ·
+                {{ wardReviewCounts.unresolved }} ohne Koordinate
+              </small>
+            </span>
+            <span class="ward-review-method">
+              Methode: {{ selectedWardHypothesisId || wardFloatApiFitHypothesisId }} · Confidence:
+              experimentell / API-offline-fit
+            </span>
+            <span class="ward-review-filters" aria-label="Ward review filter">
+              <button
+                v-for="filter in wardReviewFilters"
+                :key="filter"
+                :class="{ active: wardReviewFilter === filter }"
+                @click="wardReviewFilter = filter"
+              >
+                {{ filter === "all" ? "Alle" : filter === "mapped" ? "Mit Kandidat" : "Offen" }}
+                ({{ wardReviewCounts[filter] }})
+              </button>
+            </span>
+          </header>
+          <div v-if="filteredWardPositionReviews.length" class="ward-review-list">
+            <button
+              v-for="review in filteredWardPositionReviews"
+              :key="`${review.timestampMillis}-${review.wardEntityNetworkId}`"
+              class="ward-review-row"
+              :class="review.status"
+              :title="review.missingEvidence.join(' ') || wardReviewEvidence(review)"
+              @click="seek(review.timestampMillis)"
+            >
+              <time>{{ formatTime(review.timestampMillis) }}</time>
+              <span class="ward-review-owner">{{
+                participantChampion(review.ownerParticipantId)
+              }}</span>
+              <code>{{ review.wardEntityNetworkIdHex }}</code>
+              <b>{{ review.status === "mapped" ? "KANDIDAT" : "OFFEN" }}</b>
+              <small>{{ wardReviewEvidence(review) }}</small>
+            </button>
+          </div>
+          <p v-else class="ward-review-empty">
+            Keine Platzierungen für diesen Filter. Ohne passenden Research-Datensatz werden keine
+            Koordinaten geraten.
+          </p>
+        </section>
         <div class="event-window">
           <div class="event-window-header">
             <span>EREIGNISSE UM {{ formatTime(currentTime) }}</span>
@@ -1205,6 +1285,124 @@ function onScrub(event: Event): void {
   color: #ffb348;
   font-size: 0.54rem;
   letter-spacing: 0.08em;
+}
+.ward-review-panel {
+  margin-top: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 178, 72, 0.2);
+  border-radius: 8px;
+  background: #080d14;
+}
+.ward-review-header {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 9px;
+  border-bottom: 1px solid rgba(143, 171, 202, 0.1);
+}
+.ward-review-header > span:first-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.ward-review-header strong {
+  color: #ffc46f;
+  font-size: 0.56rem;
+  letter-spacing: 0.1em;
+}
+.ward-review-header small,
+.ward-review-method {
+  color: #7e8ca0;
+  font-size: 0.52rem;
+}
+.ward-review-method {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ward-review-filters {
+  display: flex;
+  gap: 3px;
+}
+.ward-review-filters button {
+  min-height: 25px;
+  padding: 3px 6px;
+  border: 1px solid rgba(143, 171, 202, 0.12);
+  border-radius: 4px;
+  background: #0c131d;
+  color: #77869a;
+  font-size: 0.51rem;
+  font-weight: 700;
+}
+.ward-review-filters button.active {
+  border-color: rgba(255, 178, 72, 0.3);
+  background: rgba(236, 155, 51, 0.16);
+  color: #ffc46f;
+}
+.ward-review-list {
+  max-height: 184px;
+  overflow-y: auto;
+}
+.ward-review-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 38px minmax(72px, 1fr) 78px 52px;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border: 0;
+  border-bottom: 1px solid rgba(143, 171, 202, 0.07);
+  border-left: 2px solid #b47c3d;
+  background: transparent;
+  color: #9baabd;
+  text-align: left;
+  font-size: 0.56rem;
+}
+.ward-review-row.mapped {
+  border-left-color: #4fe093;
+}
+.ward-review-row:hover,
+.ward-review-row:focus-visible {
+  background: rgba(255, 255, 255, 0.045);
+  outline: none;
+}
+.ward-review-row time,
+.ward-review-row code {
+  color: #78879a;
+  font-family: "Cascadia Code", monospace;
+}
+.ward-review-owner {
+  overflow: hidden;
+  color: #c2cfde;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ward-review-row b {
+  color: #dca55f;
+  font-size: 0.49rem;
+  letter-spacing: 0.06em;
+}
+.ward-review-row.mapped b {
+  color: #65dda1;
+}
+.ward-review-row small {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: #77869a;
+  font-size: 0.52rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ward-review-empty {
+  margin: 0;
+  padding: 14px;
+  color: #69778b;
+  font-size: 0.58rem;
+  text-align: center;
 }
 .map-unavailable {
   position: absolute;

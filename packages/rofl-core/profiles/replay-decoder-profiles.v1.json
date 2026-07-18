@@ -1,0 +1,462 @@
+{
+  "schema": "rofl-replay-decoder-profiles/v1",
+  "registryId": "league-replay-analyzer-offline-validated",
+  "revision": "2026-07-18",
+  "profiles": [
+    {
+      "versionGroup": "15.22",
+      "finalStatsValidated": true,
+      "kill": {
+        "channel": 1,
+        "ownerSequencePacketType": 21,
+        "deathMarkerPacketType": 468,
+        "deathMarkerContentLength": 5,
+        "championNetworkIdBase": 1073741977,
+        "timestampToleranceMillis": 1,
+        "ownerOrder": "victim-assists-killer"
+      },
+      "objective": {
+        "channel": 1,
+        "packetType": 734,
+        "minimumContentLength": 126,
+        "maximumContentLength": 126,
+        "discriminator": {
+          "origin": "start",
+          "offset": 124,
+          "values": [
+            { "value": 149, "class": "DRAGON" },
+            { "value": 103, "class": "ATAKHAN" },
+            { "value": 241, "class": "BARON_NASHOR" },
+            { "value": 82, "class": "RIFTHERALD" },
+            { "value": 126, "class": "HORDE" }
+          ]
+        }
+      },
+      "ward": {
+        "channel": 1,
+        "placementMarkerPacketType": 776,
+        "placementContentLength": 3,
+        "placementDiscriminatorOffset": 2,
+        "placementDiscriminatorValues": [9],
+        "placementOwnerPacketType": 1056,
+        "placementOwnerContentLengths": { "exact": [2, 3, 4] },
+        "removalPacketType": 23,
+        "removalContentLengths": { "exact": [21, 28, 29] },
+        "killerOwnerPacketType": 1102,
+        "killerOwnerContentLengths": { "exact": [6, 7] },
+        "championNetworkIdBase": 1073741977,
+        "researchSpawn": {
+          "primarySpawnPacketType": 220,
+          "companionSpawnPacketType": 188,
+          "primaryMinimumContentLength": 64,
+          "primaryMaximumContentLength": 73,
+          "companionContentLength": 63
+        }
+      }
+    },
+    {
+      "versionGroup": "15.23",
+      "finalStatsValidated": true,
+      "kill": {
+        "channel": 1,
+        "ownerSequencePacketType": 261,
+        "deathMarkerPacketType": 835,
+        "deathMarkerContentLength": 5,
+        "championNetworkIdBase": 1073743052,
+        "timestampToleranceMillis": 1,
+        "ownerOrder": "victim-assists-killer"
+      },
+      "objective": {
+        "channel": 1,
+        "packetType": 622,
+        "minimumContentLength": 126,
+        "maximumContentLength": 127,
+        "discriminator": {
+          "origin": "start",
+          "offset": 1,
+          "values": [
+            { "value": 108, "class": "DRAGON" },
+            { "value": 134, "class": "ATAKHAN" },
+            { "value": 114, "class": "BARON_NASHOR" },
+            { "value": 47, "class": "RIFTHERALD" },
+            { "value": 42, "class": "HORDE" }
+          ]
+        }
+      },
+      "ward": {
+        "channel": 1,
+        "placementMarkerPacketType": 872,
+        "placementContentLength": 3,
+        "placementDiscriminatorOffset": 2,
+        "placementDiscriminatorValues": [213],
+        "placementOwnerPacketType": 447,
+        "placementOwnerContentLengths": { "exact": [2, 3, 4] },
+        "removalPacketType": 522,
+        "removalContentLengths": { "exact": [28, 29] },
+        "killerOwnerPacketType": 651,
+        "killerOwnerContentLengths": { "exact": [6, 7] },
+        "championNetworkIdBase": 1073743052,
+        "researchSpawn": {
+          "primarySpawnPacketType": 915,
+          "companionSpawnPacketType": 96,
+          "primaryMinimumContentLength": 64,
+          "primaryMaximumContentLength": 73,
+          "companionContentLength": 63
+        }
+      }
+    },
+    {
+      "versionGroup": "15.24",
+      "finalStatsValidated": true,
+      "kill": {
+        "channel": 1,
+        "ownerSequencePacketType": 472,
+        "deathMarkerPacketType": 526,
+        "deathMarkerContentLength": 5,
+        "championNetworkIdBase": 1073742151,
+        "timestampToleranceMillis": 1,
+        "ownerOrder": "victim-assists-killer"
+      },
+      "objective": {
+        "channel": 1,
+        "packetType": 255,
+        "minimumContentLength": 126,
+        "maximumContentLength": 127,
+        "discriminator": {
+          "origin": "start",
+          "offset": 122,
+          "values": [
+            { "value": 43, "class": "DRAGON" },
+            { "value": 62, "class": "ATAKHAN" },
+            { "value": 247, "class": "RIFTHERALD" },
+            { "value": 198, "class": "HORDE" }
+          ]
+        }
+      },
+      "ward": {
+        "channel": 1,
+        "placementMarkerPacketType": 718,
+        "placementContentLength": 3,
+        "placementDiscriminatorOffset": 2,
+        "placementDiscriminatorValues": [225],
+        "placementOwnerPacketType": 551,
+        "placementOwnerContentLengths": { "exact": [2, 3, 4] },
+        "removalPacketType": 156,
+        "removalContentLengths": { "exact": [28, 29] },
+        "killerOwnerPacketType": 544,
+        "killerOwnerContentLengths": { "exact": [6, 7] },
+        "championNetworkIdBase": 1073742151,
+        "researchSpawn": {
+          "primarySpawnPacketType": 834,
+          "companionSpawnPacketType": 536,
+          "primaryMinimumContentLength": 63,
+          "primaryMaximumContentLength": 73,
+          "companionContentLength": 63
+        }
+      }
+    },
+    {
+      "versionGroup": "16.1",
+      "finalStatsValidated": true,
+      "kill": {
+        "channel": 1,
+        "ownerSequencePacketType": 726,
+        "deathMarkerPacketType": 147,
+        "deathMarkerContentLength": 5,
+        "championNetworkIdBase": 1073741997,
+        "timestampToleranceMillis": 1,
+        "ownerOrder": "victim-assists-killer"
+      },
+      "objective": {
+        "channel": 1,
+        "packetType": 963,
+        "minimumContentLength": 126,
+        "maximumContentLength": 127,
+        "discriminator": {
+          "origin": "start",
+          "offset": 122,
+          "values": [
+            { "value": 111, "class": "DRAGON" },
+            { "value": 178, "class": "BARON_NASHOR" },
+            { "value": 204, "class": "RIFTHERALD" },
+            { "value": 170, "class": "HORDE" }
+          ]
+        }
+      },
+      "ward": {
+        "channel": 1,
+        "placementMarkerPacketType": 895,
+        "placementContentLength": 3,
+        "placementDiscriminatorOffset": 2,
+        "placementDiscriminatorValues": [1, 146],
+        "placementOwnerPacketType": 821,
+        "placementOwnerContentLengths": { "exact": [2, 3, 4] },
+        "removalPacketType": 89,
+        "removalContentLengths": { "exact": [28, 29] },
+        "killerOwnerPacketType": 538,
+        "killerOwnerContentLengths": { "exact": [6, 7] },
+        "championNetworkIdBase": 1073741997,
+        "researchSpawn": {
+          "primarySpawnPacketType": 716,
+          "companionSpawnPacketType": 1064,
+          "primaryMinimumContentLength": 63,
+          "primaryMaximumContentLength": 73,
+          "companionContentLength": 63
+        }
+      }
+    },
+    {
+      "versionGroup": "16.5",
+      "finalStatsValidated": true,
+      "kill": {
+        "channel": 1,
+        "ownerSequencePacketType": 538,
+        "deathMarkerPacketType": 1007,
+        "deathMarkerContentLength": 5,
+        "championNetworkIdBase": 1073741997,
+        "timestampToleranceMillis": 1,
+        "ownerOrder": "victim-assists-killer"
+      },
+      "objective": {
+        "channel": 1,
+        "packetType": 808,
+        "minimumContentLength": 126,
+        "maximumContentLength": 127,
+        "discriminator": {
+          "origin": "start",
+          "offset": 3,
+          "values": [
+            { "value": 184, "class": "DRAGON" },
+            { "value": 30, "class": "BARON_NASHOR" },
+            { "value": 222, "class": "RIFTHERALD" }
+          ]
+        },
+        "contentLengthClasses": [
+          { "contentLength": 127, "class": "HORDE" }
+        ]
+      },
+      "ward": {
+        "channel": 1,
+        "placementMarkerPacketType": 1016,
+        "placementContentLength": 3,
+        "placementDiscriminatorOffset": 2,
+        "placementDiscriminatorValues": [80],
+        "placementOwnerPacketType": 591,
+        "placementOwnerContentLengths": { "exact": [2, 3, 4] },
+        "removalPacketType": 575,
+        "removalContentLengths": { "exact": [28, 29] },
+        "killerOwnerPacketType": 510,
+        "killerOwnerContentLengths": { "exact": [6, 7] },
+        "championNetworkIdBase": 1073741997,
+        "researchSpawn": {
+          "primarySpawnPacketType": 1063,
+          "companionSpawnPacketType": 494,
+          "primaryMinimumContentLength": 64,
+          "primaryMaximumContentLength": 73,
+          "companionContentLength": 63
+        }
+      }
+    },
+    {
+      "versionGroup": "16.6",
+      "finalStatsValidated": true,
+      "kill": {
+        "channel": 1,
+        "ownerSequencePacketType": 748,
+        "deathMarkerPacketType": 26,
+        "deathMarkerContentLength": 5,
+        "championNetworkIdBase": 1073741997,
+        "timestampToleranceMillis": 1,
+        "ownerOrder": "victim-assists-killer"
+      },
+      "objective": {
+        "channel": 1,
+        "packetType": 242,
+        "minimumContentLength": 126,
+        "maximumContentLength": 127,
+        "discriminator": {
+          "origin": "start",
+          "offset": 122,
+          "values": [
+            { "value": 255, "class": "DRAGON" },
+            { "value": 12, "class": "BARON_NASHOR" },
+            { "value": 199, "class": "RIFTHERALD" },
+            { "value": 31, "class": "HORDE" }
+          ]
+        }
+      },
+      "ward": {
+        "channel": 1,
+        "placementMarkerPacketType": 785,
+        "placementContentLength": 3,
+        "placementDiscriminatorOffset": 2,
+        "placementDiscriminatorValues": [20],
+        "placementOwnerPacketType": 285,
+        "placementOwnerContentLengths": { "exact": [2, 3, 4] },
+        "removalPacketType": 625,
+        "removalContentLengths": { "exact": [21, 28, 29] },
+        "killerOwnerPacketType": 1021,
+        "killerOwnerContentLengths": { "exact": [6, 7] },
+        "championNetworkIdBase": 1073741997,
+        "researchSpawn": {
+          "primarySpawnPacketType": 977,
+          "companionSpawnPacketType": 843,
+          "primaryMinimumContentLength": 63,
+          "primaryMaximumContentLength": 73,
+          "companionContentLength": 63
+        }
+      }
+    },
+    {
+      "versionGroup": "16.7",
+      "finalStatsValidated": true,
+      "kill": {
+        "channel": 1,
+        "ownerSequencePacketType": 82,
+        "deathMarkerPacketType": 1106,
+        "deathMarkerContentLength": 5,
+        "championNetworkIdBase": 1073741997,
+        "timestampToleranceMillis": 1,
+        "ownerOrder": "victim-assists-killer"
+      },
+      "objective": {
+        "channel": 1,
+        "packetType": 942,
+        "minimumContentLength": 126,
+        "maximumContentLength": 127,
+        "discriminator": {
+          "origin": "start",
+          "offset": 1,
+          "values": [
+            { "value": 71, "class": "DRAGON" },
+            { "value": 42, "class": "BARON_NASHOR" },
+            { "value": 8, "class": "RIFTHERALD" },
+            { "value": 170, "class": "HORDE" }
+          ]
+        }
+      },
+      "ward": {
+        "channel": 1,
+        "placementMarkerPacketType": 354,
+        "placementContentLength": 3,
+        "placementDiscriminatorOffset": 2,
+        "placementDiscriminatorValues": [128, 244, 247],
+        "placementOwnerPacketType": 827,
+        "placementOwnerContentLengths": { "exact": [2, 3, 4] },
+        "removalPacketType": 924,
+        "removalContentLengths": { "exact": [28, 29] },
+        "killerOwnerPacketType": 769,
+        "killerOwnerContentLengths": { "exact": [6, 7] },
+        "championNetworkIdBase": 1073741997,
+        "researchSpawn": {
+          "primarySpawnPacketType": 1097,
+          "companionSpawnPacketType": 537,
+          "primaryMinimumContentLength": 63,
+          "primaryMaximumContentLength": 73,
+          "companionContentLength": 63
+        }
+      }
+    },
+    {
+      "versionGroup": "16.9",
+      "finalStatsValidated": true,
+      "kill": {
+        "channel": 1,
+        "ownerSequencePacketType": 115,
+        "deathMarkerPacketType": 715,
+        "deathMarkerContentLength": 5,
+        "championNetworkIdBase": 1073741997,
+        "timestampToleranceMillis": 1,
+        "ownerOrder": "victim-assists-killer"
+      },
+      "objective": {
+        "channel": 1,
+        "packetType": 491,
+        "minimumContentLength": 132,
+        "maximumContentLength": 133,
+        "discriminator": {
+          "origin": "start",
+          "offset": 2,
+          "values": [
+            { "value": 69, "class": "DRAGON" },
+            { "value": 172, "class": "BARON_NASHOR" },
+            { "value": 118, "class": "RIFTHERALD" },
+            { "value": 123, "class": "HORDE" }
+          ]
+        }
+      },
+      "ward": {
+        "channel": 1,
+        "placementMarkerPacketType": 65,
+        "placementContentLength": 3,
+        "placementDiscriminatorOffset": 2,
+        "placementDiscriminatorValues": [176],
+        "placementOwnerPacketType": 1196,
+        "placementOwnerContentLengths": { "exact": [2, 3, 4] },
+        "removalPacketType": 742,
+        "removalContentLengths": { "exact": [28, 29] },
+        "killerOwnerPacketType": 758,
+        "killerOwnerContentLengths": { "exact": [6, 7] },
+        "championNetworkIdBase": 1073741997,
+        "researchSpawn": {
+          "primarySpawnPacketType": 214,
+          "companionSpawnPacketType": 429,
+          "primaryMinimumContentLength": 62,
+          "primaryMaximumContentLength": 73,
+          "companionContentLength": 63
+        }
+      }
+    },
+    {
+      "versionGroup": "16.14",
+      "acceptedGameVersions": ["16.14.794.5912"],
+      "finalStatsValidated": true,
+      "kill": {
+        "channel": 1,
+        "ownerSequencePacketType": 780,
+        "deathMarkerPacketType": 131,
+        "deathMarkerContentLength": 5,
+        "championNetworkIdBase": 1073741997,
+        "timestampToleranceMillis": 1,
+        "ownerOrder": "victim-assists-killer"
+      },
+      "objective": {
+        "channel": 1,
+        "packetType": 30,
+        "minimumContentLength": 136,
+        "maximumContentLength": 137,
+        "discriminator": {
+          "origin": "end",
+          "offset": 2,
+          "values": [
+            { "value": 168, "class": "DRAGON" },
+            { "value": 243, "class": "HORDE" },
+            { "value": 86, "class": "RIFTHERALD" },
+            { "value": 220, "class": "BARON_NASHOR" }
+          ]
+        }
+      },
+      "ward": {
+        "channel": 1,
+        "placementMarkerPacketType": 1000,
+        "placementContentLength": 3,
+        "placementDiscriminatorOffset": 2,
+        "placementDiscriminatorValues": [199],
+        "placementOwnerPacketType": 197,
+        "placementOwnerContentLengths": { "minimum": 113, "maximum": 141 },
+        "removalPacketType": 487,
+        "removalContentLengths": { "exact": [21, 28, 29] },
+        "killerOwnerPacketType": 535,
+        "killerOwnerContentLengths": { "exact": [10, 11] },
+        "championNetworkIdBase": 1073741997,
+        "researchSpawn": {
+          "primarySpawnPacketType": 550,
+          "companionSpawnPacketType": 648,
+          "primaryMinimumContentLength": 62,
+          "primaryMaximumContentLength": 73,
+          "companionContentLength": 63
+        }
+      }
+    }
+  ]
+}

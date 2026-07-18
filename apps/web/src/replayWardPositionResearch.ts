@@ -92,6 +92,35 @@ export interface ReplayWardPositionHypothesisSummary {
   coverage: number;
 }
 
+export type ReplayWardPositionReviewStatus = "mapped" | "unresolved";
+export type ReplayWardPositionReviewFilter = "all" | ReplayWardPositionReviewStatus;
+
+export interface ReplayWardPositionMissingLaneSymbol {
+  axis: "x" | "y";
+  primaryOffset: number;
+  sourceByte: number | null;
+  sourceByteHex: string | null;
+  reason: "payload-byte-missing" | "symbol-unmapped";
+}
+
+/**
+ * One review row for every productive ward placement. `candidate` is kept
+ * separate from the productive ward event and remains research-only.
+ */
+export interface ReplayWardPositionReview {
+  hypothesisId: string;
+  method: string;
+  confidence: "experimental-api-offline-fit";
+  status: ReplayWardPositionReviewStatus;
+  timestampMillis: number;
+  wardEntityNetworkId: number;
+  wardEntityNetworkIdHex: string;
+  ownerParticipantId: number;
+  candidate: ReplayWardPositionResearchCandidate | null;
+  missingLaneSymbols: ReplayWardPositionMissingLaneSymbol[];
+  missingEvidence: string[];
+}
+
 export type ReplayWardPositionMarkerState =
   | "all-placement"
   | "active-linked"
@@ -153,47 +182,139 @@ function parsePayloadHex(payloadHex: string): Uint8Array | null {
   return bytes;
 }
 
-function decodeApiFitAxis(payload: Uint8Array, axis: "x" | "y"): number | null {
+interface ApiFitAxisResolution {
+  value: number | null;
+  missingLaneSymbols: ReplayWardPositionMissingLaneSymbol[];
+}
+
+interface ApiFitCandidateResolution {
+  candidate: ReplayWardPositionResearchCandidate | null;
+  missingLaneSymbols: ReplayWardPositionMissingLaneSymbol[];
+  missingEvidence: string[];
+}
+
+function byteHex(value: number): string {
+  return `0x${value.toString(16).padStart(2, "0").toUpperCase()}`;
+}
+
+function decodeApiFitAxis(payload: Uint8Array, axis: "x" | "y"): ApiFitAxisResolution {
   const targetBytes: number[] = [];
+  const missingLaneSymbols: ReplayWardPositionMissingLaneSymbol[] = [];
   for (const lane of wardFloatSymbolModel16_9.model.lookup[axis]) {
     const sourceByte = payload[lane.primaryOffset];
-    if (sourceByte === undefined) return null;
+    if (sourceByte === undefined) {
+      missingLaneSymbols.push({
+        axis,
+        primaryOffset: lane.primaryOffset,
+        sourceByte: null,
+        sourceByteHex: null,
+        reason: "payload-byte-missing",
+      });
+      continue;
+    }
     const targetByte = lane.pairs.find((pair) => pair.from === sourceByte)?.to;
-    if (targetByte === undefined) return null;
+    if (targetByte === undefined) {
+      missingLaneSymbols.push({
+        axis,
+        primaryOffset: lane.primaryOffset,
+        sourceByte,
+        sourceByteHex: byteHex(sourceByte),
+        reason: "symbol-unmapped",
+      });
+      continue;
+    }
     targetBytes[lane.targetFloatByteIndex] = targetByte;
+  }
+
+  if (missingLaneSymbols.length > 0) {
+    return { value: null, missingLaneSymbols };
   }
 
   targetBytes[3] = wardFloatSymbolModel16_9.model.lookup.byte3.value;
   if (targetBytes.length !== 4 || targetBytes.some((value) => !Number.isInteger(value))) {
-    return null;
+    return { value: null, missingLaneSymbols };
   }
   const bytes = Uint8Array.from(targetBytes);
-  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getFloat32(0, false);
+  return {
+    value: new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getFloat32(0, false),
+    missingLaneSymbols,
+  };
+}
+
+function resolveApiFitCandidate(
+  research: ReplayWardPositionResearchResult,
+  placement: ReplayWardPositionResearchPlacement,
+): ApiFitCandidateResolution {
+  if (research.versionGroup !== wardFloatSymbolModel16_9.versionGroup) {
+    return {
+      candidate: null,
+      missingLaneSymbols: [],
+      missingEvidence: [
+        `Modell gilt nur für Patchgruppe ${wardFloatSymbolModel16_9.versionGroup}; geladen ist ${research.versionGroup}.`,
+      ],
+    };
+  }
+  const payloadHex = placement.spawnBlocks?.primary?.payloadHex;
+  if (!payloadHex) {
+    return {
+      candidate: null,
+      missingLaneSymbols: [],
+      missingEvidence: ["Primärer Ward-Spawn-Block fehlt."],
+    };
+  }
+  const payload = parsePayloadHex(payloadHex);
+  if (!payload) {
+    return {
+      candidate: null,
+      missingLaneSymbols: [],
+      missingEvidence: ["Payload des primären Ward-Spawn-Blocks ist ungültig."],
+    };
+  }
+  const x = decodeApiFitAxis(payload, "x");
+  const y = decodeApiFitAxis(payload, "y");
+  const missingLaneSymbols = [...x.missingLaneSymbols, ...y.missingLaneSymbols];
+  if (x.value === null || y.value === null) {
+    const missingEvidence = missingLaneSymbols.map((lane) =>
+      lane.reason === "symbol-unmapped"
+        ? `${lane.axis.toUpperCase()} p[${lane.primaryOffset}]=${lane.sourceByteHex} fehlt in der Symboltabelle.`
+        : `${lane.axis.toUpperCase()} p[${lane.primaryOffset}] fehlt im Spawn-Payload.`,
+    );
+    return {
+      candidate: null,
+      missingLaneSymbols,
+      missingEvidence:
+        missingEvidence.length > 0
+          ? missingEvidence
+          : ["Float32-Zielbytes konnten nicht vollständig zusammengesetzt werden."],
+    };
+  }
+
+  const candidate: ReplayWardPositionResearchCandidate = {
+    hypothesisId: wardFloatApiFitHypothesisId,
+    label: wardFloatApiFitHypothesis.label,
+    description: wardFloatApiFitHypothesis.description,
+    x: x.value,
+    y: y.value,
+    xSource: wardFloatApiFitXSource,
+    ySource: wardFloatApiFitYSource,
+  };
+  if (!isBoundedCandidate(candidate)) {
+    return {
+      candidate: null,
+      missingLaneSymbols: [],
+      missingEvidence: [
+        `Berechneter Kandidat (${candidate.x}, ${candidate.y}) liegt außerhalb 0–15.000 und wurde verworfen.`,
+      ],
+    };
+  }
+  return { candidate, missingLaneSymbols: [], missingEvidence: [] };
 }
 
 function decodeApiFitCandidate(
   research: ReplayWardPositionResearchResult,
   placement: ReplayWardPositionResearchPlacement,
 ): ReplayWardPositionResearchCandidate | null {
-  if (research.versionGroup !== wardFloatSymbolModel16_9.versionGroup) return null;
-  const payloadHex = placement.spawnBlocks?.primary?.payloadHex;
-  if (!payloadHex) return null;
-  const payload = parsePayloadHex(payloadHex);
-  if (!payload) return null;
-  const x = decodeApiFitAxis(payload, "x");
-  const y = decodeApiFitAxis(payload, "y");
-  if (x === null || y === null) return null;
-
-  const candidate: ReplayWardPositionResearchCandidate = {
-    hypothesisId: wardFloatApiFitHypothesisId,
-    label: wardFloatApiFitHypothesis.label,
-    description: wardFloatApiFitHypothesis.description,
-    x,
-    y,
-    xSource: wardFloatApiFitXSource,
-    ySource: wardFloatApiFitYSource,
-  };
-  return isBoundedCandidate(candidate) ? candidate : null;
+  return resolveApiFitCandidate(research, placement).candidate;
 }
 
 function gameVersionGroup(gameVersion: string): string {
@@ -246,6 +367,75 @@ export function replayWardPositionResearchCompatibility(
   return { compatible: true, reason: null };
 }
 
+export function buildReplayWardPositionReviews(
+  wards: ReplayWardResult,
+  research: ReplayWardPositionResearchResult,
+  hypothesisId = wardFloatApiFitHypothesisId,
+): ReplayWardPositionReview[] {
+  if (!replayWardPositionResearchCompatibility(wards, research).compatible) return [];
+
+  const researchPlacementsById = new Map<number, ReplayWardPositionResearchPlacement[]>();
+  for (const placement of research.placements) {
+    const placements = researchPlacementsById.get(placement.wardEntityNetworkId) ?? [];
+    placements.push(placement);
+    researchPlacementsById.set(placement.wardEntityNetworkId, placements);
+  }
+
+  return wards.events
+    .filter((event): event is ReplayWardPlacedEvent => event.type === "WARD_PLACED")
+    .map((decodedPlacement) => {
+      const researchPlacement = researchPlacementsById
+        .get(decodedPlacement.wardEntityNetworkId)
+        ?.find((placement) => matchesProductivePlacement(decodedPlacement, placement));
+
+      if (!researchPlacement) {
+        return {
+          hypothesisId,
+          method: hypothesisId,
+          confidence: "experimental-api-offline-fit" as const,
+          status: "unresolved" as const,
+          timestampMillis: decodedPlacement.timestampMillis,
+          wardEntityNetworkId: decodedPlacement.wardEntityNetworkId,
+          wardEntityNetworkIdHex: decodedPlacement.wardEntityNetworkIdHex,
+          ownerParticipantId: decodedPlacement.ownerParticipantId,
+          candidate: null,
+          missingLaneSymbols: [],
+          missingEvidence: ["Passender Research-Spawn-Datensatz fehlt."],
+        };
+      }
+
+      const resolution =
+        hypothesisId === wardFloatApiFitHypothesisId
+          ? resolveApiFitCandidate(research, researchPlacement)
+          : {
+              candidate: null,
+              missingLaneSymbols: [],
+              missingEvidence: [`Research-Methode ${hypothesisId} wird nicht dargestellt.`],
+            };
+      return {
+        hypothesisId,
+        method: hypothesisId,
+        confidence: "experimental-api-offline-fit" as const,
+        status: resolution.candidate ? ("mapped" as const) : ("unresolved" as const),
+        timestampMillis: decodedPlacement.timestampMillis,
+        wardEntityNetworkId: decodedPlacement.wardEntityNetworkId,
+        wardEntityNetworkIdHex: decodedPlacement.wardEntityNetworkIdHex,
+        ownerParticipantId: decodedPlacement.ownerParticipantId,
+        candidate: resolution.candidate,
+        missingLaneSymbols: resolution.missingLaneSymbols,
+        missingEvidence: resolution.missingEvidence,
+      };
+    })
+    .sort((left, right) => left.timestampMillis - right.timestampMillis);
+}
+
+export function filterReplayWardPositionReviews(
+  reviews: ReplayWardPositionReview[],
+  filter: ReplayWardPositionReviewFilter,
+): ReplayWardPositionReview[] {
+  return filter === "all" ? reviews : reviews.filter((review) => review.status === filter);
+}
+
 export function listReplayWardPositionHypotheses(
   wards: ReplayWardResult,
   research: ReplayWardPositionResearchResult,
@@ -263,7 +453,22 @@ export function listReplayWardPositionHypotheses(
   const hypotheses = new Map<
     string,
     ReplayWardPositionHypothesisSummary & { placementIds: Set<number> }
-  >();
+  >([
+    [
+      wardFloatApiFitHypothesis.id,
+      {
+        id: wardFloatApiFitHypothesis.id,
+        xSource: wardFloatApiFitXSource,
+        ySource: wardFloatApiFitYSource,
+        label: wardFloatApiFitHypothesis.label ?? wardFloatApiFitHypothesis.id,
+        description: wardFloatApiFitHypothesis.description ?? null,
+        candidateCount: 0,
+        placementCount: 0,
+        coverage: 0,
+        placementIds: new Set<number>(),
+      },
+    ],
+  ]);
 
   for (const placement of research.placements) {
     const decodedPlacement = placementsById.get(placement.wardEntityNetworkId);

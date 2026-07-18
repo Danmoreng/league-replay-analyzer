@@ -16,12 +16,17 @@ const FIELD_MAPPINGS = Object.freeze([
   { nativeKey: "wardsKilled", apiKey: "wardsKilled", read: (participant) => participant.wardsKilled },
 ]);
 
+const EXPECTED_BY_VERSION = Object.freeze({
+  "16.14": Object.freeze({ participantCount: 100, fieldCount: 1300 }),
+});
+
 function parseArgs(argv) {
   const args = {
     cliPath: path.join("build", "packages", "rofl-core", "rofl_core_cli.exe"),
     replayDir: "replays",
     apiRoot: path.join("replays", "api"),
     outputPath: path.join("artifacts", "replay-final-player-stats-corpus-validation.json"),
+    decoderProfilesPath: null,
   };
   for (let index = 2; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -29,6 +34,9 @@ function parseArgs(argv) {
     else if (arg === "--replay-dir" && index + 1 < argv.length) args.replayDir = argv[++index];
     else if (arg === "--api-root" && index + 1 < argv.length) args.apiRoot = argv[++index];
     else if (arg === "--output" && index + 1 < argv.length) args.outputPath = argv[++index];
+    else if (arg === "--decoder-profiles" && index + 1 < argv.length) {
+      args.decoderProfilesPath = argv[++index];
+    }
     else throw new Error(`Unknown or incomplete argument: ${arg}`);
   }
   return args;
@@ -48,8 +56,10 @@ function discoverFixtures(args) {
     .sort((left, right) => left.replayId.localeCompare(right.replayId));
 }
 
-function extractNativeSummary(cliPath, replayPath) {
-  const result = spawnSync(cliPath, ["--summary", replayPath], {
+function extractNativeSummary(cliPath, replayPath, decoderProfilesPath) {
+  const command = ["--summary", replayPath];
+  if (decoderProfilesPath) command.push("--decoder-profiles", decoderProfilesPath);
+  const result = spawnSync(cliPath, command, {
     encoding: "utf8",
     windowsHide: true,
     maxBuffer: 64 * 1024 * 1024,
@@ -69,13 +79,17 @@ function main() {
   const args = parseArgs(process.argv);
   const cliPath = path.resolve(args.cliPath);
   if (!fs.existsSync(cliPath)) throw new Error(`Native CLI not found: ${cliPath}`);
+  const decoderProfilesPath = args.decoderProfilesPath ? path.resolve(args.decoderProfilesPath) : null;
+  if (decoderProfilesPath && !fs.existsSync(decoderProfilesPath)) {
+    throw new Error(`Decoder profile bundle not found: ${decoderProfilesPath}`);
+  }
   const fixtures = discoverFixtures(args);
   if (fixtures.length === 0) throw new Error("No replay/API fixture pairs were found.");
 
   const rows = fixtures.map((fixture) => {
     let summary;
     try {
-      summary = extractNativeSummary(cliPath, fixture.replayPath);
+      summary = extractNativeSummary(cliPath, fixture.replayPath, decoderProfilesPath);
     } catch (error) {
       return {
         replayId: fixture.replayId,
@@ -155,25 +169,54 @@ function main() {
     expectedFieldCount: rows.reduce((sum, row) => sum + row.expectedFieldCount, 0),
     mismatchCount: rows.reduce((sum, row) => sum + row.mismatchCount, 0),
   };
-  const validated = totals.replayCount === 47 && totals.passingReplayCount === 47 &&
-    totals.capabilityAvailableReplayCount === 47 && totals.participantCount === 470 &&
-    totals.exactFieldCount === 6110 && totals.exactFieldCount === totals.expectedFieldCount &&
+  const byVersionGroup = Object.entries(Object.groupBy(rows, (row) => row.versionGroup ?? "unknown"))
+    .map(([group, groupRows]) => ({
+      versionGroup: group,
+      replayCount: groupRows.length,
+      passingReplayCount: groupRows.filter((row) => row.status === "pass").length,
+      participantCount: groupRows.reduce((sum, row) => sum + row.participantCount, 0),
+      exactFieldCount: groupRows.reduce((sum, row) => sum + row.exactFieldCount, 0),
+      expectedFieldCount: groupRows.reduce((sum, row) => sum + row.expectedFieldCount, 0),
+      mismatchCount: groupRows.reduce((sum, row) => sum + row.mismatchCount, 0),
+      expected: EXPECTED_BY_VERSION[group] ?? null,
+    }))
+    .sort((left, right) => left.versionGroup.localeCompare(right.versionGroup, undefined, { numeric: true }));
+  const expectedTotals = decoderProfilesPath
+    ? { replayCount: 57, participantCount: 570, fieldCount: 7410 }
+    : { replayCount: 47, participantCount: 470, fieldCount: 6110 };
+  const validated = totals.replayCount === expectedTotals.replayCount &&
+    totals.passingReplayCount === expectedTotals.replayCount &&
+    totals.capabilityAvailableReplayCount === expectedTotals.replayCount &&
+    totals.participantCount === expectedTotals.participantCount &&
+    totals.exactFieldCount === expectedTotals.fieldCount && totals.exactFieldCount === totals.expectedFieldCount &&
     totals.mismatchCount === 0;
+  const versionTotalsPass = byVersionGroup.every((group) =>
+    !group.expected || (
+      group.participantCount === group.expected.participantCount &&
+      group.exactFieldCount === group.expected.fieldCount &&
+      group.expectedFieldCount === group.expected.fieldCount &&
+      group.mismatchCount === 0
+    )
+  );
   const output = {
     schema: "rofl-replay-final-player-stats-corpus-validation/v2",
     generatedAtUtc: new Date().toISOString(),
-    status: validated ? "validated" : "failed",
+    status: validated && versionTotalsPass ? "validated" : "failed",
     methodology: {
       runtimeCandidateInput: "Productive native --summary JSON generated from the ROFL only.",
       requiredCapability: "validatedFinalPlayerStatsAvailable=true",
       riotFixtureRole: "Offline final-field validation only; never a runtime input.",
       participantIdentity: "Native summary players array index + 1.",
       semantics: "Final match state only; no timeseries or transaction history is inferred.",
+      decoderProfileBundle: decoderProfilesPath,
       fieldMappings: Object.fromEntries(
         FIELD_MAPPINGS.map(({ nativeKey, apiKey }) => [nativeKey, apiKey]),
       ),
     },
     totals,
+    expectedTotals,
+    versionTotalsPass,
+    byVersionGroup,
     rows,
   };
   const outputPath = path.resolve(args.outputPath);
@@ -185,7 +228,7 @@ function main() {
     `capability=${totals.capabilityAvailableReplayCount}/${totals.replayCount}, ` +
     `participants=${totals.participantCount}, fields=${totals.exactFieldCount}/${totals.expectedFieldCount}`,
   );
-  if (!validated) process.exitCode = 1;
+  if (!validated || !versionTotalsPass) process.exitCode = 1;
 }
 
 main();

@@ -7,6 +7,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "rofl/core/replay_analyzer.hpp"
@@ -55,6 +56,74 @@ void log_error(const std::string& message) {
 #else
     std::cerr << message << '\n';
 #endif
+}
+
+[[nodiscard]] std::string json_escape(std::string_view input) {
+    std::string escaped;
+    escaped.reserve(input.size());
+    for (const char character : input) {
+        switch (character) {
+            case '\\': escaped += "\\\\"; break;
+            case '"': escaped += "\\\""; break;
+            case '\n': escaped += "\\n"; break;
+            case '\r': escaped += "\\r"; break;
+            case '\t': escaped += "\\t"; break;
+            default:
+                escaped += static_cast<unsigned char>(character) < 0x20U ? '?' : character;
+        }
+    }
+    return escaped;
+}
+
+[[nodiscard]] const char* allocate_result(std::string_view json) {
+    char* output = new char[json.size() + 1];
+    std::memcpy(output, json.data(), json.size());
+    output[json.size()] = '\0';
+    return output;
+}
+
+[[nodiscard]] const char* profile_error_result(std::string_view message) {
+    return allocate_result(std::string{"{\"error\":\""} + json_escape(message) + "\"}");
+}
+
+template <typename Decode>
+[[nodiscard]] const char* run_with_decoder_profiles(
+    const std::uint8_t* replay_data,
+    int replay_size,
+    const std::uint8_t* profile_data,
+    int profile_size,
+    std::string_view operation,
+    Decode&& decode
+) {
+    try {
+        if (replay_data == nullptr || replay_size <= 0) {
+            return profile_error_result("Replay buffer was empty while " + std::string(operation) + ".");
+        }
+        if (profile_data == nullptr || profile_size <= 0) {
+            return profile_error_result("Decoder profile registry buffer was empty.");
+        }
+
+        const std::string profile_json(
+            reinterpret_cast<const char*>(profile_data),
+            static_cast<std::size_t>(profile_size)
+        );
+        const auto load_result = rofl::core::parse_decoder_profile_registry_json(profile_json);
+        if (!load_result.ok()) {
+            const std::string error = load_result.errors.empty()
+                ? "Decoder profile registry was rejected."
+                : "Decoder profile registry was rejected: " + load_result.errors.front();
+            return profile_error_result(error);
+        }
+
+        const std::vector<std::uint8_t> replay_bytes(replay_data, replay_data + replay_size);
+        return allocate_result(decode(replay_bytes, *load_result.registry));
+    } catch (const std::exception& exception) {
+        log_error(
+            "[lra/wasm] " + std::string(operation) +
+            " with decoder profiles failed: " + exception.what()
+        );
+        return profile_error_result(exception.what());
+    }
 }
 
 }  // namespace
@@ -149,6 +218,26 @@ EMSCRIPTEN_KEEPALIVE const char* lra_extract_replay_kills_buffer(
     }
 }
 
+EMSCRIPTEN_KEEPALIVE const char* lra_parse_replay_buffer_with_profiles(
+    const std::uint8_t* replay_data,
+    int replay_size,
+    const std::uint8_t* profile_data,
+    int profile_size
+) {
+    return run_with_decoder_profiles(
+        replay_data,
+        replay_size,
+        profile_data,
+        profile_size,
+        "parsing replay",
+        [](const auto& bytes, const auto& profiles) {
+            return rofl::core::replay_summary_to_json(
+                rofl::core::parse_replay_bytes(bytes, profiles)
+            );
+        }
+    );
+}
+
 EMSCRIPTEN_KEEPALIVE const char* lra_extract_replay_objectives_buffer(
     const std::uint8_t* data,
     int size
@@ -177,6 +266,24 @@ EMSCRIPTEN_KEEPALIVE const char* lra_extract_replay_objectives_buffer(
     }
 }
 
+EMSCRIPTEN_KEEPALIVE const char* lra_extract_replay_kills_buffer_with_profiles(
+    const std::uint8_t* replay_data,
+    int replay_size,
+    const std::uint8_t* profile_data,
+    int profile_size
+) {
+    return run_with_decoder_profiles(
+        replay_data,
+        replay_size,
+        profile_data,
+        profile_size,
+        "decoding kills",
+        [](const auto& bytes, const auto& profiles) {
+            return rofl::core::extract_replay_kills_json(bytes, profiles);
+        }
+    );
+}
+
 EMSCRIPTEN_KEEPALIVE const char* lra_extract_replay_wards_buffer(
     const std::uint8_t* data,
     int size
@@ -203,6 +310,24 @@ EMSCRIPTEN_KEEPALIVE const char* lra_extract_replay_wards_buffer(
         std::memcpy(output, error_json.c_str(), error_json.size() + 1);
         return output;
     }
+}
+
+EMSCRIPTEN_KEEPALIVE const char* lra_extract_replay_objectives_buffer_with_profiles(
+    const std::uint8_t* replay_data,
+    int replay_size,
+    const std::uint8_t* profile_data,
+    int profile_size
+) {
+    return run_with_decoder_profiles(
+        replay_data,
+        replay_size,
+        profile_data,
+        profile_size,
+        "decoding objectives",
+        [](const auto& bytes, const auto& profiles) {
+            return rofl::core::extract_replay_objectives_json(bytes, profiles);
+        }
+    );
 }
 
 EMSCRIPTEN_KEEPALIVE const char*
@@ -252,6 +377,46 @@ lra_extract_replay_ward_position_candidates_buffer(
         );
         return output;
     }
+}
+
+EMSCRIPTEN_KEEPALIVE const char* lra_extract_replay_wards_buffer_with_profiles(
+    const std::uint8_t* replay_data,
+    int replay_size,
+    const std::uint8_t* profile_data,
+    int profile_size
+) {
+    return run_with_decoder_profiles(
+        replay_data,
+        replay_size,
+        profile_data,
+        profile_size,
+        "decoding wards",
+        [](const auto& bytes, const auto& profiles) {
+            return rofl::core::extract_replay_wards_json(bytes, profiles);
+        }
+    );
+}
+
+EMSCRIPTEN_KEEPALIVE const char*
+lra_extract_replay_ward_position_candidates_buffer_with_profiles(
+    const std::uint8_t* replay_data,
+    int replay_size,
+    const std::uint8_t* profile_data,
+    int profile_size
+) {
+    return run_with_decoder_profiles(
+        replay_data,
+        replay_size,
+        profile_data,
+        profile_size,
+        "deriving ward position research candidates",
+        [](const auto& bytes, const auto& profiles) {
+            return rofl::core::extract_replay_ward_position_candidates_json(
+                bytes,
+                profiles
+            );
+        }
+    );
 }
 
 EMSCRIPTEN_KEEPALIVE const char* lra_scan_replay_families_buffer(

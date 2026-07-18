@@ -63,6 +63,16 @@ export interface ReplayCapabilities {
   movementTimelineAvailable: boolean;
 }
 
+export interface ReplayDecoderProfileInfo {
+  origin: "built-in" | "external";
+  matched: boolean;
+  schema: string;
+  registryId: string;
+  revision: string;
+  fingerprint: string;
+  versionGroup: string;
+}
+
 export interface ReplaySummary {
   gameVersion: string;
   fileSize: number;
@@ -72,6 +82,7 @@ export interface ReplaySummary {
   playerCount: number;
   container: ReplayContainerSummary;
   capabilities: ReplayCapabilities;
+  decoderProfile?: ReplayDecoderProfileInfo;
   warnings: string[];
   players: PlayerSummary[];
   metadataJson: string;
@@ -92,6 +103,7 @@ const validatedFinalPlayerStatVersionGroups = new Set([
   "16.6",
   "16.7",
   "16.9",
+  "16.14",
 ]);
 const validatedFinalPlayerStatKeys = [
   "LEVEL",

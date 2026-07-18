@@ -3,6 +3,8 @@ import { describe, expect, it } from "vite-plus/test";
 import type { ReplayWardResult } from "./replayWards";
 import {
   buildReplayWardPositionResearchMarkers,
+  buildReplayWardPositionReviews,
+  filterReplayWardPositionReviews,
   listReplayWardPositionHypotheses,
   replayWardPositionResearchCompatibility,
   wardFloatApiFitHypothesisId,
@@ -27,6 +29,8 @@ const wards = {
       wardEntityNetworkId: 101,
       wardEntityNetworkIdHex: "0x00000065",
       ownerParticipantId: 1,
+      wardType: null,
+      position: null,
     },
     {
       type: "WARD_KILL",
@@ -34,6 +38,9 @@ const wards = {
       wardEntityNetworkId: 101,
       wardEntityNetworkIdHex: "0x00000065",
       killerParticipantId: 6,
+      wardType: null,
+      position: null,
+      removalReason: null,
     },
     {
       type: "WARD_PLACED",
@@ -41,6 +48,8 @@ const wards = {
       wardEntityNetworkId: 102,
       wardEntityNetworkIdHex: "0x00000066",
       ownerParticipantId: 7,
+      wardType: null,
+      position: null,
     },
   ],
 } as ReplayWardResult;
@@ -153,6 +162,105 @@ describe("ward position research presentation", () => {
         coverage: 0.5,
       },
     ]);
+  });
+
+  it("builds one review row per productive placement without changing productive positions", () => {
+    const reviews = buildReplayWardPositionReviews(wards, research);
+
+    expect(reviews).toHaveLength(2);
+    expect(reviews[0]).toMatchObject({
+      status: "mapped",
+      method: wardFloatApiFitHypothesisId,
+      confidence: "experimental-api-offline-fit",
+      timestampMillis: 10_000,
+      wardEntityNetworkId: 101,
+      ownerParticipantId: 1,
+      candidate: { x: 7_016, y: 7_803 },
+      missingLaneSymbols: [],
+      missingEvidence: [],
+    });
+    expect(reviews[1]).toMatchObject({
+      status: "unresolved",
+      timestampMillis: 20_000,
+      wardEntityNetworkId: 102,
+      ownerParticipantId: 7,
+      candidate: null,
+      missingLaneSymbols: [],
+      missingEvidence: ["Primärer Ward-Spawn-Block fehlt."],
+    });
+    expect(wards.events[0]).toMatchObject({ type: "WARD_PLACED", position: null });
+    expect(filterReplayWardPositionReviews(reviews, "all")).toHaveLength(2);
+    expect(
+      filterReplayWardPositionReviews(reviews, "mapped").map(
+        (review) => review.wardEntityNetworkId,
+      ),
+    ).toEqual([101]);
+    expect(
+      filterReplayWardPositionReviews(reviews, "unresolved").map(
+        (review) => review.wardEntityNetworkId,
+      ),
+    ).toEqual([102]);
+  });
+
+  it("reports exact unknown lane symbols instead of guessing a coordinate", () => {
+    const unresolvedResearch = {
+      ...research,
+      placements: research.placements.map((placement, index) =>
+        index !== 1
+          ? placement
+          : {
+              ...placement,
+              spawnBlocks: {
+                primary: {
+                  ...research.placements[0].spawnBlocks?.primary,
+                  payloadHex: "ff".repeat(16),
+                },
+                companion: null,
+              },
+            },
+      ),
+    } as ReplayWardPositionResearchResult;
+
+    const review = buildReplayWardPositionReviews(wards, unresolvedResearch)[1];
+    expect(review).toMatchObject({ status: "unresolved", candidate: null });
+    expect(review.missingLaneSymbols).toEqual(
+      expect.arrayContaining([
+        {
+          axis: "x",
+          primaryOffset: 8,
+          sourceByte: 255,
+          sourceByteHex: "0xFF",
+          reason: "symbol-unmapped",
+        },
+        {
+          axis: "y",
+          primaryOffset: 12,
+          sourceByte: 255,
+          sourceByteHex: "0xFF",
+          reason: "symbol-unmapped",
+        },
+      ]),
+    );
+    expect(review.missingEvidence).toEqual(
+      expect.arrayContaining([
+        "X p[8]=0xFF fehlt in der Symboltabelle.",
+        "Y p[12]=0xFF fehlt in der Symboltabelle.",
+      ]),
+    );
+  });
+
+  it("keeps every productive placement visible when its research spawn row is absent", () => {
+    const reviews = buildReplayWardPositionReviews(wards, {
+      ...research,
+      placements: research.placements.slice(0, 1),
+    });
+
+    expect(reviews).toHaveLength(2);
+    expect(reviews[1]).toMatchObject({
+      status: "unresolved",
+      wardEntityNetworkId: 102,
+      missingEvidence: ["Passender Research-Spawn-Datensatz fehlt."],
+    });
   });
 
   it("can show every bounded placement independently of replay time", () => {

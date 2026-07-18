@@ -10,6 +10,7 @@ import type { ReplayWardPositionResearchResult } from "./replayWardPositionResea
 import type { ReplayWardResult } from "./replayWards";
 import type { ReplaySummary } from "./replayParser";
 import createReplayModule from "./generated/wasm/rofl_wasm.js";
+import defaultDecoderProfileRegistryJson from "../../../packages/rofl-core/profiles/replay-decoder-profiles.v1.json?raw";
 
 interface EmscriptenModule {
   cwrap<Fn extends (...args: never[]) => unknown>(
@@ -21,6 +22,8 @@ interface EmscriptenModule {
 }
 
 const CHUNK_SIZE = 64 * 1024;
+
+export const DEFAULT_DECODER_PROFILE_REGISTRY_JSON = defaultDecoderProfileRegistryJson;
 
 let modulePromise: Promise<EmscriptenModule> | null = null;
 
@@ -63,6 +66,62 @@ async function withReplayBuffer<T>(
   }
 }
 
+async function withReplayAndProfileBuffers<T>(
+  buffer: ArrayBuffer,
+  profileJson: string,
+  run: (
+    module: EmscriptenModule,
+    replayPointer: number,
+    replaySize: number,
+    profilePointer: number,
+    profileSize: number,
+  ) => T,
+): Promise<T> {
+  const replayBytes = new Uint8Array(buffer);
+  const profileBytes = new TextEncoder().encode(profileJson);
+  if (profileBytes.length === 0) {
+    throw new Error("Decoder profile registry must not be empty.");
+  }
+
+  const module = await loadModule();
+  const allocBuffer = module.cwrap<(size: number) => number>("lra_alloc_buffer", "number", [
+    "number",
+  ]);
+  const copyChunk = module.cwrap<
+    (destination: number, offset: number, chunk: Uint8Array, size: number) => void
+  >("lra_copy_buffer_chunk", null, ["number", "number", "array", "number"]);
+  const freeBuffer = module.cwrap<(pointer: number) => void>("lra_free_buffer", null, ["number"]);
+
+  const replayPointer = allocBuffer(replayBytes.length);
+  if (!replayPointer) {
+    throw new Error("Failed to allocate replay buffer in Wasm memory.");
+  }
+
+  let profilePointer = 0;
+  try {
+    profilePointer = allocBuffer(profileBytes.length);
+    if (!profilePointer) {
+      throw new Error("Failed to allocate decoder profile registry in Wasm memory.");
+    }
+
+    for (let offset = 0; offset < replayBytes.length; offset += CHUNK_SIZE) {
+      const chunk = replayBytes.subarray(offset, Math.min(offset + CHUNK_SIZE, replayBytes.length));
+      copyChunk(replayPointer, offset, chunk, chunk.length);
+    }
+    for (let offset = 0; offset < profileBytes.length; offset += CHUNK_SIZE) {
+      const chunk = profileBytes.subarray(offset, Math.min(offset + CHUNK_SIZE, profileBytes.length));
+      copyChunk(profilePointer, offset, chunk, chunk.length);
+    }
+
+    return run(module, replayPointer, replayBytes.length, profilePointer, profileBytes.length);
+  } finally {
+    if (profilePointer) {
+      freeBuffer(profilePointer);
+    }
+    freeBuffer(replayPointer);
+  }
+}
+
 function parseJsonResult<T extends object>(module: EmscriptenModule, pointer: number): T {
   const freeString = module.cwrap<(value: number) => void>("lra_free_string", null, ["number"]);
   try {
@@ -77,53 +136,63 @@ function parseJsonResult<T extends object>(module: EmscriptenModule, pointer: nu
   }
 }
 
-export async function parseReplayBufferWithWasm(buffer: ArrayBuffer): Promise<ReplaySummary> {
-  return withReplayBuffer(buffer, (module, replayPointer, size) => {
-    const parseBuffer = module.cwrap<(input: number, size: number) => number>(
-      "lra_parse_replay_buffer",
+export async function parseReplayBufferWithWasm(
+  buffer: ArrayBuffer,
+  profileJson = DEFAULT_DECODER_PROFILE_REGISTRY_JSON,
+): Promise<ReplaySummary> {
+  return withReplayAndProfileBuffers(buffer, profileJson, (module, replayPointer, size, profilePointer, profileSize) => {
+    const parseBuffer = module.cwrap<(input: number, size: number, profiles: number, profileSize: number) => number>(
+      "lra_parse_replay_buffer_with_profiles",
       "number",
-      ["number", "number"],
+      ["number", "number", "number", "number"],
     );
 
-    return parseJsonResult<ReplaySummary>(module, parseBuffer(replayPointer, size));
+    return parseJsonResult<ReplaySummary>(module, parseBuffer(replayPointer, size, profilePointer, profileSize));
   });
 }
 
-export async function extractReplayKillsWithWasm(buffer: ArrayBuffer): Promise<ReplayKillResult> {
-  return withReplayBuffer(buffer, (module, replayPointer, size) => {
-    const extractKills = module.cwrap<(input: number, size: number) => number>(
-      "lra_extract_replay_kills_buffer",
+export async function extractReplayKillsWithWasm(
+  buffer: ArrayBuffer,
+  profileJson = DEFAULT_DECODER_PROFILE_REGISTRY_JSON,
+): Promise<ReplayKillResult> {
+  return withReplayAndProfileBuffers(buffer, profileJson, (module, replayPointer, size, profilePointer, profileSize) => {
+    const extractKills = module.cwrap<(input: number, size: number, profiles: number, profileSize: number) => number>(
+      "lra_extract_replay_kills_buffer_with_profiles",
       "number",
-      ["number", "number"],
+      ["number", "number", "number", "number"],
     );
 
-    return parseJsonResult<ReplayKillResult>(module, extractKills(replayPointer, size));
+    return parseJsonResult<ReplayKillResult>(module, extractKills(replayPointer, size, profilePointer, profileSize));
   });
 }
 
 export async function extractReplayObjectivesWithWasm(
   buffer: ArrayBuffer,
+  profileJson = DEFAULT_DECODER_PROFILE_REGISTRY_JSON,
 ): Promise<ReplayObjectiveResult> {
-  return withReplayBuffer(buffer, (module, replayPointer, size) => {
-    const extractObjectives = module.cwrap<(input: number, size: number) => number>(
-      "lra_extract_replay_objectives_buffer",
+  return withReplayAndProfileBuffers(buffer, profileJson, (module, replayPointer, size, profilePointer, profileSize) => {
+    const extractObjectives = module.cwrap<(input: number, size: number, profiles: number, profileSize: number) => number>(
+      "lra_extract_replay_objectives_buffer_with_profiles",
       "number",
-      ["number", "number"],
+      ["number", "number", "number", "number"],
     );
 
-    return parseJsonResult<ReplayObjectiveResult>(module, extractObjectives(replayPointer, size));
+    return parseJsonResult<ReplayObjectiveResult>(module, extractObjectives(replayPointer, size, profilePointer, profileSize));
   });
 }
 
-export async function extractReplayWardsWithWasm(buffer: ArrayBuffer): Promise<ReplayWardResult> {
-  return withReplayBuffer(buffer, (module, replayPointer, size) => {
-    const extractWards = module.cwrap<(input: number, size: number) => number>(
-      "lra_extract_replay_wards_buffer",
+export async function extractReplayWardsWithWasm(
+  buffer: ArrayBuffer,
+  profileJson = DEFAULT_DECODER_PROFILE_REGISTRY_JSON,
+): Promise<ReplayWardResult> {
+  return withReplayAndProfileBuffers(buffer, profileJson, (module, replayPointer, size, profilePointer, profileSize) => {
+    const extractWards = module.cwrap<(input: number, size: number, profiles: number, profileSize: number) => number>(
+      "lra_extract_replay_wards_buffer_with_profiles",
       "number",
-      ["number", "number"],
+      ["number", "number", "number", "number"],
     );
 
-    return parseJsonResult<ReplayWardResult>(module, extractWards(replayPointer, size));
+    return parseJsonResult<ReplayWardResult>(module, extractWards(replayPointer, size, profilePointer, profileSize));
   });
 }
 
@@ -133,15 +202,16 @@ export async function extractReplayWardsWithWasm(buffer: ArrayBuffer): Promise<R
  */
 export async function extractReplayWardPositionCandidatesWithWasm(
   buffer: ArrayBuffer,
+  profileJson = DEFAULT_DECODER_PROFILE_REGISTRY_JSON,
 ): Promise<ReplayWardPositionResearchResult> {
-  return withReplayBuffer(buffer, (module, replayPointer, size) => {
+  return withReplayAndProfileBuffers(buffer, profileJson, (module, replayPointer, size, profilePointer, profileSize) => {
     const extractWardPositionCandidates = module.cwrap<
-      (input: number, size: number) => number
-    >("lra_extract_replay_ward_position_candidates_buffer", "number", ["number", "number"]);
+      (input: number, size: number, profiles: number, profileSize: number) => number
+    >("lra_extract_replay_ward_position_candidates_buffer_with_profiles", "number", ["number", "number", "number", "number"]);
 
     return parseJsonResult<ReplayWardPositionResearchResult>(
       module,
-      extractWardPositionCandidates(replayPointer, size),
+      extractWardPositionCandidates(replayPointer, size, profilePointer, profileSize),
     );
   });
 }

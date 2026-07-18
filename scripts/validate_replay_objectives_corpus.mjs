@@ -11,6 +11,7 @@ const EXPECTED_EVENTS_BY_VERSION = Object.freeze({
   "16.6": 103,
   "16.7": 74,
   "16.9": 176,
+  "16.14": 99,
 });
 
 const KNOWN_MONSTER_TYPES = new Set([
@@ -28,6 +29,7 @@ function parseArgs(argv) {
     apiRoot: path.join("replays", "api"),
     outputPath: path.join("artifacts", "replay-objectives-corpus-validation.json"),
     timestampToleranceMillis: 1,
+    decoderProfilesPath: null,
   };
   for (let index = 2; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -35,6 +37,9 @@ function parseArgs(argv) {
     else if (arg === "--replay-dir" && index + 1 < argv.length) args.replayDir = argv[++index];
     else if (arg === "--api-root" && index + 1 < argv.length) args.apiRoot = argv[++index];
     else if (arg === "--output" && index + 1 < argv.length) args.outputPath = argv[++index];
+    else if (arg === "--decoder-profiles" && index + 1 < argv.length) {
+      args.decoderProfilesPath = argv[++index];
+    }
     else if (arg === "--timestamp-tolerance-ms" && index + 1 < argv.length) {
       args.timestampToleranceMillis = Number.parseInt(argv[++index], 10);
     } else if (arg === "--help" || arg === "-h") {
@@ -46,6 +51,7 @@ function parseArgs(argv) {
         "  --replay-dir <path>             Directory containing .rofl files.",
         "  --api-root <path>               Offline Riot fixture root.",
         "  --output <path>                 Validation JSON output.",
+        "  --decoder-profiles <path>       External versioned decoder profile bundle.",
         "  --timestamp-tolerance-ms <n>    Timestamp tolerance; default 1.",
         "",
         "The native extractor receives only a ROFL path. Riot timeline data is read",
@@ -153,8 +159,10 @@ function discoverFixtures(args) {
     .sort((left, right) => left.replayId.localeCompare(right.replayId));
 }
 
-function extractObjectives(cliPath, replayPath) {
-  const result = spawnSync(cliPath, ["--extract-replay-objectives-json", replayPath], {
+function extractObjectives(cliPath, replayPath, decoderProfilesPath) {
+  const command = ["--extract-replay-objectives-json", replayPath];
+  if (decoderProfilesPath) command.push("--decoder-profiles", decoderProfilesPath);
+  const result = spawnSync(cliPath, command, {
     encoding: "utf8",
     windowsHide: true,
     maxBuffer: 64 * 1024 * 1024,
@@ -175,6 +183,10 @@ function main() {
   const args = parseArgs(process.argv);
   const cliPath = path.resolve(args.cliPath);
   if (!fs.existsSync(cliPath)) throw new Error(`Native CLI not found: ${cliPath}`);
+  const decoderProfilesPath = args.decoderProfilesPath ? path.resolve(args.decoderProfilesPath) : null;
+  if (decoderProfilesPath && !fs.existsSync(decoderProfilesPath)) {
+    throw new Error(`Decoder profile bundle not found: ${decoderProfilesPath}`);
+  }
   const fixtures = discoverFixtures(args);
   if (fixtures.length === 0) throw new Error("No replay/API fixture pairs were found.");
 
@@ -185,7 +197,7 @@ function main() {
     const apiEvents = collectApiEvents(timeline);
     let extracted;
     try {
-      extracted = extractObjectives(cliPath, fixture.replayPath);
+      extracted = extractObjectives(cliPath, fixture.replayPath, decoderProfilesPath);
     } catch (error) {
       rows.push({
         replayId: fixture.replayId,
@@ -258,11 +270,14 @@ function main() {
     group.expectedCorpusEventCount === group.decodedObjectiveEventCount &&
     group.decodedObjectiveEventCount === group.apiObjectiveEventCount
   );
+  const expectedTotals = decoderProfilesPath
+    ? { replayCount: 57, objectiveEventCount: 524 }
+    : { replayCount: 47, objectiveEventCount: 425 };
   const validated =
-    totals.replayCount === 47 &&
-    totals.passingReplayCount === totals.replayCount &&
-    totals.decodedObjectiveEventCount === 425 &&
-    totals.exactMatchCount === 425 &&
+    totals.replayCount === expectedTotals.replayCount &&
+    totals.passingReplayCount === expectedTotals.replayCount &&
+    totals.decodedObjectiveEventCount === expectedTotals.objectiveEventCount &&
+    totals.exactMatchCount === expectedTotals.objectiveEventCount &&
     totals.extraDecodedEventCount === 0 &&
     totals.missingApiEventCount === 0 &&
     totals.unknownMonsterTypeCount === 0 &&
@@ -275,9 +290,11 @@ function main() {
       extractorInput: "ROFL file only.",
       riotFixtureRole: "Offline timestamp and monster-class validation only.",
       timestampToleranceMillis: args.timestampToleranceMillis,
+      decoderProfileBundle: decoderProfilesPath,
       unresolvedFields: ["monsterSubtype", "killerParticipantId", "killerTeamId"],
     },
     totals,
+    expectedTotals,
     byVersionGroup,
     rows,
   };

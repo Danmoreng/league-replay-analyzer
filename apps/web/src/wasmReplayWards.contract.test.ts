@@ -7,7 +7,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import type { ReplayWardResult } from "./replayWards";
 import type { ReplayWardPositionResearchResult } from "./replayWardPositionResearch";
 
-type ExtractReplayWards = (buffer: ArrayBuffer) => Promise<ReplayWardResult>;
+type ExtractReplayWards = (
+  buffer: ArrayBuffer,
+  profileJson?: string,
+) => Promise<ReplayWardResult>;
 type ExtractReplayWardPositionCandidates = (
   buffer: ArrayBuffer,
 ) => Promise<ReplayWardPositionResearchResult>;
@@ -211,6 +214,47 @@ describe("ward Wasm ABI contract", () => {
 
     expect(caught).toBeInstanceOf(Error);
     expect((caught as Error).message).toContain("Unsupported replay version 17.0.0.0");
+  });
+
+  it("decodes a new version from profile bytes without rebuilding Wasm", async () => {
+    const profileJson = JSON.stringify({
+      schema: "rofl-replay-decoder-profiles/v1",
+      registryId: "wasm-contract-dynamic-profile",
+      revision: 1,
+      profiles: [
+        {
+          versionGroup: "17.0",
+          acceptedGameVersions: ["17.0.0.0"],
+          ward: {
+            channel: 1,
+            placementMarkerPacketType,
+            placementContentLength: 3,
+            placementDiscriminatorOffset: 2,
+            placementDiscriminatorValues: [0xb0],
+            placementOwnerPacketType,
+            placementOwnerContentLengths: { exact: [2, 3, 4] },
+            removalPacketType,
+            removalContentLengths: { exact: [28, 29] },
+            killerOwnerPacketType,
+            killerOwnerContentLengths: { exact: [6, 7] },
+            championNetworkIdBase: championBase,
+          },
+        },
+      ],
+    });
+
+    const result = await extractReplayWardsWithWasm(
+      buildWardReplay("17.0.0.0"),
+      profileJson,
+    );
+
+    expect(result.gameVersion).toBe("17.0.0.0");
+    expect(result.versionGroup).toBe("17.0");
+    expect(result.profile).toMatchObject({
+      origin: "external",
+      registryId: "wasm-contract-dynamic-profile",
+    });
+    expect(result.events).toHaveLength(3);
   });
 
   it("keeps eight replay-only ward marker hypotheses behind the research gates", async () => {

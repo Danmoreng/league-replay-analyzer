@@ -1,11 +1,58 @@
 #include <exception>
 #include <iostream>
+#include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "rofl/core/replay_analyzer.hpp"
+
+namespace {
+
+[[nodiscard]] std::optional<rofl::core::DecoderProfileRegistry>
+load_optional_decoder_profile_registry(int argc, char** argv, int first_option_index) {
+    std::optional<std::string> profile_path;
+    for (int index = first_option_index; index < argc; ++index) {
+        const std::string_view argument = argv[index];
+        if (argument != "--decoder-profiles") {
+            continue;
+        }
+        if (index + 1 >= argc) {
+            throw std::invalid_argument("Missing path after --decoder-profiles");
+        }
+        if (profile_path.has_value()) {
+            throw std::invalid_argument("--decoder-profiles may only be provided once");
+        }
+        profile_path = argv[++index];
+        if (profile_path->empty()) {
+            throw std::invalid_argument("--decoder-profiles requires a non-empty JSON path");
+        }
+    }
+
+    if (!profile_path.has_value()) {
+        return std::nullopt;
+    }
+
+    auto loaded = rofl::core::load_decoder_profile_registry_file(*profile_path);
+    if (loaded.ok()) {
+        return std::move(loaded.registry);
+    }
+
+    std::ostringstream message;
+    message << "Failed to load decoder profiles from '" << *profile_path << "'";
+    if (!loaded.errors.empty()) {
+        message << ':';
+        for (const std::string& error : loaded.errors) {
+            message << "\n  - " << error;
+        }
+    }
+    throw std::runtime_error(message.str());
+}
+
+}  // namespace
 
 int main(int argc, char** argv) {
     const std::string_view first_arg = argc > 1 ? argv[1] : "";
@@ -17,7 +64,10 @@ int main(int argc, char** argv) {
 
     if (first_arg == "--summary" && argc > 2) {
         try {
-            const auto summary = rofl::core::parse_replay_file(argv[2]);
+            const auto decoder_profiles = load_optional_decoder_profile_registry(argc, argv, 3);
+            const auto summary = decoder_profiles.has_value()
+                ? rofl::core::parse_replay_file(argv[2], *decoder_profiles)
+                : rofl::core::parse_replay_file(argv[2]);
             std::cout << rofl::core::replay_summary_to_json(summary) << '\n';
             return 0;
         } catch (const std::exception& exception) {
@@ -121,7 +171,10 @@ int main(int argc, char** argv) {
 
     if (first_arg == "--extract-replay-kills-json" && argc > 2) {
         try {
-            std::cout << rofl::core::extract_replay_kills_file_json(argv[2]);
+            const auto decoder_profiles = load_optional_decoder_profile_registry(argc, argv, 3);
+            std::cout << (decoder_profiles.has_value()
+                ? rofl::core::extract_replay_kills_file_json(argv[2], *decoder_profiles)
+                : rofl::core::extract_replay_kills_file_json(argv[2]));
             return 0;
         } catch (const std::exception& exception) {
             std::cerr << exception.what() << '\n';
@@ -131,7 +184,10 @@ int main(int argc, char** argv) {
 
     if (first_arg == "--extract-replay-objectives-json" && argc > 2) {
         try {
-            std::cout << rofl::core::extract_replay_objectives_file_json(argv[2]);
+            const auto decoder_profiles = load_optional_decoder_profile_registry(argc, argv, 3);
+            std::cout << (decoder_profiles.has_value()
+                ? rofl::core::extract_replay_objectives_file_json(argv[2], *decoder_profiles)
+                : rofl::core::extract_replay_objectives_file_json(argv[2]));
             return 0;
         } catch (const std::exception& exception) {
             std::cerr << exception.what() << '\n';
@@ -141,7 +197,10 @@ int main(int argc, char** argv) {
 
     if (first_arg == "--extract-replay-wards-json" && argc > 2) {
         try {
-            std::cout << rofl::core::extract_replay_wards_file_json(argv[2]);
+            const auto decoder_profiles = load_optional_decoder_profile_registry(argc, argv, 3);
+            std::cout << (decoder_profiles.has_value()
+                ? rofl::core::extract_replay_wards_file_json(argv[2], *decoder_profiles)
+                : rofl::core::extract_replay_wards_file_json(argv[2]));
             return 0;
         } catch (const std::exception& exception) {
             std::cerr << exception.what() << '\n';
@@ -152,11 +211,13 @@ int main(int argc, char** argv) {
     if (first_arg == "--extract-replay-ward-position-candidates-json" &&
         argc > 2) {
         try {
-            std::cout
-                << rofl::core::
-                    extract_replay_ward_position_candidates_file_json(
-                        argv[2]
-                    );
+            const auto decoder_profiles = load_optional_decoder_profile_registry(argc, argv, 3);
+            std::cout << (decoder_profiles.has_value()
+                ? rofl::core::extract_replay_ward_position_candidates_file_json(
+                    argv[2],
+                    *decoder_profiles
+                )
+                : rofl::core::extract_replay_ward_position_candidates_file_json(argv[2]));
             return 0;
         } catch (const std::exception& exception) {
             std::cerr << exception.what() << '\n';
@@ -1139,16 +1200,16 @@ int main(int argc, char** argv) {
 
     std::cout << "rofl_core_cli scaffold\n";
     std::cout << "Use --version for build metadata.\n";
-    std::cout << "Use --summary <path-to-rofl> to print a parsed replay summary.\n";
+    std::cout << "Use --summary <path-to-rofl> [--decoder-profiles <json-path>] to print a parsed replay summary.\n";
     std::cout << "Use --probe <path-to-rofl> to inspect likely payload/index regions.\n";
     std::cout << "Use --inspect <path-to-rofl> to inspect decompressed footer-style payload records.\n";
     std::cout << "Use --validate-packet-framing <path-to-rofl> [--segment-type startup|keyframe|chunk|all] to validate exact packet-block framing for every selected decompressed segment.\n";
     std::cout << "Use --summarize-packet-types-json <path-to-rofl> [--segment-type startup|keyframe|chunk|all] [--top-types <n>] to catalog packet types as JSON. A top-types value of 0 emits every group.\n";
     std::cout << "Use --dump-packet-type-json <path-to-rofl> --packet-type <u16> [--segment-type startup|keyframe|chunk|all] [--max-blocks <n>] to dump matching packet blocks as JSON. Decimal and 0x-prefixed packet types are accepted.\n";
-    std::cout << "Use --extract-replay-kills-json <path-to-rofl> to emit ROFL-only normalized champion kill events with participant and packet provenance.\n";
-    std::cout << "Use --extract-replay-objectives-json <path-to-rofl> to emit ROFL-only elite-monster objective events with monster class and packet provenance.\n";
-    std::cout << "Use --extract-replay-wards-json <path-to-rofl> to emit ROFL-only standard ward placement and conservative ward-kill events with entity and participant provenance.\n";
-    std::cout << "Use --extract-replay-ward-position-candidates-json <path-to-rofl> to emit strictly research-only replay-byte ward marker hypotheses without promoting decoded positions.\n";
+    std::cout << "Use --extract-replay-kills-json <path-to-rofl> [--decoder-profiles <json-path>] to emit ROFL-only normalized champion kill events with participant and packet provenance.\n";
+    std::cout << "Use --extract-replay-objectives-json <path-to-rofl> [--decoder-profiles <json-path>] to emit ROFL-only elite-monster objective events with monster class and packet provenance.\n";
+    std::cout << "Use --extract-replay-wards-json <path-to-rofl> [--decoder-profiles <json-path>] to emit ROFL-only standard ward placement and conservative ward-kill events with entity and participant provenance.\n";
+    std::cout << "Use --extract-replay-ward-position-candidates-json <path-to-rofl> [--decoder-profiles <json-path>] to emit strictly research-only replay-byte ward marker hypotheses without promoting decoded positions.\n";
     std::cout << "Use --dump-chunk-subrecords <path-to-rofl> --chunk-id <id> to dump subrecords for a chunk.\n";
     std::cout << "Use --summarize-subrecord-families <path-to-rofl> [--min-length <n>] [--min-records <n>] [--top-families <n>] to rank recurring subrecord families across the replay.\n";
     std::cout << "Use --dump-subrecord-family <path-to-rofl> --length <len> --first-byte <byte> to dump matching records.\n";

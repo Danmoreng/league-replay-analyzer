@@ -9,6 +9,7 @@
 
 #include <zstd.h>
 
+#include "rofl/core/decoder_profiles.hpp"
 #include "rofl/core/replay_analyzer.hpp"
 
 namespace {
@@ -831,6 +832,134 @@ bool test_replay_ward_position_research_fixture() {
         ) != std::string::npos;
 }
 
+bool test_decoder_profile_registry_loader() {
+    const std::string valid_profile = R"json({
+        "schema":"rofl-replay-decoder-profiles/v1",
+        "registryId":"smoke-test",
+        "revision":1,
+        "profiles":[{
+            "versionGroup":"16.14",
+            "acceptedGameVersions":["16.14.794.5912"],
+            "finalStatsValidated":true,
+            "objective":{
+                "channel":1,
+                "packetType":30,
+                "minimumContentLength":136,
+                "maximumContentLength":137,
+                "discriminator":{
+                    "origin":"end",
+                    "offset":2,
+                    "values":[{"value":168,"class":"DRAGON"}]
+                }
+            },
+            "ward":{
+                "channel":1,
+                "placementMarkerPacketType":1000,
+                "placementContentLength":3,
+                "placementDiscriminatorOffset":2,
+                "placementDiscriminatorValues":[199],
+                "placementOwnerPacketType":197,
+                "placementOwnerContentLengths":{"minimum":113,"maximum":141},
+                "removalPacketType":487,
+                "removalContentLengths":{"exact":[21,28,29]},
+                "killerOwnerPacketType":535,
+                "killerOwnerContentLengths":{"exact":[10,11]},
+                "championNetworkIdBase":1073741997
+            }
+        }]
+    })json";
+
+    const rofl::core::DecoderProfileLoadResult loaded =
+        rofl::core::parse_decoder_profile_registry_json(valid_profile);
+    if (!loaded.ok() || !loaded.registry.has_value() || !loaded.errors.empty()) {
+        return false;
+    }
+
+    const rofl::core::DecoderVersionProfile* exact_profile =
+        rofl::core::find_decoder_profile(*loaded.registry, "16.14.794.5912");
+    if (exact_profile == nullptr ||
+        rofl::core::find_decoder_profile(*loaded.registry, "16.14.794.5913") != nullptr ||
+        rofl::core::find_decoder_profile(*loaded.registry, "16.14") != nullptr ||
+        !exact_profile->objective.has_value() || !exact_profile->ward.has_value()) {
+        return false;
+    }
+
+    const rofl::core::ObjectiveDecoderProfile& objective = *exact_profile->objective;
+    const rofl::core::WardDecoderProfile& ward = *exact_profile->ward;
+    if (objective.discriminator_origin != rofl::core::PayloadOffsetOrigin::end ||
+        objective.discriminator_offset != 2 ||
+        objective.discriminators.size() != 1 ||
+        objective.discriminators.front().monster_class !=
+            rofl::core::ObjectiveMonsterClass::dragon ||
+        !ward.placement_owner_content_lengths.minimum.has_value() ||
+        !ward.placement_owner_content_lengths.maximum.has_value() ||
+        *ward.placement_owner_content_lengths.minimum != 113 ||
+        *ward.placement_owner_content_lengths.maximum != 141 ||
+        !ward.placement_owner_content_lengths.exact_values.empty()) {
+        return false;
+    }
+
+    const auto is_atomic_rejection = [](std::string_view candidate) {
+        const rofl::core::DecoderProfileLoadResult result =
+            rofl::core::parse_decoder_profile_registry_json(candidate);
+        return !result.ok() && !result.registry.has_value() &&
+            !result.errors.empty();
+    };
+
+    const std::string minimal_profile = R"json({
+        "schema":"rofl-replay-decoder-profiles/v1",
+        "registryId":"smoke-test",
+        "profiles":[{"versionGroup":"16.14","finalStatsValidated":true}]
+    })json";
+    const std::string duplicate_key_profile = R"json({
+        "schema":"rofl-replay-decoder-profiles/v1",
+        "schema":"rofl-replay-decoder-profiles/v1",
+        "registryId":"smoke-test",
+        "profiles":[{"versionGroup":"16.14","finalStatsValidated":true}]
+    })json";
+    const std::string duplicate_version_profile = R"json({
+        "schema":"rofl-replay-decoder-profiles/v1",
+        "registryId":"smoke-test",
+        "profiles":[
+            {"versionGroup":"16.14","finalStatsValidated":true},
+            {"versionGroup":"16.14","finalStatsValidated":true}
+        ]
+    })json";
+    const std::string unknown_field_profile = R"json({
+        "schema":"rofl-replay-decoder-profiles/v1",
+        "registryId":"smoke-test",
+        "unexpected":true,
+        "profiles":[{"versionGroup":"16.14","finalStatsValidated":true}]
+    })json";
+    const std::string invalid_end_offset_profile = R"json({
+        "schema":"rofl-replay-decoder-profiles/v1",
+        "registryId":"smoke-test",
+        "profiles":[{
+            "versionGroup":"16.14",
+            "objective":{
+                "channel":1,
+                "packetType":30,
+                "minimumContentLength":136,
+                "maximumContentLength":137,
+                "discriminator":{
+                    "origin":"end",
+                    "offset":0,
+                    "values":[{"value":168,"class":"DRAGON"}]
+                }
+            }
+        }]
+    })json";
+    std::string oversized_profile(262145, ' ');
+
+    return is_atomic_rejection("{\"schema\"") &&
+        is_atomic_rejection(unknown_field_profile) &&
+        is_atomic_rejection(duplicate_key_profile) &&
+        is_atomic_rejection(duplicate_version_profile) &&
+        is_atomic_rejection(invalid_end_offset_profile) &&
+        is_atomic_rejection(oversized_profile) &&
+        rofl::core::parse_decoder_profile_registry_json(minimal_profile).ok();
+}
+
 }  // namespace
 
 int main() {
@@ -867,6 +996,10 @@ int main() {
     }
 
     if (!test_replay_ward_position_research_fixture()) {
+        return EXIT_FAILURE;
+    }
+
+    if (!test_decoder_profile_registry_loader()) {
         return EXIT_FAILURE;
     }
 

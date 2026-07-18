@@ -1,4 +1,5 @@
 add_library(rofl_core STATIC
+    src/decoder_profiles.cpp
     src/packet_blocks.cpp
     src/replay_analyzer.cpp
 )

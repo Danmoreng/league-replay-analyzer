@@ -49,7 +49,13 @@ export interface ReplayObjectiveResult {
     minimumContentLength: number;
     maximumContentLength: number;
     discriminatorOffset: number;
+    discriminatorOrigin?: "start" | "end";
     classifier: string;
+    origin?: "built-in" | "external";
+    schema?: string;
+    registryId?: string;
+    revision?: string;
+    fingerprint?: string;
   };
   replay: {
     gameLengthMillis: number | null;

@@ -61,7 +61,7 @@ function versionGroupFromGameVersion(gameVersion) {
   return gameVersion.split(".").slice(0, 2).join(".");
 }
 
-function extractGameVersion(bytes) {
+function extractGameVersion(bytes, profiles = KILL_PACKET_PROFILES) {
   const prefix = bytes.subarray(0, Math.min(bytes.length, MAX_VERSION_SCAN_BYTES)).toString("latin1");
   const versions = [
     ...new Set(
@@ -72,11 +72,11 @@ function extractGameVersion(bytes) {
   if (versions.length === 0) {
     throw new Error("Replay game version was not found in the ROFL header region.");
   }
-  const supported = versions.filter((version) => KILL_PACKET_PROFILES[versionGroupFromGameVersion(version)]);
+  const supported = versions.filter((version) => profiles[versionGroupFromGameVersion(version)]);
   if (supported.length === 0) {
     throw new Error(
       `Unsupported replay version ${versions.join(", ")}. ` +
-      `Supported groups: ${Object.keys(KILL_PACKET_PROFILES).join(", ")}.`,
+      `Supported groups: ${Object.keys(profiles).join(", ")}.`,
     );
   }
   const supportedGroups = new Set(supported.map(versionGroupFromGameVersion));
@@ -431,15 +431,35 @@ function validateFinalKda(participants, events) {
   };
 }
 
-export function extractReplayKills(replayPath) {
+function loadExternalKillProfiles(decoderProfilesPath) {
+  if (!decoderProfilesPath) return KILL_PACKET_PROFILES;
+  const parsed = JSON.parse(fs.readFileSync(path.resolve(decoderProfilesPath), "utf8"));
+  if (parsed.schema !== "rofl-replay-decoder-profiles/v1" || !Array.isArray(parsed.profiles)) {
+    throw new Error("Decoder profile bundle must use schema rofl-replay-decoder-profiles/v1.");
+  }
+  const profiles = { ...KILL_PACKET_PROFILES };
+  for (const entry of parsed.profiles) {
+    const kill = entry?.kill;
+    if (!entry?.versionGroup || !kill) continue;
+    profiles[entry.versionGroup] = Object.freeze({
+      ownerSequencePacketType: kill.ownerSequencePacketType,
+      deathMarkerPacketType: kill.deathMarkerPacketType,
+      championNetworkIdBase: kill.championNetworkIdBase,
+    });
+  }
+  return Object.freeze(profiles);
+}
+
+export function extractReplayKills(replayPath, { decoderProfilesPath = null } = {}) {
   if (typeof zlib.zstdDecompressSync !== "function") {
     throw new Error("This extractor requires a Node.js build with zstdDecompressSync support.");
   }
   const absoluteReplayPath = path.resolve(replayPath);
   const bytes = fs.readFileSync(absoluteReplayPath);
-  const gameVersion = extractGameVersion(bytes);
+  const profiles = loadExternalKillProfiles(decoderProfilesPath);
+  const gameVersion = extractGameVersion(bytes, profiles);
   const versionGroup = versionGroupFromGameVersion(gameVersion);
-  const profile = KILL_PACKET_PROFILES[versionGroup];
+  const profile = profiles[versionGroup];
   if (!profile) {
     throw new Error(`No kill packet profile is available for replay version ${gameVersion}.`);
   }
@@ -519,6 +539,7 @@ export function extractReplayKills(replayPath) {
       matchId: replayId.replace("-", "_"),
       runtimeInput: "rofl-only",
       riotApiInput: false,
+      decoderProfileBundle: decoderProfilesPath ? path.resolve(decoderProfilesPath) : null,
     },
     gameVersion,
     versionGroup,
@@ -565,12 +586,16 @@ function parseArgs(argv) {
     replayPath: null,
     outputPath: null,
     compact: false,
+    decoderProfilesPath: null,
   };
   for (let index = 2; index < argv.length; index += 1) {
     const arg = argv[index];
     if (!args.replayPath && !arg.startsWith("--")) args.replayPath = arg;
     else if (arg === "--output" && index + 1 < argv.length) args.outputPath = argv[++index];
     else if (arg === "--compact") args.compact = true;
+    else if (arg === "--decoder-profiles" && index + 1 < argv.length) {
+      args.decoderProfilesPath = argv[++index];
+    }
     else if (arg === "--help" || arg === "-h") {
       console.log([
         "Usage: node ./scripts/extract_replay_kills.mjs <replay.rofl> [options]",
@@ -578,6 +603,7 @@ function parseArgs(argv) {
         "Options:",
         "  --output <path>  Write normalized JSON to a file instead of stdout.",
         "  --compact        Emit compact JSON.",
+        "  --decoder-profiles <path>  Load an external decoder profile bundle.",
         "",
         "Extraction is ROFL-only. Riot API fixtures are not read.",
       ].join("\n"));
@@ -594,7 +620,9 @@ function parseArgs(argv) {
 
 function main() {
   const args = parseArgs(process.argv);
-  const output = extractReplayKills(args.replayPath);
+  const output = extractReplayKills(args.replayPath, {
+    decoderProfilesPath: args.decoderProfilesPath,
+  });
   const json = args.compact ? JSON.stringify(output) : JSON.stringify(output, null, 2);
   if (args.outputPath) {
     const outputPath = path.resolve(args.outputPath);
