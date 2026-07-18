@@ -261,6 +261,12 @@ matches 31/62 with zero extras. Both retain exact champion ownership and 1.0
 leave-one-replay-out precision, and both packet types also occur as owner-bound
 keyframe components. This proves a component/change anchor, not item identity,
 slot, operation ordering, or complete undo coverage; it remains research-only.
+For patch 16.14, a follow-up D7 scan of all 9,908,848 chunk blocks evaluates
+3,481,871 packet-type/length/prefix classifiers against the 17 Undo labels not
+covered by `0x0081`; none covers all targets before extra rejection. This rules
+out a second single-family constant-prefix classifier through 16 prefix bytes,
+not a stateful multi-packet grammar. H3 remains unopened because Discovery has
+no exact candidate.
 
 An expanded full-payload and offline-oracle scan falsified the strongest simple
 slot candidate: it matches 155/196 deterministic initial adds but only 108/239
@@ -294,33 +300,51 @@ The values and XOR masks are non-monotonic and do not decode item ID, slot,
 count, operation ordering, or inventory state. These anchors are therefore
 research boundaries only, not normalized runtime fields.
 
-Patch 16.14 now also has exact `totalGold` and lane-CS **change** envelopes
-within the champion-owned 1,479-byte `0x02EB` family. Offsets 115, 117, and
-119 change on all 3,024 saved `totalGold`-changing transitions and none of 76
-unchanged transitions. The lane-CS envelope is the minimal offset union 125,
-127, and 129: it changes on all 2,155 saved `minionsKilled` changes and
-none of 945 unchanged transitions (Discovery 1,458/0/0/642; Holdout
-697/0/0/303, in TP/FP/FN/TN order). The previous 127..129 range missed three
-otherwise identical p125-only updates; byte 125 changes in 24 positive / 0
-negative Discovery transitions and 32 / 0 Holdout transitions, including
-exactly one and two p125-only forms respectively. The asserted p125-only
-witnesses are `EUW1-7920292147` participant 3, segments 38→39, lane CS
-280→281, plus `EUW1-7921482297` participants 3 and 8, segments 46→47, lane
-CS 360→361 and 268→269; all have p125 `0x0e→0xe8`. Byte 128 is inert across
-all 3,100 transitions and is diagnostic only, not part of the envelope or a
-packing test. A bounded 120..140 selector reproduces 127, 129, then 125 from
-the seven Discovery replays and yields the same exact matrix on the three
-fixed Holdouts. This is not historical unseen-holdout evidence because p125
-was found in a full-corpus mismatch audit. The separate LORO selector chooses
-the same three locations in every nine-replay fold and remains exact on the
-held replay; it is cross-validation, not additional independent holdout
-evidence.
+Patch 16.14 now has replay/Timeline **change correlations** within the
+champion-owned 1,479-byte `0x02EB` family, not decoded field boundaries. The
+`totalGold` artifact explicitly sets `fieldBoundaryAvailable:false`,
+`nonUnique:true`, and `postHoc:true`. Post-hoc pair `109,119` changes on all
+3,024 saved `totalGold` changes and none of 76 unchanged transitions
+(Discovery 2,043/0/0/57; frozen Holdout 981/0/0/19, TP/FP/FN/TN). A bounded
+`96..128` Discovery-only search (maximum three bytes) finds three equally
+minimal exact pairs: `109,119`, `115,119`, and `117,119`; all remain exact in
+H3. The former exact `115,117,119` correlation is a non-minimal superset.
+Every nine-replay leave-one-replay-out search again finds those same three
+pairs, which are exact on its held replay. This preserves a stability
+diagnostic but is neither independent holdout evidence nor proof of a semantic
+or component boundary.
 
-Both findings are change envelopes only. A direct packed lane or gold value
-matches 0/3,100 non-initial keyframe values; each packed delta matches only
-the corresponding unchanged transitions (945 lane, 76 gold), so no current or
-earned gold, numeric lane CS, delta, or last-hit event is decoded. Jungle-CS
-offsets 134..137 remain an imperfect negative control with ten false positives.
+The lane-CS correlation is uniquely minimal in its separately fixed `120..140`
+search window: only `125,127,129` is exact in Discovery and H3. It changes on
+all 2,155 saved `minionsKilled` changes and none of 945 unchanged transitions
+(Discovery 1,458/0/0/642; Holdout 697/0/0/303). The previous `127..129`
+range missed three otherwise identical p125-only updates; byte 125 changes in
+24 positive / 0 negative Discovery transitions and 32 / 0 Holdout transitions,
+including exactly one and two p125-only forms respectively. The asserted
+p125-only witnesses are `EUW1-7920292147` participant 3, segments 38→39, lane
+CS 280→281, plus `EUW1-7921482297` participants 3 and 8, segments 46→47, lane
+CS 360→361 and 268→269; all have p125 `0x0e→0xe8`. Byte 128 is inert across
+all 3,100 transitions and is diagnostic only, not part of the correlation or
+a packing test. This is not historical unseen-holdout evidence because p125
+was found in a full-corpus mismatch audit; the LORO result is stability
+diagnostic only.
+
+Neither correlation decodes a value, delta, event, or field boundary. A direct
+packed lane or gold value matches 0/3,100 non-initial keyframe values; the
+`109,119` gold delta matches only 58 Discovery and 19 Holdout transitions, and
+the lane delta only the corresponding 945 unchanged transitions. Thus no
+current or earned gold, numeric lane CS, delta, or last-hit event is decoded.
+Jungle-CS offsets 134..137 remain an imperfect negative control with ten false
+positives.
+
+A separately bounded stride-two scalar audit checks 1,126 integer, Float32,
+Float64, raw-delta, constant-XOR, and constant-add candidates over starts
+`90..160` and logical widths `2..8`. None is D7-exact; adding `p121`, `p131`,
+or `p141` to the apparent gold/lane/jungle lanes yields zero direct matches and
+no viable changing-delta decoder in D7 or frozen H3. Bounded discrete packet
+searches likewise find no exact champion-owner lane-CS or jungle-CS event-count
+family. The next keyframe step is therefore a stateful replication/record
+grammar, not a wider static scalar packing.
 
 Position, health, resources, numeric gold, XP, level, numeric CS, damage, KDA,
 and alive state are not decoded. Older supervised keyframe assignments are
@@ -395,10 +419,11 @@ it does not prove what those bytes mean.
    symbols, then complete slot/instance/removal decoding and reconstruct
    inventory state; expose item events and a scrubber-synchronized inventory
    panel only after the Native/Wasm promotion gate.
-2. Decode the inner keyframe replication/component grammar beginning at the
-   exact total-gold change envelope and nearby CS lanes. Use final `statsJson`
-   values plus controlled transitions as replay-only constraints for numeric
-   gold, XP, level, CS, health, and resources.
+2. Decode the inner keyframe replication/component grammar using the exact but
+   non-semantic `totalGold` and lane-CS change correlations only as search
+   constraints. Use final `statsJson` values plus controlled transitions as
+   replay-only constraints for numeric gold, XP, level, CS, health, and
+   resources.
 3. Decode the real movement/waypoint protocol and entity identity. Validate raw
    waypoints before considering interpolation, pathfinding, or movement-speed
    reconstruction.

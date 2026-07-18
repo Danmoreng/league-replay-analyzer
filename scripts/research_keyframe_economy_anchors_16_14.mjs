@@ -25,7 +25,12 @@ const PROFILE = Object.freeze({
   holdout: Object.freeze([
     "EUW1-7921377760", "EUW1-7921482297", "EUW1-7921996430",
   ]),
-  totalGoldOffsets: Object.freeze([115, 117, 119]),
+  // These are observed change correlations, not a decoded total-gold field.
+  // [109, 119] was identified after inspecting the corpus, so it is explicitly
+  // post-hoc. The bounded search below selects from Discovery only before H3.
+  totalGoldPostHocOffsets: Object.freeze([109, 119]),
+  totalGoldPriorCorrelationOffsets: Object.freeze([115, 117, 119]),
+  totalGoldCandidateOffsets: Object.freeze(Array.from({ length: 33 }, (_, index) => 96 + index)),
   // Minimal change envelope. It establishes only whether lane CS changed,
   // never its value; p128 is retained only as an inert diagnostic.
   laneCsOffsets: Object.freeze([125, 127, 129]),
@@ -37,23 +42,38 @@ const PROFILE = Object.freeze({
 // selected lane and exact confusion counts. They are a separate cross-validation
 // view and do not extend the declared 7/3 discovery/holdout evidence boundary.
 // Direct/delta negative gates are kept for that primary split.
+function expectedMetric(tp, tn, directMisses, deltaMatches) {
+  return { tp, fp: 0, fn: 0, tn, directMatches: 0, directMisses, deltaMatches, deltaMisses: directMisses - deltaMatches, exactChangeAnchor: true };
+}
+function expectedGoldLoro() {
+  const heldout = [
+    ["EUW1-7919517389", 250, 10], ["EUW1-7919624327", 252, 8], ["EUW1-7920241664", 332, 8], ["EUW1-7920292147", 392, 8], ["EUW1-7920341366", 245, 5],
+    ["EUW1-7920364492", 242, 8], ["EUW1-7920550565", 330, 10], ["EUW1-7921377760", 234, 6], ["EUW1-7921482297", 463, 7], ["EUW1-7921996430", 284, 6],
+  ];
+  return Object.fromEntries(heldout.map(([replayId, tp, tn]) => [replayId, {
+    minimumUnionSize: 2,
+    exactTrainingUnions: [[109, 119], [115, 119], [117, 119]].map((offsets) => ({ offsets, heldout: { tp, fp: 0, fn: 0, tn, exactChangeAnchor: true } })),
+  }]));
+}
 const EXPECTED = Object.freeze({
   counts: { snapshots: 3200, transitions: 3100, discoveryTransitions: 2100, holdoutTransitions: 1000 },
   totalGold: {
-    discovery: { tp: 2043, fp: 0, fn: 0, tn: 57, directMatches: 0, directMisses: 2100, deltaMatches: 57, deltaMisses: 2043, exactChangeAnchor: true },
-    holdout: { tp: 981, fp: 0, fn: 0, tn: 19, directMatches: 0, directMisses: 1000, deltaMatches: 19, deltaMisses: 981, exactChangeAnchor: true },
-    allCorpusLoro: {
-      "EUW1-7919517389": { selectedOffsets: [119, 117, 115], heldout: { tp: 250, fp: 0, fn: 0, tn: 10, exactChangeAnchor: true } },
-      "EUW1-7919624327": { selectedOffsets: [119, 117, 115], heldout: { tp: 252, fp: 0, fn: 0, tn: 8, exactChangeAnchor: true } },
-      "EUW1-7920241664": { selectedOffsets: [119, 117, 115], heldout: { tp: 332, fp: 0, fn: 0, tn: 8, exactChangeAnchor: true } },
-      "EUW1-7920292147": { selectedOffsets: [119, 117, 115], heldout: { tp: 392, fp: 0, fn: 0, tn: 8, exactChangeAnchor: true } },
-      "EUW1-7920341366": { selectedOffsets: [119, 117, 115], heldout: { tp: 245, fp: 0, fn: 0, tn: 5, exactChangeAnchor: true } },
-      "EUW1-7920364492": { selectedOffsets: [119, 117, 115], heldout: { tp: 242, fp: 0, fn: 0, tn: 8, exactChangeAnchor: true } },
-      "EUW1-7920550565": { selectedOffsets: [119, 117, 115], heldout: { tp: 330, fp: 0, fn: 0, tn: 10, exactChangeAnchor: true } },
-      "EUW1-7921377760": { selectedOffsets: [119, 117, 115], heldout: { tp: 234, fp: 0, fn: 0, tn: 6, exactChangeAnchor: true } },
-      "EUW1-7921482297": { selectedOffsets: [119, 117, 115], heldout: { tp: 463, fp: 0, fn: 0, tn: 7, exactChangeAnchor: true } },
-      "EUW1-7921996430": { selectedOffsets: [119, 117, 115], heldout: { tp: 284, fp: 0, fn: 0, tn: 6, exactChangeAnchor: true } },
+    fieldBoundaryAvailable: false, nonUnique: true, postHoc: true,
+    postHocCorrelations: [
+      { id: "post-hoc-109-119", offsets: [109, 119], discovery: expectedMetric(2043, 57, 2100, 58), holdout: expectedMetric(981, 19, 1000, 19) },
+      { id: "prior-115-117-119", offsets: [115, 117, 119], discovery: expectedMetric(2043, 57, 2100, 57), holdout: expectedMetric(981, 19, 1000, 19) },
+    ],
+    boundedDiscoverySearch: {
+      candidateOffsets: Array.from({ length: 33 }, (_, index) => 96 + index),
+      maximumUnionSize: 3,
+      minimumUnionSize: 2,
+      exactDiscoveryUnions: [
+        { offsets: [109, 119], discovery: expectedMetric(2043, 57, 2100, 58), holdout: expectedMetric(981, 19, 1000, 19) },
+        { offsets: [115, 119], discovery: expectedMetric(2043, 57, 2100, 57), holdout: expectedMetric(981, 19, 1000, 19) },
+        { offsets: [117, 119], discovery: expectedMetric(2043, 57, 2100, 57), holdout: expectedMetric(981, 19, 1000, 19) },
+      ],
     },
+    allCorpusLoro: expectedGoldLoro(),
   },
   laneCs: {
     discovery: { tp: 1458, fp: 0, fn: 0, tn: 642, directMatches: 0, directMisses: 2100, deltaMatches: 642, deltaMisses: 1458, exactChangeAnchor: true },
@@ -64,6 +84,12 @@ const EXPECTED = Object.freeze({
     },
     inertOffset128: { discoveryChangedTransitionCount: 0, holdoutChangedTransitionCount: 0 },
     discoverySelector: { selectedOffsets: [127, 129, 125], discovery: { tp: 1458, fp: 0, fn: 0, tn: 642, exactChangeAnchor: true }, holdout: { tp: 697, fp: 0, fn: 0, tn: 303, exactChangeAnchor: true } },
+    boundedDiscoverySearch: {
+      candidateOffsets: Array.from({ length: 21 }, (_, index) => 120 + index),
+      maximumUnionSize: 3,
+      minimumUnionSize: 3,
+      exactDiscoveryUnions: [{ offsets: [125, 127, 129], discovery: expectedMetric(1458, 642, 2100, 642), holdout: expectedMetric(697, 303, 1000, 303) }],
+    },
     allCorpusLoro: {
       "EUW1-7919517389": { selectedOffsets: [127, 129, 125], heldout: { tp: 180, fp: 0, fn: 0, tn: 80, exactChangeAnchor: true } },
       "EUW1-7919624327": { selectedOffsets: [127, 129, 125], heldout: { tp: 184, fp: 0, fn: 0, tn: 76, exactChangeAnchor: true } },
@@ -228,9 +254,24 @@ function inertOffsetChangedTransitionCount(rows, offset) {
   return transitions(rows).filter((transition) => changed(transition.next, transition.previous, [offset])).length;
 }
 
-function selectTotalGoldOffsets(rows) {
-  const scores = Array.from({ length: PROFILE.payloadLength }, (_, offset) => ({ offset, ...metrics(rows, "totalGold", [offset]) }));
-  return scores.sort((a, b) => (b.tp - b.fp - b.fn) - (a.tp - a.fp - a.fn) || a.offset - b.offset).slice(0, 3).map((entry) => entry.offset);
+function combinations(values, count, start = 0, prefix = [], output = []) {
+  if (prefix.length === count) { output.push(prefix); return output; }
+  for (let index = start; index <= values.length - (count - prefix.length); index += 1) {
+    combinations(values, count, index + 1, [...prefix, values[index]], output);
+  }
+  return output;
+}
+
+// The candidate window and maximum union size are fixed in the profile. This
+// selector uses Discovery only; H3 is evaluated only after its results freeze.
+function selectMinimumExactTotalGoldUnions(rows) {
+  for (let size = 1; size <= 3; size += 1) {
+    const exactUnions = combinations(PROFILE.totalGoldCandidateOffsets, size)
+      .map((offsets) => ({ offsets, metrics: metrics(rows, "totalGold", offsets) }))
+      .filter((candidate) => candidate.metrics.fp === 0 && candidate.metrics.fn === 0);
+    if (exactUnions.length) return { candidateOffsets: PROFILE.totalGoldCandidateOffsets, minimumUnionSize: size, exactDiscoveryUnions: exactUnions };
+  }
+  fail("Bounded totalGold search found no exact union through three offsets.", { candidateOffsets: PROFILE.totalGoldCandidateOffsets });
 }
 
 // The bounded 120..140 locality was fixed before this leave-one-replay-out
@@ -266,10 +307,40 @@ function selectLaneCsOffsets(rows) {
   return selectedOffsets;
 }
 
+// This enumerates the same predeclared locality as the greedy lane-CS
+// diagnostic, rather than using the Holdout to break ties between unions.
+function selectMinimumExactLaneCsUnions(rows) {
+  for (let size = 1; size <= 3; size += 1) {
+    const exactUnions = combinations(PROFILE.laneCsLoroCandidateOffsets, size)
+      .map((offsets) => ({ offsets, metrics: metrics(rows, "laneCs", offsets) }))
+      .filter((candidate) => candidate.metrics.fp === 0 && candidate.metrics.fn === 0);
+    if (exactUnions.length) return { candidateOffsets: PROFILE.laneCsLoroCandidateOffsets, minimumUnionSize: size, exactDiscoveryUnions: exactUnions };
+  }
+  fail("Bounded lane-CS search found no exact union through three offsets.", { candidateOffsets: PROFILE.laneCsLoroCandidateOffsets });
+}
+
 function evaluate(rows) {
   const discoveryRows = rows.filter((row) => PROFILE.discovery.includes(row.replayId));
   const holdoutRows = rows.filter((row) => PROFILE.holdout.includes(row.replayId));
-  const totalGold = { discovery: metrics(discoveryRows, "totalGold", PROFILE.totalGoldOffsets), holdout: metrics(holdoutRows, "totalGold", PROFILE.totalGoldOffsets), allCorpusLoro: {} };
+  const boundedDiscoverySearch = selectMinimumExactTotalGoldUnions(discoveryRows);
+  // Freeze the Discovery-selected alternatives before measuring the Holdout.
+  const totalGold = {
+    fieldBoundaryAvailable: false,
+    nonUnique: true,
+    postHoc: true,
+    postHocCorrelations: [
+      { id: "post-hoc-109-119", offsets: PROFILE.totalGoldPostHocOffsets, discovery: metrics(discoveryRows, "totalGold", PROFILE.totalGoldPostHocOffsets), holdout: metrics(holdoutRows, "totalGold", PROFILE.totalGoldPostHocOffsets) },
+      { id: "prior-115-117-119", offsets: PROFILE.totalGoldPriorCorrelationOffsets, discovery: metrics(discoveryRows, "totalGold", PROFILE.totalGoldPriorCorrelationOffsets), holdout: metrics(holdoutRows, "totalGold", PROFILE.totalGoldPriorCorrelationOffsets) },
+    ],
+    boundedDiscoverySearch: {
+      candidateOffsets: boundedDiscoverySearch.candidateOffsets,
+      maximumUnionSize: 3,
+      minimumUnionSize: boundedDiscoverySearch.minimumUnionSize,
+      exactDiscoveryUnions: boundedDiscoverySearch.exactDiscoveryUnions.map(({ offsets, metrics: discovery }) => ({ offsets, discovery, holdout: metrics(holdoutRows, "totalGold", offsets) })),
+    },
+    allCorpusLoro: {},
+  };
+  const boundedLaneCsDiscoverySearch = selectMinimumExactLaneCsUnions(discoveryRows);
   const laneCs = {
     changeEnvelopeOnly: true,
     numericStateAvailable: false,
@@ -288,6 +359,12 @@ function evaluate(rows) {
       holdoutChangedTransitionCount: inertOffsetChangedTransitionCount(holdoutRows, 128),
     },
     discoverySelector: {},
+    boundedDiscoverySearch: {
+      candidateOffsets: boundedLaneCsDiscoverySearch.candidateOffsets,
+      maximumUnionSize: 3,
+      minimumUnionSize: boundedLaneCsDiscoverySearch.minimumUnionSize,
+      exactDiscoveryUnions: boundedLaneCsDiscoverySearch.exactDiscoveryUnions.map(({ offsets, metrics: discovery }) => ({ offsets, discovery, holdout: metrics(holdoutRows, "laneCs", offsets) })),
+    },
     allCorpusLoro: {},
   };
   const discoverySelectedLaneCsOffsets = selectLaneCsOffsets(discoveryRows);
@@ -299,27 +376,30 @@ function evaluate(rows) {
   for (const replayId of PROFILE.fixtures) {
     const train = rows.filter((row) => row.replayId !== replayId);
     const held = rows.filter((row) => row.replayId === replayId);
-    const selectedOffsets = selectTotalGoldOffsets(train);
-    totalGold.allCorpusLoro[replayId] = { selectedOffsets, heldout: metrics(held, "totalGold", selectedOffsets) };
+    const selectedTotalGold = selectMinimumExactTotalGoldUnions(train);
+    totalGold.allCorpusLoro[replayId] = {
+      minimumUnionSize: selectedTotalGold.minimumUnionSize,
+      exactTrainingUnions: selectedTotalGold.exactDiscoveryUnions.map(({ offsets }) => ({ offsets, heldout: metrics(held, "totalGold", offsets) })),
+    };
     const selectedLaneCsOffsets = selectLaneCsOffsets(train);
     laneCs.allCorpusLoro[replayId] = { selectedOffsets: selectedLaneCsOffsets, heldout: metrics(held, "laneCs", selectedLaneCsOffsets) };
   }
   return {
-    schema: "rofl-keyframe-economy-anchors-research/v2",
+    schema: "rofl-keyframe-economy-anchors-research/v3",
     researchOnly: true,
     promotionGate: false,
     runtimeInput: false,
     profile: { versionGroup: PROFILE.versionGroup, packetType: "0x02EB", payloadLength: PROFILE.payloadLength, championOwnerBase: "0x400000AD" },
     offlineOracle: { input: "Saved Riot Timeline participantFrames labels only", alignment: "ROFL keyframe segmentId - 1", runtimeUse: false },
-    evidenceBoundary: "The reproducible Discovery-to-Holdout lane selector is evaluated on the fixed 7/3 split, but p125 was originally identified by a full-corpus mismatch audit, so the Holdout must not be described as historically unseen. The separate all-corpus leave-one-replay-out views select bounded candidate offsets on nine replays and check the tenth; they are cross-validation, not additional holdout-isolated evidence.",
+    evidenceBoundary: "The totalGold [109,119] correlation was identified post-hoc, so its frozen 7/3 Holdout result is not historical unseen-selection evidence. The totalGold minimum-union search is bounded to offsets 96..128, permits at most three offsets, selects exact unions from Discovery only, and measures H3 only after selection. The lane selector is bounded to 120..140 and likewise selects from Discovery only, but p125 was originally identified by a full-corpus mismatch audit. All leave-one-replay-out views select bounded candidate offsets on nine replays and check the tenth; they are stability diagnostics, not additional independent holdouts.",
     split: { discovery: PROFILE.discovery, holdout: PROFILE.holdout },
     counts: { snapshots: rows.length, transitions: transitions(rows).length, discoveryTransitions: transitions(discoveryRows).length, holdoutTransitions: transitions(holdoutRows).length },
-    totalGoldChangeAnchor: { offsets: PROFILE.totalGoldOffsets, ...totalGold },
+    totalGoldChangeCorrelations: totalGold,
     laneCsChangeEnvelope: laneCs,
     negativeControls: {
       jungleCs: { offsets: PROFILE.jungleCsOffsets, discovery: metrics(discoveryRows, "jungleCs", PROFILE.jungleCsOffsets), holdout: metrics(holdoutRows, "jungleCs", PROFILE.jungleCsOffsets) },
     },
-    nonPromotionReason: "The totalGold and lane-CS byte ranges reveal exactly when their saved oracle values change, but neither direct packed values nor packed deltas decode a numeric state. Jungle-CS remains an imperfect negative control. No numeric economy value, delta, or event is available.",
+    nonPromotionReason: "The post-hoc, non-unique totalGold byte-change correlations and lane-CS byte ranges reveal when their saved oracle values change, but neither direct packed values nor packed deltas decode a numeric state. Jungle-CS remains an imperfect negative control. No numeric economy value, delta, event, or field boundary is available.",
   };
 }
 
@@ -327,7 +407,22 @@ function assertionShape(result) {
   const select = (value) => ({ tp: value.tp, fp: value.fp, fn: value.fn, tn: value.tn, directMatches: value.directMatches, directMisses: value.directMisses, deltaMatches: value.deltaMatches, deltaMisses: value.deltaMisses, exactChangeAnchor: value.exactChangeAnchor });
   return {
     counts: result.counts,
-    totalGold: { discovery: select(result.totalGoldChangeAnchor.discovery), holdout: select(result.totalGoldChangeAnchor.holdout), allCorpusLoro: Object.fromEntries(Object.entries(result.totalGoldChangeAnchor.allCorpusLoro).map(([id, value]) => [id, { selectedOffsets: value.selectedOffsets, heldout: { tp: value.heldout.tp, fp: value.heldout.fp, fn: value.heldout.fn, tn: value.heldout.tn, exactChangeAnchor: value.heldout.exactChangeAnchor } }])) },
+    totalGold: {
+      fieldBoundaryAvailable: result.totalGoldChangeCorrelations.fieldBoundaryAvailable,
+      nonUnique: result.totalGoldChangeCorrelations.nonUnique,
+      postHoc: result.totalGoldChangeCorrelations.postHoc,
+      postHocCorrelations: result.totalGoldChangeCorrelations.postHocCorrelations.map((value) => ({ id: value.id, offsets: value.offsets, discovery: select(value.discovery), holdout: select(value.holdout) })),
+      boundedDiscoverySearch: {
+        candidateOffsets: result.totalGoldChangeCorrelations.boundedDiscoverySearch.candidateOffsets,
+        maximumUnionSize: result.totalGoldChangeCorrelations.boundedDiscoverySearch.maximumUnionSize,
+        minimumUnionSize: result.totalGoldChangeCorrelations.boundedDiscoverySearch.minimumUnionSize,
+        exactDiscoveryUnions: result.totalGoldChangeCorrelations.boundedDiscoverySearch.exactDiscoveryUnions.map((value) => ({ offsets: value.offsets, discovery: select(value.discovery), holdout: select(value.holdout) })),
+      },
+      allCorpusLoro: Object.fromEntries(Object.entries(result.totalGoldChangeCorrelations.allCorpusLoro).map(([id, value]) => [id, {
+        minimumUnionSize: value.minimumUnionSize,
+        exactTrainingUnions: value.exactTrainingUnions.map((entry) => ({ offsets: entry.offsets, heldout: { tp: entry.heldout.tp, fp: entry.heldout.fp, fn: entry.heldout.fn, tn: entry.heldout.tn, exactChangeAnchor: entry.heldout.exactChangeAnchor } })),
+      }])),
+    },
     laneCs: {
       discovery: select(result.laneCsChangeEnvelope.discovery),
       holdout: select(result.laneCsChangeEnvelope.holdout),
@@ -337,6 +432,12 @@ function assertionShape(result) {
         selectedOffsets: result.laneCsChangeEnvelope.discoverySelector.selectedOffsets,
         discovery: { tp: result.laneCsChangeEnvelope.discoverySelector.discovery.tp, fp: result.laneCsChangeEnvelope.discoverySelector.discovery.fp, fn: result.laneCsChangeEnvelope.discoverySelector.discovery.fn, tn: result.laneCsChangeEnvelope.discoverySelector.discovery.tn, exactChangeAnchor: result.laneCsChangeEnvelope.discoverySelector.discovery.exactChangeAnchor },
         holdout: { tp: result.laneCsChangeEnvelope.discoverySelector.holdout.tp, fp: result.laneCsChangeEnvelope.discoverySelector.holdout.fp, fn: result.laneCsChangeEnvelope.discoverySelector.holdout.fn, tn: result.laneCsChangeEnvelope.discoverySelector.holdout.tn, exactChangeAnchor: result.laneCsChangeEnvelope.discoverySelector.holdout.exactChangeAnchor },
+      },
+      boundedDiscoverySearch: {
+        candidateOffsets: result.laneCsChangeEnvelope.boundedDiscoverySearch.candidateOffsets,
+        maximumUnionSize: result.laneCsChangeEnvelope.boundedDiscoverySearch.maximumUnionSize,
+        minimumUnionSize: result.laneCsChangeEnvelope.boundedDiscoverySearch.minimumUnionSize,
+        exactDiscoveryUnions: result.laneCsChangeEnvelope.boundedDiscoverySearch.exactDiscoveryUnions.map((value) => ({ offsets: value.offsets, discovery: select(value.discovery), holdout: select(value.holdout) })),
       },
       allCorpusLoro: Object.fromEntries(Object.entries(result.laneCsChangeEnvelope.allCorpusLoro).map(([id, value]) => [id, { selectedOffsets: value.selectedOffsets, heldout: { tp: value.heldout.tp, fp: value.heldout.fp, fn: value.heldout.fn, tn: value.heldout.tn, exactChangeAnchor: value.heldout.exactChangeAnchor } }])),
     },
@@ -352,4 +453,4 @@ if (JSON.stringify(observed) !== JSON.stringify(EXPECTED)) fail("Keyframe econom
 const outputPath = path.resolve(args.outputPath);
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 fs.writeFileSync(outputPath, `${JSON.stringify(result, null, 2)}\n`);
-console.log(JSON.stringify({ valid: true, schema: result.schema, snapshots: result.counts.snapshots, transitions: result.counts.transitions, totalGold: result.totalGoldChangeAnchor, laneCsChangeEnvelope: result.laneCsChangeEnvelope, negativeControls: result.negativeControls }, null, 2));
+console.log(JSON.stringify({ valid: true, schema: result.schema, snapshots: result.counts.snapshots, transitions: result.counts.transitions, totalGold: result.totalGoldChangeCorrelations, laneCsChangeEnvelope: result.laneCsChangeEnvelope, negativeControls: result.negativeControls }, null, 2));

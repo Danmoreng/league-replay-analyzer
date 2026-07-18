@@ -172,26 +172,36 @@ grammar and semantic validation establish item identities and transitions.
 
 The maintained harness
 [research_keyframe_economy_anchors_16_14.mjs](../scripts/research_keyframe_economy_anchors_16_14.mjs)
-adds one exact semantic boundary inside champion-owned `0x02EB` keyframes. It
+adds bounded replay/Timeline **change-correlation** research inside
+champion-owned `0x02EB` keyframes. It
 uses the ten fixed patch-16.14 replay/timeline pairs, exact 1,479-byte payloads,
 exact replay-native champion ownership, exactly ten owners per keyframe, and a
 predeclared seven-replay discovery / three-replay holdout split.
 
-Changing any byte at offsets `115`, `117`, or `119` identifies every saved
-Timeline `totalGold` change and no unchanged transition:
+The `totalGold` result is explicitly post-hoc and non-unique, not a semantic or
+component boundary: its artifact records `fieldBoundaryAvailable: false`,
+`nonUnique: true`, and `postHoc: true`. Changing either byte at offsets `109`
+or `119` identifies every saved Timeline `totalGold` change and no unchanged
+transition:
 
 | Split | Changed / true change | Changed / no change | Unchanged / true change | Unchanged / no change |
 |---|---:|---:|---:|---:|
 | discovery | 2,043 | 0 | 0 | 57 |
 | holdout | 981 | 0 | 0 | 19 |
 
-That is an exact `3,024`-positive / `76`-negative **change envelope**, not a
-gold-value decoder. A direct big-endian packing of those bytes matches
-`0/3,100` values; its delta matches only the 76 unchanged transitions and none
-of the 3,024 gold changes. Other value grammars remain open. An all-corpus
-leave-one-replay-out offset selection independently chooses the same three
-offsets on each nine-replay training fold and reproduces the exact envelope on
-the tenth; it is separate cross-validation, not extra holdout-isolated evidence.
+That is an exact `3,024`-positive / `76`-negative correlation, not a gold-value
+decoder or field boundary. The post-hoc pair has Discovery `2,043/0/0/57` and
+frozen-Holdout `981/0/0/19` TP/FP/FN/TN. To measure non-uniqueness without
+selecting from H3, a bounded `96..128` Discovery-only search allows unions of
+at most three bytes. Its minimum exact unions are `109,119`, `115,119`, and
+`117,119`; all three reproduce the same exact Holdout matrix after the
+Discovery result is frozen. The former `115,117,119` correlation is exact but
+is a non-minimal superset. The all-corpus leave-one-replay-out stability
+diagnostic finds the same three minimal pairs on every nine-replay training
+fold and each is exact on its held replay. These checks are not independent
+holdout evidence. A direct big-endian packing of `109,119` matches `0/3,100`
+values; its delta matches only 58 Discovery and 19 Holdout transitions, so it
+is not a numeric state or delta decoder. Other value grammars remain open.
 
 The nearby lane-CS change envelope is also exact, but it remains strictly
 non-numeric. Any changed byte at offsets `125`, `127`, or `129` marks
@@ -222,16 +232,62 @@ separate all-corpus leave-one-replay-out selector chooses the same three bytes
 on every nine-replay fold and remains exact on each held replay; that is
 cross-validation, not additional holdout-isolated evidence.
 
-This proves only a component-update envelope. The direct packing and packed
-delta still reproduce `0/3,100` lane-CS values and only the 945 unchanged
-transitions respectively, so neither is a lane-CS state, delta, or last-hit
-decoder. Jungle offsets `134..137` remain a negative control with ten false
-positives (8 discovery, 2 holdout). No numeric CS field is normalized.
+The lane-CS result is a change correlation only. A bounded `120..140`
+Discovery-only minimum-union search finds exactly one minimum union:
+`125,127,129`; it reproduces the same exact matrix in H3. The direct packing
+and packed delta still reproduce `0/3,100` lane-CS values and only the 945
+unchanged transitions respectively, so neither is a lane-CS state, delta, or
+last-hit decoder. Jungle offsets `134..137` remain a negative control with ten
+false positives (8 discovery, 2 holdout). No numeric CS field is normalized.
 
 ```powershell
 node .\scripts\research_keyframe_economy_anchors_16_14.mjs
 ```
 
 The artifact remains `researchOnly: true`, `promotionGate: false`, and
-`runtimeInput: false` (`rofl-keyframe-economy-anchors-research/v2`). No gold
+`runtimeInput: false` (`rofl-keyframe-economy-anchors-research/v3`). No gold
 or CS state reaches C++, Wasm, or the browser.
+
+### Bounded scalar and discrete-event falsifications
+
+A follow-up scalar audit fixes the candidate family before evaluation: every
+start offset `90..160`, stride-two logical width `2..8`, unsigned integer and
+Float32/Float64 interpretation in both byte orders, raw delta, and one
+Discovery-calibrated whole-value XOR or additive mask. Across 1,126 candidates,
+none is exact on D7. H3 is read only for the frozen D7 rankings and weakens them
+further. In particular, adding the next logical byte does not complete a
+plaintext scalar:
+
+- `totalGold` bytes `115,117,119,121`: `0/2,170` direct D7 matches and
+  `0/2,043` changing-delta matches; H3 is `0/1,030` and `0/981`;
+- lane-CS bytes `125,127,129,131`: `0/2,170` direct and `0/1,458`
+  changing-delta D7 matches; H3 is `0/1,030` and `0/697`;
+- jungle-CS bytes `135,137,139,141`: `0/2,170` direct D7 matches and only
+  `1/367` changing-delta matches; H3 is `0/1,030` and `0/183`.
+
+The full bounded stride search's best changing-delta counts are only `3/2,043`
+for total gold, `11/1,458` for lane CS, `3/367` for jungle CS, `42/964` for
+level, `1/1,931` for XP, and `2/2,100` for current gold. Their frozen H3 counts
+are `0/981`, `5/697`, `0/183`, `20/430`, `0/939`, and `0/998`. The logical
+lanes are therefore not static plaintext scalars under this family; the next
+hypothesis must operate at the stateful record/replication level.
+
+Separate packet-count audits also reject simple champion-owner event streams.
+For lane CS, 42,387 type/length/prefix signatures from 71 portable, bounded
+chunk families produce no exact D7 count stream; the frozen top 20 also fail
+H3, including zero-CS and compound-increment checks. An expanded pass over all
+channels, 257..2,048-byte payloads, and families without a champion in the
+catalog top set finds 91 portable groups, but only one has any champion blocks
+and it has only 20, below the frozen minimum support of 50. For jungle CS,
+3,134 tokens and 2,853 fixed count/multiplicity equations from 65
+champion-owner-safe families produce no exact D7 candidate. The best frozen
+comparison (`type 210`, length 22, `count * 4`) matches only `192/367` positive
+D7 intervals and adds 491 no-change false positives; H3 is likewise non-viable.
+
+An initial non-champion-owner audit covers 5,760 distinct `blockParam` values
+across 14 structurally selected short packet families. Repeated packet shapes
+exist, but owner values recur across replays and their first/last observations
+are neither explicit create/delete operations nor uniquely attributable to a
+champion or camp. This does not rule out monster-owned state; it establishes
+that a real operation/record grammar with parent or owner references must come
+before using these values as entity identities.

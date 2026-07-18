@@ -262,6 +262,18 @@ owner, timing, segment, length, and exact partial Undo association. Item
 identity, slot, instance, ordering, and the unmatched undo half therefore remain
 unavailable.
 
+A bounded raw-predicate audit rejects the simplest explanation for the missing
+patch-16.14 Undo half. It scans all `9,908,848` D7 chunk blocks, including
+`971,445` channel-1 blocks with exact champion ownership, and evaluates
+`3,481,871` classifiers of the form packet type + content length + exact payload
+prefix through 16 bytes against the 17 D7 Undo labels not covered by `0x0081`.
+No classifier covers all targets before extra rejection; `0x0081` remains the
+zero-extra negative control at 23/40 D7 labels and covers 0/17 missing labels.
+With no exact Discovery candidate, H3 is deliberately unopened. This
+falsifies a second single-family constant-prefix classifier within that bound;
+it does not falsify a multi-packet, stateful record grammar or decode item,
+slot, instance, before/after identity, or operation ordering.
+
 ## Patch-16.9 profile
 
 | Semantic candidate | Channel | Packet type | Content lengths | Champion ID base |
@@ -421,18 +433,19 @@ The gate requires all of the following before adding C++ runtime output:
 ## Next decoder step
 
 The highest-value next step is to identify the patch-16.9 item-swap family and
-obtain the patch-matched field deserializer or symbol table for `0x0132` and
-`0x0415`. Older decoded packet schemas model buy, remove, swap, and use as
-separate messages, with explicit slot fields on buy/remove and source/target
-slots on swap. This is only a structural research clue from older patches, not
-a decoder dependency or proof for 16.9.
+derive the field/symbol grammar for `0x0132` and `0x0415` exclusively from the
+saved replay corpus. Older decoded packet schemas suggest that buy, remove,
+swap, and use may be separate messages with explicit slot fields, but that is
+only a structural search clue, never a decoder dependency or proof for 16.9.
 
-A decoded patch-16.9 client-side packet trace or the patch-matched packet
-deserializer would provide a much stronger route than fitting more payload
-correlations. The locally installed client is patch 16.14, so it cannot safely
-define the 16.9 profile. Once slot identity and swaps are available, the
-reducer can maintain seven slots per participant and use replay-native final
-`statsJson` items as an independent, ROFL-only validation oracle.
+Client/game binaries, client-side packet traces, running League/Riot processes,
+and Vanguard-managed data are outside this research boundary and must not be
+used to obtain a deserializer or symbol table. Productive evidence must come
+from saved `.rofl` packet bytes, this repository's parser/tools, replay-native
+final `statsJson`, and saved Riot API fixtures used only as offline validation
+oracles. Once slot identity and swaps are replay-natively available, the reducer
+can maintain seven slots per participant and validate each reconstructed final
+inventory against its replay's embedded final state.
 
 Structural reference only:
 
