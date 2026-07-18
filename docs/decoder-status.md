@@ -228,6 +228,25 @@ owner/timestamp purchase-ID multisets semantically link 1,973 packets; the
 remaining 546 are explicitly transaction-unresolved and must not be emitted as
 purchases, slots, instances, transforms, or undo operations.
 
+The same fixed ten-fixture, 7/3 Discovery/Holdout research gate isolates a
+second, still unresolved removal-context family: champion-owned channel-1
+`0x0146` packets of length 2/3/4. There are 4,214 packets. A strictly
+Timeline-only timing shape—one `ITEM_DESTROYED`, no `ITEM_SOLD`, and neither a
+profiled 14/15-byte `0x0369` nor a profiled 6/7-byte `0x03F9` packet at the
+same owner within one millisecond—has 432 groups and 434 `0x0146` packets,
+with zero missing or ambiguous associations (267/269 Discovery and 165/165
+Holdout). Another 25 exact double-Destroy groups contain one each of profiled
+`0x0369`, profiled `0x03F9`, and `0x0146`. The 459 count is a unique complete
+framing-provenance union (`replayId`, segment type/ID/payload offset, and
+source offset) across both shapes with zero duplicate physical-packet
+assignments; 3,755 lie outside both. `blockIndex` is only chunk-local: two
+diagnostic block-index collisions are distinct physical packets in different
+chunks, not timing ambiguity. The often useful intermediate count of 3,780 is
+only the number outside the single-Destroy shape; it includes the 25
+double-Destroy companions. This is
+not an `0x0146` semantic decoder: its item, slot, instance, payload grammar,
+and operation class remain unavailable, and it emits no C++/Wasm/UI output.
+
 An add/update packet is not necessarily a purchase. Automatic transforms and
 unlabelled state updates exist. The sold/removed item, slot, item instance,
 count/charges, component consumption, upgrades, undos, and swaps remain

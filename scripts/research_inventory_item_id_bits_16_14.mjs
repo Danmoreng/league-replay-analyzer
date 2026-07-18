@@ -65,6 +65,28 @@ const EXPECTED = Object.freeze({
     11: Object.freeze({ observedCodeCount: 7, missingCodes: Object.freeze([4]) }),
     12: Object.freeze({ observedCodeCount: 2, missingCodes: Object.freeze([]) }),
   }),
+  extendedLengthNegativeControl: Object.freeze({
+    payloadLengths: Object.freeze([16, 17]),
+    packetCount: 9,
+    structurallyDecodablePacketCount: 9,
+    exactPurchaseLinkedPacketCount: 8,
+    extraPacketCount: 1,
+    excludedCoResidentExactCandidateCount: 0,
+    coResidentExcludedCandidatePacketCount: 1,
+    newExactPurchaseLinkedGroupCount: 8,
+    previousUnmatchedExactPacketCount: 8,
+    discovery: Object.freeze({ packetCount: 6, structurallyDecodablePacketCount: 6, exactPurchaseLinkedPacketCount: 6, extraPacketCount: 0, excludedCoResidentExactCandidateCount: 0, coResidentExcludedCandidatePacketCount: 0, newExactPurchaseLinkedGroupCount: 6, previousUnmatchedExactPacketCount: 6 }),
+    holdout: Object.freeze({ packetCount: 3, structurallyDecodablePacketCount: 3, exactPurchaseLinkedPacketCount: 2, extraPacketCount: 1, excludedCoResidentExactCandidateCount: 0, coResidentExcludedCandidatePacketCount: 1, newExactPurchaseLinkedGroupCount: 2, previousUnmatchedExactPacketCount: 2 }),
+    hypotheticalExtendedProfile: Object.freeze({
+      packetCount: 2528,
+      structurallyDecodablePacketCount: 2528,
+      unknownSymbolPacketCount: 0,
+      exactPurchaseLinkedPacketCount: 1981,
+      exactPurchaseLinkedGroupCount: 1980,
+      transactionUnresolvedPacketCount: 547,
+      unmatchedTimelinePurchaseCount: 228,
+    }),
+  }),
 });
 
 function parseArgs(argv) {
@@ -161,7 +183,7 @@ function validatedBit(payload, bit) {
   return BIT_FORMULAS[bit](payload);
 }
 
-function dumpBlocks(cliPath, replayPath) {
+function dumpChampionOwnedBlocks(cliPath, replayPath) {
   const result = spawnSync(cliPath, [
     "--dump-packet-types-json", replayPath, "--packet-type", String(PROFILE.packetType),
     "--segment-type", "chunk", "--max-blocks", "0",
@@ -173,21 +195,34 @@ function dumpBlocks(cliPath, replayPath) {
   if (!payload.valid || payload.errors?.length || !typeDump || typeDump.truncated || typeDump.emittedBlockCount !== typeDump.matchingBlockCount) {
     throw new Error(`${path.basename(replayPath)} failed the complete packet-dump gate.`);
   }
-  const relevantBlocks = (typeDump.blocks ?? []).filter((block) => block.channel === 1 && PROFILE.payloadLengths.has(block.contentLength));
-  for (const block of relevantBlocks) {
+  const championOwnedBlocks = (typeDump.blocks ?? []).filter((block) => block.channel === 1
+    && Number.isInteger(block.blockParam - PROFILE.championIdBase)
+    && block.blockParam - PROFILE.championIdBase >= 1 && block.blockParam - PROFILE.championIdBase <= 10);
+  for (const block of championOwnedBlocks) {
     if (block.contentHexTruncated !== false || block.contentHexBytes !== block.contentLength
       || typeof block.contentHex !== "string" || block.contentHex.length !== block.contentLength * 2
       || !/^[0-9a-f]*$/iu.test(block.contentHex)) {
       throw new Error(`${path.basename(replayPath)} contains an incomplete or invalid packet payload.`);
     }
   }
-  return relevantBlocks
+  return championOwnedBlocks
     .map((block) => ({
       participantId: block.blockParam - PROFILE.championIdBase,
       timestampMillis: block.timestampMillis,
       contentHex: block.contentHex,
-    }))
-    .filter((block) => Number.isInteger(block.participantId) && block.participantId >= 1 && block.participantId <= 10);
+      contentLength: block.contentLength,
+      blockIndex: block.blockIndex,
+      segmentType: block.segmentType,
+      segmentId: block.segmentId,
+      chunkId: block.chunkId,
+      segmentPayloadOffset: block.segmentPayloadOffset,
+      sourceOffset: block.sourceOffset,
+    }));
+}
+
+function dumpBlocks(cliPath, replayPath) {
+  return dumpChampionOwnedBlocks(cliPath, replayPath)
+    .filter((block) => PROFILE.payloadLengths.has(block.contentLength));
 }
 
 function purchasesFromTimeline(timeline) {
@@ -228,6 +263,97 @@ function labelsForFixture(replayId, purchases, blocks) {
     groups: [...groups.values()].map((group) => ({ ...group, replayId })),
     unmatchedPurchases,
     ambiguousPurchases,
+  };
+}
+
+function packetGroupsForFixture(replayId, purchases, blocks) {
+  const groups = new Map();
+  for (const block of blocks) {
+    const key = `${block.participantId}:${block.timestampMillis}`;
+    const group = groups.get(key) ?? { participantId: block.participantId, timestampMillis: block.timestampMillis, blocks: [], purchases: [] };
+    group.blocks.push(block);
+    groups.set(key, group);
+  }
+  let unmatchedPurchases = 0;
+  let ambiguousPurchases = 0;
+  for (const purchase of purchases) {
+    const matches = [...groups.values()].filter((group) => group.participantId === purchase.participantId
+      && Math.abs(group.timestampMillis - purchase.timestampMillis) <= PROFILE.labelToleranceMillis);
+    if (matches.length === 0) { unmatchedPurchases += 1; continue; }
+    if (matches.length !== 1) { ambiguousPurchases += 1; continue; }
+    matches[0].purchases.push(purchase);
+  }
+  return { groups: [...groups.values()].map((group) => ({ ...group, replayId })), unmatchedPurchases, ambiguousPurchases };
+}
+
+function extendedLengthNegativeControl(replayId, purchases, allChampionOwnedBlocks, oldGroups) {
+  const candidateLengths = new Set(EXPECTED.extendedLengthNegativeControl.payloadLengths);
+  const extendedBlocks = allChampionOwnedBlocks.filter((block) => PROFILE.payloadLengths.has(block.contentLength)
+    || candidateLengths.has(block.contentLength));
+  const extended = packetGroupsForFixture(replayId, purchases, extendedBlocks);
+  const complete = packetGroupsForFixture(replayId, purchases, allChampionOwnedBlocks);
+  const exactGroups = extended.groups.filter((group) => {
+    const decodedItemIds = group.blocks.map((block) => decodeItemId(Buffer.from(block.contentHex, "hex")));
+    return decodedItemIds.every((itemId) => itemId !== null)
+      && multisetEqual(decodedItemIds, group.purchases.map((purchase) => purchase.itemId));
+  });
+  const exactKeys = new Set(exactGroups.map((group) => `${group.participantId}:${group.timestampMillis}`));
+  const candidates = extendedBlocks.filter((block) => candidateLengths.has(block.contentLength));
+  const completeGroupFor = (block) => complete.groups.find((group) => group.participantId === block.participantId
+    && group.timestampMillis === block.timestampMillis) ?? null;
+  const hasExcludedCoResident = (block) => (completeGroupFor(block)?.blocks ?? [])
+    .some((coResident) => !PROFILE.payloadLengths.has(coResident.contentLength)
+      && !candidateLengths.has(coResident.contentLength));
+  const exactCandidatesBeforeEligibility = candidates.filter((block) => exactKeys.has(`${block.participantId}:${block.timestampMillis}`));
+  const exactCandidates = exactCandidatesBeforeEligibility.filter((block) => !hasExcludedCoResident(block));
+  const exactCandidateKeys = new Set(exactCandidates.map((block) => `${block.participantId}:${block.timestampMillis}`));
+  const oldGroupAt = (block) => oldGroups.some((group) => group.participantId === block.participantId
+    && Math.abs(group.timestampMillis - block.timestampMillis) <= PROFILE.labelToleranceMillis);
+  const groupFor = (block) => extended.groups.find((group) => group.participantId === block.participantId
+    && group.timestampMillis === block.timestampMillis) ?? null;
+  return {
+    replayId,
+    packetCount: candidates.length,
+    structurallyDecodablePacketCount: candidates.filter((block) => decodeItemId(Buffer.from(block.contentHex, "hex")) !== null).length,
+    exactPurchaseLinkedPacketCount: exactCandidates.length,
+    extraPacketCount: candidates.length - exactCandidates.length,
+    excludedCoResidentExactCandidateCount: exactCandidatesBeforeEligibility.filter(hasExcludedCoResident).length,
+    coResidentExcludedCandidatePacketCount: candidates.filter(hasExcludedCoResident).length,
+    newExactPurchaseLinkedGroupCount: exactCandidateKeys.size,
+    previousUnmatchedExactPacketCount: exactCandidates.filter((block) => !oldGroupAt(block)).length,
+    extendedPacketCount: extendedBlocks.length,
+    extendedExactPurchaseLinkedPacketCount: exactGroups.flatMap((group) => group.blocks).length,
+    extendedExactPurchaseLinkedGroupCount: exactGroups.length,
+    extendedTransactionUnresolvedPacketCount: extendedBlocks.length - exactGroups.flatMap((group) => group.blocks).length,
+    extendedUnmatchedPurchases: extended.unmatchedPurchases,
+    extendedAmbiguousPurchases: extended.ambiguousPurchases,
+    packets: candidates.map((block) => {
+      const group = groupFor(block);
+      const completeGroup = completeGroupFor(block);
+      const excludedCoResident = hasExcludedCoResident(block);
+      return {
+        participantId: block.participantId,
+        timestampMillis: block.timestampMillis,
+        contentLength: block.contentLength,
+        decodedItemId: decodeItemId(Buffer.from(block.contentHex, "hex")),
+        apiItemIds: (group?.purchases ?? []).map((purchase) => purchase.itemId).sort((left, right) => left - right),
+        exactPurchaseLinked: exactCandidates.includes(block),
+        completeGroupEligible: !excludedCoResident,
+        excludedCoResidentContentLengths: (completeGroup?.blocks ?? [])
+          .filter((coResident) => !PROFILE.payloadLengths.has(coResident.contentLength)
+            && !candidateLengths.has(coResident.contentLength))
+          .map((coResident) => coResident.contentLength).sort((left, right) => left - right),
+        completeGroupContentLengths: (completeGroup?.blocks ?? [])
+          .map((coResident) => coResident.contentLength).sort((left, right) => left - right),
+        segmentType: block.segmentType,
+        segmentId: block.segmentId,
+        chunkId: block.chunkId,
+        segmentPayloadOffset: block.segmentPayloadOffset,
+        sourceOffset: block.sourceOffset,
+        blockIndex: block.blockIndex,
+        contentHex: block.contentHex,
+      };
+    }),
   };
 }
 
@@ -336,6 +462,27 @@ function allProfilePacketEvidence(groups, discoveryIds, holdoutIds) {
   };
 }
 
+function aggregateExtendedLengthNegativeControl(rows, fixtureIds) {
+  const sum = (selector) => rows.filter((row) => fixtureIds.has(row.replayId))
+    .reduce((total, row) => total + selector(row), 0);
+  return {
+    packetCount: sum((row) => row.packetCount),
+    structurallyDecodablePacketCount: sum((row) => row.structurallyDecodablePacketCount),
+    exactPurchaseLinkedPacketCount: sum((row) => row.exactPurchaseLinkedPacketCount),
+    extraPacketCount: sum((row) => row.extraPacketCount),
+    excludedCoResidentExactCandidateCount: sum((row) => row.excludedCoResidentExactCandidateCount),
+    coResidentExcludedCandidatePacketCount: sum((row) => row.coResidentExcludedCandidatePacketCount),
+    newExactPurchaseLinkedGroupCount: sum((row) => row.newExactPurchaseLinkedGroupCount),
+    previousUnmatchedExactPacketCount: sum((row) => row.previousUnmatchedExactPacketCount),
+    extendedPacketCount: sum((row) => row.extendedPacketCount),
+    extendedExactPurchaseLinkedPacketCount: sum((row) => row.extendedExactPurchaseLinkedPacketCount),
+    extendedExactPurchaseLinkedGroupCount: sum((row) => row.extendedExactPurchaseLinkedGroupCount),
+    extendedTransactionUnresolvedPacketCount: sum((row) => row.extendedTransactionUnresolvedPacketCount),
+    extendedUnmatchedPurchases: sum((row) => row.extendedUnmatchedPurchases),
+    extendedAmbiguousPurchases: sum((row) => row.extendedAmbiguousPurchases),
+  };
+}
+
 function truthTableEvidence(rows, bit) {
   const inputBits = FORMULA_INPUT_BITS[bit];
   const outputsByCode = new Map();
@@ -378,6 +525,7 @@ function main() {
   }
   const rows = [];
   const profileGroups = [];
+  const extendedLengthRows = [];
   const fixtures = [];
   let unmatchedPurchases = 0, ambiguousPurchases = 0;
   for (const fixture of FIXTURES) {
@@ -389,13 +537,17 @@ function main() {
     const match = JSON.parse(fs.readFileSync(matchPath, "utf8"));
     if (versionGroup(match.info?.gameVersion) !== PROFILE.versionGroup) throw new Error(`${fixture.replayId} is not a ${PROFILE.versionGroup} fixture.`);
     const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf8"));
-    const joined = labelsForFixture(fixture.replayId, purchasesFromTimeline(timeline), dumpBlocks(cliPath, replayPath));
+    const purchases = purchasesFromTimeline(timeline);
+    const championOwnedBlocks = dumpChampionOwnedBlocks(cliPath, replayPath);
+    const joined = labelsForFixture(fixture.replayId, purchases, championOwnedBlocks
+      .filter((block) => PROFILE.payloadLengths.has(block.contentLength)));
     const profilePacketCount = joined.groups.reduce((sum, group) => sum + group.blocks.length, 0);
     if (joined.labels.length !== fixture.expectedLabelCount || profilePacketCount !== fixture.expectedProfilePacketCount || joined.ambiguousPurchases !== 0) {
       throw new Error(`${fixture.replayId} profile gate drifted: labels=${joined.labels.length}/${fixture.expectedLabelCount}, packets=${profilePacketCount}/${fixture.expectedProfilePacketCount}, ambiguous=${joined.ambiguousPurchases}.`);
     }
     rows.push(...joined.labels);
     profileGroups.push(...joined.groups);
+    extendedLengthRows.push(extendedLengthNegativeControl(fixture.replayId, purchases, championOwnedBlocks, joined.groups));
     unmatchedPurchases += joined.unmatchedPurchases; ambiguousPurchases += joined.ambiguousPurchases;
     fixtures.push({ replayId: fixture.replayId, gameVersion: match.info?.gameVersion ?? null, labelCount: joined.labels.length, profilePacketCount });
   }
@@ -417,6 +569,45 @@ function main() {
   const discovery = evaluateItemIdRows(discoveryRows);
   const holdout = evaluateItemIdRows(holdoutRows);
   const profilePackets = allProfilePacketEvidence(profileGroups, discoveryIds, holdoutIds);
+  const extendedLengthControl = {
+    all: aggregateExtendedLengthNegativeControl(extendedLengthRows, fixtureIds),
+    discovery: aggregateExtendedLengthNegativeControl(extendedLengthRows, discoveryIds),
+    holdout: aggregateExtendedLengthNegativeControl(extendedLengthRows, holdoutIds),
+  };
+  const hypotheticalExtendedProfile = {
+    packetCount: profilePackets.profilePacketCount + extendedLengthControl.all.packetCount,
+    structurallyDecodablePacketCount: profilePackets.structurallyDecodablePacketCount + extendedLengthControl.all.structurallyDecodablePacketCount,
+    unknownSymbolPacketCount: profilePackets.unknownSymbolPacketCount,
+    exactPurchaseLinkedPacketCount: profilePackets.exactPurchaseLinkedPacketCount + extendedLengthControl.all.exactPurchaseLinkedPacketCount,
+    exactPurchaseLinkedGroupCount: profilePackets.exactPurchaseLinkedGroupCount + extendedLengthControl.all.newExactPurchaseLinkedGroupCount,
+    transactionUnresolvedPacketCount: profilePackets.transactionUnresolvedPacketCount + extendedLengthControl.all.extraPacketCount,
+    unmatchedTimelinePurchaseCount: unmatchedPurchases - extendedLengthControl.all.previousUnmatchedExactPacketCount,
+  };
+  const directlyRegroupedExtendedProfile = {
+    packetCount: extendedLengthControl.all.extendedPacketCount,
+    structurallyDecodablePacketCount: profilePackets.structurallyDecodablePacketCount + extendedLengthControl.all.structurallyDecodablePacketCount,
+    unknownSymbolPacketCount: profilePackets.unknownSymbolPacketCount,
+    exactPurchaseLinkedPacketCount: extendedLengthControl.all.extendedExactPurchaseLinkedPacketCount,
+    exactPurchaseLinkedGroupCount: extendedLengthControl.all.extendedExactPurchaseLinkedGroupCount,
+    transactionUnresolvedPacketCount: extendedLengthControl.all.extendedTransactionUnresolvedPacketCount,
+    unmatchedTimelinePurchaseCount: extendedLengthControl.all.extendedUnmatchedPurchases,
+  };
+  const extendedLengthNegativeControlPassed = extendedLengthControl.all.packetCount === EXPECTED.extendedLengthNegativeControl.packetCount
+    && extendedLengthControl.all.structurallyDecodablePacketCount === EXPECTED.extendedLengthNegativeControl.structurallyDecodablePacketCount
+    && extendedLengthControl.all.exactPurchaseLinkedPacketCount === EXPECTED.extendedLengthNegativeControl.exactPurchaseLinkedPacketCount
+    && extendedLengthControl.all.extraPacketCount === EXPECTED.extendedLengthNegativeControl.extraPacketCount
+    && extendedLengthControl.all.excludedCoResidentExactCandidateCount === EXPECTED.extendedLengthNegativeControl.excludedCoResidentExactCandidateCount
+    && extendedLengthControl.all.coResidentExcludedCandidatePacketCount === EXPECTED.extendedLengthNegativeControl.coResidentExcludedCandidatePacketCount
+    && extendedLengthControl.all.newExactPurchaseLinkedGroupCount === EXPECTED.extendedLengthNegativeControl.newExactPurchaseLinkedGroupCount
+    && extendedLengthControl.all.previousUnmatchedExactPacketCount === EXPECTED.extendedLengthNegativeControl.previousUnmatchedExactPacketCount
+    && ["packetCount", "structurallyDecodablePacketCount", "exactPurchaseLinkedPacketCount", "extraPacketCount", "excludedCoResidentExactCandidateCount", "coResidentExcludedCandidatePacketCount", "newExactPurchaseLinkedGroupCount", "previousUnmatchedExactPacketCount"].every((key) => extendedLengthControl.discovery[key] === EXPECTED.extendedLengthNegativeControl.discovery[key]
+      && extendedLengthControl.holdout[key] === EXPECTED.extendedLengthNegativeControl.holdout[key])
+    && Object.entries(EXPECTED.extendedLengthNegativeControl.hypotheticalExtendedProfile)
+      .every(([key, expected]) => hypotheticalExtendedProfile[key] === expected
+        && directlyRegroupedExtendedProfile[key] === expected)
+    && Object.entries(hypotheticalExtendedProfile)
+      .every(([key, value]) => directlyRegroupedExtendedProfile[key] === value)
+    && extendedLengthControl.all.extendedAmbiguousPurchases === 0;
   const discoveryItemIds = new Set(discoveryRows.map((row) => row.itemId));
   const unseenHoldoutRows = holdoutRows.filter((row) => !discoveryItemIds.has(row.itemId));
   const unseenHoldout = evaluateItemIdRows(unseenHoldoutRows);
@@ -450,6 +641,7 @@ function main() {
     && profilePackets.discovery.transactionUnresolvedPacketCount === EXPECTED.discoveryTransactionUnresolvedPacketCount
     && profilePackets.holdout.transactionUnresolvedPacketCount === EXPECTED.holdoutTransactionUnresolvedPacketCount
     && profilePackets.discovery.unknownSymbolPacketCount === 0 && profilePackets.holdout.unknownSymbolPacketCount === 0
+    && extendedLengthNegativeControlPassed
     && discovery.exact === EXPECTED.discoverySampleCount && discovery.unavailable === 0 && discovery.sampleCount === EXPECTED.discoverySampleCount
     && holdout.exact === EXPECTED.holdoutSampleCount && holdout.unavailable === 0 && holdout.sampleCount === EXPECTED.holdoutSampleCount
     && unseenHoldout.exact === EXPECTED.holdoutUnseenItemIdSampleCount && unseenHoldout.unavailable === 0
@@ -475,6 +667,20 @@ function main() {
     allProfilePacketValidation: {
       ...profilePackets,
       semanticBoundary: "Only exact owner/timestamp purchase-ID multiset matches are purchase-linked. Every other packet remains transaction-unresolved even when its structural item ID is available.",
+    },
+    extendedLengthNegativeControl: {
+      status: extendedLengthNegativeControlPassed ? "negative-control-passed-not-promoted" : "negative-control-regression",
+      profileExtensionGate: false,
+      maintainedProfilePayloadLengths: [...PROFILE.payloadLengths],
+      candidatePayloadLengths: EXPECTED.extendedLengthNegativeControl.payloadLengths,
+      failClosedSymbolCodesRetained: true,
+      all: extendedLengthControl.all,
+      discovery: extendedLengthControl.discovery,
+      holdout: extendedLengthControl.holdout,
+      hypotheticalExtendedProfile,
+      directlyRegroupedExtendedProfile,
+      fixtures: extendedLengthRows,
+      reason: "The 16/17-byte candidates are structurally decodable under the observed 13-bit grammar, but the fixed Holdout contains one unlabelled candidate packet. The required zero-extra profile-extension gate therefore fails; [14,15] remains the only maintained profiled payload lengths.",
     },
     counts: { labelCount: rows.length, unmatchedTimelinePurchases: unmatchedPurchases, ambiguousTimelinePurchases: ambiguousPurchases },
     promotionBoundary: { passed: false, reason: "This proves an offline research item-ID grammar only. Slot, instance, removals, undo, transaction linkage, and complete inventory state remain unresolved; no runtime API is emitted." },

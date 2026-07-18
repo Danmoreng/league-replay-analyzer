@@ -54,6 +54,7 @@ offline labels. Its `researchOnly: true`, `promotionGate: false`, and
 |---|---:|---:|---:|---|---:|
 | inventory add/update | 1 | `0x0369` | 14/15 | `blockParam - 0x400000AD` | 2,519 |
 | inventory removal | 1 | `0x03F9` | 6/7 | `blockParam - 0x400000AD` | 2,074 |
+| unresolved removal-context companion | 1 | `0x0146` | 2/3/4 | `blockParam - 0x400000AD` | 4,214 |
 
 The 16.9 add/update item-ID formula is a negative control on this new family:
 it matches `0/1,971` unique one-purchase/one-add labels (all 1,971 mismatch).
@@ -117,6 +118,21 @@ The other 546 packets are explicitly `transactionUnresolved`. Their structural
 bit value is not proof of a purchase, resulting item, slot, instance, transform,
 or undo, and the runtime must not emit them as semantic inventory events.
 
+### Patch-16.14 16/17-byte `0x0369` negative control
+
+The maintained item-ID harness also catalogs every champion-owned 16/17-byte
+`0x0369` packet without adding those lengths to the profile. The existing
+fail-closed 13-bit grammar structurally decodes all nine saved packets. The
+seven Discovery replays have 6/6 exact owner/timestamp/purchase-ID links and
+zero extras, but the three fixed Holdouts have only 2/3 links plus one
+unlabelled extra. Thus eight packets would link purchases and one would remain
+transaction-unresolved; the required zero-extra profile-extension gate fails.
+
+The artifact records `profileExtensionGate: false` and keeps the maintained
+profiled payload lengths at 14/15 bytes. The hypothetical 16/17-byte
+extension is diagnostic only (2,528 packets; 1,981 linked; 547 unresolved),
+never a runtime decoder change.
+
 Reproduce the bounded result with:
 
 ```powershell
@@ -152,13 +168,14 @@ corpus proves it. This remains insufficient to identify the sold item, so it
 cannot promote a full inventory reducer.
 
 The maintained harness uses the multi-type native packet dump, so both packet
-families are extracted from one exact replay parse. The underlying CLI command
+families and the unresolved companion family are extracted from one exact replay
+parse. The underlying CLI command
 is also available directly for bounded grammar research:
 
 ```powershell
 .\build\packages\rofl-core\rofl_core_cli.exe `
   --dump-packet-types-json .\replays\EUW1-7919517389.rofl `
-  --packet-type 0x0369 --packet-type 0x03F9 `
+  --packet-type 0x0369 --packet-type 0x03F9 --packet-type 0x0146 `
   --segment-type chunk --max-blocks 0
 ```
 
@@ -166,6 +183,53 @@ is also available directly for bounded grammar research:
 matching block. The replay is decompressed and framed once, requested packet
 types are de-duplicated and sorted, and each family retains exact source
 provenance.
+
+### Patch-16.14 unresolved `0x0146` removal-context companion
+
+The same maintained research artifact contains a strictly non-promoted timing
+gate for the champion-owned, 2/3/4-byte `0x0146` family. It is a Timeline-only
+association result, not a packet classifier or a normalized removal event.
+
+The predeclared single-Destroy label shape is, for the same champion within
+one millisecond:
+
+```text
+exactly one ITEM_DESTROYED and zero ITEM_SOLD
+zero profiled 0x0369 packets of length 14/15
+zero profiled 0x03F9 packets of length 6/7
+```
+
+All 432 label groups have one exact `0x0146` timestamp group: 434 packets in
+total because two groups contain duplicate companion packets. There are zero
+missing associations and zero ambiguous companion timestamp groups. This also
+reproduces on the fixed split: Discovery has 267 groups / 269 packets and the
+three Holdouts have 165 / 165.
+
+A second exact timing shape has two `ITEM_DESTROYED`, zero `ITEM_SOLD`, one
+profiled `0x0369` packet, one profiled `0x03F9` packet, and one `0x0146`
+packet. It occurs in 25 groups (15 Discovery, 10 Holdout). Therefore 459 of
+the 4,214 packets are timing-associated across the two proven shapes:
+434 single-Destroy-shape packets plus 25 double-Destroy companions. The gate
+forms this as a unique framed-provenance packet union
+`${replayId}:${segmentType}:${segmentId}:${segmentPayloadOffset}:${sourceOffset}`
+and requires zero duplicate physical-packet assignments across shapes. The
+remaining 3,755 occur outside both shapes and are explicitly unresolved.
+
+`blockIndex` is local to a chunk and is not replay-global. Two values collide
+across distinct chunks in the timing-associated corpus; the artifact records
+their full framing provenance as diagnostic samples. They are two distinct
+physical packets, not a timing-assignment ambiguity or a duplicate in the
+provenance union.
+
+The intermediate number `4,214 - 434 = 3,780` means only “outside the
+single-Destroy shape”; it includes the 25 separately timing-associated
+double-Destroy companions and must not be described as completely unrelated.
+
+No `0x0146` packet is emitted, classified, or treated as an inventory removal
+by C++, Wasm, or the UI. Its payload grammar, item ID, slot, instance, and
+operation semantics are unavailable. The artifact records
+`classifierAvailable: false`, zero runtime semantic claims, and zero runtime
+false claims precisely because it creates no runtime output.
 
 ## Cross-patch inventory-component / undo anchors
 
