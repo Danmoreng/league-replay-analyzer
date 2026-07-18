@@ -213,6 +213,13 @@ and timestamp for 2,519 add/update plus 2,074 removal-family packets, and an
 exact sale-operation class for 116/116 labelled sales with zero extras or
 misses. The older 16.9 item-ID formula matches 0/1,971 uniquely labelled
 16.14 add/update packets, so it is explicitly rejected at the version boundary.
+Seven separately fitted 16.14 item-ID bit formulas (bits 0, 1, 5, 6, 7, 10,
+and 12) each match all 1,971 labels and all 30 cross-replay unseen-item-ID
+label samples. Another 236 saved Timeline purchases have no matching profiled
+packet group and remain outside this validation. The formulas were selected
+during full-corpus exploration, not on
+leak-free training folds. Bits 2, 3, 4, 8, 9, and 11 remain unmodeled, leaving
+64 complete-ID possibilities; therefore item identity is still unavailable.
 
 An add/update packet is not necessarily a purchase. Automatic transforms and
 unlabelled state updates exist. The sold/removed item, slot, item instance,
@@ -261,11 +268,20 @@ The values and XOR masks are non-monotonic and do not decode item ID, slot,
 count, operation ordering, or inventory state. These anchors are therefore
 research boundaries only, not normalized runtime fields.
 
-No tested field survives the direct-value or first-difference semantic gate.
-Position, health, resources, gold, XP, level, CS, damage, KDA, and alive state
-are not decoded. Older supervised keyframe assignments are research artifacts,
-not replay-only runtime fields. The blocker is the inner replication/component
-serialization grammar. See
+Patch 16.14 now also has an exact `totalGold` **change** envelope: within the
+champion-owned 1,479-byte `0x02EB` family, offsets 115, 117, and 119 change on
+all 3,024 gold-changing transitions and none of 76 unchanged transitions. The
+predeclared 7/3 discovery/holdout split has zero false positives and zero false
+negatives. A direct packed value matches 0/3,100 non-initial keyframe values,
+and its delta
+matches only the 76 unchanged transitions, so this does not decode current or
+earned gold. Nearby lane-CS and jungle-CS change envelopes are imperfect (three
+misses and ten extras respectively) and also decode no numeric counter.
+
+Position, health, resources, numeric gold, XP, level, numeric CS, damage, KDA,
+and alive state are not decoded. Older supervised keyframe assignments are
+research artifacts, not replay-only runtime fields. The blocker is the inner
+replication/component serialization grammar. See
 [`keyframe-champion-state-discovery.md`](keyframe-champion-state-discovery.md).
 
 ### Movement
@@ -331,14 +347,16 @@ it does not prove what those bytes mean.
 
 ## Recommended Next Work
 
-1. Decode the real movement/waypoint protocol and entity identity. Validate raw
+1. Complete the patch-16.14 item-ID grammar, slot/instance/removal decoding,
+   and reconstruct inventory
+   state; then expose item events and a scrubber-synchronized inventory panel.
+2. Decode the inner keyframe replication/component grammar beginning at the
+   exact total-gold change envelope and nearby CS lanes. Use final `statsJson`
+   values plus controlled transitions as replay-only constraints for numeric
+   gold, XP, level, CS, health, and resources.
+3. Decode the real movement/waypoint protocol and entity identity. Validate raw
    waypoints before considering interpolation, pathfinding, or movement-speed
    reconstruction.
-2. Complete inventory slot/instance/removal decoding and reconstruct inventory
-   state; then expose item events and a scrubber-synchronized inventory panel.
-3. Decode the inner keyframe replication/component grammar and use final
-   `statsJson` values plus controlled transitions as replay-only constraints for
-   health, gold, level, XP, CS, and resources.
 4. Decode the isolated versioned ward spawn/companion grammar into X/Y, then
    validate the transform against an independent spatial oracle before exposing
    position. Continue subtype, vision radius, removal reason, and the one

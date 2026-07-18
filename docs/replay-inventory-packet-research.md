@@ -59,6 +59,39 @@ The 16.9 add/update item-ID formula is a negative control on this new family:
 it matches `0/1,971` unique one-purchase/one-add labels (all 1,971 mismatch).
 It must therefore not be ported or parameterized as a 16.14 item-ID decoder.
 
+The separate fail-closed bit-grammar harness establishes seven individual
+positions of the 13-bit 16.14 item-ID lane across those same 1,971 labels:
+
+| Item-ID bit | Replay-native formula (little-endian payload-bit numbering) |
+|---:|---|
+| 0 | `payloadBit(71)` |
+| 1 | `payloadBit(66) XOR payloadBit(71) XOR 1` |
+| 5 | `payloadBit(70) XOR 1` |
+| 6 | `payloadBit(69) XOR payloadBit(70) XOR 1` |
+| 7 | `payloadBit(78) XOR payloadBit(79)` |
+| 10 | `payloadBit(73) XOR payloadBit(76) XOR 1` |
+| 12 | `payloadBit(78) XOR 1` |
+
+Every listed formula matches `1,971/1,971`; per-replay cross-checks also match
+all 30 label samples whose item ID is absent from the other nine replays. The
+evidence covers those 1,971 unambiguous one-purchase/one-packet joins; 236 saved
+Timeline purchases have no matching profiled packet group and remain outside
+this bit-formula validation. These
+formulas were selected during full-corpus exploration, so that per-replay view
+is not a leak-free formula-discovery holdout. The harness gates that every
+label is in `0..8191` and that bits 2, 3, 4, 8, 9, and 11 remain unmodeled.
+Seven bits leave 64 possible complete IDs, so no item identity is emitted.
+
+Reproduce the bounded result with:
+
+```powershell
+node .\scripts\research_inventory_item_id_bits_16_14.mjs
+```
+
+The output is explicitly `researchOnly: true`, `promotionGate: false`, and
+`runtimeInput: false`; it is evidence for the patch-specific symbol grammar,
+not a C++/Wasm inventory field.
+
 For a single-removal/no-add transaction group at the same replay-native
 participant and timestamp, the following operation-class predicate is exact
 on the ten fixtures:

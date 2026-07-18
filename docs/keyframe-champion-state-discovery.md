@@ -167,3 +167,40 @@ There is no automatic candidate-offset selection and no custom-case override:
 the fixed discovery/holdout split is part of each profile's evidence boundary.
 Both profiles remain research-only until a deterministic replay-native inventory
 grammar and semantic validation establish item identities and transitions.
+
+## Patch-16.14 economy change anchors
+
+The maintained harness
+[research_keyframe_economy_anchors_16_14.mjs](../scripts/research_keyframe_economy_anchors_16_14.mjs)
+adds one exact semantic boundary inside champion-owned `0x02EB` keyframes. It
+uses the ten fixed patch-16.14 replay/timeline pairs, exact 1,479-byte payloads,
+exact replay-native champion ownership, exactly ten owners per keyframe, and a
+predeclared seven-replay discovery / three-replay holdout split.
+
+Changing any byte at offsets `115`, `117`, or `119` identifies every saved
+Timeline `totalGold` change and no unchanged transition:
+
+| Split | Changed / true change | Changed / no change | Unchanged / true change | Unchanged / no change |
+|---|---:|---:|---:|---:|
+| discovery | 2,043 | 0 | 0 | 57 |
+| holdout | 981 | 0 | 0 | 19 |
+
+That is an exact `3,024`-positive / `76`-negative **change envelope**, not a
+gold-value decoder. A direct big-endian packing of those bytes matches
+`0/3,100` values; its delta matches only the 76 unchanged transitions and none
+of the 3,024 gold changes. Other value grammars remain open. An all-corpus
+leave-one-replay-out offset selection independently chooses the same three
+offsets on each nine-replay training fold and reproduces the exact envelope on
+the tenth; it is separate cross-validation, not extra holdout-isolated evidence.
+
+Nearby CS lanes are useful but fail promotion: offsets `127..129` miss three
+lane-CS changes, while offsets `134..137` add ten false jungle-CS changes.
+Neither tested direct packing nor its delta reproduces either counter. They are
+negative controls and search boundaries, not normalized CS fields.
+
+```powershell
+node .\scripts\research_keyframe_economy_anchors_16_14.mjs
+```
+
+The artifact remains `researchOnly: true`, `promotionGate: false`, and
+`runtimeInput: false`. No gold or CS state reaches C++, Wasm, or the browser.
