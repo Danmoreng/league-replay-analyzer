@@ -104,3 +104,66 @@ The next useful step is to reverse-engineer that inner grammar, beginning with `
 5. Only after the inner grammar is understood, rerun this two-replay validator and require direct or first-difference-stable agreement before adding C++/Wasm schema fields.
 
 The exact family coverage makes that work tractable: participant identity and keyframe timing no longer need to be inferred while decoding the payload interior.
+
+## Narrow inventory-component research anchors (patches 16.9 and 16.14)
+
+`0x0442` now has one reproducible **research-only** anchor for the inventory
+component boundary. This is not an inventory decoder and must not be surfaced in
+the runtime UI, C++, or Wasm schema.
+
+The harness [research_keyframe_inventory_anchor.mjs](../scripts/research_keyframe_inventory_anchor.mjs)
+uses explicit fixed profiles. The `16.9` profile uses three saved replay/timeline pairs: two fixed discovery replays
+(`EUW1-7840220945`, `EUW1-7840267452`) and the predeclared holdout
+`EUW1-7840327293`. It requires exact `0x0442` framing, the replay-native
+champion owner from `blockParam`, full 1,451-byte payloads, and exactly ten
+champion snapshots per keyframe.
+
+For each champion it compares consecutive snapshots and assigns saved timeline
+item events for that same participant to the half-open interval
+`(previousSnapshotTimestamp, currentSnapshotTimestamp]`. In the two discovery
+replays, byte offset `259` changed on all `264/264` windows containing
+`ITEM_PURCHASED` or `ITEM_UNDO`, and on none of the `326` negative windows. The
+predeclared holdout independently reproduced the same gate: `118/118` positive
+windows changed and `0/162` negatives changed. Across all three replays that is
+`382/382` positives and `0/488` negatives.
+
+The immediate `256..263` lane sharpens the boundary: purchase/undo windows have
+only change masks `0x08` (byte 259) or `0x88` (bytes 259 and 263), while every
+negative window has `0x00`. Pure purchase windows (no undo, sale, or destroy)
+also pass exactly (`130/130`). In contrast, all 80 sale/destroy windows without
+a purchase or undo leave byte 259 unchanged. `ITEM_SOLD` must not be interpreted
+separately yet because the observed sale windows also overlap purchase/undo
+activity.
+
+The byte value is deliberately **not promoted**. This harness establishes only
+the fixed change-presence invariant and does not contain an item-ID, slot, item
+operation, count, or complete-inventory decoder.
+
+Reproduce it with:
+
+```powershell
+node .\scripts\research_keyframe_inventory_anchor.mjs `
+  --profile 16.9 `
+  --output .\tmp\keyframe-inventory-anchor-16.9.json
+```
+
+The separately profiled `16.14` anchor uses exact `0x02EB` keyframe blocks with
+1,479-byte payloads and byte offset `111`. Its two fixed discovery replays are
+`EUW1-7919517389` and `EUW1-7919624327`; `EUW1-7921996430` was fixed as the
+holdout before the offset was selected. It applies the same exact owner and
+half-open timing gate. The discovery result is `229/229` positive purchase/undo
+windows with zero false positives across 291 negatives; the holdout independently
+is `132/132` with zero false positives across 158 negatives. The XOR masks vary
+(for example `0x76`, `0x35`, and `0x44`), so this is a change-presence anchor,
+not a raw value or bit-field decoder.
+
+```powershell
+node .\scripts\research_keyframe_inventory_anchor.mjs `
+  --profile 16.14 `
+  --output .\tmp\keyframe-inventory-anchor-16.14.json
+```
+
+There is no automatic candidate-offset selection and no custom-case override:
+the fixed discovery/holdout split is part of each profile's evidence boundary.
+Both profiles remain research-only until a deterministic replay-native inventory
+grammar and semantic validation establish item identities and transitions.

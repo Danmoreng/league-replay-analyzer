@@ -169,6 +169,42 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (first_arg == "--dump-packet-types-json" && argc > 2) {
+        try {
+            std::string path = argv[2];
+            std::vector<std::uint16_t> packet_types;
+            std::string segment_type = "all";
+            std::size_t max_blocks = 64;
+            for (int i = 3; i < argc; ++i) {
+                const std::string_view arg = argv[i];
+                if (arg == "--packet-type" && i + 1 < argc) {
+                    const unsigned long value = std::stoul(argv[++i], nullptr, 0);
+                    if (value > 0xFFFFUL) {
+                        throw std::out_of_range("Packet type must fit in an unsigned 16-bit integer");
+                    }
+                    packet_types.push_back(static_cast<std::uint16_t>(value));
+                } else if ((arg == "--segment-type" || arg == "--record-type") && i + 1 < argc) {
+                    segment_type = argv[++i];
+                } else if (arg == "--max-blocks" && i + 1 < argc) {
+                    max_blocks = std::stoull(argv[++i]);
+                } else {
+                    throw std::invalid_argument(
+                        "Unknown or incomplete --dump-packet-types-json option: " + std::string(arg));
+                }
+            }
+            if (packet_types.empty()) {
+                std::cerr << "Missing --packet-type\n";
+                return 1;
+            }
+            std::cout << rofl::core::dump_packet_types_file_json(
+                path, packet_types, segment_type, max_blocks);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
     if (first_arg == "--extract-replay-kills-json" && argc > 2) {
         try {
             const auto decoder_profiles = load_optional_decoder_profile_registry(argc, argv, 3);
@@ -1206,6 +1242,7 @@ int main(int argc, char** argv) {
     std::cout << "Use --validate-packet-framing <path-to-rofl> [--segment-type startup|keyframe|chunk|all] to validate exact packet-block framing for every selected decompressed segment.\n";
     std::cout << "Use --summarize-packet-types-json <path-to-rofl> [--segment-type startup|keyframe|chunk|all] [--top-types <n>] to catalog packet types as JSON. A top-types value of 0 emits every group.\n";
     std::cout << "Use --dump-packet-type-json <path-to-rofl> --packet-type <u16> [--segment-type startup|keyframe|chunk|all] [--max-blocks <n>] to dump matching packet blocks as JSON. Decimal and 0x-prefixed packet types are accepted.\n";
+    std::cout << "Use --dump-packet-types-json <path-to-rofl> --packet-type <u16> [--packet-type <u16> ...] [--segment-type startup|keyframe|chunk|all] [--max-blocks <n>] to dump multiple packet types from one replay parse. Limits apply per packet type.\n";
     std::cout << "Use --extract-replay-kills-json <path-to-rofl> [--decoder-profiles <json-path>] to emit ROFL-only normalized champion kill events with participant and packet provenance.\n";
     std::cout << "Use --extract-replay-objectives-json <path-to-rofl> [--decoder-profiles <json-path>] to emit ROFL-only elite-monster objective events with monster class and packet provenance.\n";
     std::cout << "Use --extract-replay-wards-json <path-to-rofl> [--decoder-profiles <json-path>] to emit ROFL-only standard ward placement and conservative ward-kill events with entity and participant provenance.\n";

@@ -2312,6 +2312,68 @@ struct DumpedPacketBlock {
     std::string content_hex;
 };
 
+[[nodiscard]] DumpedPacketBlock make_dumped_packet_block(
+    const ReplaySegmentSummary& segment,
+    const std::vector<std::uint8_t>& decompressed,
+    const PacketBlock& block
+) {
+    DumpedPacketBlock entry;
+    entry.segment = segment;
+    entry.block_index = block.block_index;
+    entry.marker = block.marker;
+    entry.channel = block.channel;
+    entry.timestamp_millis = packet_timestamp_millis(block.timestamp_seconds);
+    entry.timestamp_is_delta = block.timestamp_is_delta;
+    entry.timestamp_delta_milliseconds = block.timestamp_delta_milliseconds;
+    entry.content_length = block.content_length;
+    entry.content_length_is_compact = block.content_length_is_compact;
+    entry.packet_type = block.packet_type;
+    entry.packet_type_is_inherited = block.packet_type_is_inherited;
+    entry.block_param = block.block_param;
+    entry.block_param_is_compact = block.block_param_is_compact;
+    entry.block_param_delta = block.block_param_delta;
+    entry.block_param_signed_delta = block.block_param_signed_delta;
+    entry.header_offset = block.header_offset;
+    entry.content_offset = block.content_offset;
+    entry.end_offset = block.end_offset;
+    entry.content_hex_bytes = std::min<std::size_t>(block.content_length, kPacketDumpHexLimit);
+    entry.content_hex = packet_bytes_to_hex(std::span<const std::uint8_t>(
+        decompressed.data() + block.content_offset, entry.content_hex_bytes));
+    return entry;
+}
+
+void write_dumped_packet_block_json(std::ostringstream& output, const DumpedPacketBlock& block) {
+    output << '{';
+    output << "\"segmentType\":\"" << json_escape(block.segment.type) << "\",";
+    output << "\"segmentId\":" << block.segment.id << ',';
+    output << "\"chunkId\":" << block.segment.chunk_id << ',';
+    output << "\"segmentHeaderOffset\":" << block.segment.header_offset << ',';
+    output << "\"segmentPayloadOffset\":" << block.segment.payload_offset << ',';
+    output << "\"blockIndex\":" << block.block_index << ',';
+    output << "\"sourceOffset\":" << block.header_offset << ',';
+    output << "\"headerOffset\":" << block.header_offset << ',';
+    output << "\"contentOffset\":" << block.content_offset << ',';
+    output << "\"endOffset\":" << block.end_offset << ',';
+    output << "\"marker\":" << static_cast<unsigned int>(block.marker) << ',';
+    output << "\"channel\":" << static_cast<unsigned int>(block.channel) << ',';
+    output << "\"timestampMillis\":" << block.timestamp_millis << ',';
+    output << "\"timestampIsDelta\":" << bool_to_json(block.timestamp_is_delta) << ',';
+    output << "\"timestampDeltaMilliseconds\":" << static_cast<unsigned int>(block.timestamp_delta_milliseconds) << ',';
+    output << "\"packetType\":" << block.packet_type << ',';
+    output << "\"packetTypeIsInherited\":" << bool_to_json(block.packet_type_is_inherited) << ',';
+    output << "\"blockParam\":" << block.block_param << ',';
+    output << "\"blockParamIsCompact\":" << bool_to_json(block.block_param_is_compact) << ',';
+    output << "\"rawBlockParam\":" << (block.block_param_is_compact ? static_cast<std::uint32_t>(block.block_param_delta) : block.block_param) << ',';
+    output << "\"blockParamDelta\":" << static_cast<unsigned int>(block.block_param_delta) << ',';
+    output << "\"blockParamSignedDelta\":" << block.block_param_signed_delta << ',';
+    output << "\"contentLength\":" << block.content_length << ',';
+    output << "\"contentLengthIsCompact\":" << bool_to_json(block.content_length_is_compact) << ',';
+    output << "\"contentHexBytes\":" << block.content_hex_bytes << ',';
+    output << "\"contentHexTruncated\":" << bool_to_json(block.content_hex_bytes < block.content_length) << ',';
+    output << "\"contentHex\":\"" << block.content_hex << "\"";
+    output << '}';
+}
+
 }  // namespace
 
 std::string validate_packet_framing_file_json(const std::string& path, std::string_view segment_type) {
@@ -2552,29 +2614,7 @@ std::string dump_packet_type_file_json(
                 if (block.packet_type != packet_type) continue;
                 matching_block_count += 1;
                 if (max_blocks > 0 && dumped.size() >= max_blocks) continue;
-                DumpedPacketBlock entry;
-                entry.segment = segment;
-                entry.block_index = block.block_index;
-                entry.marker = block.marker;
-                entry.channel = block.channel;
-                entry.timestamp_millis = packet_timestamp_millis(block.timestamp_seconds);
-                entry.timestamp_is_delta = block.timestamp_is_delta;
-                entry.timestamp_delta_milliseconds = block.timestamp_delta_milliseconds;
-                entry.content_length = block.content_length;
-                entry.content_length_is_compact = block.content_length_is_compact;
-                entry.packet_type = block.packet_type;
-                entry.packet_type_is_inherited = block.packet_type_is_inherited;
-                entry.block_param = block.block_param;
-                entry.block_param_is_compact = block.block_param_is_compact;
-                entry.block_param_delta = block.block_param_delta;
-                entry.block_param_signed_delta = block.block_param_signed_delta;
-                entry.header_offset = block.header_offset;
-                entry.content_offset = block.content_offset;
-                entry.end_offset = block.end_offset;
-                entry.content_hex_bytes = std::min<std::size_t>(block.content_length, kPacketDumpHexLimit);
-                entry.content_hex = packet_bytes_to_hex(std::span<const std::uint8_t>(
-                    decompressed.data() + block.content_offset, entry.content_hex_bytes));
-                dumped.push_back(std::move(entry));
+                dumped.push_back(make_dumped_packet_block(segment, decompressed, block));
             }
         });
 
@@ -2595,36 +2635,83 @@ std::string dump_packet_type_file_json(
     output << "\"blocks\":[";
     for (std::size_t index = 0; index < dumped.size(); ++index) {
         if (index > 0) output << ',';
-        const DumpedPacketBlock& block = dumped[index];
+        write_dumped_packet_block_json(output, dumped[index]);
+    }
+    output << "],\"errors\":[";
+    for (std::size_t index = 0; index < scan.errors.size(); ++index) {
+        if (index > 0) output << ',';
+        write_packet_scan_error_json(output, scan.errors[index]);
+    }
+    output << "]}";
+    return output.str();
+}
+
+std::string dump_packet_types_file_json(
+    const std::string& path,
+    const std::vector<std::uint16_t>& packet_types,
+    std::string_view segment_type,
+    std::size_t max_blocks_per_type
+) {
+    if (packet_types.empty()) {
+        throw std::invalid_argument("At least one packet type is required");
+    }
+
+    const std::set<std::uint16_t> selected_types(packet_types.begin(), packet_types.end());
+    const std::vector<std::uint8_t> bytes = read_file_bytes(path);
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    std::map<std::uint16_t, std::size_t> matching_block_counts;
+    std::map<std::uint16_t, std::vector<DumpedPacketBlock>> dumped_by_type;
+    for (const std::uint16_t packet_type : selected_types) {
+        matching_block_counts.emplace(packet_type, 0);
+        dumped_by_type.emplace(packet_type, std::vector<DumpedPacketBlock>{});
+    }
+
+    const PacketFileScan scan = scan_packet_segments(
+        bytes, summary, segment_type,
+        [&](const ReplaySegmentSummary& segment, const std::vector<std::uint8_t>& decompressed, const PacketBlockParseResult& result) {
+            for (const PacketBlock& block : result.blocks) {
+                const auto count_it = matching_block_counts.find(block.packet_type);
+                if (count_it == matching_block_counts.end()) continue;
+                count_it->second += 1;
+                std::vector<DumpedPacketBlock>& dumped = dumped_by_type.at(block.packet_type);
+                if (max_blocks_per_type > 0 && dumped.size() >= max_blocks_per_type) continue;
+                dumped.push_back(make_dumped_packet_block(segment, decompressed, block));
+            }
+        });
+
+    std::ostringstream output;
+    output << '{';
+    output << "\"schema\":\"packet-types-dump.v1\",";
+    output << "\"replayPath\":\"" << json_escape(path) << "\",";
+    output << "\"matchId\":" << summary.container.match_id << ',';
+    output << "\"gameVersion\":\"" << json_escape(summary.game_version) << "\",";
+    output << "\"versionGroup\":\"" << json_escape(packet_version_group(summary.game_version)) << "\",";
+    output << "\"segmentType\":\"" << json_escape(scan.segment_filter) << "\",";
+    output << "\"packetTypes\":[";
+    std::size_t type_index = 0;
+    for (const std::uint16_t packet_type : selected_types) {
+        if (type_index++ > 0) output << ',';
+        output << packet_type;
+    }
+    output << "],\"maxBlocksPerPacketType\":" << max_blocks_per_type << ',';
+    output << "\"valid\":" << bool_to_json(scan.selected_segment_count > 0 && scan.exact_segment_count == scan.selected_segment_count) << ',';
+    output << "\"packetTypeDumps\":[";
+    type_index = 0;
+    for (const std::uint16_t packet_type : selected_types) {
+        if (type_index++ > 0) output << ',';
+        const std::size_t matching_block_count = matching_block_counts.at(packet_type);
+        const std::vector<DumpedPacketBlock>& dumped = dumped_by_type.at(packet_type);
         output << '{';
-        output << "\"segmentType\":\"" << json_escape(block.segment.type) << "\",";
-        output << "\"segmentId\":" << block.segment.id << ',';
-        output << "\"chunkId\":" << block.segment.chunk_id << ',';
-        output << "\"segmentHeaderOffset\":" << block.segment.header_offset << ',';
-        output << "\"segmentPayloadOffset\":" << block.segment.payload_offset << ',';
-        output << "\"blockIndex\":" << block.block_index << ',';
-        output << "\"sourceOffset\":" << block.header_offset << ',';
-        output << "\"headerOffset\":" << block.header_offset << ',';
-        output << "\"contentOffset\":" << block.content_offset << ',';
-        output << "\"endOffset\":" << block.end_offset << ',';
-        output << "\"marker\":" << static_cast<unsigned int>(block.marker) << ',';
-        output << "\"channel\":" << static_cast<unsigned int>(block.channel) << ',';
-        output << "\"timestampMillis\":" << block.timestamp_millis << ',';
-        output << "\"timestampIsDelta\":" << bool_to_json(block.timestamp_is_delta) << ',';
-        output << "\"timestampDeltaMilliseconds\":" << static_cast<unsigned int>(block.timestamp_delta_milliseconds) << ',';
-        output << "\"packetType\":" << block.packet_type << ',';
-        output << "\"packetTypeIsInherited\":" << bool_to_json(block.packet_type_is_inherited) << ',';
-        output << "\"blockParam\":" << block.block_param << ',';
-        output << "\"blockParamIsCompact\":" << bool_to_json(block.block_param_is_compact) << ',';
-        output << "\"rawBlockParam\":" << (block.block_param_is_compact ? static_cast<std::uint32_t>(block.block_param_delta) : block.block_param) << ',';
-        output << "\"blockParamDelta\":" << static_cast<unsigned int>(block.block_param_delta) << ',';
-        output << "\"blockParamSignedDelta\":" << block.block_param_signed_delta << ',';
-        output << "\"contentLength\":" << block.content_length << ',';
-        output << "\"contentLengthIsCompact\":" << bool_to_json(block.content_length_is_compact) << ',';
-        output << "\"contentHexBytes\":" << block.content_hex_bytes << ',';
-        output << "\"contentHexTruncated\":" << bool_to_json(block.content_hex_bytes < block.content_length) << ',';
-        output << "\"contentHex\":\"" << block.content_hex << "\"";
-        output << '}';
+        output << "\"packetType\":" << packet_type << ',';
+        output << "\"matchingBlockCount\":" << matching_block_count << ',';
+        output << "\"emittedBlockCount\":" << dumped.size() << ',';
+        output << "\"truncated\":" << bool_to_json(dumped.size() < matching_block_count) << ',';
+        output << "\"blocks\":[";
+        for (std::size_t block_index = 0; block_index < dumped.size(); ++block_index) {
+            if (block_index > 0) output << ',';
+            write_dumped_packet_block_json(output, dumped[block_index]);
+        }
+        output << "]}";
     }
     output << "],\"errors\":[";
     for (std::size_t index = 0; index < scan.errors.size(); ++index) {

@@ -31,6 +31,105 @@ the runtime decoder.
 
 The checked corpus consists of 20 patch-16.9 replays.
 
+## Patch-16.14 sale-operation research only
+
+The ten saved patch-16.14 replay/fixture pairs establish a second,
+version-specific **research** result. It is deliberately not a runtime
+inventory API and does not decode item identity, slot, instance, undo, or a
+complete inventory state.
+
+Reproduce it with the native CLI already built:
+
+```powershell
+node .\scripts\research_inventory_packets_16_14.mjs
+```
+
+The script writes the explicitly non-promoted
+`artifacts/inventory-packet-research-16.14.json`. It obtains packet blocks only
+from the saved `.rofl` files and uses saved Match-V5 timelines solely as
+offline labels. Its `researchOnly: true`, `promotionGate: false`, and
+`runtimeInput: false` fields are part of the artifact contract.
+
+| Candidate family | Channel | Packet type | Content lengths | Owner formula | Corpus count |
+|---|---:|---:|---:|---|---:|
+| inventory add/update | 1 | `0x0369` | 14/15 | `blockParam - 0x400000AD` | 2,519 |
+| inventory removal | 1 | `0x03F9` | 6/7 | `blockParam - 0x400000AD` | 2,074 |
+
+The 16.9 add/update item-ID formula is a negative control on this new family:
+it matches `0/1,971` unique one-purchase/one-add labels (all 1,971 mismatch).
+It must therefore not be ported or parameterized as a 16.14 item-ID decoder.
+
+For a single-removal/no-add transaction group at the same replay-native
+participant and timestamp, the following operation-class predicate is exact
+on the ten fixtures:
+
+```text
+(payload[0] & 0x0F) in { 0x02, 0x05 }
+&& (payload[2] & 0x03) != 0x03
+```
+
+Together with the transaction shape, it resolves 116/116 offline-labelled
+sales with zero extras and zero misses. It rejects the three known
+destroy+purchase transform collisions and all 189 destroy-only one-removal
+negatives.
+Leave-one-replay-out is exact for each of the ten replays.
+
+The result has a strict compatibility boundary: the currently proven
+`payload[2]` values are `0x30, 0x6E, 0x7A, 0xEA, 0xEE, 0xF9`. This bounded
+opcode-field enum is not a full-payload lookup table. The explicit
+unseen-discriminator test withholds each value and records only the expected
+fail-closed false negatives, never a false positive. A new byte value must
+therefore be unavailable rather than guessed as a sale until another labelled
+corpus proves it. This remains insufficient to identify the sold item, so it
+cannot promote a full inventory reducer.
+
+The maintained harness uses the multi-type native packet dump, so both packet
+families are extracted from one exact replay parse. The underlying CLI command
+is also available directly for bounded grammar research:
+
+```powershell
+.\build\packages\rofl-core\rofl_core_cli.exe `
+  --dump-packet-types-json .\replays\EUW1-7919517389.rofl `
+  --packet-type 0x0369 --packet-type 0x03F9 `
+  --segment-type chunk --max-blocks 0
+```
+
+`--max-blocks` applies independently to each requested type; zero emits every
+matching block. The replay is decompressed and framed once, requested packet
+types are de-duplicated and sorted, and each family retains exact source
+provenance.
+
+## Cross-patch inventory-component / undo anchors
+
+Two variable-length, champion-owned component families have an exact but
+partial relationship to `ITEM_UNDO`. They are replay-native change signals,
+not complete undo or inventory decoders:
+
+| Version | Packet type | Segment/channel | Exact matched Undo labels | Extras | Recall |
+|---|---:|---|---:|---:|---:|
+| `16.9` | `0x0165` | chunk / 1 | 78/147 | 0 | 53.06% |
+| `16.14` | `0x0081` | chunk / 1 | 31/62 | 0 | 50.00% |
+
+Both profiles use `participantId = blockParam - 0x400000AD` and a maximum
+one-millisecond offline label tolerance. Leave-one-replay-out preserves 1.0
+precision and the same partial recall. Reproduce the fixed, fail-closed profiles
+with:
+
+```powershell
+node .\scripts\research_inventory_undo_component_families.mjs --profile 16.9
+node .\scripts\research_inventory_undo_component_families.mjs --profile 16.14
+```
+
+The same packet types also occur as variable-length champion-owned keyframe
+components. On 16.14, the all-segment survey has 3,200 keyframe `0x0081` blocks
+and exactly the 31 undo-associated chunk blocks. For 16.9, `0x0165` has 5,720
+keyframe blocks and 78 undo-associated chunk blocks over the 20-replay corpus.
+This is strong component identity evidence, but it does not establish the
+payload's semantic grammar. The maintained gate intentionally stops at family,
+owner, timing, segment, length, and exact partial Undo association. Item
+identity, slot, instance, ordering, and the unmatched undo half therefore remain
+unavailable.
+
 ## Patch-16.9 profile
 
 | Semantic candidate | Channel | Packet type | Content lengths | Champion ID base |

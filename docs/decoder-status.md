@@ -208,6 +208,12 @@ Patch `16.9`, 20-replay research currently proves:
   direct matches plus two correctly explained automatic transformations;
 - an exact sale-operation class for 189/189 labelled sales with zero extras.
 
+Patch `16.14`, ten-replay research now separately proves exact champion owner
+and timestamp for 2,519 add/update plus 2,074 removal-family packets, and an
+exact sale-operation class for 116/116 labelled sales with zero extras or
+misses. The older 16.9 item-ID formula matches 0/1,971 uniquely labelled
+16.14 add/update packets, so it is explicitly rejected at the version boundary.
+
 An add/update packet is not necessarily a purchase. Automatic transforms and
 unlabelled state updates exist. The sold/removed item, slot, item instance,
 count/charges, component consumption, upgrades, undos, and swaps remain
@@ -215,14 +221,24 @@ unresolved. The full-inventory promotion gate is 0/20 because all 3,550 removal
 packets lack a decoded item target. No C++/Wasm inventory API exists yet. See
 [`replay-inventory-packet-research.md`](replay-inventory-packet-research.md).
 
+There is also exact replay-native evidence for a variable inventory-component
+family associated with only part of the undo stream: patch 16.9 `0x0165`
+matches 78/147 labelled undos with zero extras, while patch 16.14 `0x0081`
+matches 31/62 with zero extras. Both retain exact champion ownership and 1.0
+leave-one-replay-out precision, and both packet types also occur as owner-bound
+keyframe components. This proves a component/change anchor, not item identity,
+slot, operation ordering, or complete undo coverage; it remains research-only.
+
 An expanded full-payload and offline-oracle scan falsified the strongest simple
 slot candidate: it matches 155/196 deterministic initial adds but only 108/239
 terminal final-item labels. Across 882 offline-linked add/removal lifecycles,
 the best slot-sized relationship reaches 675/882 and the best instance-sized
 relationship 505/882; a separately labelled removal-slot scan reaches 420/733.
 These correlations are useful search constraints but are not runtime fields.
-The next inventory lead is the separate swap packet family plus a patch-16.9
-field deserializer/symbol table.
+The next inventory lead is a lossless record splitter for the repeated
+`0x0165` component tags (`BE C7 1F 76` and `BE C9 1F 76`), followed by a
+same-owner keyframe/chunk structural comparison. The separate swap family and
+the patch-specific add/update symbol codec remain parallel leads.
 
 ### Keyframe champion state
 
@@ -233,6 +249,17 @@ The outer structure is exact on two independent patch-16.9 replays:
 - 1,830 selected blocks have exact framing, timestamp alignment, and ownership,
   with no missing, duplicate, or non-champion owners;
 - payloads change and therefore carry state.
+
+Narrow inventory-component change anchors now survive predeclared holdouts:
+
+- patch 16.9 fixed family `0x0442`, 1,451-byte payload, byte 259 changes on
+  382/382 purchase-or-undo windows and 0/488 negative windows;
+- patch 16.14 fixed family `0x02EB`, 1,479-byte payload, byte 111 changes on
+  361/361 purchase-or-undo windows and 0/449 negative windows.
+
+The values and XOR masks are non-monotonic and do not decode item ID, slot,
+count, operation ordering, or inventory state. These anchors are therefore
+research boundaries only, not normalized runtime fields.
 
 No tested field survives the direct-value or first-difference semantic gate.
 Position, health, resources, gold, XP, level, CS, damage, KDA, and alive state

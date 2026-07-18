@@ -126,6 +126,7 @@ struct ReplaySummary {
 [[nodiscard]] std::string validate_packet_framing_file_json(const std::string& path, std::string_view segment_type = "all");
 [[nodiscard]] std::string summarize_packet_types_file_json(const std::string& path, std::string_view segment_type = "all", std::size_t top_types = 0);
 [[nodiscard]] std::string dump_packet_type_file_json(const std::string& path, std::uint16_t packet_type, std::string_view segment_type = "all", std::size_t max_blocks = 64);
+[[nodiscard]] std::string dump_packet_types_file_json(const std::string& path, const std::vector<std::uint16_t>& packet_types, std::string_view segment_type = "all", std::size_t max_blocks_per_type = 64);
 [[nodiscard]] std::string extract_replay_kills_json(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] std::string extract_replay_kills_json(
     const std::vector<std::uint8_t>& bytes,

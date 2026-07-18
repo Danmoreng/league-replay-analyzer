@@ -684,6 +684,33 @@ bool test_replay_kill_extractor_fixture() {
            json.find("\"passingParticipantCount\":10,\"pass\":true") != std::string::npos;
 }
 
+bool test_multi_packet_type_dump_fixture() {
+    constexpr std::uint16_t owner_packet_type = 0x021A;
+    constexpr std::uint16_t marker_packet_type = 0x03EF;
+    const std::string path = "rofl_core_smoke_multi_packet_dump_fixture.rofl";
+    {
+        std::ofstream file(path, std::ios::binary);
+        const auto bytes = build_footer_kill_fixture();
+        file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    }
+
+    const std::string json = rofl::core::dump_packet_types_file_json(
+        path,
+        {marker_packet_type, owner_packet_type, marker_packet_type},
+        "chunk",
+        1
+    );
+    std::remove(path.c_str());
+    return json.find("\"schema\":\"packet-types-dump.v1\"") != std::string::npos &&
+           json.find("\"segmentType\":\"chunk\"") != std::string::npos &&
+           json.find("\"packetTypes\":[538,1007]") != std::string::npos &&
+           json.find("\"maxBlocksPerPacketType\":1") != std::string::npos &&
+           json.find("\"packetType\":538,\"matchingBlockCount\":3,\"emittedBlockCount\":1,\"truncated\":true") != std::string::npos &&
+           json.find("\"packetType\":1007,\"matchingBlockCount\":2,\"emittedBlockCount\":1,\"truncated\":true") != std::string::npos &&
+           json.find("]},,{") == std::string::npos &&
+           json.find("\"errors\":[]") != std::string::npos;
+}
+
 bool test_replay_objective_extractor_fixture() {
     const std::string json =
         rofl::core::extract_replay_objectives_json(build_footer_objective_fixture());
@@ -984,6 +1011,10 @@ int main() {
     }
 
     if (!test_replay_kill_extractor_fixture()) {
+        return EXIT_FAILURE;
+    }
+
+    if (!test_multi_packet_type_dump_fixture()) {
         return EXIT_FAILURE;
     }
 
