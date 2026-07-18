@@ -88,7 +88,7 @@ Current state:
 - primary/companion lanes form a conflict-free 256-symbol permutation across 2,625 placements, and 701/745 linked removals have an exact full primary+companion spawn fingerprint match, but these equality constraints do not reveal the numeric coordinate assigned to an unknown symbol
 - embedded final `statsJson` level, XP, lane CS, neutral CS, seven item slots, and ward-placement/kill aggregates validate exactly through the productive native summary for 6,110/6,110 fields across all 470 corpus participants; `validatedFinalPlayerStatsAvailable` restricts display to the eight validated patch groups with a complete valid field set, and the values are final state rather than timelines
 - the Wasm suite includes a real in-memory zstd ROFL contract test for the ward ABI and unsupported-version error boundary; Wasm C++ exception handling must remain enabled for those JSON error boundaries
-- patch-16.9 inventory research decodes add/update item IDs and a sale-operation class; patch 16.14 separately proves its add/update/removal families, 116/116 sale operations, and seven exact item-ID bit positions across 1,971 labels, but the remaining six bits, slot/instance/removal linkage, swaps, undo, and full inventory state remain unresolved, and no inventory runtime API exists
+- patch-16.9 inventory research decodes add/update item IDs and a sale-operation class; patch 16.14 separately proves its add/update/removal families, 116/116 sale operations, and all 13 item-ID bits for 1,971 unambiguous labels with 651/651 complete IDs on three fixed Holdouts; all 2,519 profiled add/update packets yield a structural ID and 1,973 are exactly purchase-linked, while two unseen input symbols fail closed and 546 packets plus slot/instance/removal linkage, swaps, undo, and full inventory state remain unresolved; no inventory runtime API exists
 - keyframe outer framing and champion ownership are exact; patch 16.14 additionally has an exact three-byte totalGold change envelope across 3,024 changing and 76 unchanged transitions, but it exposes no numeric gold value, nearby CS envelopes are imperfect, and the inner replication/component value grammar remains unresolved
 - there is no valid replay-native movement or position decoder; the provisional `0x00DC` raw-coordinate interpretation was disproven and removed from the runtime
 - building and turret-plate signatures are correlations with false positives, not runtime decoders
@@ -106,7 +106,7 @@ Important browser caveat:
 
 Near-term engineering focus should be:
 
-1. finish the patch-16.14 item-ID grammar, slot/instance/removal decoding, and full inventory-state reconstruction
+1. independently cover the two fail-closed patch-16.14 item-ID input symbols, then finish slot/instance/removal decoding and full inventory-state reconstruction
 2. decode the patch-16.14 keyframe replication/component value grammar beginning at the exact totalGold change envelope and nearby CS lanes, then reconstruct numeric gold, CS, XP, level, health, and resources
 3. decode the real movement/waypoint message grammar and replay-native entity identity
 4. expand or structurally decode the patch-16.9 ward symbol-to-Float32 mapping, prioritizing the sparse `p[9]`, `p[10]`, `p[13]`, and `p[14]` lanes; use new replay-native spatial anchors plus the exact primary/companion permutation and placement/removal equality constraints, never interpolation or visual plausibility, then rerun holdout and full-corpus gates

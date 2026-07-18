@@ -59,8 +59,9 @@ The 16.9 add/update item-ID formula is a negative control on this new family:
 it matches `0/1,971` unique one-purchase/one-add labels (all 1,971 mismatch).
 It must therefore not be ported or parameterized as a 16.14 item-ID decoder.
 
-The separate fail-closed bit-grammar harness establishes seven individual
-positions of the 13-bit 16.14 item-ID lane across those same 1,971 labels:
+The separate fail-closed bit-grammar harness now establishes all 13 positions
+of the 16.14 item-ID lane across those same 1,971 labels. Seven formulas were
+found during the earlier full-corpus exploration:
 
 | Item-ID bit | Replay-native formula (little-endian payload-bit numbering) |
 |---:|---|
@@ -72,15 +73,49 @@ positions of the 13-bit 16.14 item-ID lane across those same 1,971 labels:
 | 10 | `payloadBit(73) XOR payloadBit(76) XOR 1` |
 | 12 | `payloadBit(78) XOR 1` |
 
-Every listed formula matches `1,971/1,971`; per-replay cross-checks also match
-all 30 label samples whose item ID is absent from the other nine replays. The
-evidence covers those 1,971 unambiguous one-purchase/one-packet joins; 236 saved
+The remaining six formulas were then selected only on seven fixed Discovery
+replays. With `qN = payloadBit(N)`, they are:
+
+| Item-ID bit | Formula |
+|---:|---|
+| 2 | `q65 XOR (q66 AND q71)` |
+| 3 | `1 XOR q65 XOR q68 XOR (q66 AND q71) XOR (q65 AND q66 AND q71)` |
+| 4 | `1 XOR q67 XOR q68 XOR (q65 AND q68) XOR (q66 AND q68 AND q71) XOR (q65 AND q66 AND q68 AND q71)` |
+| 8 | `1 XOR q74 XOR q79 XOR (q72 AND q79)` |
+| 9 | `q73 XOR (q73 AND q79) XOR (q72 AND q73 AND q79)` |
+| 11 | `1 XOR q75 XOR q76 XOR (q73 AND q76)` |
+
+All 1,320 Discovery labels decode exactly. The three fixed Holdouts then decode
+all `651/651` complete IDs, including `19/19` label samples whose item ID never
+appears in Discovery. Because the earlier seven formulas predate this split,
+the Holdouts are independently clean for the six new bits, not for selection
+of the entire 13-bit grammar. Full-corpus per-bit checks remain `1,971/1,971`,
+with 30/30 cross-replay unseen-item-ID label samples.
+
+The Discovery truth tables are complete and conflict-free for every formula
+except two explicitly absent input symbols. Those symbols never occur in
+Discovery, Holdout, or the full corpus:
+bit 9 input `[72,73,79]` code `0`, and bit 11 input `[73,75,76]` code `4`
+(input-list order is least-significant-code-bit first). The harness returns
+unavailable for either symbol instead of applying the Boolean extrapolation.
+Thus it is a complete ID only on the explicitly observed/fail-closed symbol
+domain, not an unrestricted future-packet decoder.
+
+The evidence covers 1,971 unambiguous one-purchase/one-packet joins; 236 saved
 Timeline purchases have no matching profiled packet group and remain outside
-this bit-formula validation. These
-formulas were selected during full-corpus exploration, so that per-replay view
-is not a leak-free formula-discovery holdout. The harness gates that every
-label is in `0..8191` and that bits 2, 3, 4, 8, 9, and 11 remain unmodeled.
-Seven bits leave 64 possible complete IDs, so no item identity is emitted.
+the validation. Every label is gated to `0..8191`.
+
+The maintained gate also scans all 2,519 profiled `0x0369` packets. Every one
+uses an observed symbol code and therefore yields a structural 13-bit value;
+neither fail-closed input symbol occurs anywhere in the stored packet corpus.
+Exact owner/timestamp item-ID multisets conservatively purchase-link 1,973
+packets in 1,972 groups: the original 1,971 single-packet labels plus one
+two-packet/two-purchase Holdout group. The split is 1,320 linked of 1,575
+Discovery packets and 653 linked of 944 Holdout packets.
+
+The other 546 packets are explicitly `transactionUnresolved`. Their structural
+bit value is not proof of a purchase, resulting item, slot, instance, transform,
+or undo, and the runtime must not emit them as semantic inventory events.
 
 Reproduce the bounded result with:
 
@@ -89,8 +124,8 @@ node .\scripts\research_inventory_item_id_bits_16_14.mjs
 ```
 
 The output is explicitly `researchOnly: true`, `promotionGate: false`, and
-`runtimeInput: false`; it is evidence for the patch-specific symbol grammar,
-not a C++/Wasm inventory field.
+`runtimeInput: false`. Slot, instance, removal linkage, undo, and full inventory
+state are still missing, and no C++/Wasm inventory field exists yet.
 
 For a single-removal/no-add transaction group at the same replay-native
 participant and timestamp, the following operation-class predicate is exact

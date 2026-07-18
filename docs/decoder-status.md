@@ -213,13 +213,20 @@ and timestamp for 2,519 add/update plus 2,074 removal-family packets, and an
 exact sale-operation class for 116/116 labelled sales with zero extras or
 misses. The older 16.9 item-ID formula matches 0/1,971 uniquely labelled
 16.14 add/update packets, so it is explicitly rejected at the version boundary.
-Seven separately fitted 16.14 item-ID bit formulas (bits 0, 1, 5, 6, 7, 10,
-and 12) each match all 1,971 labels and all 30 cross-replay unseen-item-ID
-label samples. Another 236 saved Timeline purchases have no matching profiled
-packet group and remain outside this validation. The formulas were selected
-during full-corpus exploration, not on
-leak-free training folds. Bits 2, 3, 4, 8, 9, and 11 remain unmodeled, leaving
-64 complete-ID possibilities; therefore item identity is still unavailable.
+The patch-16.14 research harness now combines 13 compact Boolean bit formulas
+into the complete item ID for every one of the 1,971 unambiguous labels. The six
+new formulas were selected on seven fixed Discovery replays (`1,320/1,320`) and
+then reproduce all `651/651` complete IDs in three fixed Holdouts, including
+`19/19` unseen-item-ID label samples. Seven older formulas predate that split,
+so the Holdouts independently validate selection of the six new bits, not all
+13. Two input symbols for bits 9 and 11 are absent from all ten replays and are
+explicitly fail-closed as unavailable. Another 236 saved Timeline purchases
+have no matching profiled packet group and remain outside this validation.
+Across all 2,519 profiled add/update packets, zero stored packets use either
+unknown symbol and every packet produces a structural 13-bit value. Exact
+owner/timestamp purchase-ID multisets semantically link 1,973 packets; the
+remaining 546 are explicitly transaction-unresolved and must not be emitted as
+purchases, slots, instances, transforms, or undo operations.
 
 An add/update packet is not necessarily a purchase. Automatic transforms and
 unlabelled state updates exist. The sold/removed item, slot, item instance,
@@ -347,9 +354,10 @@ it does not prove what those bytes mean.
 
 ## Recommended Next Work
 
-1. Complete the patch-16.14 item-ID grammar, slot/instance/removal decoding,
-   and reconstruct inventory
-   state; then expose item events and a scrubber-synchronized inventory panel.
+1. Obtain independent coverage for the two fail-closed patch-16.14 item-ID
+   symbols, then complete slot/instance/removal decoding and reconstruct
+   inventory state; expose item events and a scrubber-synchronized inventory
+   panel only after the Native/Wasm promotion gate.
 2. Decode the inner keyframe replication/component grammar beginning at the
    exact total-gold change envelope and nearby CS lanes. Use final `statsJson`
    values plus controlled transitions as replay-only constraints for numeric
