@@ -2,6 +2,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -11,6 +12,7 @@ function parseArgs(argv) {
   const args = {
     artifactRoot: path.resolve("artifacts"),
     json: false,
+    strictManifest: true,
   };
 
   for (let index = 2; index < argv.length; index += 1) {
@@ -20,14 +22,114 @@ function parseArgs(argv) {
       continue;
     }
     if (arg === "--artifact-root") {
+      if (!argv[index + 1]) {
+        throw new Error("--artifact-root requires a path");
+      }
       args.artifactRoot = path.resolve(argv[index + 1]);
       index += 1;
+      continue;
+    }
+    if (arg === "--allow-legacy-directory-scan") {
+      args.strictManifest = false;
       continue;
     }
     throw new Error(`Unknown argument: ${arg}`);
   }
 
   return args;
+}
+
+function samePath(left, right) {
+  if (typeof left !== "string" || typeof right !== "string") {
+    return false;
+  }
+  const normalizedLeft = path.resolve(left);
+  const normalizedRight = path.resolve(right);
+  if (process.platform === "win32") {
+    return normalizedLeft.toLowerCase() === normalizedRight.toLowerCase();
+  }
+  return normalizedLeft === normalizedRight;
+}
+
+function requireFile(filePath, description) {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`Missing ${description}: ${filePath}`);
+  }
+}
+
+function getStrictManifestReplayIds(artifactRoot, corpusSchema) {
+  const manifestPath = path.join(artifactRoot, "corpus-manifest.json");
+  requireFile(manifestPath, "corpus manifest");
+  const manifest = readJson(manifestPath);
+  if (!samePath(manifest.artifactRoot, artifactRoot)) {
+    throw new Error(`Corpus manifest artifact root does not match scorecard root: ${manifest.artifactRoot}`);
+  }
+  if (!Array.isArray(manifest.processed) || manifest.processed.length === 0) {
+    throw new Error(`Corpus manifest must contain a non-empty processed replay list: ${manifestPath}`);
+  }
+
+  const schemaSource = corpusSchema.source;
+  if (schemaSource == null || typeof schemaSource !== "object") {
+    throw new Error("Corpus schema is missing source provenance.");
+  }
+  if (!samePath(schemaSource.artifactRoot, artifactRoot)) {
+    throw new Error(`Corpus schema artifact root does not match scorecard root: ${schemaSource.artifactRoot}`);
+  }
+  if (!samePath(schemaSource.corpusManifestPath, manifestPath)) {
+    throw new Error(`Corpus schema manifest path does not match scorecard manifest: ${schemaSource.corpusManifestPath}`);
+  }
+  if (schemaSource.replayCount !== manifest.processed.length) {
+    throw new Error(`Corpus schema replay count (${schemaSource.replayCount}) does not match manifest (${manifest.processed.length}).`);
+  }
+
+  const replayIds = [];
+  const seenReplayIds = new Set();
+  for (const entry of manifest.processed) {
+    const replayId = entry?.replayId;
+    if (typeof replayId !== "string" || replayId.length === 0 || path.basename(replayId) !== replayId) {
+      throw new Error("Corpus manifest contains an invalid replayId.");
+    }
+    const replayKey = process.platform === "win32" ? replayId.toLowerCase() : replayId;
+    if (seenReplayIds.has(replayKey)) {
+      throw new Error(`Corpus manifest contains duplicate replayId: ${replayId}`);
+    }
+    seenReplayIds.add(replayKey);
+
+    const expectedArtifactDir = path.join(artifactRoot, replayId);
+    if (typeof entry.artifactDir !== "string" || !samePath(entry.artifactDir, expectedArtifactDir)) {
+      throw new Error(`Corpus manifest replay '${replayId}' must use artifactDir ${expectedArtifactDir}.`);
+    }
+    const expectedScalarPath = path.join(expectedArtifactDir, "validation-report.json");
+    const expectedMovementPath = path.join(expectedArtifactDir, "assigned-movement-validation-report.json");
+    if (typeof entry.validationReportPath !== "string" || !samePath(entry.validationReportPath, expectedScalarPath)) {
+      throw new Error(`Corpus manifest replay '${replayId}' has an invalid scalar validation path.`);
+    }
+    if (typeof entry.assignedMovementValidationPath !== "string" || !samePath(entry.assignedMovementValidationPath, expectedMovementPath)) {
+      throw new Error(`Corpus manifest replay '${replayId}' has an invalid assigned-movement validation path.`);
+    }
+    requireFile(expectedArtifactDir, `manifested replay artifact directory for ${replayId}`);
+    if (!fs.statSync(expectedArtifactDir).isDirectory()) {
+      throw new Error(`Manifested replay artifact path is not a directory: ${expectedArtifactDir}`);
+    }
+    replayIds.push(replayId);
+  }
+
+  for (const entry of fs.readdirSync(artifactRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const entryKey = process.platform === "win32" ? entry.name.toLowerCase() : entry.name;
+    if (seenReplayIds.has(entryKey)) {
+      continue;
+    }
+    const staleScalarPath = path.join(artifactRoot, entry.name, "validation-report.json");
+    const staleMovementPath = path.join(artifactRoot, entry.name, "assigned-movement-validation-report.json");
+    if (fs.existsSync(staleScalarPath) || fs.existsSync(staleMovementPath)) {
+      throw new Error(`Unmanifested score report directory detected: ${path.join(artifactRoot, entry.name)}`);
+    }
+  }
+
+  return replayIds.sort();
 }
 
 function summarizeScalarValidation(report) {
@@ -67,13 +169,25 @@ function summarizeMovementValidation(report) {
   };
 }
 
-function buildSummary(artifactRoot) {
+export function buildSummary(artifactRoot, { strictManifest = true } = {}) {
   const corpusSchemaPath = path.join(artifactRoot, "corpus-schema.json");
+  requireFile(corpusSchemaPath, "corpus schema");
   const corpusSchema = readJson(corpusSchemaPath);
-  const replayIds = fs.readdirSync(artifactRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
+  const replayIds = strictManifest
+    ? getStrictManifestReplayIds(artifactRoot, corpusSchema)
+    : fs.readdirSync(artifactRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+  if (strictManifest) {
+    if (!Array.isArray(corpusSchema.versionGroups) || corpusSchema.versionGroups.some((group) => !Number.isInteger(group?.replayCount) || group.replayCount < 0)) {
+      throw new Error("Corpus schema has invalid version-group replay counts.");
+    }
+    const versionGroupReplayCount = corpusSchema.versionGroups.reduce((sum, group) => sum + group.replayCount, 0);
+    if (versionGroupReplayCount !== replayIds.length) {
+      throw new Error(`Corpus schema version-group replay count (${versionGroupReplayCount}) does not match manifest (${replayIds.length}).`);
+    }
+  }
 
   const scalarTotals = {
     totalPasses: 0,
@@ -89,6 +203,9 @@ function buildSummary(artifactRoot) {
 
   for (const replayId of replayIds) {
     const validationPath = path.join(artifactRoot, replayId, "validation-report.json");
+    if (strictManifest) {
+      requireFile(validationPath, `scalar validation report for ${replayId}`);
+    }
     if (fs.existsSync(validationPath)) {
       const scalarSummary = summarizeScalarValidation(readJson(validationPath));
       scalarTotals.totalPasses += scalarSummary.totalPasses;
@@ -102,6 +219,9 @@ function buildSummary(artifactRoot) {
     }
 
     const assignedMovementValidationPath = path.join(artifactRoot, replayId, "assigned-movement-validation-report.json");
+    if (strictManifest) {
+      requireFile(assignedMovementValidationPath, `assigned movement validation report for ${replayId}`);
+    }
     if (fs.existsSync(assignedMovementValidationPath)) {
       const movementSummary = summarizeMovementValidation(readJson(assignedMovementValidationPath));
       movementTotals.passingAssignments += movementSummary.passingAssignments;
@@ -124,7 +244,7 @@ function buildSummary(artifactRoot) {
   return {
     generatedAtUtc: new Date().toISOString(),
     artifactRoot,
-    replayCount: corpusSchema.source?.replayCount ?? replayIds.length,
+    replayCount: strictManifest ? replayIds.length : (corpusSchema.source?.replayCount ?? replayIds.length),
     versionGroups: (corpusSchema.versionGroups ?? []).map((group) => ({
       versionGroup: group.versionGroup,
       replayCount: group.replayCount,
@@ -183,7 +303,7 @@ function printHuman(summary) {
 
 function main() {
   const args = parseArgs(process.argv);
-  const summary = buildSummary(args.artifactRoot);
+  const summary = buildSummary(args.artifactRoot, { strictManifest: args.strictManifest });
   if (args.json) {
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
     return;
@@ -191,4 +311,6 @@ function main() {
   printHuman(summary);
 }
 
-main();
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  main();
+}

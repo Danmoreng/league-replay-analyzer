@@ -13,6 +13,7 @@ param (
     [int]$MaxSchemaIterations = 3,
     [switch]$Force,
     [switch]$CleanReplayArtifacts,
+    [switch]$RequireEmptyArtifactRoot,
     [switch]$SkipSchema,
     [switch]$SkipCorpusSchema,
     [switch]$SkipExtraction,
@@ -204,6 +205,18 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $resolvedReplayRoot = Resolve-AbsolutePath -Path $ReplayRoot -BasePath $repoRoot
 $resolvedApiRoot = Resolve-AbsolutePath -Path $ApiRoot -BasePath $repoRoot
 $resolvedArtifactRoot = Resolve-AbsolutePath -Path $ArtifactRoot -BasePath $repoRoot
+
+if ($RequireEmptyArtifactRoot -and (Test-Path -LiteralPath $resolvedArtifactRoot)) {
+    $artifactRootItem = Get-Item -LiteralPath $resolvedArtifactRoot
+    if (-not $artifactRootItem.PSIsContainer) {
+        throw "RequireEmptyArtifactRoot requires a directory path, but '$resolvedArtifactRoot' is a file."
+    }
+
+    $existingArtifactEntries = @(Get-ChildItem -LiteralPath $resolvedArtifactRoot -Force)
+    if ($existingArtifactEntries.Count -gt 0) {
+        throw "RequireEmptyArtifactRoot refused non-empty artifact root '$resolvedArtifactRoot'. Choose a new per-run directory; existing artifacts are not deleted."
+    }
+}
 
 $artifactScript = Join-Path $PSScriptRoot "run_decoder_artifacts.ps1"
 $schemaScript = Join-Path $PSScriptRoot "build_provisional_schema.mjs"

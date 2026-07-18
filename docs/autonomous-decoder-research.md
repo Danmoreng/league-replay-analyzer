@@ -51,6 +51,7 @@ Recommended files in that directory:
 - `results.tsv`
 - one `run-<timestamp>.log` per corpus rerun
 - one `summary-<timestamp>.json` per corpus summary
+- one fresh `artifacts/iteration-<n>-<timestamp>/` corpus root per iteration
 
 Do not commit anything under `tmp/autoresearch/`.
 
@@ -113,12 +114,18 @@ Before a full corpus rerun:
 
 Before keeping any change:
 
-1. rerun the full corpus:
-   `& 'C:\Program Files\PowerShell\7\pwsh.exe' -File .\scripts\run_decoder_corpus.ps1 -Configuration Debug`
+1. choose a fresh per-iteration artifact root and rerun the full corpus:
+   `& 'C:\Program Files\PowerShell\7\pwsh.exe' -File .\scripts\run_decoder_corpus.ps1 -Configuration Debug -ArtifactRoot <fresh-root> -RequireEmptyArtifactRoot -Force -CleanReplayArtifacts`
 2. summarize the results:
-   `node .\scripts\summarize_decoder_corpus.mjs --json`
+   `node .\scripts\summarize_decoder_corpus.mjs --artifact-root <fresh-root> --json`
 
 If the full corpus did not run, the experiment is not complete and should not be kept as an overnight winner.
+
+The summarizer is strict and manifest-based by default. It fails if a
+manifested scalar or assigned-movement report is missing, if schema/manifest
+provenance points at another root, or if an unmanifested directory contains a
+score report. `--allow-legacy-directory-scan` exists only for old diagnostic
+artifacts and must not be used to decide keep/revert.
 
 ## Scorecard
 

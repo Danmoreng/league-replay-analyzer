@@ -12,6 +12,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+if ($Tag -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
+    throw "Tag must contain only letters, digits, dots, underscores, and hyphens, and must start with a letter or digit."
+}
+
 function Write-Status {
     param([string]$Message)
     Write-Host "[autoresearch] $Message"
@@ -70,29 +74,6 @@ $branchName = "autoresearch/$Tag"
 New-Item -ItemType Directory -Force -Path $runDirectory | Out-Null
 Ensure-ResultsFile -Path $resultsFile
 
-$prompt = @"
-Read program.md and docs/autonomous-decoder-research.md.
-Continue the autonomous decoder research loop in this repository.
-
-Use this run tag: $Tag
-Use this ledger file: tmp/autoresearch/$Tag/results.tsv
-
-Do exactly one bounded iteration:
-1. inspect the latest kept result and current repo state
-2. choose one decoder hypothesis
-3. implement the change
-4. run fast checks on touched files
-5. rerun the full decoder corpus
-6. summarize with scripts/summarize_decoder_corpus.mjs --json
-7. append exactly one row to tmp/autoresearch/$Tag/results.tsv
-8. keep or revert based on the scorecard in program.md
-9. update docs only if the finding is actually stable and worth recording
-10. stop after this single iteration
-
-Do not ask the user to continue. Complete one full iteration and exit.
-"@
-$prompt | Set-Content -LiteralPath $promptFile -Encoding utf8
-
 if ($EnsureResearchBranch) {
     Ensure-ResearchBranch -RepositoryRoot $repositoryRoot -BranchName $branchName
 }
@@ -113,6 +94,38 @@ while ($true) {
 
     $iteration += 1
     $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $iterationArtifactRootRelative = "tmp/autoresearch/$Tag/artifacts/iteration-$iteration-$stamp"
+    $iterationArtifactRoot = Join-Path $repositoryRoot $iterationArtifactRootRelative
+    if (Test-Path -LiteralPath $iterationArtifactRoot) {
+        throw "Autoresearch artifact root already exists: $iterationArtifactRoot"
+    }
+
+    $prompt = @"
+Read program.md and docs/autonomous-decoder-research.md.
+Continue the autonomous decoder research loop in this repository.
+
+Use this run tag: $Tag
+Use this ledger file: tmp/autoresearch/$Tag/results.tsv
+Use this fresh artifact root for this iteration only: $iterationArtifactRootRelative
+
+Do exactly one bounded iteration:
+1. inspect the latest kept result and current repo state
+2. choose one decoder hypothesis
+3. implement the change
+4. run fast checks on touched files
+5. rerun the full decoder corpus exactly with:
+   pwsh -File .\scripts\run_decoder_corpus.ps1 -Configuration Debug -ArtifactRoot '$iterationArtifactRootRelative' -RequireEmptyArtifactRoot -Force -CleanReplayArtifacts
+6. summarize exactly that artifact root with:
+   node .\scripts\summarize_decoder_corpus.mjs --artifact-root '$iterationArtifactRootRelative' --json
+7. append exactly one row to tmp/autoresearch/$Tag/results.tsv and include the artifact-root path in its description
+8. keep or revert based on the scorecard in program.md
+9. update docs only if the finding is actually stable and worth recording
+10. stop after this single iteration
+
+Do not use the shared artifacts root. Do not ask the user to continue. Complete one full iteration and exit.
+"@
+    $prompt | Set-Content -LiteralPath $promptFile -Encoding utf8
+
     $stdoutPath = Join-Path $runDirectory "codex-$stamp.stdout.log"
     $stderrPath = Join-Path $runDirectory "codex-$stamp.stderr.log"
     $messagePath = Join-Path $runDirectory "codex-$stamp.last-message.txt"
@@ -172,6 +185,8 @@ while ($true) {
         finishedAtUtc = [DateTime]::UtcNow.ToString("o")
         exitCode = $exitCode
         completed = $completed
+        artifactRoot = $iterationArtifactRoot
+        artifactRootRelative = $iterationArtifactRootRelative
         stdoutPath = $stdoutPath
         stderrPath = $stderrPath
         messagePath = $messagePath

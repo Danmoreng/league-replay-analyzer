@@ -23,8 +23,9 @@ Work with the user once to set up a run:
 3. create `tmp/autoresearch/<tag>/`
 4. initialize `tmp/autoresearch/<tag>/results.tsv` with the documented header
 5. establish the baseline:
-   - run the full decoder corpus
-   - run `node .\scripts\summarize_decoder_corpus.mjs --json`
+   - choose one fresh root such as `tmp/autoresearch/<tag>/artifacts/baseline-<timestamp>`
+   - run the full decoder corpus with `-ArtifactRoot <fresh-root> -RequireEmptyArtifactRoot`
+   - run `node .\scripts\summarize_decoder_corpus.mjs --artifact-root <fresh-root> --json`
    - log the baseline row as `keep`
 
 After setup, do not stop to ask whether you should continue. Continue until interrupted.
@@ -75,10 +76,11 @@ Loop forever:
    - `node --check` on edited files
    - targeted replay extraction or validation when useful
 5. commit the experiment
-6. run the full corpus:
-   - `& 'C:\Program Files\PowerShell\7\pwsh.exe' -File .\scripts\run_decoder_corpus.ps1 -Configuration Debug`
+6. choose a new per-iteration root under
+   `tmp/autoresearch/<tag>/artifacts/iteration-<n>-<timestamp>` and run the full corpus:
+   - `& 'C:\Program Files\PowerShell\7\pwsh.exe' -File .\scripts\run_decoder_corpus.ps1 -Configuration Debug -ArtifactRoot <fresh-root> -RequireEmptyArtifactRoot -Force -CleanReplayArtifacts`
 7. summarize the run:
-   - `node .\scripts\summarize_decoder_corpus.mjs --json`
+   - `node .\scripts\summarize_decoder_corpus.mjs --artifact-root <fresh-root> --json`
 8. append a row to `tmp/autoresearch/<tag>/results.tsv`
 9. compare against the previous kept result
 10. keep or revert:
@@ -86,6 +88,11 @@ Loop forever:
    - revert if it regressed
    - revert if it stayed flat and the code got more complex without a clear correctness gain
 11. move to the next hypothesis immediately
+
+The scorecard is strict and manifest-based by default. It requires both scalar
+and assigned-movement reports for every manifested replay and rejects stale
+unmanifested score-report directories. `--allow-legacy-directory-scan` is a
+diagnostic compatibility escape hatch, never a valid autonomous scorecard.
 
 ## Scorecard
 
