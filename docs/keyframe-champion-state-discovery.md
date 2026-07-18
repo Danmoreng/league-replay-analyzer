@@ -193,14 +193,45 @@ leave-one-replay-out offset selection independently chooses the same three
 offsets on each nine-replay training fold and reproduces the exact envelope on
 the tenth; it is separate cross-validation, not extra holdout-isolated evidence.
 
-Nearby CS lanes are useful but fail promotion: offsets `127..129` miss three
-lane-CS changes, while offsets `134..137` add ten false jungle-CS changes.
-Neither tested direct packing nor its delta reproduces either counter. They are
-negative controls and search boundaries, not normalized CS fields.
+The nearby lane-CS change envelope is also exact, but it remains strictly
+non-numeric. Any changed byte at offsets `125`, `127`, or `129` marks
+every saved Timeline `minionsKilled` change and no unchanged transition:
+
+| Split | Changed / true change | Changed / no change | Unchanged / true change | Unchanged / no change |
+|---|---:|---:|---:|---:|
+| discovery | 1,458 | 0 | 0 | 642 |
+| holdout | 697 | 0 | 0 | 303 |
+
+The original `127..129` range missed one discovery and two holdout changes.
+All three are the same adjacent-component form: byte `125` alone changes
+(`0x0e -> 0xe8`) while `127` and `129` remain unchanged. The asserted
+witnesses are Discovery `EUW1-7920292147`, participant 3, segments 38→39,
+lane CS 280→281; and Holdout `EUW1-7921482297`, participants 3 and 8,
+segments 46→47, lane CS 360→361 and 268→269. Byte `125` changes on 24
+positive / 0 negative discovery transitions and 32 / 0 holdout transitions;
+the p125-only form is exactly 1 / 2. Byte 128 changes in none of the 3,100
+transitions and is retained only as a local-layout diagnostic, not in the
+change envelope or numeric packing test.
+
+A bounded `120..140` selector run on the seven Discovery replays chooses the
+minimal ordered set `127`, `129`, then `125` and reproduces the same exact
+confusion matrix on the three fixed Holdout replays. This is a reproducible
+Discovery→Holdout check, **not** historical unseen-holdout evidence: p125 was
+identified by a full-corpus mismatch audit before this gate was added. The
+separate all-corpus leave-one-replay-out selector chooses the same three bytes
+on every nine-replay fold and remains exact on each held replay; that is
+cross-validation, not additional holdout-isolated evidence.
+
+This proves only a component-update envelope. The direct packing and packed
+delta still reproduce `0/3,100` lane-CS values and only the 945 unchanged
+transitions respectively, so neither is a lane-CS state, delta, or last-hit
+decoder. Jungle offsets `134..137` remain a negative control with ten false
+positives (8 discovery, 2 holdout). No numeric CS field is normalized.
 
 ```powershell
 node .\scripts\research_keyframe_economy_anchors_16_14.mjs
 ```
 
 The artifact remains `researchOnly: true`, `promotionGate: false`, and
-`runtimeInput: false`. No gold or CS state reaches C++, Wasm, or the browser.
+`runtimeInput: false` (`rofl-keyframe-economy-anchors-research/v2`). No gold
+or CS state reaches C++, Wasm, or the browser.

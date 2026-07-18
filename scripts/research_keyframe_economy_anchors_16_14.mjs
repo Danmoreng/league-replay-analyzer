@@ -26,7 +26,10 @@ const PROFILE = Object.freeze({
     "EUW1-7921377760", "EUW1-7921482297", "EUW1-7921996430",
   ]),
   totalGoldOffsets: Object.freeze([115, 117, 119]),
-  laneCsOffsets: Object.freeze([127, 128, 129]),
+  // Minimal change envelope. It establishes only whether lane CS changed,
+  // never its value; p128 is retained only as an inert diagnostic.
+  laneCsOffsets: Object.freeze([125, 127, 129]),
+  laneCsLoroCandidateOffsets: Object.freeze(Array.from({ length: 21 }, (_, index) => 120 + index)),
   jungleCsOffsets: Object.freeze([134, 135, 136, 137]),
 });
 
@@ -53,8 +56,26 @@ const EXPECTED = Object.freeze({
     },
   },
   laneCs: {
-    discovery: { tp: 1457, fp: 0, fn: 1, tn: 642, directMatches: 0, directMisses: 2100, deltaMatches: 642, deltaMisses: 1458, exactChangeAnchor: false },
-    holdout: { tp: 695, fp: 0, fn: 2, tn: 303, directMatches: 0, directMisses: 1000, deltaMatches: 303, deltaMisses: 697, exactChangeAnchor: false },
+    discovery: { tp: 1458, fp: 0, fn: 0, tn: 642, directMatches: 0, directMisses: 2100, deltaMatches: 642, deltaMisses: 1458, exactChangeAnchor: true },
+    holdout: { tp: 697, fp: 0, fn: 0, tn: 303, directMatches: 0, directMisses: 1000, deltaMatches: 303, deltaMisses: 697, exactChangeAnchor: true },
+    p125AlternativeComponent: {
+      discovery: { positiveChangeCount: 24, negativeChangeCount: 0, p125OnlyPositiveChangeCount: 1, p125OnlyWitnesses: [{ replayId: "EUW1-7920292147", participantId: 3, previousSegmentId: 38, nextSegmentId: 39, previousLaneCs: 280, nextLaneCs: 281, p125TransitionHex: "0e->e8" }] },
+      holdout: { positiveChangeCount: 32, negativeChangeCount: 0, p125OnlyPositiveChangeCount: 2, p125OnlyWitnesses: [{ replayId: "EUW1-7921482297", participantId: 3, previousSegmentId: 46, nextSegmentId: 47, previousLaneCs: 360, nextLaneCs: 361, p125TransitionHex: "0e->e8" }, { replayId: "EUW1-7921482297", participantId: 8, previousSegmentId: 46, nextSegmentId: 47, previousLaneCs: 268, nextLaneCs: 269, p125TransitionHex: "0e->e8" }] },
+    },
+    inertOffset128: { discoveryChangedTransitionCount: 0, holdoutChangedTransitionCount: 0 },
+    discoverySelector: { selectedOffsets: [127, 129, 125], discovery: { tp: 1458, fp: 0, fn: 0, tn: 642, exactChangeAnchor: true }, holdout: { tp: 697, fp: 0, fn: 0, tn: 303, exactChangeAnchor: true } },
+    allCorpusLoro: {
+      "EUW1-7919517389": { selectedOffsets: [127, 129, 125], heldout: { tp: 180, fp: 0, fn: 0, tn: 80, exactChangeAnchor: true } },
+      "EUW1-7919624327": { selectedOffsets: [127, 129, 125], heldout: { tp: 184, fp: 0, fn: 0, tn: 76, exactChangeAnchor: true } },
+      "EUW1-7920241664": { selectedOffsets: [127, 129, 125], heldout: { tp: 247, fp: 0, fn: 0, tn: 93, exactChangeAnchor: true } },
+      "EUW1-7920292147": { selectedOffsets: [127, 129, 125], heldout: { tp: 266, fp: 0, fn: 0, tn: 134, exactChangeAnchor: true } },
+      "EUW1-7920341366": { selectedOffsets: [127, 129, 125], heldout: { tp: 185, fp: 0, fn: 0, tn: 65, exactChangeAnchor: true } },
+      "EUW1-7920364492": { selectedOffsets: [127, 129, 125], heldout: { tp: 172, fp: 0, fn: 0, tn: 78, exactChangeAnchor: true } },
+      "EUW1-7920550565": { selectedOffsets: [127, 129, 125], heldout: { tp: 224, fp: 0, fn: 0, tn: 116, exactChangeAnchor: true } },
+      "EUW1-7921377760": { selectedOffsets: [127, 129, 125], heldout: { tp: 175, fp: 0, fn: 0, tn: 65, exactChangeAnchor: true } },
+      "EUW1-7921482297": { selectedOffsets: [127, 129, 125], heldout: { tp: 322, fp: 0, fn: 0, tn: 148, exactChangeAnchor: true } },
+      "EUW1-7921996430": { selectedOffsets: [127, 129, 125], heldout: { tp: 200, fp: 0, fn: 0, tn: 90, exactChangeAnchor: true } },
+    },
   },
   jungleCs: {
     discovery: { tp: 367, fp: 8, fn: 0, tn: 1725, directMatches: 0, directMisses: 2100, deltaMatches: 1725, deltaMisses: 375, exactChangeAnchor: false },
@@ -179,37 +200,126 @@ function metrics(rows, labelKey, offsets) {
   return result;
 }
 
+function laneCsAlternativeComponentMetrics(rows) {
+  const result = { positiveChangeCount: 0, negativeChangeCount: 0, p125OnlyPositiveChangeCount: 0, p125OnlyWitnesses: [] };
+  for (const transition of transitions(rows)) {
+    const p125Changed = changed(transition.next, transition.previous, [125]);
+    if (!p125Changed) continue;
+    const laneCsChanged = transition.next.laneCs !== transition.previous.laneCs;
+    if (laneCsChanged) result.positiveChangeCount += 1;
+    else result.negativeChangeCount += 1;
+    if (laneCsChanged && !changed(transition.next, transition.previous, [127, 129])) {
+      result.p125OnlyPositiveChangeCount += 1;
+      result.p125OnlyWitnesses.push({
+        replayId: transition.next.replayId,
+        participantId: transition.next.participantId,
+        previousSegmentId: transition.previous.segmentId,
+        nextSegmentId: transition.next.segmentId,
+        previousLaneCs: transition.previous.laneCs,
+        nextLaneCs: transition.next.laneCs,
+        p125TransitionHex: `${transition.previous.payload[125].toString(16).padStart(2, "0")}->${transition.next.payload[125].toString(16).padStart(2, "0")}`,
+      });
+    }
+  }
+  return result;
+}
+
+function inertOffsetChangedTransitionCount(rows, offset) {
+  return transitions(rows).filter((transition) => changed(transition.next, transition.previous, [offset])).length;
+}
+
 function selectTotalGoldOffsets(rows) {
   const scores = Array.from({ length: PROFILE.payloadLength }, (_, offset) => ({ offset, ...metrics(rows, "totalGold", [offset]) }));
   return scores.sort((a, b) => (b.tp - b.fp - b.fn) - (a.tp - a.fp - a.fn) || a.offset - b.offset).slice(0, 3).map((entry) => entry.offset);
+}
+
+// The bounded 120..140 locality was fixed before this leave-one-replay-out
+// diagnostic. Each fold considers only single-byte, zero-false-positive
+// change markers and greedily chooses the smallest deterministic set that
+// covers every training lane-CS change. It is cross-validation only, not an
+// additional independent holdout nor a runtime selection rule.
+function selectLaneCsOffsets(rows) {
+  const transitionsForRows = transitions(rows);
+  const positiveIndices = transitionsForRows.flatMap((transition, index) =>
+    transition.next.laneCs !== transition.previous.laneCs ? [index] : []);
+  const candidates = PROFILE.laneCsLoroCandidateOffsets.map((offset) => {
+    const covered = new Set();
+    let falsePositiveCount = 0;
+    for (let index = 0; index < transitionsForRows.length; index += 1) {
+      const transition = transitionsForRows[index];
+      if (!changed(transition.next, transition.previous, [offset])) continue;
+      if (transition.next.laneCs !== transition.previous.laneCs) covered.add(index);
+      else falsePositiveCount += 1;
+    }
+    return { offset, covered, falsePositiveCount };
+  }).filter((candidate) => candidate.falsePositiveCount === 0 && candidate.covered.size > 0);
+  const selectedOffsets = [], uncovered = new Set(positiveIndices);
+  while (uncovered.size > 0) {
+    const ranked = candidates.map((candidate) => ({ candidate, newCoverage: [...candidate.covered].filter((index) => uncovered.has(index)).length }))
+      .filter((entry) => entry.newCoverage > 0)
+      .sort((left, right) => right.newCoverage - left.newCoverage || left.candidate.offset - right.candidate.offset);
+    if (!ranked.length) fail("Bounded lane-CS LORO selector cannot cover every training change.", { selectedOffsets, uncoveredCount: uncovered.size });
+    const next = ranked[0].candidate;
+    selectedOffsets.push(next.offset);
+    for (const index of next.covered) uncovered.delete(index);
+  }
+  return selectedOffsets;
 }
 
 function evaluate(rows) {
   const discoveryRows = rows.filter((row) => PROFILE.discovery.includes(row.replayId));
   const holdoutRows = rows.filter((row) => PROFILE.holdout.includes(row.replayId));
   const totalGold = { discovery: metrics(discoveryRows, "totalGold", PROFILE.totalGoldOffsets), holdout: metrics(holdoutRows, "totalGold", PROFILE.totalGoldOffsets), allCorpusLoro: {} };
+  const laneCs = {
+    changeEnvelopeOnly: true,
+    numericStateAvailable: false,
+    numericDeltaAvailable: false,
+    lastHitEventAvailable: false,
+    runtimeUse: false,
+    offsets: PROFILE.laneCsOffsets,
+    discovery: metrics(discoveryRows, "laneCs", PROFILE.laneCsOffsets),
+    holdout: metrics(holdoutRows, "laneCs", PROFILE.laneCsOffsets),
+    p125AlternativeComponent: {
+      discovery: laneCsAlternativeComponentMetrics(discoveryRows),
+      holdout: laneCsAlternativeComponentMetrics(holdoutRows),
+    },
+    inertOffset128: {
+      discoveryChangedTransitionCount: inertOffsetChangedTransitionCount(discoveryRows, 128),
+      holdoutChangedTransitionCount: inertOffsetChangedTransitionCount(holdoutRows, 128),
+    },
+    discoverySelector: {},
+    allCorpusLoro: {},
+  };
+  const discoverySelectedLaneCsOffsets = selectLaneCsOffsets(discoveryRows);
+  laneCs.discoverySelector = {
+    selectedOffsets: discoverySelectedLaneCsOffsets,
+    discovery: metrics(discoveryRows, "laneCs", discoverySelectedLaneCsOffsets),
+    holdout: metrics(holdoutRows, "laneCs", discoverySelectedLaneCsOffsets),
+  };
   for (const replayId of PROFILE.fixtures) {
     const train = rows.filter((row) => row.replayId !== replayId);
     const held = rows.filter((row) => row.replayId === replayId);
     const selectedOffsets = selectTotalGoldOffsets(train);
     totalGold.allCorpusLoro[replayId] = { selectedOffsets, heldout: metrics(held, "totalGold", selectedOffsets) };
+    const selectedLaneCsOffsets = selectLaneCsOffsets(train);
+    laneCs.allCorpusLoro[replayId] = { selectedOffsets: selectedLaneCsOffsets, heldout: metrics(held, "laneCs", selectedLaneCsOffsets) };
   }
   return {
-    schema: "rofl-keyframe-economy-anchors-research/v1",
+    schema: "rofl-keyframe-economy-anchors-research/v2",
     researchOnly: true,
     promotionGate: false,
     runtimeInput: false,
     profile: { versionGroup: PROFILE.versionGroup, packetType: "0x02EB", payloadLength: PROFILE.payloadLength, championOwnerBase: "0x400000AD" },
     offlineOracle: { input: "Saved Riot Timeline participantFrames labels only", alignment: "ROFL keyframe segmentId - 1", runtimeUse: false },
-    evidenceBoundary: "The primary 7/3 discovery/holdout split validates only a byte-change envelope. The separate all-corpus leave-one-replay-out view selects offsets on nine replays and checks the tenth; it is not additional holdout-isolated evidence.",
+    evidenceBoundary: "The reproducible Discovery-to-Holdout lane selector is evaluated on the fixed 7/3 split, but p125 was originally identified by a full-corpus mismatch audit, so the Holdout must not be described as historically unseen. The separate all-corpus leave-one-replay-out views select bounded candidate offsets on nine replays and check the tenth; they are cross-validation, not additional holdout-isolated evidence.",
     split: { discovery: PROFILE.discovery, holdout: PROFILE.holdout },
     counts: { snapshots: rows.length, transitions: transitions(rows).length, discoveryTransitions: transitions(discoveryRows).length, holdoutTransitions: transitions(holdoutRows).length },
     totalGoldChangeAnchor: { offsets: PROFILE.totalGoldOffsets, ...totalGold },
+    laneCsChangeEnvelope: laneCs,
     negativeControls: {
-      laneCs: { offsets: PROFILE.laneCsOffsets, discovery: metrics(discoveryRows, "laneCs", PROFILE.laneCsOffsets), holdout: metrics(holdoutRows, "laneCs", PROFILE.laneCsOffsets) },
       jungleCs: { offsets: PROFILE.jungleCsOffsets, discovery: metrics(discoveryRows, "jungleCs", PROFILE.jungleCsOffsets), holdout: metrics(holdoutRows, "jungleCs", PROFILE.jungleCsOffsets) },
     },
-    nonPromotionReason: "The totalGold bytes reveal exactly when the value changes, but neither the direct packed value nor its packed delta decodes totalGold. Lane-CS and jungle-CS envelopes are imperfect. No numeric economy value is available.",
+    nonPromotionReason: "The totalGold and lane-CS byte ranges reveal exactly when their saved oracle values change, but neither direct packed values nor packed deltas decode a numeric state. Jungle-CS remains an imperfect negative control. No numeric economy value, delta, or event is available.",
   };
 }
 
@@ -218,7 +328,18 @@ function assertionShape(result) {
   return {
     counts: result.counts,
     totalGold: { discovery: select(result.totalGoldChangeAnchor.discovery), holdout: select(result.totalGoldChangeAnchor.holdout), allCorpusLoro: Object.fromEntries(Object.entries(result.totalGoldChangeAnchor.allCorpusLoro).map(([id, value]) => [id, { selectedOffsets: value.selectedOffsets, heldout: { tp: value.heldout.tp, fp: value.heldout.fp, fn: value.heldout.fn, tn: value.heldout.tn, exactChangeAnchor: value.heldout.exactChangeAnchor } }])) },
-    laneCs: { discovery: select(result.negativeControls.laneCs.discovery), holdout: select(result.negativeControls.laneCs.holdout) },
+    laneCs: {
+      discovery: select(result.laneCsChangeEnvelope.discovery),
+      holdout: select(result.laneCsChangeEnvelope.holdout),
+      p125AlternativeComponent: result.laneCsChangeEnvelope.p125AlternativeComponent,
+      inertOffset128: result.laneCsChangeEnvelope.inertOffset128,
+      discoverySelector: {
+        selectedOffsets: result.laneCsChangeEnvelope.discoverySelector.selectedOffsets,
+        discovery: { tp: result.laneCsChangeEnvelope.discoverySelector.discovery.tp, fp: result.laneCsChangeEnvelope.discoverySelector.discovery.fp, fn: result.laneCsChangeEnvelope.discoverySelector.discovery.fn, tn: result.laneCsChangeEnvelope.discoverySelector.discovery.tn, exactChangeAnchor: result.laneCsChangeEnvelope.discoverySelector.discovery.exactChangeAnchor },
+        holdout: { tp: result.laneCsChangeEnvelope.discoverySelector.holdout.tp, fp: result.laneCsChangeEnvelope.discoverySelector.holdout.fp, fn: result.laneCsChangeEnvelope.discoverySelector.holdout.fn, tn: result.laneCsChangeEnvelope.discoverySelector.holdout.tn, exactChangeAnchor: result.laneCsChangeEnvelope.discoverySelector.holdout.exactChangeAnchor },
+      },
+      allCorpusLoro: Object.fromEntries(Object.entries(result.laneCsChangeEnvelope.allCorpusLoro).map(([id, value]) => [id, { selectedOffsets: value.selectedOffsets, heldout: { tp: value.heldout.tp, fp: value.heldout.fp, fn: value.heldout.fn, tn: value.heldout.tn, exactChangeAnchor: value.heldout.exactChangeAnchor } }])),
+    },
     jungleCs: { discovery: select(result.negativeControls.jungleCs.discovery), holdout: select(result.negativeControls.jungleCs.holdout) },
   };
 }
@@ -231,4 +352,4 @@ if (JSON.stringify(observed) !== JSON.stringify(EXPECTED)) fail("Keyframe econom
 const outputPath = path.resolve(args.outputPath);
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 fs.writeFileSync(outputPath, `${JSON.stringify(result, null, 2)}\n`);
-console.log(JSON.stringify({ valid: true, schema: result.schema, snapshots: result.counts.snapshots, transitions: result.counts.transitions, totalGold: result.totalGoldChangeAnchor, negativeControls: result.negativeControls }, null, 2));
+console.log(JSON.stringify({ valid: true, schema: result.schema, snapshots: result.counts.snapshots, transitions: result.counts.transitions, totalGold: result.totalGoldChangeAnchor, laneCsChangeEnvelope: result.laneCsChangeEnvelope, negativeControls: result.negativeControls }, null, 2));

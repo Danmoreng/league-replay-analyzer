@@ -294,15 +294,33 @@ The values and XOR masks are non-monotonic and do not decode item ID, slot,
 count, operation ordering, or inventory state. These anchors are therefore
 research boundaries only, not normalized runtime fields.
 
-Patch 16.14 now also has an exact `totalGold` **change** envelope: within the
-champion-owned 1,479-byte `0x02EB` family, offsets 115, 117, and 119 change on
-all 3,024 gold-changing transitions and none of 76 unchanged transitions. The
-predeclared 7/3 discovery/holdout split has zero false positives and zero false
-negatives. A direct packed value matches 0/3,100 non-initial keyframe values,
-and its delta
-matches only the 76 unchanged transitions, so this does not decode current or
-earned gold. Nearby lane-CS and jungle-CS change envelopes are imperfect (three
-misses and ten extras respectively) and also decode no numeric counter.
+Patch 16.14 now also has exact `totalGold` and lane-CS **change** envelopes
+within the champion-owned 1,479-byte `0x02EB` family. Offsets 115, 117, and
+119 change on all 3,024 saved `totalGold`-changing transitions and none of 76
+unchanged transitions. The lane-CS envelope is the minimal offset union 125,
+127, and 129: it changes on all 2,155 saved `minionsKilled` changes and
+none of 945 unchanged transitions (Discovery 1,458/0/0/642; Holdout
+697/0/0/303, in TP/FP/FN/TN order). The previous 127..129 range missed three
+otherwise identical p125-only updates; byte 125 changes in 24 positive / 0
+negative Discovery transitions and 32 / 0 Holdout transitions, including
+exactly one and two p125-only forms respectively. The asserted p125-only
+witnesses are `EUW1-7920292147` participant 3, segments 38→39, lane CS
+280→281, plus `EUW1-7921482297` participants 3 and 8, segments 46→47, lane
+CS 360→361 and 268→269; all have p125 `0x0e→0xe8`. Byte 128 is inert across
+all 3,100 transitions and is diagnostic only, not part of the envelope or a
+packing test. A bounded 120..140 selector reproduces 127, 129, then 125 from
+the seven Discovery replays and yields the same exact matrix on the three
+fixed Holdouts. This is not historical unseen-holdout evidence because p125
+was found in a full-corpus mismatch audit. The separate LORO selector chooses
+the same three locations in every nine-replay fold and remains exact on the
+held replay; it is cross-validation, not additional independent holdout
+evidence.
+
+Both findings are change envelopes only. A direct packed lane or gold value
+matches 0/3,100 non-initial keyframe values; each packed delta matches only
+the corresponding unchanged transitions (945 lane, 76 gold), so no current or
+earned gold, numeric lane CS, delta, or last-hit event is decoded. Jungle-CS
+offsets 134..137 remain an imperfect negative control with ten false positives.
 
 Position, health, resources, numeric gold, XP, level, numeric CS, damage, KDA,
 and alive state are not decoded. Older supervised keyframe assignments are
