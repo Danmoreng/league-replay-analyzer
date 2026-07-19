@@ -65,6 +65,12 @@ are outside scope even when described by historical community work.
 - `scripts/research_keyframe_inventory_slots_16_14.mjs` reproduces the exact
   six-record keyframe `0x0081` structure and falsifies its interpretation as
   current champion inventory on D7 and frozen H3.
+- `scripts/research_inventory_gold_adjustments_16_14.mjs` freezes the
+  static-recipe/Undo spend-ledger comparison and the incomplete cumulative-sale
+  correction for current gold.
+- `scripts/research_inventory_sale_identity_16_14.mjs` freezes the six-record
+  sale-history candidate constraint and the negative removal identity/record
+  linkage searches.
 - `docs/replay-movement-packet-research.md`
 - `docs/rofl-api-parity.md`
 - `docs/keyframe-api-parity.md`

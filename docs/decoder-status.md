@@ -540,14 +540,21 @@ Two July 2026 maintained gates narrow those gaps without adding product fields:
   spent-gold-like Float32LE lane: 3,200/3,200 values are finite, nonnegative,
   and integral, and all 100 participant tracks begin at zero. It is not
   spendable gold. `trunc(totalGold - spentLike)` matches only 967/2,170 D7 and
-  354/1,030 H3 current-gold labels; exhaustive interleaved Float32LE and
-  UInt32LE correction searches do not close the residual.
+  354/1,030 H3 current-gold labels. A frozen static-recipe/Undo ledger matches
+  the lane delta on 2,945/3,100 transitions, including 49/50 Undo-containing
+  intervals (16/16 sale-Undo and 35/36 purchase-Undo intervals). Cumulative
+  sale proceeds improve the current-gold comparison to 1,459/3,200 snapshots
+  but do not close the residual; sold-item identity is also unavailable, so no
+  spendable-gold field is promoted.
 - every exact-build champion/keyframe `0x0081` payload has six replay-only
   trailing records and reuses the established item-ID symbol grammar, but the
   current-inventory interpretation is falsified. A Timeline-derived offline
   reducer sees false-extra decoded items in 675/2,170 D7 and 374/1,030 H3
-  snapshots. This family is consistent with historical shop/Undo state, not
-  physical inventory slots.
+  snapshots. The preceding component contains the sold item for 112/116 sales,
+  and removal length exactly partitions 111 unique truth records into ordinal
+  halves across D7/H3, but raw lookup and record/removal linkage searches fail
+  held-out exactness. This remains historical shop/Undo candidate evidence,
+  not physical inventory slots or sold-item identity.
 
 Both artifacts remain research-only and fail closed. The product continues to
 omit current gold and dynamic inventory slots instead of relabelling total gold,

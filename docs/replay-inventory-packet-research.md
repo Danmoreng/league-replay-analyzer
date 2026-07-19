@@ -589,6 +589,59 @@ deltas all have zero exact candidate (best raw hit 3/787; best keyframe hit
 4/785). H3 remains unopened for this failed search. No purchase/sale gold
 delta or current-gold field is decoded.
 
+### Sale, Undo, and current-gold adjustment follow-up
+
+Two exact-build research harnesses now connect the replay-native spent-like
+keyframe lane, offline shop operations, and the six-record `0x0081` history
+component without promoting a product field:
+
+```bash
+node scripts/research_inventory_gold_adjustments_16_14.mjs \
+  --cli build-linux/packages/rofl-core/rofl_core_cli \
+  --item-data /path/to/Data-Dragon-16.14.1-item.json
+
+node scripts/research_inventory_sale_identity_16_14.mjs \
+  --cli build-linux/packages/rofl-core/rofl_core_cli \
+  --item-data /path/to/Data-Dragon-16.14.1-item.json
+```
+
+Both scripts require the same byte-length- and SHA-256-pinned `16.14.1`
+catalog described above. They perform no network lookup. Saved Timeline values
+and item events are offline labels only.
+
+The `[107,109,111,113]` spent-like lane follows a static-recipe purchase ledger
+plus `ITEM_UNDO.goldGain` on 2,004/2,100 D7 and 941/1,000 frozen H3 keyframe
+transitions. Undo intervals alone agree on 32/33 D7 and 17/17 H3 transitions;
+the sole difference is a one-minute interval containing several other item
+operations. This supports net cumulative spending semantics: undoing a purchase
+reduces the lane by its refund, while undoing a sale increases the lane by the
+reacquisition cost. All 16 sale-Undo intervals agree with that signed adjustment;
+purchase-Undo intervals agree in 35/36 cases. It does not make Timeline
+`goldGain` a runtime input.
+
+Sale proceeds remain separate from that lane. Adding cumulative pinned sale
+proceeds to `trunc(totalGold) - trunc(spentLike)` improves exact offline
+current-gold snapshots from 1,321/3,200 to 1,459/3,200. It does not close the
+gate; systematic residuals remain, and the replay sale stream still lacks the
+sold item needed to choose a static price. Current spendable gold therefore
+remains unavailable.
+
+The identity follow-up also rejects several tempting shortcuts. The preceding
+six-record `0x0081` history component contains the offline sold item for
+74/77 D7 and 38/39 H3 sales. Among the 111 rows where that item occurs exactly
+once, every 7-byte removal corresponds to history ordinal 0-2 and every 6-byte
+removal to ordinal 3-5. This is a reproducible candidate-set constraint, not a
+slot decoder: the component was already falsified as current inventory, four
+sales lack their truth item, and each half normally contains three different
+items and prices.
+
+Frozen D7-to-H3 searches for raw removal-to-item, removal-to-price, and
+removal-to-history-ordinal lookup fields fail with held-out wrong labels.
+Direct add/removal XOR and history-record/removal XOR searches also fail; the
+best direct record linkage selects zero rows. Consequently sold identity,
+physical inventory slot, item instance, sale gold gain, and full inventory
+state remain unpromoted.
+
 The same result holds outside the operation payloads. An exact D7 framing pass
 over 9,908,848 chunk blocks retains 5,606 non-`0x0369`/`0x03F9` blocks within
 one millisecond of those 787 labels, partitioned into 1,284
