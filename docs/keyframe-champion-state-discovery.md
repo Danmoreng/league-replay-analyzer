@@ -209,6 +209,46 @@ that more complex masks, records, or replication grammar are impossible.
 None of these structural diagnostics is a decoded field boundary, value,
 record, or runtime API.
 
+### Maintained whole-payload layout falsifications
+
+The saved-ROFL-only harness
+[research_keyframe_layout_falsifications_16_14.mjs](../scripts/research_keyframe_layout_falsifications_16_14.mjs)
+preserves two further bounded negatives for the same exact-build `0x02EB`
+family. It uses no Timeline/API labels: the seven D7 replays are fully opened,
+framed, owner-completeness checked, and asserted before the three H3 replay
+files can be opened. No D7 candidate survives, so H3 remains deliberately
+unopened.
+
+First, it tests all 144 byte-lossless flat layouts formed from two orders
+(`bitset + byte values` or its reverse), nine predeclared bitmap sizes
+(`165..256` bytes), two bit orders, two polarities, and two targets (a byte is
+non-`0x0E`, or differs from the preceding snapshot for the same champion).
+Each value byte is assigned one bitmap bit while unused trailing bitmap bits
+are allowed. Every layout fails on D7. The least-mismatching non-default
+candidate still has
+`952,703` errors across `2,653,910` byte observations; the best changed-byte
+candidate has `982,277` errors across `2,568,300`. This rejects only a single
+contiguous bitmap with one assigned bit per byte value and optional trailing
+unused bits, not other mask/value or stateful encodings.
+
+Second, it rejects exactly three whole-payload TLV forms: ULEB tag + ULEB
+length, U8 tag + ULEB length, and U8 tag + U8 length. Each must consume all
+1,479 payload bytes into at least two records, include a nonempty body, and
+retain one fixed tag/header-width/length record-boundary layout across D7, with
+the two already-frozen mirror ranges in corresponding record positions. All
+three overflow on the first D7 snapshot, before any candidate could reach a
+holdout check. This is not evidence against other tags, nested records, length
+schemes, or stateful replication grammar.
+
+```powershell
+node .\scripts\research_keyframe_layout_falsifications_16_14.mjs `
+  --output .\tmp\keyframe-layout-falsifications-16.14.json
+```
+
+The report is deterministic and carries `researchOnly: true`,
+`promotionGate: false`, and `runtimeInput: false`. It does not add a C++, Wasm,
+or browser field.
+
 ### Quarantined one-off lane probes
 
 The following observations came from temporary exploratory scripts and are
