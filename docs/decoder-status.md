@@ -367,11 +367,33 @@ inside a continuous prefix. No owner reaches the end of the profiled stream,
 so no final inventory comparison is valid. This scratch reducer is therefore
 neither a partial runtime decoder nor a complete-state path.
 
-Even conservative unique-source lifecycles do not expose the link directly:
-15 D7 and 9 H3 add-to-removal pairs are available after offline state
+Even conservative unique-source lifecycles do not expose an item-instance link
+directly: 15 D7 and 9 H3 add-to-removal pairs are available after offline state
 disambiguation, but an exhaustive one-to-eight-bit contiguous slice/XOR search
-between their `0x0369` and `0x03F9` payloads has zero exact D7 candidate. Slot,
-instance, and removal identity remain unresolved.
+between their `0x0369` and `0x03F9` payloads has zero exact D7 candidate.
+
+The removal family now has a stronger bounded slot candidate. All 2,074
+champion-owned `0x03F9` length-6/7 packets in the fixed exact-build corpus map
+to a seven-value structural domain with zero unavailable symbols: length 6
+maps `(bit7,bit8)` values `00/11/10` to candidate slots `0/1/2`, while length 7
+maps `(bit16,bit17)` values `10/01/00/11` to `3/4/5/6`. The fixed split has
+1,293 D7 and 781 H3 packets; every slot value occurs in both. All 72 strict
+trinket-replacement labels independently select candidate slot 6 (50 D7 and 22
+H3, zero wrong), and 506/535 simultaneous multi-removal groups use distinct
+candidate slots. This is not yet a product field: only slot 6 has a zero-error
+semantic oracle, sold-item identity and instances remain unavailable, and 29
+multi-removal groups repeat a candidate slot under unresolved count/update
+semantics.
+
+The historical `0x0081` records provide a second, still non-promotable check.
+Mapping their six record ordinals to slots `5..0` agrees with the removal-slot
+candidate in 108/111 sales having one unique historical sold-item record. The
+three disagreements can be explained only after inventory rearrangement/state
+semantics are decoded, so they are retained instead of excluded. Separately,
+181 isolated purchase intervals link one `0x0369` add to one changed historical
+record across all six main candidate slots (126 D7, 55 H3). No contiguous
+one-to-eight-bit add-payload lookup is conflict-free even on D7, so add
+placement remains unresolved.
 
 Owner-local ordinal/count lookups likewise leave zero exact H3 hypothesis;
 non-contiguous XOR rules are massively non-unique, and most nearby keyframe
@@ -383,6 +405,13 @@ labels and 77 sale-gain labels have zero exact direct integer, varint, bitfield,
 successive-packet-delta, or nearest-owner-keyframe `i32` candidate. H3 remains
 unopened because Discovery has no codec. Purchase/sale gold deltas and current
 gold are therefore still unavailable.
+
+A full decoded-keyframe residual scan does not repair current gold. Signed and
+unsigned 8/16/32-bit integers plus Float32 values at every contiguous or
+stride-2 offset in the 1,479-byte decoded `0x02EB` payload produce no correction
+field for the post-ledger residual. The best candidate is a constant decoded
+zero and merely reproduces 1,460/3,200 already-exact residual rows. Current
+spendable gold remains unavailable rather than approximated.
 
 An expanded exact-framing pass over all 9,908,848 D7 chunk blocks likewise
 finds no co-timestamp companion: 5,606 non-operation blocks across 1,284
@@ -551,10 +580,13 @@ Two July 2026 maintained gates narrow those gaps without adding product fields:
   current-inventory interpretation is falsified. A Timeline-derived offline
   reducer sees false-extra decoded items in 675/2,170 D7 and 374/1,030 H3
   snapshots. The preceding component contains the sold item for 112/116 sales,
-  and removal length exactly partitions 111 unique truth records into ordinal
-  halves across D7/H3, but raw lookup and record/removal linkage searches fail
-  held-out exactness. This remains historical shop/Undo candidate evidence,
-  not physical inventory slots or sold-item identity.
+  and the new removal-slot candidate agrees with the reverse record ordinal in
+  108/111 unique-truth sales. All 72 strict trinket replacements select
+  candidate slot 6, but only that slot has a zero-error semantic oracle. The
+  181 isolated add/record-change anchors cover all six main candidate slots,
+  while no bounded contiguous add-payload lookup is conflict-free on D7. This
+  remains historical shop/Undo and removal-slot candidate evidence, not a
+  complete physical inventory or sold-item identity decoder.
 
 Both artifacts remain research-only and fail closed. The product continues to
 omit current gold and dynamic inventory slots instead of relabelling total gold,

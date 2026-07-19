@@ -603,11 +603,15 @@ node scripts/research_inventory_gold_adjustments_16_14.mjs \
 node scripts/research_inventory_sale_identity_16_14.mjs \
   --cli build-linux/packages/rofl-core/rofl_core_cli \
   --item-data /path/to/Data-Dragon-16.14.1-item.json
+
+node scripts/research_inventory_removal_slots_16_14.mjs \
+  --cli build-linux/packages/rofl-core/rofl_core_cli
 ```
 
-Both scripts require the same byte-length- and SHA-256-pinned `16.14.1`
-catalog described above. They perform no network lookup. Saved Timeline values
-and item events are offline labels only.
+The gold and sale-identity scripts require the same byte-length- and
+SHA-256-pinned `16.14.1` catalog described above; the removal-slot harness does
+not. They perform no network lookup. Saved Timeline values and item events are
+offline labels only.
 
 The `[107,109,111,113]` spent-like lane follows a static-recipe purchase ledger
 plus `ITEM_UNDO.goldGain` on 2,004/2,100 D7 and 941/1,000 frozen H3 keyframe
@@ -625,6 +629,46 @@ current-gold snapshots from 1,321/3,200 to 1,459/3,200. It does not close the
 gate; systematic residuals remain, and the replay sale stream still lacks the
 sold item needed to choose a static price. Current spendable gold therefore
 remains unavailable.
+
+An exhaustive decoded-keyframe correction scan covers every contiguous and
+stride-2 8/16/32-bit integer and Float32 candidate in the 1,479-byte `0x02EB`
+payload. Its best result is a decoded zero constant, matching 1,086/2,170 D7
+and 374/1,030 H3 residual rows without improving the ledger calculation. No
+numeric replay-native correction field is found.
+
+### Removal-slot candidate
+
+The exact-build `0x03F9` family has a complete seven-value structural candidate:
+
+| Payload | Replay bits | Candidate slot | Combined packets |
+| ------- | ----------- | -------------: | ---------------: |
+| 6 bytes | `bit7=0, bit8=0` | 0 | 180 |
+| 6 bytes | `bit7=1, bit8=1` | 1 | 208 |
+| 6 bytes | `bit7=1, bit8=0` | 2 | 278 |
+| 7 bytes | `bit16=1, bit17=0` | 3 | 321 |
+| 7 bytes | `bit16=0, bit17=1` | 4 | 491 |
+| 7 bytes | `bit16=0, bit17=0` | 5 | 284 |
+| 7 bytes | `bit16=1, bit17=1` | 6 | 312 |
+
+The unused six-byte symbol `bit7=0, bit8=1` never occurs. All 2,074 packets
+decode structurally: 1,293 D7 and 781 H3, with every candidate slot represented
+in both partitions. Of 535 owner/timestamp groups containing multiple
+removals, 506 use distinct candidate slots and 29 repeat one under unresolved
+stack/count/update behavior.
+
+The semantic anchor is exact but partial. Saved Timeline is an offline oracle
+for 72 strict two-event trinket replacements; every corresponding replay
+removal decodes candidate slot 6 (50/50 D7 and 22/22 H3). The 116 exact sale
+operations cover candidate slots 0 through 5. Their operation nibble is `5` in
+112 rows and `2` in four probable partial-stack sales, but count semantics are
+not promoted.
+
+The preceding six-record `0x0081` component supplies a noisy cross-check rather
+than current state. For 111 sales with one unique historical sold-item record,
+`candidateSlot == 5 - recordOrdinal` in 108 cases. The remaining three are
+retained because manual rearrangement or another state transition can occur
+after the keyframe. Slots 0-5 therefore still lack a zero-error semantic oracle,
+and the candidate is deliberately absent from C++, Wasm, and product schemas.
 
 The identity follow-up also rejects several tempting shortcuts. The preceding
 six-record `0x0081` history component contains the offline sold item for
@@ -745,6 +789,14 @@ slots.
 The current-inventory and slot-ordinal hypotheses are therefore rejected.
 Record boundaries and reused item symbols remain useful structural evidence,
 but they do not authorize a C++/Wasm/product inventory field.
+
+A narrower add/record-change gate remains useful for further grammar search.
+It selects intervals containing exactly one Timeline purchase label, one
+replay-native `0x0369` add with the same decoded item, and one changed `0x0081`
+historical record. This yields 126 D7 and 55 H3 rows across all six main record
+ordinals. No contiguous one-to-eight-bit add-payload lookup is conflict-free on
+Discovery, so the record ordinal cannot yet place the added item in a runtime
+slot reducer.
 
 ```bash
 node scripts/research_keyframe_inventory_slots_16_14.mjs \

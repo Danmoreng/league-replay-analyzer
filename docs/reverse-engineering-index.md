@@ -47,6 +47,9 @@ are outside scope even when described by historical community work.
   add-only purchase subsets, the operation-only item-sale stream, their pinned
   static-item-catalog boundary, and their explicit inventory/research
   limitations)
+- `scripts/research_inventory_removal_slots_16_14.mjs` (the complete
+  seven-value `0x03F9` structural slot candidate, exact slot-6 trinket oracle,
+  and explicit non-promotion boundary)
 - `docs/keyframe-champion-state-discovery.md` (including the exact-build
   patch-16.14 replay-byte-only `0x01EB` physical record directory: 366
   contiguous records per owner/keyframe, stable cross-index-unique

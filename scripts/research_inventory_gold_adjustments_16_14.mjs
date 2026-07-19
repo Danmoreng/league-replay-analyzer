@@ -297,6 +297,7 @@ function inspectReplay(args, replayId, partition, cipher, items) {
     const payload = Buffer.from(block.contentHex, "hex");
     const totalGold = decodeFloat32(payload, PROFILE.totalGoldOffsets, cipher);
     const spentLike = decodeFloat32(payload, PROFILE.spentLikeOffsets, cipher);
+    const decodedPayload = Buffer.from(payload.map((value) => cipher[value]));
     const baseCurrentGold = Math.trunc(totalGold) - Math.trunc(spentLike);
     rows.push({
       replayId,
@@ -310,6 +311,8 @@ function inspectReplay(args, replayId, partition, cipher, items) {
       spentLike,
       baseCurrentGold,
       residual: participantFrame.currentGold - baseCurrentGold,
+      payload,
+      decodedPayload,
     });
   }
   if ([...ownersBySegment.values()].some((owners) => owners.size !== 10)) {
@@ -384,6 +387,100 @@ function histogram(values) {
   return Object.fromEntries(
     [...counts].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0])),
   );
+}
+
+function decodeInteger(payload, offsets, byteLength, signed) {
+  let value = 0;
+  for (let index = 0; index < byteLength; index += 1) {
+    value += payload[offsets[index]] * 2 ** (index * 8);
+  }
+  const signBoundary = 2 ** (byteLength * 8 - 1);
+  return signed && value >= signBoundary ? value - 2 ** (byteLength * 8) : value;
+}
+
+function correctionCandidateMetrics(rows, candidate) {
+  let exact = 0;
+  let unavailable = 0;
+  let absoluteError = 0;
+  const floatBytes = Buffer.alloc(4);
+  for (const row of rows) {
+    const offsets = Array.from(
+      { length: candidate.byteLength },
+      (_, index) => candidate.start + index * candidate.stride,
+    );
+    if (offsets.at(-1) >= row.payload.length) {
+      unavailable += 1;
+      continue;
+    }
+    let decoded;
+    if (candidate.encoding === "f32") {
+      for (let index = 0; index < 4; index += 1) {
+        floatBytes[index] = row.decodedPayload[offsets[index]];
+      }
+      decoded = Math.trunc(floatBytes.readFloatLE(0));
+      if (!Number.isFinite(decoded)) {
+        unavailable += 1;
+        continue;
+      }
+    } else {
+      decoded = decodeInteger(row.decodedPayload, offsets, candidate.byteLength, candidate.signed);
+    }
+    const value = candidate.sign * decoded;
+    const expected = row.residualMinusCumulativeTransactionAdjustment;
+    if (value === expected) exact += 1;
+    absoluteError += Math.abs(value - expected);
+  }
+  const available = rows.length - unavailable;
+  return {
+    total: rows.length,
+    exact,
+    unavailable,
+    meanAbsoluteError: available === 0 ? null : absoluteError / available,
+  };
+}
+
+function scanResidualCorrectionCandidates(discoveryRows, holdoutRows) {
+  const shapes = [
+    { encoding: "i8", byteLength: 1, signed: true, strides: [1] },
+    { encoding: "u8", byteLength: 1, signed: false, strides: [1] },
+    { encoding: "i16", byteLength: 2, signed: true, strides: [1, 2] },
+    { encoding: "u16", byteLength: 2, signed: false, strides: [1, 2] },
+    { encoding: "i32", byteLength: 4, signed: true, strides: [1, 2] },
+    { encoding: "u32", byteLength: 4, signed: false, strides: [1, 2] },
+    { encoding: "f32", byteLength: 4, signed: true, strides: [1, 2] },
+  ];
+  const candidates = [];
+  for (const shape of shapes) {
+    for (const stride of shape.strides) {
+      for (
+        let start = 0;
+        start + (shape.byteLength - 1) * stride < PROFILE.payloadLength;
+        start += 1
+      ) {
+        for (const sign of [1, -1]) {
+          const candidate = { ...shape, strides: undefined, stride, start, sign };
+          candidates.push({
+            ...candidate,
+            discovery: correctionCandidateMetrics(discoveryRows, candidate),
+          });
+        }
+      }
+    }
+  }
+  candidates.sort(
+    (left, right) =>
+      right.discovery.exact - left.discovery.exact ||
+      left.discovery.unavailable - right.discovery.unavailable ||
+      left.discovery.meanAbsoluteError - right.discovery.meanAbsoluteError ||
+      left.byteLength - right.byteLength ||
+      left.stride - right.stride ||
+      left.start - right.start ||
+      right.sign - left.sign,
+  );
+  return candidates.slice(0, 40).map((candidate) => ({
+    ...candidate,
+    holdout: correctionCandidateMetrics(holdoutRows, candidate),
+  }));
 }
 
 function summarize(transitions) {
@@ -492,6 +589,7 @@ function main() {
       actual,
     });
   }
+  const residualCorrectionCandidates = scanResidualCorrectionCandidates(discovery, holdout);
   const output = {
     schema: "rofl-inventory-gold-adjustment-research-16.14/v1",
     researchOnly: true,
@@ -511,8 +609,16 @@ function main() {
       holdout: holdoutSummary,
       combined: summarize(transitions),
     },
-    labelledSaleOrUndoTransitions: transitions.filter((row) =>
-      row.intervalEvents.some((event) => event.type === "ITEM_SOLD" || event.type === "ITEM_UNDO"),
+    residualCorrectionCandidates,
+    labelledSaleOrUndoTransitions: transitions
+      .filter((row) =>
+        row.intervalEvents.some(
+          (event) => event.type === "ITEM_SOLD" || event.type === "ITEM_UNDO",
+        ),
+      )
+      .map(({ payload: _payload, decodedPayload: _decodedPayload, ...row }) => row),
+    allTransitionRows: transitions.map(
+      ({ payload: _payload, decodedPayload: _decodedPayload, ...row }) => row,
     ),
     conclusion:
       "The spent-like replay lane follows the offline static-recipe/Undo spend ledger on 2945/3100 transitions, including 49/50 Undo intervals. Sale proceeds are a separate cumulative current-gold correction and improve exact snapshots from 1321/3200 to 1459/3200. The remaining residual and sold-item identity are unresolved, so current gold remains unpromoted.",

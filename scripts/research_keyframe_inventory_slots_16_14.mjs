@@ -10,6 +10,7 @@ import path from "node:path";
 const PROFILE = Object.freeze({
   exactReplayBuild: "16.14.794.5912",
   packetType: 0x0081,
+  addPacketType: 0x0369,
   championOwnerBase: 0x400000ad,
   discovery: Object.freeze([
     "EUW1-7919517389",
@@ -39,6 +40,14 @@ const EXPECTED = Object.freeze({
     decodedSubsetSnapshotCount: 656,
     falseExtraItemSnapshotCount: 374,
   }),
+});
+
+const EXPECTED_ADD_SLOT_CANDIDATES = Object.freeze({
+  discoveryCount: 126,
+  holdoutCount: 55,
+  discoverySlots: Object.freeze({ 0: 3, 1: 15, 2: 18, 3: 21, 4: 31, 5: 38 }),
+  holdoutSlots: Object.freeze({ 0: 2, 1: 5, 2: 14, 3: 10, 4: 12, 5: 12 }),
+  discoveryContiguousLookupCandidateCount: 0,
 });
 
 function parseArgs(argv) {
@@ -124,16 +133,16 @@ function decodeItemPair(first, second) {
   return decodedBits.reduce((value, decoded, index) => value | (decoded << index), 0);
 }
 
-function dumpKeyframeInventory(args, replayPath) {
+function dumpPacketType(args, replayPath, packetType, segmentType) {
   const run = spawnSync(
     args.cliPath,
     [
       "--dump-packet-type-json",
       replayPath,
       "--packet-type",
-      String(PROFILE.packetType),
+      String(packetType),
       "--segment-type",
-      "keyframe",
+      segmentType,
       "--max-blocks",
       "0",
     ],
@@ -151,9 +160,13 @@ function dumpKeyframeInventory(args, replayPath) {
     dump.emittedBlockCount !== dump.matchingBlockCount ||
     dump.gameVersion !== PROFILE.exactReplayBuild
   ) {
-    fail("Exact keyframe inventory framing/version gate failed.", { replayPath, dump });
+    fail("Exact packet framing/version gate failed.", { replayPath, packetType, segmentType });
   }
   return dump.blocks ?? [];
+}
+
+function dumpKeyframeInventory(args, replayPath) {
+  return dumpPacketType(args, replayPath, PROFILE.packetType, "keyframe");
 }
 
 function itemEvents(timeline) {
@@ -301,6 +314,40 @@ function countOrderedEmbeddings(positionDomains, limit = 2) {
   );
 }
 
+function countsBySlot(rows) {
+  const counts = new Map();
+  for (const row of rows) counts.set(row.slot, (counts.get(row.slot) ?? 0) + 1);
+  return Object.fromEntries([...counts].sort(([left], [right]) => left - right));
+}
+
+function contiguousSlotLookupCandidateCount(rows) {
+  let candidateCount = 0;
+  for (let width = 1; width <= 8; width += 1) {
+    for (let start = 0; start + width <= 112; start += 1) {
+      for (const reversed of [false, true]) {
+        const slotsByValue = new Map();
+        let conflict = false;
+        for (const row of rows) {
+          const payload = Buffer.from(row.addPacket.payloadHex, "hex");
+          let value = 0;
+          for (let index = 0; index < width; index += 1) {
+            const outputBit = reversed ? width - 1 - index : index;
+            value |= payloadBit(payload, start + index) << outputBit;
+          }
+          const previous = slotsByValue.get(value);
+          if (previous !== undefined && previous !== row.slot) {
+            conflict = true;
+            break;
+          }
+          slotsByValue.set(value, row.slot);
+        }
+        if (!conflict) candidateCount += 1;
+      }
+    }
+  }
+  return candidateCount;
+}
+
 function earliestOrderedEmbedding(positionDomains) {
   const selected = [];
   let previous = -1;
@@ -377,6 +424,23 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
   }
 
   const events = itemEvents(timeline);
+  const addPackets = dumpPacketType(args, replayPath, PROFILE.addPacketType, "chunk")
+    .filter((block) => block.channel === 1 && [14, 15].includes(block.contentLength))
+    .map((block) => {
+      const participantId = block.blockParam - PROFILE.championOwnerBase;
+      const payload = Buffer.from(block.contentHex, "hex");
+      return {
+        participantId,
+        timestampMillis: block.timestampMillis,
+        segmentId: block.segmentId,
+        sourceOffset: block.sourceOffset,
+        contentLength: block.contentLength,
+        payloadHex: block.contentHex,
+        itemId: decodeItemPair(payload[8], payload[9]),
+      };
+    })
+    .filter((row) => row.participantId >= 1 && row.participantId <= 10);
+  const strictAddSlotRows = [];
   const timelineStateValidation = {
     snapshotCount: 0,
     exactMultisetSnapshotCount: 0,
@@ -395,6 +459,7 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
       .sort(
         (left, right) => left.segmentId - right.segmentId || left.blockIndex - right.blockIndex,
       );
+    const participantSnapshots = [];
     for (let blockIndex = 0; blockIndex < participantBlocks.length; blockIndex += 1) {
       const block = participantBlocks[blockIndex];
       const stateTimestampMillis =
@@ -407,10 +472,16 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
         eventIndex += 1;
       }
       const labelledInventory = inventory.filter((itemId) => inventoryItemIds.has(itemId));
-      const decodedInventory = decodeMainSlots(
+      const decodedMainSlots = decodeMainSlots(
         Buffer.from(block.contentHex, "hex"),
         inventoryItemIds,
-      ).decodedMainSlots.filter((itemId) => itemId !== 0);
+      ).decodedMainSlots;
+      const decodedInventory = decodedMainSlots.filter((itemId) => itemId !== 0);
+      participantSnapshots.push({
+        stateTimestampMillis,
+        blockTimestampMillis: block.timestampMillis,
+        decodedMainSlots,
+      });
       const decodedSubset = isMultisetSubset(decodedInventory, labelledInventory);
       timelineStateValidation.snapshotCount += 1;
       if (sameMultiset(decodedInventory, labelledInventory)) {
@@ -428,6 +499,44 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
             decodedInventory,
           });
         }
+      }
+    }
+    for (let index = 1; index < participantSnapshots.length; index += 1) {
+      const previous = participantSnapshots[index - 1];
+      const current = participantSnapshots[index];
+      if (current.stateTimestampMillis <= previous.stateTimestampMillis) continue;
+      const changedSlots = current.decodedMainSlots
+        .map((itemId, slot) => ({ slot, beforeItemId: previous.decodedMainSlots[slot], itemId }))
+        .filter((entry) => entry.itemId !== entry.beforeItemId);
+      const intervalAdds = addPackets.filter(
+        (packet) =>
+          packet.participantId === participantId &&
+          packet.timestampMillis > previous.stateTimestampMillis + 1 &&
+          packet.timestampMillis <= current.stateTimestampMillis + 1,
+      );
+      const intervalEvents = participantEvents.filter(
+        (event) =>
+          event.timestamp > previous.stateTimestampMillis + 1 &&
+          event.timestamp <= current.stateTimestampMillis + 1,
+      );
+      if (
+        changedSlots.length === 1 &&
+        changedSlots[0].itemId !== 0 &&
+        intervalAdds.length === 1 &&
+        intervalAdds[0].itemId === changedSlots[0].itemId &&
+        intervalEvents.length === 1 &&
+        intervalEvents[0].type === "ITEM_PURCHASED" &&
+        intervalEvents[0].itemId === changedSlots[0].itemId
+      ) {
+        strictAddSlotRows.push({
+          replayId,
+          partition,
+          participantId,
+          intervalStartMillis: previous.stateTimestampMillis,
+          intervalEndMillis: current.stateTimestampMillis,
+          ...changedSlots[0],
+          addPacket: intervalAdds[0],
+        });
       }
     }
   }
@@ -507,6 +616,7 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
   }
   return {
     tracks,
+    strictAddSlotRows,
     input: {
       replayId,
       partition,
@@ -601,6 +711,7 @@ function main() {
     ...PROFILE.holdout.map((replayId) => inspectReplay(args, replayId, "H3", inventoryItemIds)),
   ];
   const tracks = reports.flatMap((report) => report.tracks);
+  const strictAddSlotRows = reports.flatMap((report) => report.strictAddSlotRows);
   const discoveryReports = reports.filter((report) => report.input.partition === "D7");
   const holdoutReports = reports.filter((report) => report.input.partition === "H3");
   const frozenMetrics = {
@@ -615,6 +726,22 @@ function main() {
   }
   const discovery = tracks.filter((track) => track.partition === "D7");
   const holdout = tracks.filter((track) => track.partition === "H3");
+  const discoveryAddSlotRows = strictAddSlotRows.filter((row) => row.partition === "D7");
+  const holdoutAddSlotRows = strictAddSlotRows.filter((row) => row.partition === "H3");
+  const addSlotCandidateMetrics = {
+    discoveryCount: discoveryAddSlotRows.length,
+    holdoutCount: holdoutAddSlotRows.length,
+    discoverySlots: countsBySlot(discoveryAddSlotRows),
+    holdoutSlots: countsBySlot(holdoutAddSlotRows),
+    discoveryContiguousLookupCandidateCount:
+      contiguousSlotLookupCandidateCount(discoveryAddSlotRows),
+  };
+  if (JSON.stringify(addSlotCandidateMetrics) !== JSON.stringify(EXPECTED_ADD_SLOT_CANDIDATES)) {
+    fail("Frozen add-slot candidate metrics drifted.", {
+      expected: EXPECTED_ADD_SLOT_CANDIDATES,
+      actual: addSlotCandidateMetrics,
+    });
+  }
   const output = {
     schema: "rofl-keyframe-inventory-slot-research-16.14/v1",
     researchOnly: true,
@@ -652,12 +779,15 @@ function main() {
       },
     },
     frozenMetrics,
+    addSlotCandidateMetrics,
     inputs: reports.map((report) => report.input),
     stableTailTracks: tracks.filter((track) => track.stableTail),
+    isolatedAddRecordChangeRows: strictAddSlotRows,
     nonPromotionReasons: [
       "The replay-only selector retains items that the offline Timeline reducer has already removed: 1,049/3,200 snapshots contain at least one false-extra candidate, including 374/1,030 frozen Holdout snapshots.",
       "The six records are therefore not champion current-inventory slots; their behavior remains consistent with a shop/undo component or another historical item state.",
       "Empty slots, duplicate-item counts, physical slot moves, and the complete record grammar remain unresolved.",
+      "The 181 isolated add/record-change anchors cover all six main record ordinals, but no contiguous one-to-eight-bit add-payload lookup is even conflict-free on Discovery.",
       "The independently decoded chunk operation subsets still do not provide complete between-keyframe inventory reconstruction.",
     ],
     conclusion:

@@ -11,6 +11,7 @@ import path from "node:path";
 const PROFILE = Object.freeze({
   exactReplayBuild: "16.14.794.5912",
   removalPacketType: 0x03f9,
+  removalContextPacketType: 0x0146,
   addPacketType: 0x0369,
   keyframeShopPacketType: 0x0081,
   championOwnerBase: 0x400000ad,
@@ -230,6 +231,17 @@ function saleLabels(timeline) {
     );
 }
 
+function timelineItemEvents(timeline) {
+  return (timeline.info?.frames ?? [])
+    .flatMap((frame) => frame.events ?? [])
+    .filter(
+      (event) =>
+        ["ITEM_PURCHASED", "ITEM_DESTROYED", "ITEM_SOLD", "ITEM_UNDO"].includes(event.type) &&
+        Number.isInteger(event.participantId) &&
+        Number.isInteger(event.timestamp),
+    );
+}
+
 function multisetDifference(left, right) {
   const remaining = [...right];
   return left.filter((itemId) => {
@@ -251,7 +263,10 @@ function inspectReplay(args, replayId, partition, items) {
   if (readJson(matchPath).info?.gameVersion !== PROFILE.exactReplayBuild) {
     fail("Match fixture exact-build gate failed.", { replayId });
   }
+  const timeline = readJson(timelinePath);
+  const allItemEvents = timelineItemEvents(timeline);
   const removals = dumpPacketType(args, replayPath, PROFILE.removalPacketType);
+  const removalContexts = dumpPacketType(args, replayPath, PROFILE.removalContextPacketType);
   const adds = dumpPacketType(args, replayPath, PROFILE.addPacketType)
     .filter((block) => {
       const participantId = block.blockParam - PROFILE.championOwnerBase;
@@ -301,7 +316,7 @@ function inspectReplay(args, replayId, partition, items) {
       };
     });
   const rows = [];
-  for (const label of saleLabels(readJson(timelinePath))) {
+  for (const label of saleLabels(timeline)) {
     const matches = removals.filter(
       (block) =>
         block.channel === 1 &&
@@ -348,6 +363,20 @@ function inspectReplay(args, replayId, partition, items) {
       .map((itemId, ordinal) => ({ itemId, ordinal }))
       .filter((entry) => entry.itemId === label.itemId)
       .map((entry) => entry.ordinal);
+    const interveningItemEvents = allItemEvents.filter(
+      (event) =>
+        event.participantId === label.participantId &&
+        event.timestamp > (precedingKeyframe?.timestampMillis ?? Number.NEGATIVE_INFINITY) + 1 &&
+        event.timestamp < label.timestamp - 1,
+    );
+    const interveningRemovalContexts = removalContexts.filter(
+      (context) =>
+        context.channel === 1 &&
+        context.blockParam - PROFILE.championOwnerBase === label.participantId &&
+        context.timestampMillis >
+          (precedingKeyframe?.timestampMillis ?? Number.NEGATIVE_INFINITY) + 1 &&
+        context.timestampMillis < label.timestamp - 1,
+    );
     rows.push({
       replayId,
       partition,
@@ -362,6 +391,10 @@ function inspectReplay(args, replayId, partition, items) {
       pairedAddPayload: priorMatchingAdds.length === 1 ? priorMatchingAdds[0].payload : null,
       pairedAddPayloadHex: priorMatchingAdds.length === 1 ? priorMatchingAdds[0].payloadHex : null,
       precedingKeyframeItems: precedingKeyframe?.items ?? [],
+      precedingKeyframeTimestampMillis: precedingKeyframe?.timestampMillis ?? null,
+      interveningItemEventCount: interveningItemEvents.length,
+      interveningItemEventTypes: interveningItemEvents.map((event) => event.type),
+      interveningRemovalContextCount: interveningRemovalContexts.length,
       precedingTruthOrdinals,
       keyframeTruthOrdinal: precedingTruthOrdinals.length === 1 ? precedingTruthOrdinals[0] : null,
       precedingKeyframeRecords: precedingKeyframe?.records ?? [],
