@@ -320,6 +320,40 @@ slot, item instance, count/charges, undo before/after state, gold delta, nor
 an inventory reducer. It is therefore `researchOnly`, has
 `promotionGate:false`, and adds no C++/Wasm/UI API.
 
+### Patch-16.14 strict purchase-linked resulting-item subset
+
+A second maintained checkpoint combines only ten of the frozen same-time
+bundle signatures with the separately proven, fail-closed `0x0369` item-ID
+grammar:
+
+```powershell
+node .\scripts\research_inventory_purchase_subset_16_14.mjs
+```
+
+The runtime-shaped predicate uses only the complete profiled chunk/channel-1
+owner/time group, exact family/length source order, champion ownership, and the
+structural item ID from its one `0x0369` length-14 packet. The ten signatures
+are selected on D7 and frozen before H3 is opened; their content fingerprint is
+`edadb744df01c08cd9898428ebf6a7faca4de7d285e6e78cb832180e7227e27b`.
+An unknown signature or either formally underidentified item-ID input symbol
+makes the whole candidate unavailable.
+
+The frozen subset identifies 130/1,575 D7 add/update packets and 63/944 H3
+packets. All 193 selected packets are exact purchase-linked resulting-item
+updates with zero false-positive groups and zero wrong item IDs. Seven H3
+packets carry six item IDs never seen in D7 (`2520`, `3053`, `3087`, `3181`,
+`3803`, and `6657`) and remain exact. Ten leave-one-replay-out folds likewise
+produce zero false positives, including nine selected packets whose item ID is
+unseen in that fold's training replays.
+
+This is deliberately a small exact subset: 2,326/2,519 profiled add/update
+packets remain unavailable, and the result is not a complete purchase stream.
+It does not identify consumed or removed components, slot, item instance,
+count/charges, price, gold state, undo, or current inventory. The maintained
+artifact therefore remains `researchOnly`, with `promotionGate:false` and no
+C++/Wasm/UI output until a separate runtime promotion implements those limits
+verbatim.
+
 ### Patch-16.14 static recipe constraint
 
 A separate maintained harness validates one bounded component-consumption
