@@ -1,6 +1,6 @@
 # Replay Decoder Status
 
-Updated: 2026-07-20
+Updated: 2026-07-21
 Baseline commit: `fe39e13`
 
 This is the canonical handoff for the current decoder state. Read it before
@@ -69,27 +69,31 @@ Wasm, and consumed by the Vue application unless noted otherwise.
 | Ward lifecycle | Standard-ward placement timestamp, ward entity ID, owner participant, conservative ward-kill timestamp, linked ward entity ID, killer participant, and source provenance in `rofl-replay-wards/v1` | Historical corpus: 6,168/6,168 placements; 1,882/1,883 removals with zero extras. External profile build `16.14.794.5912`: 1,477/1,477 placements and 484/484 removals. Ward subtype, position, vision radius, and removal reason are unavailable. |
 | Purchase-linked resulting-item updates | Timestamp, participant, resulting item ID, matched strict bundle template, and packet provenance in `rofl-replay-purchase-linked-item-updates/v1` | External-profile-only, exact build `16.14.794.5912`: 193/193 offline-validated updates (D7 130, H3 63), zero extras/wrong IDs, maximum 1 ms delta. Strict subset only: 2,326/2,519 profiled add/update packets remain unavailable; no slot, instance, removal/component identity, count, complete inventory, price/gold, or undo state. |
 | Direct add-only item purchases | Timestamp, replay-native participant, structural 13-bit item ID, buildable-component flag, and add-block provenance in `rofl-replay-direct-item-purchases/v1` | External-profile-only, exact build `16.14.794.5912`: 1,278/1,278 exact purchases (D7 844, H3 434), zero extras/wrong IDs, maximum 1 ms delta. This includes 1,043/1,043 buildable components (D7 710, H3 333). It accepts only an isolated champion-owned channel-1 `0x0369`, length 14/15 add, with no relevant `0x0369`/`0x03F9`/`0x0146`/`0x0081` family operation for that owner within +/-1 ms and a decoded ID in the profile-pinned static real-item catalog. It does not expose a general purchase classifier, slot, instance, quantity, price, gold, removal, undo, or inventory state. |
+| Item sale operations | Timestamp, replay-native participant, exact sale-operation classification, and removal-block provenance in `rofl-replay-item-sales/v1` | External-profile-only, exact build `16.14.794.5912`: 116/116 offline-validated sale operations (D7 77, H3 39), zero extras/misses, maximum 1 ms delta. The event proves only the operation and its source block; sold item ID, slot, instance, count/charges, price, gold gain, undo, and inventory state are explicitly unavailable. |
 
 The historical built-in coverage includes patch groups `15.22`, `15.23`,
 `15.24`, `16.1`, `16.5`, `16.6`, `16.7`, and `16.9`. The externally supplied
 profile additionally validates exact build `16.14.794.5912`: 684/684 kills,
 99/99 objectives, 1,477/1,477 ward placements, 484/484 ward removals, and
 1,300/1,300 final player-stat values. The same exact external profile also
-enables the strict 193/193 purchase-linked resulting-item-update subset and the
-strict 1,278/1,278 direct-add-only purchase subset; neither is available
-through built-in fallback profiles. The profile revision is `2026-07-20` and
-its provenance fingerprint is `fnv1a64:52158d03db096c70`.
+enables the strict 193/193 purchase-linked resulting-item-update subset, the
+strict 1,278/1,278 direct-add-only purchase subset, and the exact 116/116
+item-sale-operation stream; none is available through built-in fallback
+profiles. The profile revision is `2026-07-21`, its SHA-256 is
+`f690f77926c09d28998c52e5a56044c4575a23a268f49328c071be02d2359cce`, and its
+provenance fingerprint is `fnv1a64:10b2b8d2727009a0`.
 
 The browser currently renders the real Wasm participant summary, kill timeline,
-objective timeline, ward lifecycle, and both exact-build item-purchase subsets
-for the locally loaded replay.
+objective timeline, ward lifecycle, both exact-build item-purchase subsets,
+and the exact-build item-sale-operation stream for the locally loaded replay.
 
 The default browser landing page is now a timeline-first product replay view.
 Its full-width scrubber prioritizes replay-native kills, elite objectives, and
-the strict purchase-linked item updates and strict direct add-only purchases;
-Ward lifecycle is summarized in a lower-emphasis density lane instead of
-thousands of competing markers. Roster K/D/A and recognized item-update icons
-follow the scrub time. Validated level,
+the strict purchase-linked item updates, strict direct add-only purchases, and
+a distinct orange sale-operation stream. Ward lifecycle is summarized in a
+lower-emphasis density lane instead of thousands of competing markers. Roster
+K/D/A and recognized item-update icons follow the scrub time. Sale markers are
+operation-only and never mutate or imply a current inventory. Validated level,
 CS, Ward aggregates, and earned gold remain visible only with explicit final
 labels. Seven-slot final inventories, fake health/resource bars, the minimap,
 and ward-position research controls are not shown on the product landing page.
@@ -275,6 +279,18 @@ labels (74.6%) without using Timeline at runtime. Slots, item instances,
 quantities/charges, removed item identity, removals, prices, gold, undo state,
 and full inventory reconstruction remain unavailable.
 
+The same exact-build profile now promotes the deliberately narrower
+operation-only `rofl-replay-item-sales/v1` stream. Its frozen replay-native
+predicate emits only a champion-owned sale operation with its exact
+`0x03F9` removal-block provenance; it does not identify the thing removed. The
+fixed corpus validates 77/77 D7 plus 39/39 H3 operations, 116/116 combined,
+with zero extras, zero misses, and at most one millisecond timestamp delta.
+The event is therefore useful as an orange timeline marker, but not as an
+inventory mutation: sold item ID, slot, item instance, count/charges, price,
+gold gain, undo, and inventory state are explicitly unavailable. The classifier
+is external-profile-only and fails closed for missing, invalid, built-in,
+ambiguous, or other-build profile selection.
+
 An exhaustive all-segment scan now confirms that the two fail-closed symbols
 cannot be learned from the current fixtures: all 3,266 `0x0369` blocks in the
 ten replays were framed and inspected, and bit-9 input code `0` plus bit-11
@@ -372,8 +388,9 @@ unlabelled state updates exist. The sold/removed item, slot, item instance,
 count/charges, component consumption, upgrades, undos, and swaps remain
 unresolved. The full-inventory promotion gate is 0/20 because all 3,550 removal
 packets lack a decoded item target. The strict 16.14 purchase-linked and direct
-add-only subsets are the only productive inventory-adjacent C++/Wasm surfaces;
-no general inventory API or reconstruction exists yet. See
+add-only subsets plus the operation-only sale stream are the productive
+inventory-adjacent C++/Wasm surfaces; no general inventory API or
+reconstruction exists yet. See
 [`replay-inventory-packet-research.md`](replay-inventory-packet-research.md).
 
 There is also exact replay-native evidence for a variable inventory-component
@@ -654,6 +671,7 @@ node .\scripts\validate_replay_wards_corpus.mjs
 node .\scripts\validate_replay_final_player_stats_corpus.mjs
 node .\scripts\validate_replay_purchase_linked_item_updates_corpus.mjs
 node .\scripts\validate_replay_direct_item_purchases_corpus.mjs
+node .\scripts\validate_replay_item_sales_corpus.mjs
 ```
 
 Inventory and keyframe research have their own reproduction commands in their

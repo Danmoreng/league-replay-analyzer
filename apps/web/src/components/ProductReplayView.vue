@@ -19,6 +19,7 @@ import type {
   ReplayDirectItemPurchaseEvent,
   ReplayDirectItemPurchasesResult,
 } from "../replayDirectItemPurchases";
+import type { ReplayItemSalesResult } from "../replayItemSales";
 import type {
   ReplayPurchaseLinkedItemUpdatesResult,
   ReplayPurchaseLinkedResultingItemUpdateEvent,
@@ -33,16 +34,19 @@ const props = defineProps<{
   wards: ReplayWardResult | null;
   purchaseLinkedItemUpdates: ReplayPurchaseLinkedItemUpdatesResult | null;
   directItemPurchases: ReplayDirectItemPurchasesResult | null;
+  itemSales: ReplayItemSalesResult | null;
   killsLoading: boolean;
   objectivesLoading: boolean;
   wardsLoading: boolean;
   purchaseLinkedItemUpdatesLoading: boolean;
   directItemPurchasesLoading: boolean;
+  itemSalesLoading: boolean;
   killsError?: string;
   objectivesError?: string;
   wardsError?: string;
   purchaseLinkedItemUpdatesError?: string;
   directItemPurchasesError?: string;
+  itemSalesError?: string;
 }>();
 
 type ProductEvent =
@@ -65,6 +69,12 @@ type ProductEvent =
       kind: "direct-purchase";
       timestampMillis: number;
       event: ReplayDirectItemPurchaseEvent;
+    }
+  | {
+      id: string;
+      kind: "sale-operation";
+      timestampMillis: number;
+      event: ReplayItemSalesResult["events"][number];
     };
 
 type ItemPurchaseEvent = Extract<
@@ -206,6 +216,22 @@ const events = computed<ProductEvent[]>(() =>
       event,
     })),
     ...itemPurchaseEvents.value,
+    ...(props.itemSales?.events ?? []).map((event, index) => ({
+      id:
+        "sale-operation-" +
+        index +
+        "-" +
+        event.timestampMillis +
+        "-" +
+        event.participantId +
+        "-" +
+        event.provenance.removalBlock.provenance.segmentPayloadOffset +
+        "-" +
+        event.provenance.removalBlock.provenance.blockIndex,
+      kind: "sale-operation" as const,
+      timestampMillis: event.timestampMillis,
+      event,
+    })),
   ].sort((left, right) => left.timestampMillis - right.timestampMillis),
 );
 
@@ -225,6 +251,7 @@ const counts = computed(() => ({
     (event) => event.kind === "direct-purchase" && event.event.componentItem,
   ).length,
   purchases: itemPurchaseEvents.value.length,
+  sales: props.itemSales?.events.length ?? 0,
   wards: props.wards?.events.length ?? 0,
 }));
 
@@ -314,7 +341,9 @@ const nearbyEvents = computed(() => {
               ? 2
               : event.kind === "purchase-update"
                 ? 3
-                : 4,
+                : event.kind === "sale-operation"
+                  ? 4
+                  : 5,
     }))
     .sort((left, right) => left.distance - right.distance || left.priority - right.priority)
     .slice(0, 8)
@@ -327,8 +356,12 @@ const finalStatsAvailable = computed(
 );
 const purchaseUpdatesUnavailable = computed(() => Boolean(props.purchaseLinkedItemUpdatesError));
 const directPurchasesUnavailable = computed(() => Boolean(props.directItemPurchasesError));
+const salesUnavailable = computed(() => Boolean(props.itemSalesError));
 const purchaseStreamsUnavailable = computed(
   () => purchaseUpdatesUnavailable.value && directPurchasesUnavailable.value,
+);
+const itemOperationStreamsUnavailable = computed(
+  () => purchaseStreamsUnavailable.value && salesUnavailable.value,
 );
 
 const loadState = computed(() => {
@@ -337,7 +370,8 @@ const loadState = computed(() => {
     props.objectivesLoading ||
     props.wardsLoading ||
     props.purchaseLinkedItemUpdatesLoading ||
-    props.directItemPurchasesLoading
+    props.directItemPurchasesLoading ||
+    props.itemSalesLoading
   ) {
     return "Replay-Ereignisse werden lokal dekodiert …";
   }
@@ -346,7 +380,8 @@ const loadState = computed(() => {
     props.objectivesError ||
     props.wardsError ||
     props.purchaseLinkedItemUpdatesError ||
-    props.directItemPurchasesError
+    props.directItemPurchasesError ||
+    props.itemSalesError
   ) {
     return "Ein Teil der Replay-Ereignisse ist für diesen Patch nicht verfügbar.";
   }
@@ -499,6 +534,7 @@ function eventInvolves(event: ProductEvent, participantId: number): boolean {
   if (event.kind === "purchase-update" || event.kind === "direct-purchase") {
     return event.event.participantId === participantId;
   }
+  if (event.kind === "sale-operation") return event.event.participantId === participantId;
   if (event.kind === "kill") {
     return (
       event.event.victimParticipantId === participantId ||
@@ -524,6 +560,9 @@ function eventLabel(event: ProductEvent): string {
     const component = event.event.componentItem ? "Komponente · " : "";
     return participantChampion(event.event.participantId) + " · " + component + itemName(event.event.itemId);
   }
+  if (event.kind === "sale-operation") {
+    return participantChampion(event.event.participantId) + " · Verkaufsoperation";
+  }
   if (event.kind === "ward-placement" && event.event.type === "WARD_PLACED") {
     return participantChampion(event.event.ownerParticipantId) + " platziert Ward";
   }
@@ -547,6 +586,9 @@ function eventDetail(event: ProductEvent): string {
       ? "Direkter Komponenten-Kauf · kein Slot- oder Inventarstand"
       : "Direkter Item-Kauf · kein Slot- oder Inventarstand";
   }
+  if (event.kind === "sale-operation") {
+    return "Verkaufsoperation · Item, Slot, Gold und Inventarstand nicht dekodiert";
+  }
   if (event.kind === "kill") return "Champion-Kill";
   if (event.kind === "objective") return "Elite-Objective";
   return event.kind === "ward-placement" ? "Ward platziert" : "Ward zerstört";
@@ -555,6 +597,7 @@ function eventDetail(event: ProductEvent): string {
 function eventIcon(event: ProductEvent): string {
   if (event.kind === "kill") return "bi-lightning-charge-fill";
   if (event.kind === "objective") return "bi-shield-fill";
+  if (event.kind === "sale-operation") return "bi-cash-coin";
   return event.kind === "ward-placement" ? "bi-eye-fill" : "bi-eye-slash-fill";
 }
 
@@ -614,6 +657,12 @@ function onScrub(event: Event): void {
               {{ counts.directPurchases }} direkte Käufe
               <template v-if="counts.directComponents">· {{ counts.directComponents }} Komponenten</template>
             </template>
+          </span>
+          <span class="sale-operation">
+            <i></i>
+            <template v-if="itemSalesLoading">Verkaufsoperationen werden dekodiert</template>
+            <template v-else-if="salesUnavailable">Verkaufsoperationen nicht verfügbar</template>
+            <template v-else>{{ counts.sales }} Verkaufsoperationen</template>
           </span>
           <span class="ward"><i></i>{{ counts.wards }} Ward-Ereignisse</span>
         </div>
@@ -823,29 +872,45 @@ function onScrub(event: Event): void {
 
         <p
           class="purchase-boundary"
-          :class="{ unavailable: purchaseStreamsUnavailable }"
-          :title="[purchaseLinkedItemUpdatesError, directItemPurchasesError].filter(Boolean).join(' ')"
+          :class="{ unavailable: itemOperationStreamsUnavailable }"
+          :title="[purchaseLinkedItemUpdatesError, directItemPurchasesError, itemSalesError].filter(Boolean).join(' ')"
         >
           <i
             class="bi"
-            :class="purchaseStreamsUnavailable ? 'bi-bag-x-fill' : 'bi-bag-check-fill'"
+            :class="itemOperationStreamsUnavailable ? 'bi-bag-x-fill' : 'bi-bag-check-fill'"
           ></i>
           <span>
-            <template v-if="purchaseStreamsUnavailable">
-              <b>Item-Käufe nicht verfügbar für diesen Patch</b>
-              <small>Es werden keine null Käufe behauptet und keine Inventardaten geschätzt.</small>
+            <template v-if="itemOperationStreamsUnavailable">
+              <b>Item-Käufe nicht verfügbar; Verkaufsströme für diesen Patch ebenfalls nicht verfügbar</b>
+              <small>Es werden keine null Käufe oder Verkäufe behauptet und keine Inventardaten geschätzt.</small>
             </template>
             <template v-else>
               <b>
-                {{ counts.purchases }} dekodierte Item-Kaufereignisse:
-                {{ counts.directPurchases }} direkte Käufe und {{ counts.purchaseUpdates }}
-                kaufverknüpfte Ergebnis-Updates
+                <template v-if="!purchaseStreamsUnavailable">
+                  {{ counts.purchases }} dekodierte Item-Kaufereignisse:
+                  {{ counts.directPurchases }} direkte Käufe und {{ counts.purchaseUpdates }}
+                  kaufverknüpfte Ergebnis-Updates
+                </template>
+                <template v-else>Kaufereignisse nicht verfügbar</template>
+                ·
+                <template v-if="!salesUnavailable">
+                  {{ counts.sales }} Verkaufsoperationen
+                </template>
+                <template v-else>Verkaufsoperationen nicht verfügbar</template>
               </b>
               <small>
                 Name und Icon: Data Dragon {{ itemCatalog?.dataDragonVersion ?? "patchgebunden" }}.
                 Direkte Komponenten-Käufe sind mit einem türkisfarbenen Rand markiert. Verkäufe,
-                Slots, verbrauchte Komponenten, Undo und der vollständige Inventarverlauf fehlen
-                noch; deshalb wird kein erfundener Inventarstand angezeigt.
+                falls dekodiert, zeigen ausschließlich eine Verkaufsoperation: verkauftes Item,
+                Slot, Instanz, Menge, Goldgewinn, Undo und Inventarverlauf bleiben unavailable.
+                Deshalb wird kein Inventarstand mutiert oder angezeigt.
+                <template v-if="purchaseStreamsUnavailable">
+                  Kaufereignisse sind für diesen Patch nicht verfügbar.
+                </template>
+                <template v-if="salesUnavailable">
+                  Verkaufsoperationen sind für diesen Patch nicht verfügbar; es werden keine
+                  fehlenden Verkäufe geschätzt.
+                </template>
                 <template v-if="itemCatalogLoading"> Itemdaten werden geladen …</template>
                 <template v-else-if="itemCatalogError">
                   Unbekannte Items bleiben als ID sichtbar.
@@ -1040,6 +1105,7 @@ function onScrub(event: Event): void {
 .timeline-legend .objective { color: var(--gold); }
 .timeline-legend .purchase-update { color: #c49aff; }
 .timeline-legend .direct-purchase { color: #61d5c3; }
+.timeline-legend .sale-operation { color: #f0a85f; }
 .timeline-legend .ward { color: #56d6c2; }
 
 .timeline-layout {
@@ -1145,6 +1211,11 @@ function onScrub(event: Event): void {
   border-color: #61d5c3;
   border-radius: 3px;
   color: #61d5c3;
+}
+
+.event-marker.sale-operation {
+  border-color: #f0a85f;
+  color: #f0a85f;
 }
 
 .event-marker img,
@@ -1471,6 +1542,7 @@ function onScrub(event: Event): void {
 .event-symbol.objective { color: var(--gold); }
 .event-symbol.purchase-update { border-color: rgba(196, 154, 255, 0.4); }
 .event-symbol.direct-purchase { border-color: rgba(97, 213, 195, 0.54); }
+.event-symbol.sale-operation { border-color: rgba(240, 168, 95, 0.54); color: #f0a85f; }
 .event-symbol.ward-placement { color: #56d6c2; }
 .event-symbol.ward-kill { color: #b596ee; }
 

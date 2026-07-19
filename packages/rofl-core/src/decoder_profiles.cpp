@@ -610,6 +610,78 @@ parse_inventory_direct_purchase_subset(const JsonValue& value) {
     return profile;
 }
 
+[[nodiscard]] InventorySaleSubsetDecoderProfile parse_inventory_sale_subset(
+    const JsonValue& value
+) {
+    if (value.kind != JsonValue::Kind::object) {
+        throw std::runtime_error(
+            "profile schema: 'inventorySaleSubset' must be an object");
+    }
+    allow_only(value, {"segmentType", "channel", "championNetworkIdBase", "add", "removal", "exactGroup", "removalPayload"});
+
+    InventorySaleSubsetDecoderProfile profile;
+    profile.segment_type = string_value(field(value, "segmentType"), "segmentType", 16);
+    profile.channel = static_cast<std::uint8_t>(integer_value(
+        field(value, "channel"), "channel", 15));
+    profile.champion_network_id_base = static_cast<std::uint32_t>(integer_value(
+        field(value, "championNetworkIdBase"), "championNetworkIdBase", 0xffffffffULL));
+    profile.add = parse_inventory_purchase_family(field(value, "add"), "add");
+    profile.removal = parse_inventory_purchase_family(field(value, "removal"), "removal");
+
+    const JsonValue& group = field(value, "exactGroup");
+    if (group.kind != JsonValue::Kind::object) {
+        throw std::runtime_error("profile schema: 'exactGroup' must be an object");
+    }
+    allow_only(group, {"addCount", "removalCount", "timestampToleranceMillis"});
+    profile.required_add_update_count = static_cast<std::size_t>(integer_value(
+        field(group, "addCount"), "addCount", 8));
+    profile.required_removal_count = static_cast<std::size_t>(integer_value(
+        field(group, "removalCount"), "removalCount", 8));
+    profile.group_timestamp_tolerance_millis = static_cast<std::size_t>(integer_value(
+        field(group, "timestampToleranceMillis"), "timestampToleranceMillis", 1000));
+
+    const JsonValue& payload = field(value, "removalPayload");
+    if (payload.kind != JsonValue::Kind::object) {
+        throw std::runtime_error("profile schema: 'removalPayload' must be an object");
+    }
+    allow_only(payload, {"payload0LowNibbleAllow", "payload2LowTwoBitReject", "payload2Allow"});
+    profile.payload0_low_nibble_values = byte_array(
+        field(payload, "payload0LowNibbleAllow"), "payload0LowNibbleAllow");
+    profile.payload2_low_bits_mask = 0x03;
+    profile.payload2_rejected_low_bits_value = static_cast<std::uint8_t>(
+        integer_value(field(payload, "payload2LowTwoBitReject"), "payload2LowTwoBitReject", 3));
+    profile.sale_payload_byte2_values = byte_array(
+        field(payload, "payload2Allow"), "payload2Allow");
+
+    static constexpr std::array<std::uint8_t, 2> kPayload0LowNibbleAllow{{2, 5}};
+    static constexpr std::array<std::uint8_t, 6> kPayload2Allow{{
+        0x30, 0x6E, 0x7A, 0xEA, 0xEE, 0xF9,
+    }};
+    if (profile.segment_type != "chunk" || profile.channel != 1 ||
+        profile.champion_network_id_base != 1073741997 ||
+        profile.add.packet_type != 873 || profile.removal.packet_type != 1017 ||
+        profile.add.content_lengths.exact_values != std::vector<std::size_t>{14, 15} ||
+        profile.removal.content_lengths.exact_values != std::vector<std::size_t>{6, 7} ||
+        profile.required_add_update_count != 0 ||
+        profile.required_removal_count != 1 ||
+        profile.group_timestamp_tolerance_millis != 0 ||
+        profile.payload0_low_nibble_values.size() !=
+            kPayload0LowNibbleAllow.size() ||
+        !std::equal(profile.payload0_low_nibble_values.begin(),
+                    profile.payload0_low_nibble_values.end(),
+                    kPayload0LowNibbleAllow.begin(), kPayload0LowNibbleAllow.end()) ||
+        profile.payload2_low_bits_mask != 0x03 ||
+        profile.payload2_rejected_low_bits_value != 3 ||
+        profile.sale_payload_byte2_values.size() != kPayload2Allow.size() ||
+        !std::equal(profile.sale_payload_byte2_values.begin(),
+                    profile.sale_payload_byte2_values.end(),
+                    kPayload2Allow.begin(), kPayload2Allow.end())) {
+        throw std::runtime_error(
+            "profile schema: invalid inventory sale subset invariants");
+    }
+    return profile;
+}
+
 [[nodiscard]] std::string version_group(std::string_view version) {
     const std::size_t first = version.find('.');
     if (first == std::string_view::npos) return std::string(version);
@@ -648,7 +720,7 @@ DecoderProfileLoadResult parse_decoder_profile_registry_json(std::string_view js
         std::set<std::string> groups;
         std::vector<DecoderVersionProfile> parsed_profiles;
         for (const JsonValue& item : profiles.array) {
-            allow_only(item, {"versionGroup", "acceptedGameVersions", "finalStatsValidated", "kill", "objective", "ward", "inventoryPurchaseSubset", "inventoryDirectPurchaseSubset"});
+            allow_only(item, {"versionGroup", "acceptedGameVersions", "finalStatsValidated", "kill", "objective", "ward", "inventoryPurchaseSubset", "inventoryDirectPurchaseSubset", "inventorySaleSubset"});
             DecoderVersionProfile profile;
             profile.version_group = string_value(field(item, "versionGroup"), "versionGroup", 24);
             if (!version_group_is_valid(profile.version_group) || !groups.insert(profile.version_group).second) throw std::runtime_error("profile schema: versionGroup must be unique major.minor digits");
@@ -669,13 +741,18 @@ DecoderProfileLoadResult parse_decoder_profile_registry_json(std::string_view js
             if (inventory_direct_purchase.kind != JsonValue::Kind::null_value) {
                 profile.inventory_direct_purchase_subset = parse_inventory_direct_purchase_subset(inventory_direct_purchase);
             }
+            const JsonValue& inventory_sale = field(item, "inventorySaleSubset", false);
+            if (inventory_sale.kind != JsonValue::Kind::null_value) {
+                profile.inventory_sale_subset = parse_inventory_sale_subset(inventory_sale);
+            }
             if ((profile.inventory_purchase_subset.has_value() ||
-                 profile.inventory_direct_purchase_subset.has_value()) &&
+                 profile.inventory_direct_purchase_subset.has_value() ||
+                 profile.inventory_sale_subset.has_value()) &&
                 (profile.version_group != "16.14" || profile.accepted_game_versions.size() != 1 ||
                  profile.accepted_game_versions.front() != "16.14.794.5912")) {
                 throw std::runtime_error("profile schema: inventory purchase subsets are restricted to exact build 16.14.794.5912");
             }
-            if (!profile.final_stats_validated && !profile.kill && !profile.objective && !profile.ward && !profile.inventory_purchase_subset && !profile.inventory_direct_purchase_subset) throw std::runtime_error("profile schema: patch profile must declare at least one decoder capability");
+            if (!profile.final_stats_validated && !profile.kill && !profile.objective && !profile.ward && !profile.inventory_purchase_subset && !profile.inventory_direct_purchase_subset && !profile.inventory_sale_subset) throw std::runtime_error("profile schema: patch profile must declare at least one decoder capability");
             parsed_profiles.push_back(std::move(profile));
         }
         provenance.fingerprint = fnv1a64(json);

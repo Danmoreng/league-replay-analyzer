@@ -7,20 +7,22 @@ Patch 16.9 has a reproducible, exact decoder for the item ID carried by the
 field, but it is not yet a complete inventory transaction decoder.
 
 For exact build `16.14.794.5912`, the shared C++ core, Wasm boundary, and Vue
-client productively expose two complementary, external-profile-only schemas:
+client productively expose three external-profile-only schemas:
 `rofl-replay-purchase-linked-item-updates/v1` for strict transform/resulting
 updates, and `rofl-replay-direct-item-purchases/v1` for strict isolated direct
-adds. Both consume only the loaded `.rofl` and canonical local profile bytes;
-saved Riot fixtures remain offline discovery/validation oracles and are never
-runtime inputs or fallbacks.
+adds, plus `rofl-replay-item-sales/v1` for exact sale operations without an
+item identity. All consume only the loaded `.rofl` and canonical local profile
+bytes; saved Riot fixtures remain offline discovery/validation oracles and are
+never runtime inputs or fallbacks.
 
 Runtime promotion remains blocked for complete inventory reconstruction because
 the 6/7-byte removal family still has no decoded slot or item-instance
 reference. Consequently, a removal cannot yet be mapped to the item that left
 a champion's inventory without using an offline Riot label.
 
-The canonical profile revision is `2026-07-20` with fingerprint
-`fnv1a64:52158d03db096c70`.
+The canonical profile revision is `2026-07-21`, SHA-256
+`f690f77926c09d28998c52e5a56044c4575a23a268f49328c071be02d2359cce`, with
+fingerprint `fnv1a64:10b2b8d2727009a0`.
 
 ## Reproducing the result
 
@@ -40,30 +42,43 @@ the runtime decoder.
 
 The checked corpus consists of 20 patch-16.9 replays.
 
-## Patch-16.14 sale-operation research only
+## Patch-16.14 productive sale-operation subset
 
-The ten saved patch-16.14 replay/fixture pairs establish a second,
-version-specific **research** result. It is deliberately not a runtime
-inventory API and does not decode item identity, slot, instance, undo, or a
-complete inventory state.
+The ten saved patch-16.14 replay/fixture pairs establish a version-specific,
+productive but deliberately operation-only result:
+`rofl-replay-item-sales/v1`. It emits a replay-native participant, timestamp,
+sale-operation classification, and exact removal-block provenance. It does not
+decode the sold item identity, slot, instance, count/charges, price, gold gain,
+undo, or a complete inventory state.
 
 Reproduce it with the native CLI already built:
 
 ```powershell
-node .\scripts\research_inventory_packets_16_14.mjs
+node .\scripts\validate_replay_item_sales_corpus.mjs
 ```
 
-The script writes the explicitly non-promoted
-`artifacts/inventory-packet-research-16.14.json`. It obtains packet blocks only
-from the saved `.rofl` files and uses saved Match-V5 timelines solely as
-offline labels. Its `researchOnly: true`, `promotionGate: false`, and
-`runtimeInput: false` fields are part of the artifact contract.
+The productive validator invokes the native extractor only with the saved
+`.rofl` and canonical external profile, then opens saved Match-V5/Timeline
+fixtures as offline validation oracles. It validates 77/77 D7 plus 39/39 H3
+events, 116/116 combined, with zero extras, zero misses, and at most one
+millisecond timing delta. The older
+`artifacts/inventory-packet-research-16.14.json` remains research-only evidence
+and is not a runtime input.
 
 | Candidate family | Channel | Packet type | Content lengths | Owner formula | Corpus count |
 |---|---:|---:|---:|---|---:|
 | inventory add/update | 1 | `0x0369` | 14/15 | `blockParam - 0x400000AD` | 2,519 |
 | inventory removal | 1 | `0x03F9` | 6/7 | `blockParam - 0x400000AD` | 2,074 |
 | unresolved removal-context companion | 1 | `0x0146` | 2/3/4 | `blockParam - 0x400000AD` | 4,214 |
+
+The external profile freezes the productive sale predicate: exactly zero
+profiled `0x0369` adds of length 14/15 and exactly one `0x03F9` removal of
+length 6/7 for the champion owner at the exact replay timestamp; the removal
+must have `payload[0] & 0x0f` in `{2, 5}`, `payload[2] & 0x03 != 3`, and
+`payload[2]` in `{0x30, 0x6e, 0x7a, 0xea, 0xee, 0xf9}`. Unknown variants fail
+closed. The classification proves a sale operation, not what was sold. The
+Vue product view renders it only as a separate orange timeline stream and
+never mutates an inventory.
 
 The 16.9 add/update item-ID formula is a negative control on this new family:
 it matches `0/1,971` unique one-purchase/one-add labels (all 1,971 mismatch).

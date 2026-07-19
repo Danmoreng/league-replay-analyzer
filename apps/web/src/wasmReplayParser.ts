@@ -10,6 +10,7 @@ import type { ReplayWardPositionResearchResult } from "./replayWardPositionResea
 import type { ReplayWardResult } from "./replayWards";
 import type { ReplayPurchaseLinkedItemUpdatesResult } from "./replayPurchaseLinkedItemUpdates";
 import type { ReplayDirectItemPurchasesResult } from "./replayDirectItemPurchases";
+import type { ReplayItemSalesResult } from "./replayItemSales";
 import type { ReplaySummary } from "./replayParser";
 import createReplayModule from "./generated/wasm/rofl_wasm.js";
 import defaultDecoderProfileRegistryJson from "../../../packages/rofl-core/profiles/replay-decoder-profiles.v1.json?raw";
@@ -242,6 +243,27 @@ export async function extractReplayDirectItemPurchasesWithWasm(
       );
     },
   );
+}
+
+export async function extractReplayItemSalesWithWasm(
+  buffer: ArrayBuffer,
+  profileJson = DEFAULT_DECODER_PROFILE_REGISTRY_JSON,
+): Promise<ReplayItemSalesResult> {
+  return withReplayAndProfileBuffers(buffer, profileJson, (module, replayPointer, size, profilePointer, profileSize) => {
+    const extractItemSales = module.cwrap<
+      (input: number, size: number, profiles: number, profileSize: number) => number
+    >("lra_extract_replay_item_sales_buffer_with_profiles", "number", [
+      "number",
+      "number",
+      "number",
+      "number",
+    ]);
+
+    return parseJsonResult<ReplayItemSalesResult>(
+      module,
+      extractItemSales(replayPointer, size, profilePointer, profileSize),
+    );
+  });
 }
 
 /**

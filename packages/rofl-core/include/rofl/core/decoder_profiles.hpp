@@ -144,6 +144,24 @@ struct InventoryDirectPurchaseSubsetDecoderProfile {
     InventoryStaticItemCatalogProfile static_item_catalog;
 };
 
+// A deliberately narrow, exact-build sale-operation discriminator. It
+// identifies the replay-native sale operation only; it does not recover a
+// sold item ID, slot, instance, price, gold amount, or inventory state.
+struct InventorySaleSubsetDecoderProfile {
+    std::string segment_type;
+    std::uint8_t channel = 0;
+    std::uint32_t champion_network_id_base = 0;
+    InventoryPurchasePacketFamilyProfile add;
+    InventoryPurchasePacketFamilyProfile removal;
+    std::size_t group_timestamp_tolerance_millis = 0;
+    std::size_t required_add_update_count = 0;
+    std::size_t required_removal_count = 0;
+    std::vector<std::uint8_t> payload0_low_nibble_values;
+    std::uint8_t payload2_low_bits_mask = 0;
+    std::uint8_t payload2_rejected_low_bits_value = 0;
+    std::vector<std::uint8_t> sale_payload_byte2_values;
+};
+
 struct DecoderVersionProfile {
     std::string version_group;
     std::vector<std::string> accepted_game_versions;
@@ -153,6 +171,7 @@ struct DecoderVersionProfile {
     std::optional<WardDecoderProfile> ward;
     std::optional<InventoryPurchaseSubsetDecoderProfile> inventory_purchase_subset;
     std::optional<InventoryDirectPurchaseSubsetDecoderProfile> inventory_direct_purchase_subset;
+    std::optional<InventorySaleSubsetDecoderProfile> inventory_sale_subset;
 };
 
 struct DecoderProfileProvenance {

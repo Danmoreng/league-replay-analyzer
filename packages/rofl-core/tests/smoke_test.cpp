@@ -933,6 +933,142 @@ bool test_replay_inventory_purchase_subset_fixture() {
            json.find("\"goldStateAvailable\":false") != std::string::npos;
 }
 
+std::vector<std::uint8_t> build_footer_item_sales_fixture(
+    const std::string& game_version = "16.14.794.5912"
+) {
+    constexpr std::uint32_t champion_base = 0x400000AD;
+    constexpr std::uint16_t add_packet_type = 0x0369;
+    constexpr std::uint16_t removal_packet_type = 0x03F9;
+    std::vector<std::uint8_t> payload;
+    std::vector<std::uint8_t> sale_removal(6, 0);
+    sale_removal[0] = 0x02;
+    sale_removal[2] = 0x30;
+    std::vector<std::uint8_t> unknown_discriminator_removal = sale_removal;
+    unknown_discriminator_removal[2] = 0x31;
+    const std::vector<std::uint8_t> add(14, 0);
+
+    // Exact sale-operation predicate: one removal, no profiled add, and a
+    // frozen discriminator byte. The emitted stream intentionally carries no
+    // sold-item identity or inventory state.
+    append_packet_block_with_content(
+        payload, 10.0F, removal_packet_type, champion_base + 1, sale_removal);
+    append_packet_block_with_content(
+        payload, 20.0F, removal_packet_type, champion_base + 2, unknown_discriminator_removal);
+    append_packet_block_with_content(
+        payload, 30.0F, removal_packet_type, champion_base + 3, sale_removal);
+    append_packet_block_with_content(
+        payload, 30.0F, add_packet_type, champion_base + 3, add);
+
+    const std::string metadata =
+        R"({"gameLength":60000,"lastGameChunkId":1,"lastKeyFrameId":0,"statsJson":"[]"})";
+    const auto compressed = compress_zstd_payload(std::string(
+        reinterpret_cast<const char*>(payload.data()), payload.size()));
+    if (compressed.empty()) return {};
+
+    constexpr std::size_t header_offset = 32;
+    constexpr std::size_t payload_offset = header_offset + 17;
+    const std::size_t metadata_offset = payload_offset + compressed.size();
+    const std::size_t total_size = metadata_offset + metadata.size() + 4;
+    std::vector<std::uint8_t> bytes(total_size, 0);
+    write_ascii(bytes, 0, "RIOT");
+    bytes[4] = 0x02;
+    write_ascii(bytes, 16, game_version);
+    write_zstd_record_header(bytes, header_offset, 1, 2, 1,
+        static_cast<std::uint32_t>(payload.size()), static_cast<std::uint32_t>(compressed.size()));
+    std::copy(compressed.begin(), compressed.end(), bytes.begin() + payload_offset);
+    write_ascii(bytes, metadata_offset, metadata);
+    write_u32_le(bytes, total_size - 4, static_cast<std::uint32_t>(metadata.size()));
+    return bytes;
+}
+
+std::string inventory_sale_subset_profile_json(
+    const std::string& accepted_version = "16.14.794.5912"
+) {
+    return R"json({
+        "schema":"rofl-replay-decoder-profiles/v1",
+        "registryId":"inventory-sale-smoke",
+        "revision":1,
+        "profiles":[{
+            "versionGroup":"16.14",
+            "acceptedGameVersions":[")json" + accepted_version + R"json("],
+            "inventorySaleSubset":{
+                "segmentType":"chunk",
+                "channel":1,
+                "championNetworkIdBase":1073741997,
+                "add":{"packetType":873,"contentLengths":{"exact":[14,15]}},
+                "removal":{"packetType":1017,"contentLengths":{"exact":[6,7]}},
+                "exactGroup":{"addCount":0,"removalCount":1,"timestampToleranceMillis":0},
+                "removalPayload":{"payload0LowNibbleAllow":[2,5],"payload2LowTwoBitReject":3,"payload2Allow":[48,110,122,234,238,249]}
+            }
+        }]
+    })json";
+}
+
+bool test_replay_item_sales_fixture() {
+    const auto loaded = rofl::core::parse_decoder_profile_registry_json(
+        inventory_sale_subset_profile_json());
+    if (!loaded.ok() || !loaded.registry.has_value()) return false;
+
+    const std::string json = rofl::core::extract_replay_item_sales_json(
+        build_footer_item_sales_fixture(), *loaded.registry);
+    bool unsupported_build_rejected = false;
+    try {
+        (void)rofl::core::extract_replay_item_sales_json(
+            build_footer_item_sales_fixture("16.14.794.5913"), *loaded.registry);
+    } catch (const std::exception&) {
+        unsupported_build_rejected = true;
+    }
+
+    const auto mutation_rejected = [](std::string profile, std::string_view needle,
+                                      std::string_view replacement) {
+        const std::size_t offset = profile.find(needle);
+        if (offset == std::string::npos) return false;
+        profile.replace(offset, needle.size(), replacement);
+        const auto mutated = rofl::core::parse_decoder_profile_registry_json(profile);
+        return !mutated.ok() && !mutated.registry.has_value();
+    };
+    const bool timestamp_tolerance_mutation_rejected = mutation_rejected(
+        inventory_sale_subset_profile_json(),
+        "\"timestampToleranceMillis\":0",
+        "\"timestampToleranceMillis\":1"
+    );
+    const bool payload_enum_mutation_rejected = mutation_rejected(
+        inventory_sale_subset_profile_json(),
+        "\"payload2Allow\":[48,110,122,234,238,249]",
+        "\"payload2Allow\":[48,110,122,234,238,248]"
+    );
+
+    return unsupported_build_rejected &&
+           timestamp_tolerance_mutation_rejected &&
+           payload_enum_mutation_rejected &&
+           json.find("\"schema\":\"rofl-replay-item-sales/v1\"") != std::string::npos &&
+           json.find("\"runtimeInput\":\"rofl-only\",\"riotApiInput\":false") != std::string::npos &&
+           json.find("\"origin\":\"external\"") != std::string::npos &&
+           json.find("\"removalPacketType\":1017") != std::string::npos &&
+           json.find("\"removalContentLengths\":[6,7]") != std::string::npos &&
+           json.find("\"type\":\"ITEM_SOLD_OPERATION\",\"timestampMillis\":10000,\"participantId\":1,\"participantNetworkId\":1073741998,\"participantNetworkIdHex\":\"0x400000AE\"") != std::string::npos &&
+           json.find("\"removalBlock\":{\"family\":\"removal\",\"channel\":1,\"packetType\":1017,\"packetTypeHex\":\"0x03F9\",\"contentLength\":6,\"blockParam\":1073741998") != std::string::npos &&
+            json.find("\"availability\":{\"soldItemId\":false,\"slot\":false,\"itemInstance\":false,\"countOrCharges\":false,\"price\":false,\"goldGain\":false,\"inventoryState\":false,\"undo\":false}") != std::string::npos &&
+            json.find("\"ownerTimestampGroupCount\":3") != std::string::npos &&
+            json.find("\"singleRemovalNoAddGroupCount\":2") != std::string::npos &&
+            json.find("\"rejectedGroupShapeCount\":1") != std::string::npos &&
+            json.find("\"rejectedPayloadPredicateGroupCount\":0") != std::string::npos &&
+            json.find("\"rejectedUnprofiledSaleDiscriminatorGroupCount\":1") != std::string::npos &&
+            json.find("\"emittedEventCount\":1") != std::string::npos &&
+           json.find("\"soldItemIdAvailable\":false") != std::string::npos &&
+           json.find("\"slotAvailable\":false") != std::string::npos &&
+           json.find("\"itemInstanceAvailable\":false") != std::string::npos &&
+           json.find("\"countOrChargesAvailable\":false") != std::string::npos &&
+           json.find("\"priceAvailable\":false") != std::string::npos &&
+           json.find("\"goldGainAvailable\":false") != std::string::npos &&
+           json.find("\"inventoryStateAvailable\":false") != std::string::npos &&
+           json.find("\"undoAvailable\":false") != std::string::npos &&
+           json.find("\"exactPacketFraming\":true") != std::string::npos &&
+           json.find("\"coverage\":\"exact-sale-operation-only\"") != std::string::npos &&
+           json.find("\"timestampMillis\":20000") == std::string::npos &&
+           json.find("\"timestampMillis\":30000") == std::string::npos;
+}
+
 void set_inventory_payload_bit(
     std::vector<std::uint8_t>& payload, std::size_t bit
 ) {
@@ -1384,6 +1520,10 @@ int main() {
     }
 
     if (!test_replay_inventory_purchase_subset_fixture()) {
+        return EXIT_FAILURE;
+    }
+
+    if (!test_replay_item_sales_fixture()) {
         return EXIT_FAILURE;
     }
 

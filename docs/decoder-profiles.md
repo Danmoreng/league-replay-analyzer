@@ -58,6 +58,7 @@ ten saved replay/API fixture pairs as follows:
 | Final player stats | validated final scalar/item fields | 1,300 / 1,300 |
 | Purchase-linked resulting-item updates | strict `rofl-replay-purchase-linked-item-updates/v1` subset | 193 / 193 (D7 130, H3 63), zero extras or wrong IDs, maximum 1 ms delta |
 | Direct add-only item purchases | strict `rofl-replay-direct-item-purchases/v1` subset | 1,278 / 1,278 (D7 844, H3 434), including 1,043 / 1,043 buildable components (D7 710, H3 333), zero extras or wrong IDs, maximum 1 ms delta |
+| Item sale operations | operation-only `rofl-replay-item-sales/v1` stream | 116 / 116 (D7 77, H3 39), zero extras or misses, maximum 1 ms delta |
 
 The purchase-linked resulting-item-update surface is available only through
 this exact-build external profile. It consumes the loaded replay and selected
@@ -86,9 +87,20 @@ recover 1,471/1,973 exact offline purchase labels (74.6%). It still has no
 slot, instance, count/charges, removed-item identity, removal, full inventory,
 price/gold, or undo state.
 
-The canonical profile asset currently carries revision `2026-07-20` and
-fingerprint `fnv1a64:52158d03db096c70`. Both item-purchase surfaces fail closed
-for a missing, invalid, non-external, ambiguous, or non-`16.14.794.5912`
+The `inventorySaleSubset` grammar is a separate exact-build external-profile
+operation classifier. A normalized sale event is limited to replay-native
+participant, timestamp, sale-operation classification, and exact removal-block
+provenance. It carries no sold item identity, slot, item instance,
+count/charges, price, gold gain, undo, or inventory state. Those fields must
+remain unavailable in every event and diagnostic. The browser may render the
+operation as a separate orange timeline marker, but may not apply it to an
+inventory model. Missing, invalid, built-in, ambiguous, or non-`16.14.794.5912`
+profiles fail closed.
+
+The canonical profile asset currently carries revision `2026-07-21`, SHA-256
+`f690f77926c09d28998c52e5a56044c4575a23a268f49328c071be02d2359cce`, and
+fingerprint `fnv1a64:10b2b8d2727009a0`. All three item-operation surfaces fail
+closed for a missing, invalid, non-external, ambiguous, or non-`16.14.794.5912`
 profile.
 
 Ward position remains unavailable: the corresponding 16.14 research produced

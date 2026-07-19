@@ -26,9 +26,11 @@ import type { ReplayKillResult } from "./replayKills";
 import type { ReplayObjectiveResult } from "./replayObjectives";
 import type { ReplayWardResult } from "./replayWards";
 import type { ReplayDirectItemPurchasesResult } from "./replayDirectItemPurchases";
+import type { ReplayItemSalesResult } from "./replayItemSales";
 import type { ReplayPurchaseLinkedItemUpdatesResult } from "./replayPurchaseLinkedItemUpdates";
 import {
   extractReplayDirectItemPurchasesWithWasm,
+  extractReplayItemSalesWithWasm,
   extractReplayKillsWithWasm,
   extractReplayObjectivesWithWasm,
   extractReplayPurchaseLinkedItemUpdatesWithWasm,
@@ -58,6 +60,9 @@ const isLoadingReplayPurchaseLinkedItemUpdates = ref(false);
 const replayDirectItemPurchases = ref<ReplayDirectItemPurchasesResult | null>(null);
 const replayDirectItemPurchasesError = ref("");
 const isLoadingReplayDirectItemPurchases = ref(false);
+const replayItemSales = ref<ReplayItemSalesResult | null>(null);
+const replayItemSalesError = ref("");
+const isLoadingReplayItemSales = ref(false);
 const replayMovementStatus = ref("No replay-derived movement fixture loaded yet.");
 const replayBuffer = ref<ArrayBuffer | null>(null);
 const loadedReplayName = ref("");
@@ -77,7 +82,8 @@ const headerStatus = computed(() => {
     isLoadingReplayObjectives.value ||
     isLoadingReplayWards.value ||
     isLoadingReplayPurchaseLinkedItemUpdates.value ||
-    isLoadingReplayDirectItemPurchases.value
+    isLoadingReplayDirectItemPurchases.value ||
+    isLoadingReplayItemSales.value
   ) {
     return "Replay wird lokal dekodiert …";
   }
@@ -678,6 +684,9 @@ async function loadReplay(file: File): Promise<void> {
   replayDirectItemPurchases.value = null;
   replayDirectItemPurchasesError.value = "";
   isLoadingReplayDirectItemPurchases.value = true;
+  replayItemSales.value = null;
+  replayItemSalesError.value = "";
+  isLoadingReplayItemSales.value = true;
   loadedReplayName.value = file.name;
   status.value = `Parsing ${file.name}...`;
 
@@ -784,6 +793,21 @@ async function loadReplay(file: File): Promise<void> {
       if (isCurrentRequest()) isLoadingReplayDirectItemPurchases.value = false;
     }
 
+    let saleStatus = "Verkaufsoperationen nicht verfügbar.";
+    status.value = `Decoded direct item purchases for ${file.name}. Decoding item sale operations...`;
+    try {
+      const decodedItemSales = await extractReplayItemSalesWithWasm(buffer);
+      if (!isCurrentRequest()) return;
+      replayItemSales.value = decodedItemSales;
+      saleStatus = `Decoded ${decodedItemSales.events.length} replay-only item sale operations (no sold-item, slot, gold, or inventory state).`;
+    } catch (saleError) {
+      if (!isCurrentRequest()) return;
+      replayItemSales.value = null;
+      replayItemSalesError.value = saleError instanceof Error ? saleError.message : String(saleError);
+    } finally {
+      if (isCurrentRequest()) isLoadingReplayItemSales.value = false;
+    }
+
     if (derivedMatchId) {
       try {
         const loadedRiotBundle = await loadRiotFixtureBundle(derivedMatchId);
@@ -801,7 +825,7 @@ async function loadReplay(file: File): Promise<void> {
 
     const movementStatus = await loadMovementData(derivedMatchId, requestId);
     if (!isCurrentRequest()) return;
-    status.value = `Parsed ${file.name} successfully. ${killStatus} ${objectiveStatus} ${wardStatus} ${purchaseUpdateStatus} ${directPurchaseStatus} ${movementStatus}`;
+    status.value = `Parsed ${file.name} successfully. ${killStatus} ${objectiveStatus} ${wardStatus} ${purchaseUpdateStatus} ${directPurchaseStatus} ${saleStatus} ${movementStatus}`;
   } catch (error) {
     if (!isCurrentRequest()) return;
     summary.value = null;
@@ -817,6 +841,8 @@ async function loadReplay(file: File): Promise<void> {
     replayPurchaseLinkedItemUpdatesError.value = "";
     replayDirectItemPurchases.value = null;
     replayDirectItemPurchasesError.value = "";
+    replayItemSales.value = null;
+    replayItemSalesError.value = "";
     replayBuffer.value = null;
     errorMessage.value = error instanceof Error ? error.message : String(error);
     status.value = "Replay parsing failed.";
@@ -828,6 +854,7 @@ async function loadReplay(file: File): Promise<void> {
       isLoadingReplayWards.value = false;
       isLoadingReplayPurchaseLinkedItemUpdates.value = false;
       isLoadingReplayDirectItemPurchases.value = false;
+      isLoadingReplayItemSales.value = false;
     }
   }
 }
@@ -881,16 +908,19 @@ function onFileChange(event: Event): void {
           :wards="replayWards"
           :purchase-linked-item-updates="replayPurchaseLinkedItemUpdates"
           :direct-item-purchases="replayDirectItemPurchases"
+          :item-sales="replayItemSales"
           :kills-loading="isLoadingReplayKills"
           :objectives-loading="isLoadingReplayObjectives"
           :wards-loading="isLoadingReplayWards"
           :purchase-linked-item-updates-loading="isLoadingReplayPurchaseLinkedItemUpdates"
           :direct-item-purchases-loading="isLoadingReplayDirectItemPurchases"
+          :item-sales-loading="isLoadingReplayItemSales"
           :kills-error="replayKillsError"
           :objectives-error="replayObjectivesError"
           :wards-error="replayWardsError"
           :purchase-linked-item-updates-error="replayPurchaseLinkedItemUpdatesError"
           :direct-item-purchases-error="replayDirectItemPurchasesError"
+          :item-sales-error="replayItemSalesError"
         />
 
         <!-- Summary View -->

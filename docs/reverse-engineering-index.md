@@ -1,6 +1,6 @@
 # Reverse Engineering Docs Index
 
-Updated: 2026-07-20
+Updated: 2026-07-21
 
 This file consolidates the replay reverse-engineering documentation into a smaller set of active references.
 
@@ -44,8 +44,9 @@ are outside scope even when described by historical community work.
   visual hypotheses, all explicitly `NOT DECODED`)
 - `docs/replay-inventory-packet-research.md` (including the productive,
   exact-build external-profile-only purchase-linked resulting-item and direct
-  add-only purchase subsets, their pinned static-item-catalog boundary, and
-  their explicit inventory/research limitations)
+  add-only purchase subsets, the operation-only item-sale stream, their pinned
+  static-item-catalog boundary, and their explicit inventory/research
+  limitations)
 - `docs/keyframe-champion-state-discovery.md`
 - `docs/replay-movement-packet-research.md`
 - `docs/rofl-api-parity.md`

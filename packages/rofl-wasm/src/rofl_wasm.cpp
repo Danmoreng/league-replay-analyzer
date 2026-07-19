@@ -328,6 +328,25 @@ lra_extract_replay_direct_item_purchases_buffer_with_profiles(
     );
 }
 
+EMSCRIPTEN_KEEPALIVE const char*
+lra_extract_replay_item_sales_buffer_with_profiles(
+    const std::uint8_t* replay_data,
+    int replay_size,
+    const std::uint8_t* profile_data,
+    int profile_size
+) {
+    return run_with_decoder_profiles(
+        replay_data,
+        replay_size,
+        profile_data,
+        profile_size,
+        "decoding item sale operations",
+        [](const auto& bytes, const auto& profiles) {
+            return rofl::core::extract_replay_item_sales_json(bytes, profiles);
+        }
+    );
+}
+
 EMSCRIPTEN_KEEPALIVE const char* lra_extract_replay_wards_buffer(
     const std::uint8_t* data,
     int size
