@@ -47,7 +47,12 @@ are outside scope even when described by historical community work.
   add-only purchase subsets, the operation-only item-sale stream, their pinned
   static-item-catalog boundary, and their explicit inventory/research
   limitations)
-- `docs/keyframe-champion-state-discovery.md`
+- `docs/keyframe-champion-state-discovery.md` (including the exact-build
+  patch-16.14 replay-byte-only `0x01EB` physical record directory: 366
+  contiguous records per owner/keyframe, stable cross-index-unique
+  `payload[3..end]` directory fingerprint, exact bridge through `0x02EB`,
+  partial `0x0306`/`0x027C`/`0x011A` typed-stream skeleton, and explicit
+  non-semantic boundary)
 - `docs/replay-movement-packet-research.md`
 - `docs/rofl-api-parity.md`
 - `docs/keyframe-api-parity.md`

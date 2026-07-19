@@ -446,6 +446,22 @@ The outer structure is exact on two independent patch-16.9 replays:
   with no missing, duplicate, or non-champion owners;
 - payloads change and therefore carry state.
 
+For exact build 16.14, each champion/keyframe has a maintained structural
+directory of exactly 366 `0x01EB` records alongside one champion-owned
+1,479-byte `0x02EB` block. The `0x01EB` suffixes `payload[3..]` provide 366
+unique, stable directory tokens in all 2,170 D7 and 1,030 H3 owner-segments.
+An exact bridge connects them as
+`0x0233 · (0x0306 0x0306)^k · 0x0452 · 0x007D? · 0x02EB`, `k=0..4`.
+Within the wider group, all 63,905 D7 and 32,567 H3 `0x0306` records use a
+two- or three-byte base plus zero to two four-byte extensions; four contiguous
+`0x027C` records follow `0x02EB`, and exactly four contiguous `0x011A` records
+occur between that block and the unique `0x0151` end. Complete bridge
+type/length layouts are not frozen; H3 contains four D7-unseen combinations
+within the frozen per-packet domains. This fixes replay-native record and
+partial typed-stream boundaries only: neither a directory index/token nor a
+typed record has proven cell or value meaning. Direct, descriptor-guided, and
+raw typed-stream Gold/CS relations remain negative.
+
 Narrow inventory-component change anchors now survive predeclared holdouts:
 
 - patch 16.9 fixed family `0x0442`, 1,451-byte payload, byte 259 changes on
@@ -628,11 +644,12 @@ it does not prove what those bytes mean.
    operation/slot/instance/removal grammar, reject automatic transforms, and
    reconstruct inventory state; expose item events and a synchronized panel
    only after the Native/Wasm promotion gate.
-2. Decode the inner keyframe replication/component grammar using the exact but
-   non-semantic `totalGold` and lane-CS change correlations only as search
-   constraints. Use final `statsJson` values plus controlled transitions as
-   replay-only constraints for numeric gold, XP, level, CS, health, and
-   resources.
+2. Decode the variable-prefix and typed-stream grammar behind the exact
+   patch-16.14 `0x01EB` 366-record directory, using the parallel `0x02EB`
+   block plus the non-semantic `totalGold` and lane-CS change correlations only
+   as search constraints. Use final `statsJson` values plus controlled
+   transitions as replay-only constraints for numeric gold, XP, level, CS,
+   health, and resources; do not treat the directory as decoded state.
 3. Use the exact ward-linked generic handle subset to decode the
    `0x0328`/`0x0170` operation and payload grammar, expand replay-native entity
    identity, then decode the real movement/waypoint protocol. Validate raw

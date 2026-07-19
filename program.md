@@ -140,9 +140,10 @@ March baseline as if the corpus and promotion boundary were unchanged.
 
 Current priority order:
 
-1. decode the stateful patch-16.14 `0x02EB` replication/record grammar; use the
-   exact `totalGold` and lane-CS change correlations only as structural search
-   constraints, never as decoded fields
+1. use the exact patch-16.14 366-record `0x01EB` directory to decode the
+   variable bridge/typed-value stream grammar through `0x02EB`/`0x0151`; the
+   directory and bridge remain non-semantic, and `totalGold`/lane-CS
+   correlations are structural search constraints only, never decoded fields
 2. derive replay-native inventory slot/instance/removal linkage and a complete
    reducer from the proven patch-16.14 and patch-16.9 transaction families
 3. use the exact ward-linked `0x0328`/`0x0170` handle subset to recover its

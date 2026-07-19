@@ -216,8 +216,9 @@ Status should be one of:
 
 Current high-value targets:
 
-1. decode the stateful patch-16.14 `0x02EB` replication/record grammar without
-   treating its exact change correlations as numeric fields
+1. use the exact patch-16.14 366-record `0x01EB` directory to decode the
+   variable bridge/typed-value stream grammar through `0x02EB`/`0x0151`;
+   directory/bridge remain non-semantic and Gold/CS correlations are constraints
 2. derive replay-native inventory slot/instance/removal linkage and a complete
    reducer from the proven versioned transaction families
 3. use the exact ward-linked `0x0328`/`0x0170` handle subset to recover its

@@ -168,6 +168,62 @@ the fixed discovery/holdout split is part of each profile's evidence boundary.
 Both profiles remain research-only until a deterministic replay-native inventory
 grammar and semantic validation establish item identities and transitions.
 
+## Patch-16.14 physical `0x01EB` record directory
+
+The maintained replay-only harness
+[research_keyframe_record_directory_16_14.mjs](../scripts/research_keyframe_record_directory_16_14.mjs)
+establishes a narrow, exact physical directory for the patch-exact build
+`16.14.794.5912`. It uses the fixed seven-replay D7 discovery split and opens
+the fixed three-replay H3 split only after the D7 directory gate succeeds.
+There are exactly `2,170` D7 and `1,030` H3 owner/keyframe groups; every
+keyframe segment has all ten owners. Each owner/keyframe group has one
+contiguous-by-`blockIndex` ordered run of `366` channel-1 `0x01EB` records and
+one same-owner/keyframe `0x02EB` block of exactly `1,479` bytes.
+
+For each physical zero-based record index `0..365`, the `0x01EB` payload length
+is stable: 33 indices are 7 bytes, 329 are 8 bytes, and 4 are 9 bytes. The
+suffix `payload[3..end]` is exact and stable across time, owners, and replays;
+its full observed domain is disjoint from every other physical index. The
+canonical directory SHA-256 over newline-joined `index:length:suffix` rows is
+`655a4b55115c662efaf876135b5052d12688eb2b2d6b420b2144dbf70ccaa72d` in D7
+and reproduces exactly in H3. This is a fingerprint of replay bytes, not a
+field decoder.
+
+The directory is connected to `0x02EB` by an exact same-owner, same-channel,
+same-segment physical bridge rather than direct adjacency:
+
+```text
+0x01EB x 366
+0x0233 · (0x0306 0x0306)^k · 0x0452 · 0x007D? · 0x02EB, k = 0..4
+```
+
+All `2,170` D7 and `1,030` H3 bridges pass that grammar and the D7-frozen
+per-packet type/length domains. Complete bridge type/length layouts are not
+frozen; H3 contains four combinations not present in D7. The wider group also
+has a reproducible typed-stream skeleton. Every same-owner `0x0306` between
+the immediate post-directory `0x0233` and the unique `0x0151` group end has
+length `2`, `3`, `6`, `7`, `10`, or `11`, equivalently two or three base bytes
+plus zero to two four-byte extensions. This covers `63,905` D7 and `32,567`
+H3 records without freezing their highly variable complete layouts. Directly
+after `0x02EB` are four contiguous `0x027C` records; between that `0x02EB` and
+`0x0151` there are exactly four `0x011A` records in one contiguous run. Their
+D7-frozen per-ordinal length domains also contain every H3 form.
+
+These results are still physical serialization structure only. The script
+reports the arithmetic `1479 = 15 + 366 * 4`, but does **not** assert an
+`0x01EB` ordinal-to-`0x02EB` cell mapping, a numeric value encoding, or any
+inventory, item, gold, CS, or other state meaning. Simple dirty-byte,
+categorical, descriptor-guided, standard metric-name hash, and raw typed-stream
+scalar forms for gold or CS remain falsified; the stateful value/mask grammar
+is still the blocker.
+
+Reproduce the compact report with:
+
+```powershell
+node .\scripts\research_keyframe_record_directory_16_14.mjs `
+  --output .\tmp\keyframe-record-directory-16.14.json
+```
+
 ## Patch-16.14 economy change anchors
 
 The maintained harness
