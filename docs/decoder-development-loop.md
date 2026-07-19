@@ -114,8 +114,9 @@ Once we have enough records like that, automatic extraction can emit normalized 
 
 This phase is for a concrete decoder investigation, not the default
 keep/revert gate. The normal full-corpus decision run uses
-`run_decoder_corpus.ps1 -ScoreOnly`: it still processes all 57 replays but
-writes only the manifest/schema/validation evidence required by the scorecard.
+`run_decoder_corpus.sh --score-only` on Linux or
+`run_decoder_corpus.ps1 -ScoreOnly` on Windows: it still processes all 57
+replays but writes only the manifest/schema/validation evidence required by the scorecard.
 Run the detailed artifact generation below only when the hypothesis actually
 needs raw family, slab, schema, extraction, or movement evidence.
 
@@ -325,11 +326,12 @@ Current file:
 
 ### 3. Extraction runner
 
-Use `scripts/run_decoder_corpus.ps1 -ScoreOnly` for the standard complete
-57-replay keep/revert corpus pass. It writes the strict scorecard inputs while
-suppressing the bulky replay-level debug products. Use the same script without
-`-ScoreOnly` only for an explicit research/debug investigation. In full-debug
-mode it now:
+Use `scripts/run_decoder_corpus.sh --score-only` on Linux or
+`scripts/run_decoder_corpus.ps1 -ScoreOnly` on Windows for the standard
+complete 57-replay keep/revert corpus pass. It writes the strict scorecard
+inputs while suppressing the bulky replay-level debug products. Omit
+`--score-only` on Linux or `-ScoreOnly` on Windows only for an explicit
+research/debug investigation. In full-debug mode it now:
 
 - regenerates replay artifacts
 - rebuilds replay-local provisional schemas
@@ -352,6 +354,8 @@ The replay-only extractor itself lives in `scripts/extract_replay_stats.mjs` and
 Current files:
 
 - `scripts/run_decoder_corpus.ps1`
+- `scripts/run_decoder_corpus.sh`
+- `scripts/run_decoder_corpus.mjs`
 - `scripts/build_corpus_schema.mjs`
 - `scripts/extract_replay_stats.mjs`
 - `scripts/validate_extracted_stats.mjs`
@@ -446,7 +450,9 @@ That slot-cluster-aware promotion step is now implemented. The remaining gap is 
 
 ### 5. Movement discovery runner
 
-Use the same corpus runner, `scripts/run_decoder_corpus.ps1`, for movement discovery as well. It now additionally:
+Use the same native corpus runner for the host—`scripts/run_decoder_corpus.sh`
+on Linux or `scripts/run_decoder_corpus.ps1` on Windows—for movement discovery
+as well. It now additionally:
 
 - builds `movement-candidate-matches.json`
 - builds `movement-provisional-schema.json`
@@ -544,6 +550,7 @@ The main need is more examples per version group so replay-local winners can bec
 
 1. rerun the full decoder corpus pipeline:
    - `& 'C:\Program Files\PowerShell\7\pwsh.exe' -File .\scripts\run_decoder_corpus.ps1 -Configuration Debug`
+   - on Linux: `./scripts/run_decoder_corpus.sh --configuration Debug`
 2. inspect:
    - `artifacts/corpus-schema.json`
    - `artifacts/movement-identity-priors.json`

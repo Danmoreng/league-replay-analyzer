@@ -13,7 +13,7 @@ The agent should operate on a dedicated research branch and repeat a strict keep
 5. keep the commit only if the corpus actually improved
 6. otherwise revert and try the next idea
 
-The important adaptation is that this repo needs a machine-readable scorecard after each corpus run. Use [summarize_decoder_corpus.mjs](/C:/Development/league-replay-analyzer/scripts/summarize_decoder_corpus.mjs) for that.
+The important adaptation is that this repo needs a machine-readable scorecard after each corpus run. Use `scripts/summarize_decoder_corpus.mjs` for that.
 
 ## Scope
 
@@ -59,7 +59,16 @@ Do not commit anything under `tmp/autoresearch/`.
 
 Do not rely on one long interactive Codex session staying open overnight.
 
-Use the repo-local supervisor instead:
+On Linux, use the native repo-local supervisor:
+
+```bash
+./scripts/run_autoresearch.sh --tag 2026-03-21-decoder --ensure-research-branch
+```
+
+Linux research workflows must use the maintained Bash/Node entry points. They
+must not invoke PowerShell or `.ps1` scripts.
+
+On Windows, use:
 
 ```powershell
 pwsh -File .\scripts\run_autoresearch.ps1 -Tag 2026-03-21-decoder -EnsureResearchBranch
@@ -67,7 +76,13 @@ pwsh -File .\scripts\run_autoresearch.ps1 -Tag 2026-03-21-decoder -EnsureResearc
 
 That script does not try to keep one Codex process alive forever. It repeatedly launches bounded `codex exec` iterations, lets each one finish, and starts the next. That is the reliable heartbeat.
 
-To stop the run cleanly:
+To stop the Linux run cleanly:
+
+```bash
+./scripts/stop_autoresearch.sh --tag 2026-03-21-decoder
+```
+
+On Windows, use:
 
 ```powershell
 pwsh -File .\scripts\stop_autoresearch.ps1 -Tag 2026-03-21-decoder
@@ -75,15 +90,15 @@ pwsh -File .\scripts\stop_autoresearch.ps1 -Tag 2026-03-21-decoder
 
 Useful options:
 
-- `-MaxIterations 12` to cap the run
-- `-IterationTimeoutMinutes 180` to kill a stuck iteration
-- `-SleepSeconds 10` to pause briefly between iterations
-- `-Model <name>` to pin a model
-- `-DangerouslyBypassApprovalsAndSandbox` only in an isolated throwaway clone or VM
+- Linux: `--max-iterations 12`, `--iteration-timeout-minutes 180`,
+  `--sleep-seconds 10`, and `--model <name>`
+- Windows: `-MaxIterations 12`, `-IterationTimeoutMinutes 180`,
+  `-SleepSeconds 10`, and `-Model <name>`
+- use the dangerous bypass option only in an isolated throwaway clone or VM
 
 Important runtime note:
 
-- `stop_autoresearch.ps1` creates a `STOP` file for the supervisor loop, but it does not forcibly kill a `codex exec` child that is already running
+- either stop script creates a `STOP` file for the supervisor loop, but it does not forcibly kill a `codex exec` child that is already running
 - if the supervisor process dies unexpectedly, the current child iteration may still finish on its own, but no later iterations should start without the supervisor
 
 ## Ground rules
@@ -115,10 +130,11 @@ Before a full corpus rerun:
 Before keeping any change:
 
 1. choose a fresh per-iteration score root and rerun the complete corpus in
-   ScoreOnly mode:
-   `& 'C:\Program Files\PowerShell\7\pwsh.exe' -File .\scripts\run_decoder_corpus.ps1 -Configuration Debug -ScoreOnly -ArtifactRoot <fresh-root> -RequireEmptyArtifactRoot -Force -CleanReplayArtifacts`
+   ScoreOnly mode using the native command for the host:
+   - Linux: `./scripts/run_decoder_corpus.sh --configuration Debug --score-only --artifact-root <fresh-root> --require-empty-artifact-root --force --clean-replay-artifacts`
+   - Windows: `& 'C:\Program Files\PowerShell\7\pwsh.exe' -File .\scripts\run_decoder_corpus.ps1 -Configuration Debug -ScoreOnly -ArtifactRoot <fresh-root> -RequireEmptyArtifactRoot -Force -CleanReplayArtifacts`
 2. summarize the results:
-   `node .\scripts\summarize_decoder_corpus.mjs --artifact-root <fresh-root> --json`
+   `node ./scripts/summarize_decoder_corpus.mjs --artifact-root <fresh-root> --json`
 
 ScoreOnly still processes the complete 57-replay corpus; it is not a partial
 corpus shortcut. If that full score run did not complete, the experiment is not
@@ -132,7 +148,7 @@ artifacts and must not be used to decide keep/revert.
 
 ## Artifact discipline and retention
 
-The standard autonomous gate is `-ScoreOnly`. Its verified 57-replay output is
+The standard autonomous gate is ScoreOnly. Its verified 57-replay output is
 427,731,245 bytes (about 408 MiB / 0.398 GiB), while the previous full-debug
 workflow used roughly 4.1 GiB per corpus root. ScoreOnly retains the strict
 manifest/schema/validation evidence needed by the scorecard but avoids bulky

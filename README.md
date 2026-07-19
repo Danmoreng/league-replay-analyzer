@@ -186,5 +186,6 @@ The movement audit is a negative gate. `npm run audit:movement-position-goal -- 
 - Read [docs/rofl-api-parity.md](docs/rofl-api-parity.md) for the separate API-shaped final-state exporter and parity artifact policy.
 - Read [AGENTS.md](AGENTS.md) for repo-specific working instructions.
 - Read [program.md](program.md) and [docs/autonomous-decoder-research.md](docs/autonomous-decoder-research.md) if you want to run autonomous overnight decoder research.
-- Start the repo-local supervisor with `pwsh -File .\scripts\run_autoresearch.ps1 -Tag <tag>`.
-- Stop it with `pwsh -File .\scripts\stop_autoresearch.ps1 -Tag <tag>`. This prevents new iterations, but it does not forcibly kill a `codex exec` child that is already running.
+- On Linux, start the native supervisor with `./scripts/run_autoresearch.sh --tag <tag>` and stop it with `./scripts/stop_autoresearch.sh --tag <tag>`.
+- On Windows, use `pwsh -File .\scripts\run_autoresearch.ps1 -Tag <tag>` and `pwsh -File .\scripts\stop_autoresearch.ps1 -Tag <tag>`.
+- A stop request prevents new iterations, but it does not forcibly kill a `codex exec` child that is already running.

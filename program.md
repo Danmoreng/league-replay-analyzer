@@ -24,19 +24,22 @@ Work with the user once to set up a run:
 4. initialize `tmp/autoresearch/<tag>/results.tsv` with the documented header
 5. establish the baseline:
    - choose one fresh score root such as `tmp/autoresearch/<tag>/scores/baseline-<timestamp>`
-   - run the complete decoder corpus with `-ScoreOnly -ArtifactRoot <fresh-root> -RequireEmptyArtifactRoot`
-   - run `node .\scripts\summarize_decoder_corpus.mjs --artifact-root <fresh-root> --json`
+   - run the complete decoder corpus in ScoreOnly mode using the native command for the host
+   - run `node ./scripts/summarize_decoder_corpus.mjs --artifact-root <fresh-root> --json`
    - log the baseline row as `keep`
 
 After setup, do not stop to ask whether you should continue. Continue until interrupted.
 
-The recommended supervisor is:
+The recommended Linux supervisor is:
 
-- `pwsh -File .\scripts\run_autoresearch.ps1 -Tag <tag>`
+- `./scripts/run_autoresearch.sh --tag <tag>`
+
+On Windows, use `pwsh -File .\scripts\run_autoresearch.ps1 -Tag <tag>`.
 
 To stop the loop cleanly:
 
-- `pwsh -File .\scripts\stop_autoresearch.ps1 -Tag <tag>`
+- Linux: `./scripts/stop_autoresearch.sh --tag <tag>`
+- Windows: `pwsh -File .\scripts\stop_autoresearch.ps1 -Tag <tag>`
 
 Stopping nuance:
 
@@ -78,9 +81,10 @@ Loop forever:
 5. commit the experiment
 6. choose a new per-iteration score root under
    `tmp/autoresearch/<tag>/scores/iteration-<n>-<timestamp>` and run the complete corpus:
-   - `& 'C:\Program Files\PowerShell\7\pwsh.exe' -File .\scripts\run_decoder_corpus.ps1 -Configuration Debug -ScoreOnly -ArtifactRoot <fresh-root> -RequireEmptyArtifactRoot -Force -CleanReplayArtifacts`
+   - Linux: `./scripts/run_decoder_corpus.sh --configuration Debug --score-only --artifact-root <fresh-root> --require-empty-artifact-root --force --clean-replay-artifacts`
+   - Windows: `& 'C:\Program Files\PowerShell\7\pwsh.exe' -File .\scripts\run_decoder_corpus.ps1 -Configuration Debug -ScoreOnly -ArtifactRoot <fresh-root> -RequireEmptyArtifactRoot -Force -CleanReplayArtifacts`
 7. summarize the run:
-   - `node .\scripts\summarize_decoder_corpus.mjs --artifact-root <fresh-root> --json`
+   - `node ./scripts/summarize_decoder_corpus.mjs --artifact-root <fresh-root> --json`
 8. append a row to `tmp/autoresearch/<tag>/results.tsv`
 9. compare against the previous kept result
 10. keep or revert:
@@ -96,7 +100,7 @@ diagnostic compatibility escape hatch, never a valid autonomous scorecard.
 
 ## Artifact discipline and retention
 
-`-ScoreOnly` is the default keep/revert gate. It still processes the complete
+ScoreOnly is the default keep/revert gate. It still processes the complete
 57-replay corpus and produces the manifest, schema, validation reports, and
 scorecard needed for the decision, but suppresses bulky per-replay research
 artifacts. The verified reference run is 427,731,245 bytes (about 408 MiB /

@@ -60,6 +60,39 @@ Run the CLI against a local replay:
 Both scripts accept `--clean`, `--build-dir`, `--configuration`, and
 `--generator`. Run either script with `--help` for all options.
 
+## Decoder research
+
+Linux has native entry points for both a single replay and the complete corpus.
+They invoke the Linux C++ analyzer directly and never call PowerShell:
+
+```bash
+./scripts/run_decoder_artifacts.sh \
+  --replay ./replays/EUN1-3926581873.rofl \
+  --score-only \
+  --artifact-root ./tmp/decoder-smoke
+
+./scripts/run_decoder_corpus.sh \
+  --configuration Debug \
+  --score-only \
+  --artifact-root ./tmp/autoresearch/manual/scores/baseline \
+  --require-empty-artifact-root \
+  --force \
+  --clean-replay-artifacts
+```
+
+The full corpus runner requires matching saved `match.json` and `timeline.json`
+fixtures under `replays/api/`. Summarize a completed run with:
+
+```bash
+node ./scripts/summarize_decoder_corpus.mjs \
+  --artifact-root ./tmp/autoresearch/manual/scores/baseline \
+  --json
+```
+
+For a bounded autonomous loop, use `./scripts/run_autoresearch.sh --help` and
+stop it with `./scripts/stop_autoresearch.sh --tag <tag>`. See
+`docs/autonomous-decoder-research.md` for the keep/revert contract.
+
 ## Web app
 
 The Vite+ project is scoped to `apps/web`. Use the root wrappers:

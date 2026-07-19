@@ -191,6 +191,12 @@ Because of that, follow these rules:
   native build and tests
 - use `scripts/build-wasm.sh` for the Emscripten build; it automatically loads
   a repo-local `tools/emsdk/emsdk_env.sh` when present
+- use `scripts/run_decoder_artifacts.sh` and `scripts/run_decoder_corpus.sh`
+  for decoder research; the latter is the complete Linux-native corpus gate
+- use `scripts/run_autoresearch.sh` and `scripts/stop_autoresearch.sh` for the
+  autonomous decoder loop
+- never invoke PowerShell or a `.ps1` script on Linux; Linux workflows must use
+  the maintained Bash/Node entry points
 - emsdk 6.0.3 is the currently verified Linux Wasm toolchain version
 - install JavaScript dependencies with `vp install --frozen-lockfile`; Vite+
   manages the Node.js and npm versions pinned by the project
@@ -299,9 +305,11 @@ This repo now also has a root [program.md](/C:/Development/league-replay-analyze
 If the user wants autonomous decoder iteration, read that file and [docs/autonomous-decoder-research.md](/C:/Development/league-replay-analyzer/docs/autonomous-decoder-research.md) before starting. The loop is intentionally narrower than general repo work:
 
 - prefer decoder scripts and decoder docs
-- require a complete 57-replay corpus rerun in `-ScoreOnly` mode before keeping changes; ScoreOnly is the default gate, not a partial corpus
+- require a complete 57-replay corpus rerun in ScoreOnly mode before keeping changes; ScoreOnly is the default gate, not a partial corpus
 - use [scripts/summarize_decoder_corpus.mjs](/C:/Development/league-replay-analyzer/scripts/summarize_decoder_corpus.mjs) as the machine-readable scorecard
-- use [scripts/run_autoresearch.ps1](/C:/Development/league-replay-analyzer/scripts/run_autoresearch.ps1) as the recommended supervisor and [scripts/stop_autoresearch.ps1](/C:/Development/league-replay-analyzer/scripts/stop_autoresearch.ps1) to stop it cleanly
+- on Windows, use `scripts/run_autoresearch.ps1` and
+  `scripts/stop_autoresearch.ps1`; on Linux, use the native
+  `scripts/run_autoresearch.sh` and `scripts/stop_autoresearch.sh` equivalents
 - generate full debug artifacts only for an explicit research question; durable evidence is the ledger row, compact summary, and kept commit, so retain at most the current baseline/active ScoreOnly root and manually delete completed reproducible score roots after their score is recorded; retain debug roots only while they remain useful evidence
 - full-debug corpus roots are large (roughly 4.1 GiB versus the verified 408 MiB ScoreOnly reference); use a fast local SSD, check free space, and do not promise automatic deletion
 - do not commit replay movement fixtures or scratch artifacts during the loop
