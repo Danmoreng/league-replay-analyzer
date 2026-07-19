@@ -59,7 +59,7 @@ ten saved replay/API fixture pairs as follows:
 | Purchase-linked resulting-item updates | strict `rofl-replay-purchase-linked-item-updates/v1` subset | 193 / 193 (D7 130, H3 63), zero extras or wrong IDs, maximum 1 ms delta |
 | Direct add-only item purchases | strict `rofl-replay-direct-item-purchases/v1` subset | 1,278 / 1,278 (D7 844, H3 434), including 1,043 / 1,043 buildable components (D7 710, H3 333), zero extras or wrong IDs, maximum 1 ms delta |
 | Item sale operations | operation-only `rofl-replay-item-sales/v1` stream | 116 / 116 (D7 77, H3 39), zero extras or misses, maximum 1 ms delta |
-| Keyframe participant stat snapshots | `rofl-replay-participant-stat-snapshots/v1` | exact build only: 2,170 D7 and 1,030 H3 champion-owned snapshots, all finite/nonnegative/monotonic; lane CS is integral in all snapshots |
+| Keyframe participant stat snapshots | `rofl-replay-participant-stat-snapshots/v2` | exact build only: 2,170 D7 and 1,030 H3 champion-owned XP/level/total-gold/lane-CS snapshots, all finite/nonnegative/monotonic; level validates 3,200/3,200 and floored XP 3,198/3,200 with only frozen ordering-boundary differences |
 
 The purchase-linked resulting-item-update surface is available only through
 this exact-build external profile. It consumes the loaded replay and selected
@@ -101,23 +101,25 @@ profiles fail closed.
 `keyframeParticipantStats` is another separate exact-build external-profile
 capability. It pins only a fully specified replay grammar: keyframe/channel-1
 `0x02EB`, content length 1,479, the champion network-ID base, a required
-bijective 256-entry `cipherToPlain` permutation, and the two fixed interleaved
+bijective 256-entry `cipherToPlain` permutation, and three fixed interleaved
 Float32LE byte-offset arrays. The canonical cipher table SHA-256 is
 `c9be1f4971505dcc7c4366329366794108c1b031060039a2bcfd2d60134ed4be`; the
 loader rejects a duplicate/missing permutation value or any non-exact-build
-use. The profile decodes total gold from `[115,117,119,121]` and lane CS from
-`[123,125,127,129]`. Runtime does not consult, learn from, or repair values
+use. The profile decodes XP from `[83,85,87,89]`, total gold from
+`[115,117,119,121]`, and lane CS from `[123,125,127,129]`. Level is derived
+with the patch-pinned XP thresholds and the replay-embedded validated final
+level's 18-or-20 cap. Runtime does not consult, learn from, or repair values
 with Timeline data. The normalized output is external-profile-only in Native
 and Wasm and fails closed if values are non-finite, negative, lane CS is not
 integral, ownership is invalid, a participant track decreases, a
 timestamp/participant pair is duplicated, or a keyframe does not contain the
-complete participant set 1 through 10. XP, neutral CS, current gold, health,
-and resources are deliberately absent from this capability pending separate
+complete participant set 1 through 10. Neutral CS, current spendable gold,
+health, and resources are deliberately absent from this capability pending separate
 semantic/promotion gates.
 
-The canonical profile asset currently carries revision `2026-07-22`, SHA-256
-`6200e96737a85d89a3d5af8e591c4c72af4beaa475c97edf7971f85a87814ec5`, and
-fingerprint `fnv1a64:0bf533d9339eb246`. All three item-operation surfaces fail
+The canonical profile asset currently carries revision `2026-07-23`, SHA-256
+`47f20aae95740df4fb3b66417cabd146abe85c23b432c5fa1bd17d868995f9b0`, and
+fingerprint `fnv1a64:7eb24280c8b9ce1d`. All exact-build surfaces fail
 closed for a missing, invalid, non-external, ambiguous, or non-`16.14.794.5912`
 profile.
 

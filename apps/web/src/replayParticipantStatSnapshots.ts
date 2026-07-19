@@ -27,6 +27,8 @@ export interface ReplayParticipantStatSnapshotBlock {
 export interface ReplayParticipantStatSnapshot {
   timestampMillis: number;
   participantId: number;
+  experience: number;
+  level: number;
   totalGold: number;
   laneMinionsKilled: number;
   provenance: {
@@ -35,7 +37,7 @@ export interface ReplayParticipantStatSnapshot {
 }
 
 export interface ReplayParticipantStatSnapshotsResult {
-  schema: "rofl-replay-participant-stat-snapshots/v1";
+  schema: "rofl-replay-participant-stat-snapshots/v2";
   generatedAtUtc?: string;
   source: {
     replayPath: string | null;
@@ -54,6 +56,7 @@ export interface ReplayParticipantStatSnapshotsResult {
     snapshotContentLength: number;
     championNetworkIdBase: number;
     championNetworkIdBaseHex: string;
+    levelDerivation: "patch-16.14-xp-thresholds-with-replay-final-level-cap";
     origin: "external";
     schema: "rofl-replay-decoder-profiles/v1";
     registryId: string;
@@ -124,15 +127,34 @@ function requiredLiteral<T extends string | number | boolean>(
 function parseFramedProvenance(value: unknown): ReplayParticipantStatSnapshotFramedProvenance {
   const record = requiredRecord(value, "snapshotBlock.provenance");
   return {
-    segmentType: requiredLiteral(record.segmentType, "keyframe", "snapshotBlock.provenance.segmentType"),
+    segmentType: requiredLiteral(
+      record.segmentType,
+      "keyframe",
+      "snapshotBlock.provenance.segmentType",
+    ),
     segmentId: requiredInteger(record.segmentId, "snapshotBlock.provenance.segmentId", 1),
     chunkId: requiredInteger(record.chunkId, "snapshotBlock.provenance.chunkId", 0),
-    segmentHeaderOffset: requiredInteger(record.segmentHeaderOffset, "snapshotBlock.provenance.segmentHeaderOffset"),
-    segmentPayloadOffset: requiredInteger(record.segmentPayloadOffset, "snapshotBlock.provenance.segmentPayloadOffset"),
+    segmentHeaderOffset: requiredInteger(
+      record.segmentHeaderOffset,
+      "snapshotBlock.provenance.segmentHeaderOffset",
+    ),
+    segmentPayloadOffset: requiredInteger(
+      record.segmentPayloadOffset,
+      "snapshotBlock.provenance.segmentPayloadOffset",
+    ),
     blockIndex: requiredInteger(record.blockIndex, "snapshotBlock.provenance.blockIndex"),
-    decompressedHeaderOffset: requiredInteger(record.decompressedHeaderOffset, "snapshotBlock.provenance.decompressedHeaderOffset"),
-    decompressedContentOffset: requiredInteger(record.decompressedContentOffset, "snapshotBlock.provenance.decompressedContentOffset"),
-    decompressedEndOffset: requiredInteger(record.decompressedEndOffset, "snapshotBlock.provenance.decompressedEndOffset"),
+    decompressedHeaderOffset: requiredInteger(
+      record.decompressedHeaderOffset,
+      "snapshotBlock.provenance.decompressedHeaderOffset",
+    ),
+    decompressedContentOffset: requiredInteger(
+      record.decompressedContentOffset,
+      "snapshotBlock.provenance.decompressedContentOffset",
+    ),
+    decompressedEndOffset: requiredInteger(
+      record.decompressedEndOffset,
+      "snapshotBlock.provenance.decompressedEndOffset",
+    ),
   };
 }
 
@@ -143,6 +165,8 @@ function parseSnapshot(value: unknown): ReplayParticipantStatSnapshot {
   return {
     timestampMillis: requiredInteger(record.timestampMillis, "snapshot.timestampMillis"),
     participantId: requiredInteger(record.participantId, "snapshot.participantId", 1),
+    experience: requiredFiniteNumber(record.experience, "snapshot.experience"),
+    level: requiredInteger(record.level, "snapshot.level", 1),
     totalGold: requiredFiniteNumber(record.totalGold, "snapshot.totalGold"),
     laneMinionsKilled: requiredInteger(record.laneMinionsKilled, "snapshot.laneMinionsKilled"),
     provenance: {
@@ -168,7 +192,7 @@ export function parseReplayParticipantStatSnapshotsResult(
   value: unknown,
 ): ReplayParticipantStatSnapshotsResult {
   const record = requiredRecord(value, "result");
-  requiredLiteral(record.schema, "rofl-replay-participant-stat-snapshots/v1", "schema");
+  requiredLiteral(record.schema, "rofl-replay-participant-stat-snapshots/v2", "schema");
   const source = requiredRecord(record.source, "source");
   const profile = requiredRecord(record.profile, "profile");
   const diagnostics = requiredRecord(record.diagnostics, "diagnostics");
@@ -178,14 +202,18 @@ export function parseReplayParticipantStatSnapshotsResult(
 
   const snapshots = record.snapshots.map(parseSnapshot);
   if (record.gameVersion !== "16.14.794.5912") {
-    throw new Error("Participant stat snapshots: 'gameVersion' must be the exact supported 16.14 build.");
+    throw new Error(
+      "Participant stat snapshots: 'gameVersion' must be the exact supported 16.14 build.",
+    );
   }
   if (
     profile.snapshotPacketType !== 0x02eb ||
     profile.snapshotContentLength !== 1479 ||
     profile.championNetworkIdBase !== 0x400000ad
   ) {
-    throw new Error("Participant stat snapshots: profile packet, length, or champion owner base is unsupported.");
+    throw new Error(
+      "Participant stat snapshots: profile packet, length, or champion owner base is unsupported.",
+    );
   }
   for (let index = 1; index < snapshots.length; index += 1) {
     const previous = snapshots[index - 1];
@@ -194,26 +222,47 @@ export function parseReplayParticipantStatSnapshotsResult(
       current.timestampMillis === previous.timestampMillis &&
       current.participantId === previous.participantId
     ) {
-      throw new Error("Participant stat snapshots: duplicate participant snapshots at one timestamp are ambiguous.");
+      throw new Error(
+        "Participant stat snapshots: duplicate participant snapshots at one timestamp are ambiguous.",
+      );
     }
     if (
       current.timestampMillis < previous.timestampMillis ||
       (current.timestampMillis === previous.timestampMillis &&
         current.participantId < previous.participantId)
     ) {
-      throw new Error("Participant stat snapshots: snapshots must be ordered by timestamp and participant.");
+      throw new Error(
+        "Participant stat snapshots: snapshots must be ordered by timestamp and participant.",
+      );
     }
   }
+  const previousByParticipant = new Map<number, ReplayParticipantStatSnapshot>();
   for (const snapshot of snapshots) {
     const block = snapshot.provenance.snapshotBlock;
     if (
       snapshot.participantId > 10 ||
+      snapshot.level > 20 ||
       block.packetType !== profile.snapshotPacketType ||
       block.contentLength !== profile.snapshotContentLength ||
       block.blockParam !== profile.championNetworkIdBase + snapshot.participantId
     ) {
-      throw new Error("Participant stat snapshots: snapshot provenance does not match the selected exact profile.");
+      throw new Error(
+        "Participant stat snapshots: snapshot provenance does not match the selected exact profile.",
+      );
     }
+    const previous = previousByParticipant.get(snapshot.participantId);
+    if (
+      previous &&
+      (snapshot.experience < previous.experience ||
+        snapshot.level < previous.level ||
+        snapshot.totalGold < previous.totalGold ||
+        snapshot.laneMinionsKilled < previous.laneMinionsKilled)
+    ) {
+      throw new Error(
+        "Participant stat snapshots: participant values must be monotonic across keyframes.",
+      );
+    }
+    previousByParticipant.set(snapshot.participantId, snapshot);
   }
   const profiledSnapshotPacketCount = requiredInteger(
     diagnostics.profiledSnapshotPacketCount,
@@ -237,7 +286,9 @@ export function parseReplayParticipantStatSnapshotsResult(
     rejectedInvalidOwnerPacketCount !== 0 ||
     rejectedInvalidValuePacketCount !== 0
   ) {
-    throw new Error("Participant stat snapshots: diagnostics do not describe a complete fail-closed snapshot stream.");
+    throw new Error(
+      "Participant stat snapshots: diagnostics do not describe a complete fail-closed snapshot stream.",
+    );
   }
   const keyframeSegmentCount = requiredInteger(
     diagnostics.keyframeSegmentCount,
@@ -245,12 +296,16 @@ export function parseReplayParticipantStatSnapshotsResult(
     1,
   );
   if (snapshots.length !== keyframeSegmentCount * 10) {
-    throw new Error("Participant stat snapshots: every keyframe must contain exactly ten participant snapshots.");
+    throw new Error(
+      "Participant stat snapshots: every keyframe must contain exactly ten participant snapshots.",
+    );
   }
   for (let start = 0; start < snapshots.length; start += 10) {
     const timestampMillis = snapshots[start]!.timestampMillis;
     if (start > 0 && timestampMillis <= snapshots[start - 1]!.timestampMillis) {
-      throw new Error("Participant stat snapshots: keyframe snapshot groups must be strictly increasing.");
+      throw new Error(
+        "Participant stat snapshots: keyframe snapshot groups must be strictly increasing.",
+      );
     }
     for (let participantId = 1; participantId <= 10; participantId += 1) {
       const snapshot = snapshots[start + participantId - 1];
@@ -259,13 +314,15 @@ export function parseReplayParticipantStatSnapshotsResult(
         snapshot.timestampMillis !== timestampMillis ||
         snapshot.participantId !== participantId
       ) {
-        throw new Error("Participant stat snapshots: every keyframe must contain participant IDs 1 through 10.");
+        throw new Error(
+          "Participant stat snapshots: every keyframe must contain participant IDs 1 through 10.",
+        );
       }
     }
   }
 
   return {
-    schema: "rofl-replay-participant-stat-snapshots/v1",
+    schema: "rofl-replay-participant-stat-snapshots/v2",
     ...(typeof record.generatedAtUtc === "string" ? { generatedAtUtc: record.generatedAtUtc } : {}),
     source: {
       replayPath: requiredNullableString(source.replayPath, "source.replayPath"),
@@ -279,11 +336,34 @@ export function parseReplayParticipantStatSnapshotsResult(
     profile: {
       segmentType: requiredLiteral(profile.segmentType, "keyframe", "profile.segmentType"),
       channel: requiredLiteral(profile.channel, 1, "profile.channel"),
-      snapshotPacketType: requiredInteger(profile.snapshotPacketType, "profile.snapshotPacketType", 1),
-      snapshotPacketTypeHex: requiredString(profile.snapshotPacketTypeHex, "profile.snapshotPacketTypeHex"),
-      snapshotContentLength: requiredInteger(profile.snapshotContentLength, "profile.snapshotContentLength", 1),
-      championNetworkIdBase: requiredInteger(profile.championNetworkIdBase, "profile.championNetworkIdBase", 1),
-      championNetworkIdBaseHex: requiredString(profile.championNetworkIdBaseHex, "profile.championNetworkIdBaseHex"),
+      snapshotPacketType: requiredInteger(
+        profile.snapshotPacketType,
+        "profile.snapshotPacketType",
+        1,
+      ),
+      snapshotPacketTypeHex: requiredString(
+        profile.snapshotPacketTypeHex,
+        "profile.snapshotPacketTypeHex",
+      ),
+      snapshotContentLength: requiredInteger(
+        profile.snapshotContentLength,
+        "profile.snapshotContentLength",
+        1,
+      ),
+      championNetworkIdBase: requiredInteger(
+        profile.championNetworkIdBase,
+        "profile.championNetworkIdBase",
+        1,
+      ),
+      championNetworkIdBaseHex: requiredString(
+        profile.championNetworkIdBaseHex,
+        "profile.championNetworkIdBaseHex",
+      ),
+      levelDerivation: requiredLiteral(
+        profile.levelDerivation,
+        "patch-16.14-xp-thresholds-with-replay-final-level-cap",
+        "profile.levelDerivation",
+      ),
       origin: requiredLiteral(profile.origin, "external", "profile.origin"),
       schema: requiredLiteral(profile.schema, "rofl-replay-decoder-profiles/v1", "profile.schema"),
       registryId: requiredString(profile.registryId, "profile.registryId"),
@@ -292,16 +372,33 @@ export function parseReplayParticipantStatSnapshotsResult(
     },
     snapshots,
     diagnostics: {
-      keyframeRecordCount: requiredInteger(diagnostics.keyframeRecordCount, "diagnostics.keyframeRecordCount"),
+      keyframeRecordCount: requiredInteger(
+        diagnostics.keyframeRecordCount,
+        "diagnostics.keyframeRecordCount",
+      ),
       keyframeSegmentCount,
-      decompressedKeyframeBytes: requiredInteger(diagnostics.decompressedKeyframeBytes, "diagnostics.decompressedKeyframeBytes"),
-      packetBlockCount: requiredInteger(diagnostics.packetBlockCount, "diagnostics.packetBlockCount"),
+      decompressedKeyframeBytes: requiredInteger(
+        diagnostics.decompressedKeyframeBytes,
+        "diagnostics.decompressedKeyframeBytes",
+      ),
+      packetBlockCount: requiredInteger(
+        diagnostics.packetBlockCount,
+        "diagnostics.packetBlockCount",
+      ),
       profiledSnapshotPacketCount,
       rejectedInvalidOwnerPacketCount,
       rejectedInvalidValuePacketCount,
       emittedSnapshotCount,
-      exactPacketFraming: requiredLiteral(diagnostics.exactPacketFraming, true, "diagnostics.exactPacketFraming"),
-      coverage: requiredLiteral(diagnostics.coverage, "profiled-keyframe-participant-stats-only", "diagnostics.coverage"),
+      exactPacketFraming: requiredLiteral(
+        diagnostics.exactPacketFraming,
+        true,
+        "diagnostics.exactPacketFraming",
+      ),
+      coverage: requiredLiteral(
+        diagnostics.coverage,
+        "profiled-keyframe-participant-stats-only",
+        "diagnostics.coverage",
+      ),
     },
   };
 }

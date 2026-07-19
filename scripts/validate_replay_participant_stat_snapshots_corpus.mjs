@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // Productive offline corpus gate for exact-build 16.14 keyframe participant
-// gold/lane-CS snapshots. The native CLI receives only a saved ROFL and the
+// XP/level/gold/lane-CS snapshots. The native CLI receives only a saved ROFL and the
 // canonical decoder profile. Saved Riot fixtures are opened strictly after
 // extraction as validation oracles; they can never supply runtime state.
 
@@ -86,7 +86,8 @@ function canonicalProfile(profileBytes, manifest) {
   }
   assert(grammar.packetType === expected.snapshotPacketType && grammar.contentLength === expected.snapshotContentLength,
     "Keyframe profile packet grammar drifted.", grammar);
-  assert(JSON.stringify(grammar.totalGoldOffsets) === JSON.stringify(expected.totalGoldOffsets) &&
+  assert(JSON.stringify(grammar.experienceOffsets) === JSON.stringify(expected.experienceOffsets) &&
+    JSON.stringify(grammar.totalGoldOffsets) === JSON.stringify(expected.totalGoldOffsets) &&
     JSON.stringify(grammar.laneMinionsKilledOffsets) === JSON.stringify(expected.laneMinionsKilledOffsets),
   "Keyframe profile value offsets drifted.", grammar);
   assert(Array.isArray(grammar.cipherToPlain) && grammar.cipherToPlain.length === 256 &&
@@ -123,6 +124,8 @@ function sourceBlockKey(block) {
 function validateSnapshot(snapshot, grammar) {
   assert(Number.isInteger(snapshot.timestampMillis) && snapshot.timestampMillis >= 0, "Snapshot timestamp is invalid.", snapshot);
   assert(Number.isInteger(snapshot.participantId) && snapshot.participantId >= 1 && snapshot.participantId <= 10, "Snapshot participant ID is invalid.", snapshot);
+  assert(Number.isFinite(snapshot.experience) && snapshot.experience >= 0, "Snapshot experience must be finite and non-negative.", snapshot);
+  assert(Number.isInteger(snapshot.level) && snapshot.level >= 1 && snapshot.level <= 20, "Snapshot level must be an integer from 1 through 20.", snapshot);
   assert(Number.isFinite(snapshot.totalGold) && snapshot.totalGold >= 0, "Snapshot totalGold must be finite and non-negative.", snapshot);
   assert(Number.isInteger(snapshot.laneMinionsKilled) && snapshot.laneMinionsKilled >= 0, "Snapshot laneMinionsKilled must be a non-negative integer.", snapshot);
   const block = snapshot.provenance?.snapshotBlock;
@@ -136,7 +139,7 @@ function validateSnapshot(snapshot, grammar) {
 
 function assertExtractorProfile(profile, expected) {
   assert(profile && typeof profile === "object", "Extractor omitted profile provenance.");
-  for (const field of ["segmentType", "channel", "snapshotPacketType", "snapshotContentLength", "championNetworkIdBase", "origin", "schema", "registryId", "revision"]) {
+  for (const field of ["segmentType", "channel", "snapshotPacketType", "snapshotContentLength", "championNetworkIdBase", "levelDerivation", "origin", "schema", "registryId", "revision"]) {
     assert(profile[field] === expected[field], `Extractor profile provenance drifted at ${field}.`, { expected: expected[field], actual: profile[field] });
   }
   assert(normalizeFingerprint(profile.fingerprint) === expected.fingerprint,
@@ -159,9 +162,11 @@ function validateAgainstApi(replayId, groups, timeline, match, manifest, seenExc
       `${replayId} snapshot/API frame timestamp ordering drifted.`, { groupIndex, replay: group.timestampMillis, api: frame.timestamp });
     for (const snapshot of group.snapshots) {
       const api = frame.participantFrames?.[snapshot.participantId];
-      assert(api && Number.isInteger(api.totalGold) && Number.isInteger(api.minionsKilled),
+      assert(api && Number.isInteger(api.xp) && Number.isInteger(api.level) &&
+        Number.isInteger(api.totalGold) && Number.isInteger(api.minionsKilled),
         `${replayId} Timeline frame omits participant ${snapshot.participantId}.`);
-      const exact = Math.floor(snapshot.totalGold) === api.totalGold && snapshot.laneMinionsKilled === api.minionsKilled;
+      const exact = Math.floor(snapshot.experience) === api.xp && snapshot.level === api.level &&
+        Math.floor(snapshot.totalGold) === api.totalGold && snapshot.laneMinionsKilled === api.minionsKilled;
       const key = exceptionKey(replayId, groupIndex, snapshot.participantId);
       const expected = manifest.apiOrderingDifferences.find((entry) =>
         exceptionKey(entry.replayId, entry.snapshotGroupIndex, entry.participantId) === key);
@@ -169,11 +174,18 @@ function validateAgainstApi(replayId, groups, timeline, match, manifest, seenExc
         assert(!expected, `${replayId} expected API ordering exception is no longer present.`, expected);
       } else {
         assert(expected, `${replayId} has an unapproved API snapshot-ordering difference.`, { groupIndex, snapshot, api });
-        for (const field of ["snapshotTimestampMillis", "snapshotTotalGold", "snapshotLaneMinionsKilled"]) {
-          const actual = field === "snapshotTimestampMillis" ? group.timestampMillis : snapshot[field.replace("snapshot", "").replace(/^./, (character) => character.toLowerCase())];
+        const actualSnapshot = {
+          snapshotTimestampMillis: group.timestampMillis,
+          snapshotExperience: snapshot.experience,
+          snapshotLevel: snapshot.level,
+          snapshotTotalGold: snapshot.totalGold,
+          snapshotLaneMinionsKilled: snapshot.laneMinionsKilled,
+        };
+        for (const [field, actual] of Object.entries(actualSnapshot)) {
           assert(actual === expected[field], `${replayId} frozen API exception ${field} drifted.`, { expected, actual });
         }
-        assert(frame.timestamp === expected.apiFrameTimestampMillis && api.totalGold === expected.apiTotalGold &&
+        assert(frame.timestamp === expected.apiFrameTimestampMillis && api.xp === expected.apiExperience &&
+          api.level === expected.apiLevel && api.totalGold === expected.apiTotalGold &&
           api.minionsKilled === expected.apiLaneMinionsKilled,
         `${replayId} frozen API exception oracle state drifted.`, { expected, api, frameTimestamp: frame.timestamp });
         seenExceptions.add(key);
@@ -183,7 +195,10 @@ function validateAgainstApi(replayId, groups, timeline, match, manifest, seenExc
   }
   const first = groups[0];
   for (const snapshot of first.snapshots) {
-    assert(snapshot.totalGold === manifest.runtime.initialState.totalGold && snapshot.laneMinionsKilled === manifest.runtime.initialState.laneMinionsKilled,
+    assert(snapshot.experience === manifest.runtime.initialState.experience &&
+      snapshot.level === manifest.runtime.initialState.level &&
+      snapshot.totalGold === manifest.runtime.initialState.totalGold &&
+      snapshot.laneMinionsKilled === manifest.runtime.initialState.laneMinionsKilled,
       `${replayId} initial replay participant state drifted.`, snapshot);
   }
   assert(first.timestampMillis === manifest.runtime.initialState.timestampMillis,
@@ -193,9 +208,11 @@ function validateAgainstApi(replayId, groups, timeline, match, manifest, seenExc
   assert(finalParticipants.length === 10, `${replayId} Match fixture must contain ten final participants.`);
   for (const snapshot of finalGroup.snapshots) {
     const final = finalParticipants.find((participant) => participant.participantId === snapshot.participantId);
-    assert(final && Number.isInteger(final.goldEarned) && Number.isInteger(final.totalMinionsKilled),
+    assert(final && Number.isInteger(final.champExperience) && Number.isInteger(final.champLevel) &&
+      Number.isInteger(final.goldEarned) && Number.isInteger(final.totalMinionsKilled),
       `${replayId} Match fixture omits final participant ${snapshot.participantId}.`);
-    assert(snapshot.totalGold <= final.goldEarned && snapshot.laneMinionsKilled <= final.totalMinionsKilled,
+    assert(Math.floor(snapshot.experience) <= final.champExperience && snapshot.level <= final.champLevel &&
+      snapshot.totalGold <= final.goldEarned && snapshot.laneMinionsKilled <= final.totalMinionsKilled,
       `${replayId} final keyframe exceeds saved final Match-V5 state.`, { snapshot, final });
   }
   return acceptedOrderingDifferences;
@@ -246,7 +263,9 @@ function runFixture(args, manifest, profile, fixture, seenExceptions) {
     assert(participantSnapshots.length === groups.length, `${fixture.replayId} participant is missing a keyframe snapshot.`);
     for (let index = 1; index < participantSnapshots.length; index += 1) {
       const previous = participantSnapshots[index - 1]; const current = participantSnapshots[index];
-      assert(current.timestampMillis > previous.timestampMillis && current.totalGold >= previous.totalGold &&
+      assert(current.timestampMillis > previous.timestampMillis &&
+        current.experience >= previous.experience && current.level >= previous.level &&
+        current.totalGold >= previous.totalGold &&
         current.laneMinionsKilled >= previous.laneMinionsKilled,
       `${fixture.replayId} participant snapshot series is not monotonic.`, { previous, current });
     }

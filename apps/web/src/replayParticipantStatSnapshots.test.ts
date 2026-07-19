@@ -10,7 +10,7 @@ import {
 } from "./replayParticipantStatSnapshots";
 
 const result: ReplayParticipantStatSnapshotsResult = {
-  schema: "rofl-replay-participant-stat-snapshots/v1",
+  schema: "rofl-replay-participant-stat-snapshots/v2",
   source: {
     replayPath: null,
     replayId: null,
@@ -28,6 +28,7 @@ const result: ReplayParticipantStatSnapshotsResult = {
     snapshotContentLength: 1479,
     championNetworkIdBase: 0x400000ad,
     championNetworkIdBaseHex: "0x400000AD",
+    levelDerivation: "patch-16.14-xp-thresholds-with-replay-final-level-cap",
     origin: "external",
     schema: "rofl-replay-decoder-profiles/v1",
     registryId: "participant-stat-snapshots-contract",
@@ -39,6 +40,8 @@ const result: ReplayParticipantStatSnapshotsResult = {
     return {
       timestampMillis: 60_020,
       participantId,
+      experience: 1_140 + participantId,
+      level: 4,
       totalGold: 1_200 + participantId,
       laneMinionsKilled: participantId,
       provenance: {
@@ -91,22 +94,39 @@ describe("participant stat snapshot contract", () => {
   it("rejects non-finite values, non-keyframe provenance, unordered, and ambiguous state", () => {
     const nonFinite = structuredClone(result);
     nonFinite.snapshots[0].totalGold = Number.NaN;
-    expect(() => parseReplayParticipantStatSnapshotsResult(nonFinite)).toThrow("snapshot.totalGold");
+    expect(() => parseReplayParticipantStatSnapshotsResult(nonFinite)).toThrow(
+      "snapshot.totalGold",
+    );
+
+    const invalidLevel = structuredClone(result);
+    invalidLevel.snapshots[0].level = 21;
+    expect(() => parseReplayParticipantStatSnapshotsResult(invalidLevel)).toThrow(
+      "selected exact profile",
+    );
 
     const wrongSegment = structuredClone(result);
-    Reflect.set(wrongSegment.snapshots[0].provenance.snapshotBlock.provenance, "segmentType", "chunk");
+    Reflect.set(
+      wrongSegment.snapshots[0].provenance.snapshotBlock.provenance,
+      "segmentType",
+      "chunk",
+    );
     expect(() => parseReplayParticipantStatSnapshotsResult(wrongSegment)).toThrow("segmentType");
 
     const unordered = structuredClone(result);
     unordered.snapshots.reverse();
-    expect(() => parseReplayParticipantStatSnapshotsResult(unordered)).toThrow("ordered by timestamp and participant");
+    expect(() => parseReplayParticipantStatSnapshotsResult(unordered)).toThrow(
+      "ordered by timestamp and participant",
+    );
 
     const duplicate = structuredClone(result);
     duplicate.snapshots.push(structuredClone(duplicate.snapshots[0]!));
     duplicate.snapshots.sort(
-      (left, right) => left.timestampMillis - right.timestampMillis || left.participantId - right.participantId,
+      (left, right) =>
+        left.timestampMillis - right.timestampMillis || left.participantId - right.participantId,
     );
-    expect(() => parseReplayParticipantStatSnapshotsResult(duplicate)).toThrow("duplicate participant snapshots");
+    expect(() => parseReplayParticipantStatSnapshotsResult(duplicate)).toThrow(
+      "duplicate participant snapshots",
+    );
   });
 
   it("rejects built-in and incomplete profile provenance instead of widening the boundary", () => {
@@ -116,14 +136,36 @@ describe("participant stat snapshot contract", () => {
 
     const incomplete = structuredClone(result);
     Reflect.deleteProperty(incomplete.profile, "fingerprint");
-    expect(() => parseReplayParticipantStatSnapshotsResult(incomplete)).toThrow("profile.fingerprint");
+    expect(() => parseReplayParticipantStatSnapshotsResult(incomplete)).toThrow(
+      "profile.fingerprint",
+    );
   });
 
   it("rejects partial snapshot streams instead of silently showing surviving rows", () => {
     const rejected = structuredClone(result);
     rejected.diagnostics.profiledSnapshotPacketCount = 3;
     rejected.diagnostics.rejectedInvalidValuePacketCount = 1;
-    expect(() => parseReplayParticipantStatSnapshotsResult(rejected)).toThrow("complete fail-closed");
+    expect(() => parseReplayParticipantStatSnapshotsResult(rejected)).toThrow(
+      "complete fail-closed",
+    );
+  });
+
+  it("rejects participant XP or level regression across keyframes", () => {
+    const decreasing = structuredClone(result);
+    const secondGroup = structuredClone(decreasing.snapshots).map((snapshot) => ({
+      ...snapshot,
+      timestampMillis: snapshot.timestampMillis + 60_000,
+    }));
+    secondGroup[0]!.experience = 100;
+    secondGroup[0]!.level = 1;
+    decreasing.snapshots.push(...secondGroup);
+    decreasing.diagnostics.keyframeRecordCount = 2;
+    decreasing.diagnostics.keyframeSegmentCount = 2;
+    decreasing.diagnostics.profiledSnapshotPacketCount = 20;
+    decreasing.diagnostics.emittedSnapshotCount = 20;
+    expect(() => parseReplayParticipantStatSnapshotsResult(decreasing)).toThrow(
+      "monotonic across keyframes",
+    );
   });
 
   it("uses the profiled Wasm export and validates its decoded JSON before returning it", () => {

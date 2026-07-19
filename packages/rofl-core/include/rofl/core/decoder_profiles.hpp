@@ -172,6 +172,7 @@ struct KeyframeParticipantStatsDecoderProfile {
     std::size_t content_length = 0;
     std::uint32_t champion_network_id_base = 0;
     std::array<std::uint8_t, 256> cipher_to_plain{};
+    std::array<std::size_t, 4> experience_offsets{};
     std::array<std::size_t, 4> total_gold_offsets{};
     std::array<std::size_t, 4> lane_minions_killed_offsets{};
 };

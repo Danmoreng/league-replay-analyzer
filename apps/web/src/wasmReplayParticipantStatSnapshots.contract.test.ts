@@ -20,11 +20,13 @@ const gameVersion = "16.14.794.5912";
 const championNetworkIdBase = 0x400000ad;
 const snapshotPacketType = 0x02eb;
 const snapshotContentLength = 1479;
+const experienceOffsets = [83, 85, 87, 89];
 const totalGoldOffsets = [109, 115, 117, 119];
 const laneMinionsKilledOffsets = [125, 127, 129, 131];
 
 interface SnapshotCodec {
   cipherToPlain: number[];
+  experienceOffsets: number[];
   totalGoldOffsets: number[];
   laneMinionsKilledOffsets: number[];
 }
@@ -71,11 +73,14 @@ function assignCipherBytes(
   cipherToPlain: number[],
 ): void {
   const inverseCipher = Array.from({ length: 256 }, () => -1);
-  cipherToPlain.forEach((plain, cipher) => { inverseCipher[plain] = cipher; });
+  cipherToPlain.forEach((plain, cipher) => {
+    inverseCipher[plain] = cipher;
+  });
   const encoded = float32LeBytes(value);
   offsets.forEach((offset, index) => {
     const cipher = inverseCipher[encoded[index] ?? 0];
-    if (cipher === undefined || cipher < 0) throw new Error("Snapshot test cipher is not bijective.");
+    if (cipher === undefined || cipher < 0)
+      throw new Error("Snapshot test cipher is not bijective.");
     payload[offset] = cipher;
   });
 }
@@ -85,6 +90,7 @@ function buildSnapshotReplayWithCodec(
   replayGameVersion = gameVersion,
 ): ArrayBuffer {
   const keyframe: number[] = Array.from({ length: snapshotContentLength }, () => 0);
+  assignCipherBytes(keyframe, codec.experienceOffsets, 1140, codec.cipherToPlain);
   assignCipherBytes(keyframe, codec.totalGoldOffsets, 1234, codec.cipherToPlain);
   assignCipherBytes(keyframe, codec.laneMinionsKilledOffsets, 55, codec.cipherToPlain);
   const payload: number[] = [];
@@ -93,8 +99,28 @@ function buildSnapshotReplayWithCodec(
   }
 
   const compressed = zstdCompressSync(Buffer.from(payload));
+  const finalStats = Array.from({ length: 10 }, () => ({
+    LEVEL: "18",
+    EXP: "20000",
+    MINIONS_KILLED: "100",
+    NEUTRAL_MINIONS_KILLED: "0",
+    ITEM0: "0",
+    ITEM1: "0",
+    ITEM2: "0",
+    ITEM3: "0",
+    ITEM4: "0",
+    ITEM5: "0",
+    ITEM6: "0",
+    WARD_PLACED: "0",
+    WARD_KILLED: "0",
+  }));
   const metadata = new TextEncoder().encode(
-    '{"gameLength":60000,"lastGameChunkId":0,"lastKeyFrameId":1,"statsJson":"[]"}',
+    JSON.stringify({
+      gameLength: 60000,
+      lastGameChunkId: 0,
+      lastKeyFrameId: 1,
+      statsJson: JSON.stringify(finalStats),
+    }),
   );
   const headerOffset = 32;
   const payloadOffset = headerOffset + 17;
@@ -118,11 +144,15 @@ function buildSnapshotReplayWithCodec(
 }
 
 function buildSnapshotReplay(replayGameVersion = gameVersion): ArrayBuffer {
-  return buildSnapshotReplayWithCodec({
-    cipherToPlain: identityCipher(),
-    totalGoldOffsets,
-    laneMinionsKilledOffsets,
-  }, replayGameVersion);
+  return buildSnapshotReplayWithCodec(
+    {
+      cipherToPlain: identityCipher(),
+      experienceOffsets,
+      totalGoldOffsets,
+      laneMinionsKilledOffsets,
+    },
+    replayGameVersion,
+  );
 }
 
 function identityCipher(): number[] {
@@ -139,7 +169,8 @@ function productionSnapshotCodec(): SnapshotCodec {
   const codec = registry.profiles?.find(
     (profile) => profile.versionGroup === "16.14",
   )?.keyframeParticipantStats;
-  if (!codec) throw new Error("Canonical decoder registry has no keyframe participant stats codec.");
+  if (!codec)
+    throw new Error("Canonical decoder registry has no keyframe participant stats codec.");
   return codec;
 }
 
@@ -152,6 +183,7 @@ function snapshotProfileJson(): string {
       {
         versionGroup: "16.14",
         acceptedGameVersions: [gameVersion],
+        finalStatsValidated: true,
         keyframeParticipantStats: {
           segmentType: "keyframe",
           channel: 1,
@@ -159,6 +191,7 @@ function snapshotProfileJson(): string {
           contentLength: snapshotContentLength,
           championNetworkIdBase,
           cipherToPlain: identityCipher(),
+          experienceOffsets,
           totalGoldOffsets,
           laneMinionsKilledOffsets,
         },
@@ -172,7 +205,9 @@ function profileWithoutSnapshotCapabilityJson(): string {
     schema: "rofl-replay-decoder-profiles/v1",
     registryId: "wasm-contract-no-participant-stat-snapshots",
     revision: "1",
-    profiles: [{ versionGroup: "16.14", acceptedGameVersions: [gameVersion], finalStatsValidated: true }],
+    profiles: [
+      { versionGroup: "16.14", acceptedGameVersions: [gameVersion], finalStatsValidated: true },
+    ],
   });
 }
 
@@ -223,7 +258,12 @@ function extractParticipantStatSnapshots(
   >("lra_copy_buffer_chunk", null, ["number", "number", "array", "number"]);
   const free = module.cwrap<(pointer: number) => void>("lra_free_buffer", null, ["number"]);
   const extract = module.cwrap<
-    (replayPointer: number, replaySize: number, profilePointer: number, profileSize: number) => number
+    (
+      replayPointer: number,
+      replaySize: number,
+      profilePointer: number,
+      profileSize: number,
+    ) => number
   >("lra_extract_replay_participant_stat_snapshots_buffer_with_profiles", "number", [
     "number",
     "number",
@@ -237,7 +277,10 @@ function extractParticipantStatSnapshots(
   try {
     copy(replayPointer, 0, replayBytes, replayBytes.length);
     copy(profilePointer, 0, profileBytes, profileBytes.length);
-    return parseWasmJson(module, extract(replayPointer, replayBytes.length, profilePointer, profileBytes.length));
+    return parseWasmJson(
+      module,
+      extract(replayPointer, replayBytes.length, profilePointer, profileBytes.length),
+    );
   } finally {
     free(profilePointer);
     free(replayPointer);
@@ -271,7 +314,7 @@ describe("participant-stat-snapshot Wasm ABI contract", () => {
     const profileJson = snapshotProfileJson();
     const result = extractParticipantStatSnapshots(module, buildSnapshotReplay(), profileJson);
 
-    expect(result.schema).toBe("rofl-replay-participant-stat-snapshots/v1");
+    expect(result.schema).toBe("rofl-replay-participant-stat-snapshots/v2");
     expect(result.source).toMatchObject({ runtimeInput: "rofl-only", riotApiInput: false });
     expect(result.gameVersion).toBe(gameVersion);
     expect(result.versionGroup).toBe("16.14");
@@ -286,28 +329,34 @@ describe("participant-stat-snapshot Wasm ABI contract", () => {
       snapshotPacketType,
       snapshotContentLength,
       championNetworkIdBase,
+      levelDerivation: "patch-16.14-xp-thresholds-with-replay-final-level-cap",
     });
     expect(result.snapshots).toHaveLength(10);
-    expect(result.snapshots).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        timestampMillis: 2000,
-        participantId: 1,
-        totalGold: 1234,
-        laneMinionsKilled: 55,
-        provenance: expect.objectContaining({
-          snapshotBlock: expect.objectContaining({
-            packetType: snapshotPacketType,
-            contentLength: snapshotContentLength,
-            blockParam: championNetworkIdBase + 1,
-            provenance: expect.objectContaining({ segmentType: "keyframe", blockIndex: 0 }),
+    expect(result.snapshots).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          timestampMillis: 2000,
+          participantId: 1,
+          experience: 1140,
+          level: 4,
+          totalGold: 1234,
+          laneMinionsKilled: 55,
+          provenance: expect.objectContaining({
+            snapshotBlock: expect.objectContaining({
+              packetType: snapshotPacketType,
+              contentLength: snapshotContentLength,
+              blockParam: championNetworkIdBase + 1,
+              provenance: expect.objectContaining({ segmentType: "keyframe", blockIndex: 0 }),
+            }),
           }),
         }),
-      }),
-    ]));
+      ]),
+    );
   });
 
   it("decodes the canonical production profile's cipher and fixed offsets", () => {
     const codec = productionSnapshotCodec();
+    expect(codec.experienceOffsets).toEqual([83, 85, 87, 89]);
     expect(codec.totalGoldOffsets).toEqual([115, 117, 119, 121]);
     expect(codec.laneMinionsKilledOffsets).toEqual([123, 125, 127, 129]);
     expect(codec.cipherToPlain).toHaveLength(256);
@@ -325,34 +374,44 @@ describe("participant-stat-snapshot Wasm ABI contract", () => {
       championNetworkIdBase,
     });
     expect(result.snapshots).toHaveLength(10);
-    expect(result.snapshots).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        timestampMillis: 2000,
-        participantId: 1,
-        totalGold: 1234,
-        laneMinionsKilled: 55,
-      }),
-    ]));
+    expect(result.snapshots).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          timestampMillis: 2000,
+          participantId: 1,
+          experience: 1140,
+          level: 4,
+          totalGold: 1234,
+          laneMinionsKilled: 55,
+        }),
+      ]),
+    );
   });
 
   it("fails closed for missing or malformed snapshot capabilities", () => {
-    expect(() => extractParticipantStatSnapshots(
-      module,
-      buildSnapshotReplay(),
-      profileWithoutSnapshotCapabilityJson(),
-    )).toThrow("external decoder registry has no keyframe participant stats profile");
-    expect(() => extractParticipantStatSnapshots(
-      module,
-      buildSnapshotReplay(),
-      malformedSnapshotProfileJson(),
-    )).toThrow("cipherToPlain");
+    expect(() =>
+      extractParticipantStatSnapshots(
+        module,
+        buildSnapshotReplay(),
+        profileWithoutSnapshotCapabilityJson(),
+      ),
+    ).toThrow("external decoder registry has no keyframe participant stats profile");
+    expect(() =>
+      extractParticipantStatSnapshots(
+        module,
+        buildSnapshotReplay(),
+        malformedSnapshotProfileJson(),
+      ),
+    ).toThrow("cipherToPlain");
   });
 
   it("fails closed for a non-exact replay build", () => {
-    expect(() => extractParticipantStatSnapshots(
-      module,
-      buildSnapshotReplay("16.14.794.5913"),
-      snapshotProfileJson(),
-    )).toThrow("restricted to exact build 16.14.794.5912");
+    expect(() =>
+      extractParticipantStatSnapshots(
+        module,
+        buildSnapshotReplay("16.14.794.5913"),
+        snapshotProfileJson(),
+      ),
+    ).toThrow("restricted to exact build 16.14.794.5912");
   });
 });

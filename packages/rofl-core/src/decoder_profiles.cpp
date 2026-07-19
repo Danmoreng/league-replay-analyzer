@@ -737,8 +737,8 @@ parse_keyframe_participant_stats(const JsonValue& value) {
             "profile schema: 'keyframeParticipantStats' must be an object");
     }
     allow_only(value, {"segmentType", "channel", "packetType", "contentLength",
-                       "championNetworkIdBase", "cipherToPlain", "totalGoldOffsets",
-                       "laneMinionsKilledOffsets"});
+                       "championNetworkIdBase", "cipherToPlain", "experienceOffsets",
+                       "totalGoldOffsets", "laneMinionsKilledOffsets"});
     KeyframeParticipantStatsDecoderProfile profile;
     profile.segment_type = string_value(field(value, "segmentType"), "segmentType", 16);
     profile.channel = static_cast<std::uint8_t>(integer_value(
@@ -751,6 +751,8 @@ parse_keyframe_participant_stats(const JsonValue& value) {
         field(value, "championNetworkIdBase"), "championNetworkIdBase", 0xffffffffULL));
     profile.cipher_to_plain = fixed_byte_permutation<256>(
         field(value, "cipherToPlain"), "cipherToPlain");
+    profile.experience_offsets = fixed_offsets<4>(
+        field(value, "experienceOffsets"), "experienceOffsets", profile.content_length);
     profile.total_gold_offsets = fixed_offsets<4>(
         field(value, "totalGoldOffsets"), "totalGoldOffsets", profile.content_length);
     profile.lane_minions_killed_offsets = fixed_offsets<4>(

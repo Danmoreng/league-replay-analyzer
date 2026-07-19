@@ -1,6 +1,6 @@
 # Reverse Engineering Docs Index
 
-Updated: 2026-07-22
+Updated: 2026-07-23
 
 This file consolidates the replay reverse-engineering documentation into a smaller set of active references.
 
@@ -55,8 +55,8 @@ are outside scope even when described by historical community work.
   non-semantic boundary)
 - `docs/decoder-status.md` also records the promoted exact-build `0x02EB`
   participant-snapshot grammar: the profile-pinned 256-byte permutation and
-  interleaved total-gold/lane-CS Float32LE stripes. XP and neutral-CS stripes
-  remain research candidates, not runtime fields.
+  interleaved XP/total-gold/lane-CS Float32LE stripes plus the replay-only
+  XP-threshold/final-level-cap derivation. Neutral CS remains research-only.
 - `scripts/validate_replay_participant_stat_snapshots_corpus.mjs` and
   `scripts/manifests/replay-participant-stat-snapshots-16.14.expected.json`
   reproduce its compact D7/H3 promotion gate.

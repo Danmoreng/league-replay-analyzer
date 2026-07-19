@@ -5841,6 +5841,8 @@ void write_inventory_sale_removal_block_json(
 struct ReplayParticipantStatSnapshot {
     long long timestamp_millis = 0;
     int participant_id = 0;
+    float experience = 0.0F;
+    int level = 1;
     float total_gold = 0.0F;
     float lane_minions_killed = 0.0F;
     PacketBlock block;
@@ -5866,8 +5868,25 @@ struct ReplayParticipantStatSnapshot {
         }
         return true;
     };
-    return offsets_valid(profile.total_gold_offsets) &&
+    return offsets_valid(profile.experience_offsets) &&
+           offsets_valid(profile.total_gold_offsets) &&
            offsets_valid(profile.lane_minions_killed_offsets);
+}
+
+[[nodiscard]] int derive_keyframe_level(float experience, int final_level) {
+    // Patch 16.14 cumulative XP thresholds for levels 1 through 20. Whether a
+    // participant may progress beyond level 18 is replay-native final metadata,
+    // not an API or static-runtime fallback.
+    static constexpr std::array<int, 20> kCumulativeExperience{{
+        0, 280, 660, 1140, 1720, 2400, 3180, 4060, 5040, 6120,
+        7300, 8580, 9960, 11440, 13020, 14700, 16480, 18360, 20340, 22420,
+    }};
+    int level = 1;
+    for (std::size_t index = 1; index < kCumulativeExperience.size(); ++index) {
+        if (experience < static_cast<float>(kCumulativeExperience[index])) break;
+        level = static_cast<int>(index + 1);
+    }
+    return std::min(level, final_level > 18 ? 20 : 18);
 }
 
 [[nodiscard]] bool keyframe_stat_cipher_is_bijective(
@@ -5944,6 +5963,16 @@ void write_participant_stat_snapshot_block_json(
     }
     const KeyframeParticipantStatsDecoderProfile& profile =
         *selected->keyframe_participant_stats;
+    if (!selected->final_stats_validated.value_or(false) ||
+        !summary.capabilities.validated_final_player_stats_available ||
+        summary.players.size() != 10 ||
+        std::any_of(summary.players.begin(), summary.players.end(), [](const PlayerSummary& player) {
+            return player.level < 1 || player.level > 20 || player.experience < 0;
+        })) {
+        throw std::runtime_error(
+            "Keyframe participant level derivation requires validated replay-embedded final stats."
+        );
+    }
     if (!keyframe_stat_profile_is_exact(profile)) {
         throw std::runtime_error(
             "Keyframe participant stats profile must be keyframe/channel-1/0x02EB/content-length-1479."
@@ -5977,11 +6006,16 @@ void write_participant_stat_snapshot_block_json(
                     ++rejected_invalid_owner_packet_count;
                     continue;
                 }
+                const float experience = decode_keyframe_stat_float32_le(
+                    decompressed, block, profile.experience_offsets, profile);
                 const float total_gold = decode_keyframe_stat_float32_le(
                     decompressed, block, profile.total_gold_offsets, profile);
                 const float lane_minions_killed = decode_keyframe_stat_float32_le(
                     decompressed, block, profile.lane_minions_killed_offsets, profile);
-                const bool invalid_value = !std::isfinite(total_gold) || total_gold < 0.0F ||
+                const int level = derive_keyframe_level(
+                    experience, summary.players[static_cast<std::size_t>(participant_id - 1)].level);
+                const bool invalid_value = !std::isfinite(experience) || experience < 0.0F ||
+                    !std::isfinite(total_gold) || total_gold < 0.0F ||
                     !std::isfinite(lane_minions_killed) || lane_minions_killed < 0.0F ||
                     std::trunc(lane_minions_killed) != lane_minions_killed;
                 if (invalid_value) {
@@ -5991,6 +6025,8 @@ void write_participant_stat_snapshot_block_json(
                 snapshots.push_back({
                     packet_timestamp_millis(block.timestamp_seconds),
                     participant_id,
+                    experience,
+                    level,
                     total_gold,
                     lane_minions_killed,
                     block,
@@ -6039,18 +6075,26 @@ void write_participant_stat_snapshot_block_json(
     }
     std::array<std::optional<float>, 10> previous_gold;
     std::array<std::optional<float>, 10> previous_lane_minions;
+    std::array<std::optional<float>, 10> previous_experience;
+    std::array<std::optional<int>, 10> previous_level;
     std::vector<ReplayParticipantStatSnapshot> monotonic_snapshots;
     monotonic_snapshots.reserve(snapshots.size());
     for (const ReplayParticipantStatSnapshot& snapshot : snapshots) {
         const std::size_t participant_index =
             static_cast<std::size_t>(snapshot.participant_id - 1);
-        if ((previous_gold[participant_index].has_value() &&
+        if ((previous_experience[participant_index].has_value() &&
+                snapshot.experience < *previous_experience[participant_index]) ||
+            (previous_level[participant_index].has_value() &&
+                snapshot.level < *previous_level[participant_index]) ||
+            (previous_gold[participant_index].has_value() &&
                 snapshot.total_gold < *previous_gold[participant_index]) ||
             (previous_lane_minions[participant_index].has_value() &&
                 snapshot.lane_minions_killed < *previous_lane_minions[participant_index])) {
             ++rejected_invalid_value_packet_count;
             continue;
         }
+        previous_experience[participant_index] = snapshot.experience;
+        previous_level[participant_index] = snapshot.level;
         previous_gold[participant_index] = snapshot.total_gold;
         previous_lane_minions[participant_index] = snapshot.lane_minions_killed;
         monotonic_snapshots.push_back(snapshot);
@@ -6089,7 +6133,7 @@ void write_participant_stat_snapshot_block_json(
     }
 
     std::ostringstream output;
-    output << "{\"schema\":\"rofl-replay-participant-stat-snapshots/v1\",\"source\":{\"replayPath\":";
+    output << "{\"schema\":\"rofl-replay-participant-stat-snapshots/v2\",\"source\":{\"replayPath\":";
     if (source.has_file) output << '\"' << json_escape(source.replay_path) << '\"';
     else output << "null";
     output << ",\"replayId\":";
@@ -6108,7 +6152,8 @@ void write_participant_stat_snapshot_block_json(
            << "\",\"snapshotContentLength\":" << profile.content_length
            << ",\"championNetworkIdBase\":" << profile.champion_network_id_base
            << ",\"championNetworkIdBaseHex\":\""
-           << fixed_hex(profile.champion_network_id_base, 8) << "\"";
+           << fixed_hex(profile.champion_network_id_base, 8) << "\""
+           << ",\"levelDerivation\":\"patch-16.14-xp-thresholds-with-replay-final-level-cap\"";
     write_decoder_profile_provenance_fields(output, &decoder_profiles);
     output << "},\"snapshots\":[";
     for (std::size_t index = 0; index < snapshots.size(); ++index) {
@@ -6116,6 +6161,9 @@ void write_participant_stat_snapshot_block_json(
         const ReplayParticipantStatSnapshot& snapshot = snapshots[index];
         output << "{\"timestampMillis\":" << snapshot.timestamp_millis
                << ",\"participantId\":" << snapshot.participant_id
+               << ",\"experience\":" << std::setprecision(std::numeric_limits<float>::max_digits10)
+               << snapshot.experience
+               << ",\"level\":" << snapshot.level
                << ",\"totalGold\":" << std::setprecision(std::numeric_limits<float>::max_digits10)
                << snapshot.total_gold
                << ",\"laneMinionsKilled\":" << snapshot.lane_minions_killed
@@ -14874,8 +14922,6 @@ std::string match_event_window(
 }
 
 }  // namespace rofl::core
-
-
 
 
 

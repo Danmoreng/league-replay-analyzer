@@ -168,7 +168,7 @@ describe("purchase-linked resulting-item update presentation helpers", () => {
     expect(source).toContain("event.timestampMillis > currentTime.value");
     expect(source).toContain("kein vollständiger Inventarstand");
     expect(source).toContain("Item-Käufe nicht verfügbar");
-    expect(source).toContain("Gold und Lane-CS für diesen Patch nicht verfügbar");
+    expect(source).toContain("XP, Level, Gold und Lane-CS für diesen Patch nicht verfügbar");
     expect(source).not.toContain("player.items");
     expect(source).not.toContain("function finalItems");
     expect(source).not.toContain("health-bar");

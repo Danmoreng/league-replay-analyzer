@@ -1,7 +1,7 @@
 {
   "schema": "rofl-replay-decoder-profiles/v1",
   "registryId": "league-replay-analyzer-offline-validated",
-  "revision": "2026-07-22",
+  "revision": "2026-07-23",
   "profiles": [
     {
       "versionGroup": "15.22",
@@ -538,6 +538,7 @@
           72, 217, 84, 167, 122, 219, 47, 216, 128, 46, 15, 147, 155, 79, 161, 13,
           105, 164, 77, 230, 41, 120, 127, 149, 23, 28, 152, 29, 110, 85, 170, 218
         ],
+        "experienceOffsets": [83, 85, 87, 89],
         "totalGoldOffsets": [115, 117, 119, 121],
         "laneMinionsKilledOffsets": [123, 125, 127, 129]
       }

@@ -1360,12 +1360,14 @@ bool test_replay_ward_position_research_fixture() {
 std::vector<std::uint8_t> build_footer_keyframe_participant_stats_fixture(
     bool include_duplicate_participant_snapshot = false,
     bool include_invalid_owner_snapshot = false,
-    bool include_invalid_value_snapshot = false
+    bool include_invalid_value_snapshot = false,
+    float second_experience = 1140.0F,
+    int final_level = 18
 ) {
     constexpr std::uint32_t champion_base = 0x400000AD;
     constexpr std::uint16_t snapshot_packet_type = 0x02EB;
     constexpr std::size_t snapshot_content_length = 1479;
-    const auto make_snapshot = [](float gold, float lane) {
+    const auto make_snapshot = [](float experience, float gold, float lane) {
         std::vector<std::uint8_t> payload(snapshot_content_length, 0);
         const auto write_interleaved_float = [&](const std::array<std::size_t, 4>& offsets,
                                                    float value) {
@@ -1375,12 +1377,15 @@ std::vector<std::uint8_t> build_footer_keyframe_participant_stats_fixture(
                     (bits >> (index * 8U)) & 0xFFU);
             }
         };
+        write_interleaved_float({83, 85, 87, 89}, experience);
         write_interleaved_float({115, 117, 119, 121}, gold);
         write_interleaved_float({123, 125, 127, 129}, lane);
         return payload;
     };
 
-    const auto make_keyframe_payload = [&](float timestamp, float gold_base, float lane_base) {
+    const auto make_keyframe_payload = [&] (
+        float timestamp, float experience, float gold_base, float lane_base
+    ) {
         std::vector<std::uint8_t> payload;
         for (int participant_id = 1; participant_id <= 10; ++participant_id) {
             const float gold = participant_id == 1 ? gold_base : gold_base + participant_id;
@@ -1389,28 +1394,46 @@ std::vector<std::uint8_t> build_footer_keyframe_participant_stats_fixture(
                 timestamp,
                 snapshot_packet_type,
                 champion_base + static_cast<std::uint32_t>(participant_id),
-                make_snapshot(gold, lane_base + participant_id - 1)
+                make_snapshot(experience, gold, lane_base + participant_id - 1)
             );
         }
         return payload;
     };
-    std::vector<std::uint8_t> first_keyframe = make_keyframe_payload(0.0F, 500.25F, 0.0F);
-    std::vector<std::uint8_t> second_keyframe = make_keyframe_payload(60.0F, 610.5F, 12.0F);
+    std::vector<std::uint8_t> first_keyframe =
+        make_keyframe_payload(0.0F, 0.0F, 500.25F, 0.0F);
+    std::vector<std::uint8_t> second_keyframe =
+        make_keyframe_payload(60.0F, second_experience, 610.5F, 12.0F);
     if (include_duplicate_participant_snapshot) {
         append_packet_block_with_content(
-            second_keyframe, 60.0F, snapshot_packet_type, champion_base + 1, make_snapshot(611.0F, 13.0F));
+            second_keyframe, 60.0F, snapshot_packet_type, champion_base + 1,
+            make_snapshot(second_experience, 611.0F, 13.0F));
     }
     if (include_invalid_owner_snapshot) {
         append_packet_block_with_content(
-            second_keyframe, 60.0F, snapshot_packet_type, champion_base + 11, make_snapshot(700.0F, 15.0F));
+            second_keyframe, 60.0F, snapshot_packet_type, champion_base + 11,
+            make_snapshot(second_experience, 700.0F, 15.0F));
     }
     if (include_invalid_value_snapshot) {
         append_packet_block_with_content(
-            second_keyframe, 120.0F, snapshot_packet_type, champion_base + 1, make_snapshot(600.0F, 13.0F));
+            second_keyframe, 120.0F, snapshot_packet_type, champion_base + 1,
+            make_snapshot(second_experience, 600.0F, 13.0F));
     }
 
+    std::string stats_json = "[";
+    for (int participant_id = 1; participant_id <= 10; ++participant_id) {
+        if (participant_id > 1) stats_json += ',';
+        stats_json += "{\"LEVEL\":\"" + std::to_string(final_level) +
+            R"(","EXP":"25000","MINIONS_KILLED":"100","NEUTRAL_MINIONS_KILLED":"0","ITEM0":"0","ITEM1":"0","ITEM2":"0","ITEM3":"0","ITEM4":"0","ITEM5":"0","ITEM6":"0","WARD_PLACED":"0","WARD_KILLED":"0"})";
+    }
+    stats_json += ']';
+    std::string escaped_stats_json;
+    for (const char character : stats_json) {
+        if (character == '"' || character == '\\') escaped_stats_json += '\\';
+        escaped_stats_json += character;
+    }
     const std::string metadata =
-        R"({"gameLength":120000,"lastGameChunkId":0,"lastKeyFrameId":2,"statsJson":"[]"})";
+        R"({"gameLength":120000,"lastGameChunkId":0,"lastKeyFrameId":2,"statsJson":")" +
+        escaped_stats_json + R"("})";
     const auto first_compressed = compress_zstd_payload(std::string(
         reinterpret_cast<const char*>(first_keyframe.data()), first_keyframe.size()));
     const auto second_compressed = compress_zstd_payload(std::string(
@@ -1439,12 +1462,12 @@ std::vector<std::uint8_t> build_footer_keyframe_participant_stats_fixture(
 
 std::string keyframe_participant_stats_profile_json() {
     std::ostringstream output;
-    output << R"json({"schema":"rofl-replay-decoder-profiles/v1","registryId":"keyframe-stats-smoke","revision":1,"profiles":[{"versionGroup":"16.14","acceptedGameVersions":["16.14.794.5912"],"keyframeParticipantStats":{"segmentType":"keyframe","channel":1,"packetType":747,"contentLength":1479,"championNetworkIdBase":1073741997,"cipherToPlain":[)json";
+    output << R"json({"schema":"rofl-replay-decoder-profiles/v1","registryId":"keyframe-stats-smoke","revision":1,"profiles":[{"versionGroup":"16.14","acceptedGameVersions":["16.14.794.5912"],"finalStatsValidated":true,"keyframeParticipantStats":{"segmentType":"keyframe","channel":1,"packetType":747,"contentLength":1479,"championNetworkIdBase":1073741997,"cipherToPlain":[)json";
     for (int value = 0; value < 256; ++value) {
         if (value > 0) output << ',';
         output << value;
     }
-    output << R"json(],"totalGoldOffsets":[115,117,119,121],"laneMinionsKilledOffsets":[123,125,127,129]}}]})json";
+    output << R"json(],"experienceOffsets":[83,85,87,89],"totalGoldOffsets":[115,117,119,121],"laneMinionsKilledOffsets":[123,125,127,129]}}]})json";
     return output.str();
 }
 
@@ -1454,6 +1477,16 @@ bool test_replay_participant_stat_snapshots_fixture() {
     if (!loaded.ok() || !loaded.registry.has_value()) return false;
     const std::string json = rofl::core::extract_replay_participant_stat_snapshots_json(
         build_footer_keyframe_participant_stats_fixture(), *loaded.registry);
+    const std::string capped_level_json =
+        rofl::core::extract_replay_participant_stat_snapshots_json(
+            build_footer_keyframe_participant_stats_fixture(
+                false, false, false, 22420.0F, 18),
+            *loaded.registry);
+    const std::string extended_level_json =
+        rofl::core::extract_replay_participant_stat_snapshots_json(
+            build_footer_keyframe_participant_stats_fixture(
+                false, false, false, 22420.0F, 20),
+            *loaded.registry);
     bool duplicate_rejected = false;
     bool invalid_owner_rejected = false;
     bool invalid_value_rejected = false;
@@ -1478,15 +1511,17 @@ bool test_replay_participant_stat_snapshots_fixture() {
         invalid_value_rejected = std::string_view(error.what()).find(
             "rejected invalid owner or value packets") != std::string_view::npos;
     }
-    return json.find("\"schema\":\"rofl-replay-participant-stat-snapshots/v1\"") != std::string::npos &&
+    return json.find("\"schema\":\"rofl-replay-participant-stat-snapshots/v2\"") != std::string::npos &&
            duplicate_rejected &&
            invalid_owner_rejected &&
            invalid_value_rejected &&
+           capped_level_json.find("\"experience\":22420,\"level\":18") != std::string::npos &&
+           extended_level_json.find("\"experience\":22420,\"level\":20") != std::string::npos &&
            json.find("\"runtimeInput\":\"rofl-only\",\"riotApiInput\":false") != std::string::npos &&
            json.find("\"origin\":\"external\"") != std::string::npos &&
            json.find("\"snapshotPacketType\":747") != std::string::npos &&
-           json.find("\"timestampMillis\":0,\"participantId\":1,\"totalGold\":500.25,\"laneMinionsKilled\":0") != std::string::npos &&
-           json.find("\"timestampMillis\":60000,\"participantId\":1,\"totalGold\":610.5,\"laneMinionsKilled\":12") != std::string::npos &&
+           json.find("\"timestampMillis\":0,\"participantId\":1,\"experience\":0,\"level\":1,\"totalGold\":500.25,\"laneMinionsKilled\":0") != std::string::npos &&
+           json.find("\"timestampMillis\":60000,\"participantId\":1,\"experience\":1140,\"level\":4,\"totalGold\":610.5,\"laneMinionsKilled\":12") != std::string::npos &&
            json.find("\"keyframeSegmentCount\":2") != std::string::npos &&
            json.find("\"profiledSnapshotPacketCount\":20") != std::string::npos &&
            json.find("\"rejectedInvalidOwnerPacketCount\":0") != std::string::npos &&
@@ -1578,6 +1613,7 @@ bool test_decoder_profile_registry_loader() {
             "profiles":[{
                 "versionGroup":"16.14",
                 "acceptedGameVersions":[")json" << build << R"json("],
+                "finalStatsValidated":true,
                 "keyframeParticipantStats":{
                     "segmentType":"keyframe",
                     "channel":1,
@@ -1590,6 +1626,7 @@ bool test_decoder_profile_registry_loader() {
             output << value;
         }
         output << R"json(],
+                    "experienceOffsets":[83,85,87,89],
                     "totalGoldOffsets":[115,117,119,121],
                     "laneMinionsKilledOffsets":[123,125,127,129]
                 }
@@ -1620,6 +1657,7 @@ bool test_decoder_profile_registry_loader() {
         keyframe_stats.champion_network_id_base != 1073741997 ||
         keyframe_stats.cipher_to_plain[0] != 0 ||
         keyframe_stats.cipher_to_plain[255] != 255 ||
+        keyframe_stats.experience_offsets != std::array<std::size_t, 4>{83, 85, 87, 89} ||
         keyframe_stats.total_gold_offsets != std::array<std::size_t, 4>{115, 117, 119, 121} ||
         keyframe_stats.lane_minions_killed_offsets !=
             std::array<std::size_t, 4>{123, 125, 127, 129}) {
@@ -1751,6 +1789,4 @@ int main() {
 
     return EXIT_SUCCESS;
 }
-
-
 

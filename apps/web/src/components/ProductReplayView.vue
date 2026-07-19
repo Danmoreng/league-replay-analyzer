@@ -101,6 +101,8 @@ interface WardBucket {
 interface CurrentParticipantStats {
   participantId: number;
   timestampMillis: number;
+  experience: number;
+  level: number;
   totalGold: number;
   laneCs: number;
 }
@@ -247,9 +249,7 @@ const events = computed<ProductEvent[]>(() =>
 );
 
 const primaryEvents = computed(() =>
-  events.value.filter(
-    (event) => event.kind !== "ward-placement" && event.kind !== "ward-kill",
-  ),
+  events.value.filter((event) => event.kind !== "ward-placement" && event.kind !== "ward-kill"),
 );
 
 const counts = computed(() => ({
@@ -313,11 +313,15 @@ const participantStatSnapshotRows = computed<CurrentParticipantStats[]>(() => {
   for (const snapshot of props.participantStatSnapshots?.snapshots ?? []) {
     const participantId = snapshot.participantId;
     const timestampMillis = snapshot.timestampMillis;
+    const experience = snapshot.experience;
+    const level = snapshot.level;
     const totalGold = snapshot.totalGold;
     const laneCs = snapshot.laneMinionsKilled;
     if (
       !Number.isInteger(participantId) ||
       !Number.isFinite(timestampMillis) ||
+      !Number.isFinite(experience) ||
+      !Number.isInteger(level) ||
       !Number.isFinite(totalGold) ||
       !Number.isFinite(laneCs)
     ) {
@@ -326,6 +330,8 @@ const participantStatSnapshotRows = computed<CurrentParticipantStats[]>(() => {
     rows.push({
       participantId,
       timestampMillis,
+      experience,
+      level,
       totalGold,
       laneCs,
     });
@@ -507,11 +513,7 @@ function itemName(itemId: number): string {
 function itemIcon(itemId: number): string {
   return (
     resolveReplayItem(itemCatalog.value, itemId)?.iconUrl ??
-    "https://ddragon.leagueoflegends.com/cdn/" +
-      ddragonVersion() +
-      "/img/item/" +
-      itemId +
-      ".png"
+    "https://ddragon.leagueoflegends.com/cdn/" + ddragonVersion() + "/img/item/" + itemId + ".png"
   );
 }
 
@@ -604,11 +606,18 @@ function eventInvolves(event: ProductEvent, participantId: number): boolean {
 function eventLabel(event: ProductEvent): string {
   if (event.kind === "objective") return replayObjectiveMonsterLabel(event.event.monsterType);
   if (event.kind === "purchase-update") {
-    return participantChampion(event.event.participantId) + " · " + itemName(event.event.resultingItemId);
+    return (
+      participantChampion(event.event.participantId) + " · " + itemName(event.event.resultingItemId)
+    );
   }
   if (event.kind === "direct-purchase") {
     const component = event.event.componentItem ? "Komponente · " : "";
-    return participantChampion(event.event.participantId) + " · " + component + itemName(event.event.itemId);
+    return (
+      participantChampion(event.event.participantId) +
+      " · " +
+      component +
+      itemName(event.event.itemId)
+    );
   }
   if (event.kind === "sale-operation") {
     return participantChampion(event.event.participantId) + " · Verkaufsoperation";
@@ -695,17 +704,25 @@ function onScrub(event: Event): void {
           <span class="objective"><i></i>{{ counts.objectives }} Objectives</span>
           <span class="purchase-update">
             <i></i>
-            <template v-if="purchaseLinkedItemUpdatesLoading">Upgrade-Ergebnisse werden dekodiert</template>
-            <template v-else-if="purchaseUpdatesUnavailable">Upgrade-Ergebnisse nicht verfügbar</template>
+            <template v-if="purchaseLinkedItemUpdatesLoading"
+              >Upgrade-Ergebnisse werden dekodiert</template
+            >
+            <template v-else-if="purchaseUpdatesUnavailable"
+              >Upgrade-Ergebnisse nicht verfügbar</template
+            >
             <template v-else>{{ counts.purchaseUpdates }} Upgrade-Ergebnisse</template>
           </span>
           <span class="direct-purchase">
             <i></i>
             <template v-if="directItemPurchasesLoading">Direkte Käufe werden dekodiert</template>
-            <template v-else-if="directPurchasesUnavailable">Direkte Käufe nicht verfügbar</template>
+            <template v-else-if="directPurchasesUnavailable"
+              >Direkte Käufe nicht verfügbar</template
+            >
             <template v-else>
               {{ counts.directPurchases }} direkte Käufe
-              <template v-if="counts.directComponents">· {{ counts.directComponents }} Komponenten</template>
+              <template v-if="counts.directComponents"
+                >· {{ counts.directComponents }} Komponenten</template
+              >
             </template>
           </span>
           <span class="sale-operation">
@@ -833,12 +850,26 @@ function onScrub(event: Event): void {
             </span>
 
             <span v-if="currentParticipantStats(entry.participantId)" class="live-stats">
-              <small>REPLAY-STATUS · {{ formatTime(currentParticipantStats(entry.participantId)!.timestampMillis) }}</small>
-              <span class="live-gold" title="Replay-nativer Gesamtgoldwert; für die Anzeige auf ganze Goldstücke gekürzt">
-                <i class="bi bi-coin"></i>{{ formatCurrentGold(currentParticipantStats(entry.participantId)!.totalGold) }}g
+              <small
+                >REPLAY-STATUS ·
+                {{
+                  formatTime(currentParticipantStats(entry.participantId)!.timestampMillis)
+                }}</small
+              >
+              <span title="Aus replay-nativer XP und patch-gepinnten Schwellen abgeleitet">
+                Lvl {{ currentParticipantStats(entry.participantId)!.level }} ·
+                {{ Math.trunc(currentParticipantStats(entry.participantId)!.experience) }} XP
+              </span>
+              <span
+                class="live-gold"
+                title="Replay-nativer Gesamtgoldwert; für die Anzeige auf ganze Goldstücke gekürzt"
+              >
+                <i class="bi bi-coin"></i
+                >{{ formatCurrentGold(currentParticipantStats(entry.participantId)!.totalGold) }}g
               </span>
               <span title="Replay-nativer Lane-CS-Snapshot">
-                <i class="bi bi-stack"></i>{{ Math.trunc(currentParticipantStats(entry.participantId)!.laneCs) }} Lane CS
+                <i class="bi bi-stack"></i
+                >{{ Math.trunc(currentParticipantStats(entry.participantId)!.laneCs) }} Lane CS
               </span>
             </span>
             <span v-else-if="participantStatSnapshotsLoading" class="live-stats unavailable">
@@ -847,7 +878,9 @@ function onScrub(event: Event): void {
             </span>
             <span v-else class="live-stats unavailable" :title="participantStatSnapshotsError">
               <small>REPLAY-STATUS</small>
-              <span v-if="participantStatsUnavailable">Gold und Lane-CS für diesen Patch nicht verfügbar</span>
+              <span v-if="participantStatsUnavailable"
+                >XP, Level, Gold und Lane-CS für diesen Patch nicht verfügbar</span
+              >
               <span v-else>Noch kein Snapshot vor {{ formatTime(currentTime) }}</span>
             </span>
 
@@ -866,7 +899,10 @@ function onScrub(event: Event): void {
                 class="purchase-chip"
                 :class="[
                   itemEvent.kind,
-                  { component: itemEvent.kind === 'direct-purchase' && itemEvent.event.componentItem },
+                  {
+                    component:
+                      itemEvent.kind === 'direct-purchase' && itemEvent.event.componentItem,
+                  },
                 ]"
                 :title="purchaseTitle(itemEvent)"
               >
@@ -930,7 +966,11 @@ function onScrub(event: Event): void {
         <p
           class="purchase-boundary"
           :class="{ unavailable: itemOperationStreamsUnavailable }"
-          :title="[purchaseLinkedItemUpdatesError, directItemPurchasesError, itemSalesError].filter(Boolean).join(' ')"
+          :title="
+            [purchaseLinkedItemUpdatesError, directItemPurchasesError, itemSalesError]
+              .filter(Boolean)
+              .join(' ')
+          "
         >
           <i
             class="bi"
@@ -938,8 +978,14 @@ function onScrub(event: Event): void {
           ></i>
           <span>
             <template v-if="itemOperationStreamsUnavailable">
-              <b>Item-Käufe nicht verfügbar; Verkaufsströme für diesen Patch ebenfalls nicht verfügbar</b>
-              <small>Es werden keine null Käufe oder Verkäufe behauptet und keine Inventardaten geschätzt.</small>
+              <b
+                >Item-Käufe nicht verfügbar; Verkaufsströme für diesen Patch ebenfalls nicht
+                verfügbar</b
+              >
+              <small
+                >Es werden keine null Käufe oder Verkäufe behauptet und keine Inventardaten
+                geschätzt.</small
+              >
             </template>
             <template v-else>
               <b>
@@ -1009,7 +1055,13 @@ function onScrub(event: Event): void {
   align-items: center;
   gap: 20px;
   padding: 12px 22px;
-  background: linear-gradient(100deg, rgba(18, 62, 93, 0.52), #070c14 43%, #070c14 57%, rgba(95, 24, 35, 0.48));
+  background: linear-gradient(
+    100deg,
+    rgba(18, 62, 93, 0.52),
+    #070c14 43%,
+    #070c14 57%,
+    rgba(95, 24, 35, 0.48)
+  );
 }
 
 .match-identity {
@@ -1158,12 +1210,24 @@ function onScrub(event: Event): void {
   background: currentColor;
 }
 
-.timeline-legend .kill { color: var(--red); }
-.timeline-legend .objective { color: var(--gold); }
-.timeline-legend .purchase-update { color: #c49aff; }
-.timeline-legend .direct-purchase { color: #61d5c3; }
-.timeline-legend .sale-operation { color: #f0a85f; }
-.timeline-legend .ward { color: #56d6c2; }
+.timeline-legend .kill {
+  color: var(--red);
+}
+.timeline-legend .objective {
+  color: var(--gold);
+}
+.timeline-legend .purchase-update {
+  color: #c49aff;
+}
+.timeline-legend .direct-purchase {
+  color: #61d5c3;
+}
+.timeline-legend .sale-operation {
+  color: #f0a85f;
+}
+.timeline-legend .ward {
+  color: #56d6c2;
+}
 
 .timeline-layout {
   display: grid;
@@ -1213,7 +1277,9 @@ function onScrub(event: Event): void {
   height: 34px;
   border: 1px solid rgba(143, 171, 202, 0.08);
   border-radius: 7px;
-  background: linear-gradient(to bottom, #1a2330 0 8px, transparent 8px 20px, rgba(86, 214, 194, 0.05) 20px), #0a1018;
+  background:
+    linear-gradient(to bottom, #1a2330 0 8px, transparent 8px 20px, rgba(86, 214, 194, 0.05) 20px),
+    #0a1018;
 }
 
 .timeline-track input {
@@ -1254,8 +1320,12 @@ function onScrub(event: Event): void {
   cursor: pointer;
 }
 
-.event-marker.kill { color: var(--red); }
-.event-marker.objective { color: var(--gold); }
+.event-marker.kill {
+  color: var(--red);
+}
+.event-marker.objective {
+  color: var(--gold);
+}
 .event-marker.purchase-update {
   border-color: #c49aff;
   color: #c49aff;
@@ -1349,8 +1419,12 @@ function onScrub(event: Event): void {
   overflow: hidden;
 }
 
-.roster-blue { grid-area: blue; }
-.roster-red { grid-area: red; }
+.roster-blue {
+  grid-area: blue;
+}
+.roster-red {
+  grid-area: red;
+}
 
 .roster-title {
   display: flex;
@@ -1595,13 +1669,28 @@ function onScrub(event: Event): void {
   font-size: 0.72rem;
 }
 
-.event-symbol.kill { color: var(--red); }
-.event-symbol.objective { color: var(--gold); }
-.event-symbol.purchase-update { border-color: rgba(196, 154, 255, 0.4); }
-.event-symbol.direct-purchase { border-color: rgba(97, 213, 195, 0.54); }
-.event-symbol.sale-operation { border-color: rgba(240, 168, 95, 0.54); color: #f0a85f; }
-.event-symbol.ward-placement { color: #56d6c2; }
-.event-symbol.ward-kill { color: #b596ee; }
+.event-symbol.kill {
+  color: var(--red);
+}
+.event-symbol.objective {
+  color: var(--gold);
+}
+.event-symbol.purchase-update {
+  border-color: rgba(196, 154, 255, 0.4);
+}
+.event-symbol.direct-purchase {
+  border-color: rgba(97, 213, 195, 0.54);
+}
+.event-symbol.sale-operation {
+  border-color: rgba(240, 168, 95, 0.54);
+  color: #f0a85f;
+}
+.event-symbol.ward-placement {
+  color: #56d6c2;
+}
+.event-symbol.ward-kill {
+  color: #b596ee;
+}
 
 .event-copy {
   min-width: 0;
