@@ -272,6 +272,54 @@ payloads also collide across several consumable IDs and unlabelled contexts.
 Neither sequence context nor payload therefore identifies an item, charge,
 slot, instance, or removal operation exactly.
 
+### Patch-16.14 same-time operation-bundle checkpoint
+
+A separate maintained, replay-only checkpoint records a narrow structural
+result for the *complete relevant profiled owner/time-group population*,
+without interpreting any individual packet payload. Reproduce it with:
+
+```powershell
+node .\scripts\research_inventory_operation_sequences_16_14.mjs
+```
+
+It reads every exact-framed chunk/channel-1 packet in the four profiled
+families—`0x0369` lengths 14/15, `0x03F9` lengths 6/7, `0x0146` lengths 2/3/4,
+and chunk `0x0081`—and groups them only by exact replay-native champion owner
+and exact replay timestamp. A template consists solely of the ordered
+family/length sequence, sorted by exact physical source order inside that one
+group. It never uses packet payload bytes, preceding/succeeding operation
+groups, Match data, static data, network data, or a client binary as a
+template feature.
+
+The fixed 7/3 D7/H3 split is deliberately sequenced: D7 fully frames and gates
+its population before H3 is opened. D7 contains 1,575 add, 1,293 removal,
+2,847 removal-context, and 23 Undo-component blocks in 4,645 owner/time
+groups. It freezes 27 signatures that each recur at least twice, have exactly
+one saved-Timeline item-event **bundle** label, and have no unlabelled D7
+occurrence. The frozen template content fingerprint is
+`fd1586bc5eb6a2d4151243773e16d37e38f1c3cac94c7dde93becd1c1f735344`.
+
+Against all 4,645 D7 groups, those templates cover 289/289 matching groups
+with zero false-positive groups; against all 2,273 H3 groups they cover
+136/136 with zero false-positive groups. The H3 population independently has
+944 add, 781 removal, 1,367 removal-context, and 8 Undo-component blocks.
+Nineteen of the 27 frozen signatures occur in H3, accounting for all 136 H3
+matches with zero extras; the other eight have zero H3 support and remain
+unavailable. A per-template D7 leave-one-replay-out check reselects and
+correctly labels 279 heldout matching groups with zero extras. The remaining
+10 heldout matching groups lack the two-occurrence training support required
+to select their signature and are emitted zero times: this is an explicit
+fail-closed unseen-template outcome, not a missed inference.
+
+Unknown signatures are intentionally unavailable: 4,356 D7 and 2,137 H3
+groups are not assigned any event bundle. The 425 exact combined matches are
+offline validation evidence only. A bundle label such as
+`ITEM_DESTROYED+ITEM_PURCHASED` is not a statement that a particular packet is
+the destroyed or purchased item, and the result provides neither item ID,
+slot, item instance, count/charges, undo before/after state, gold delta, nor
+an inventory reducer. It is therefore `researchOnly`, has
+`promotionGate:false`, and adds no C++/Wasm/UI API.
+
 ### Patch-16.14 static recipe constraint
 
 A separate maintained harness validates one bounded component-consumption
