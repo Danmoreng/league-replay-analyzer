@@ -66,7 +66,7 @@ function parseArgs(argv) {
 
 function printHelp() {
   console.log("Usage: node ./scripts/discover_movement_candidates.mjs --artifact-dir <path> [--fixture-dir <path>] [--output-dir <path>] [--coordinate-model-path <path>] [--compact-score-only]");
-  console.log("  --compact-score-only  Write a bounded, explicitly marked replay/topMatches projection instead of the full raw-pair debug report; cap ranked movement patterns at 32. This is for corpus scoring/storage experiments, not full movement research.");
+  console.log("  --compact-score-only  Write a bounded, explicitly marked replay/topMatches projection instead of the full raw-pair debug report. The movement schema remains complete for score parity. This is for corpus scoring/storage experiments, not full movement research.");
 }
 
 function buildFieldCandidate(familySummary, slotSummary, field) {
@@ -924,7 +924,7 @@ export function buildMovementOutputDocuments({
       minAverageValidatorScore: 0.55,
     },
     promotedPatterns,
-    rankedPatterns: rankedPatterns.slice(0, compactScoreOnly ? 32 : 128),
+    rankedPatterns: rankedPatterns.slice(0, 128),
   };
   return { candidateMatchesReport, provisionalSchema };
 }

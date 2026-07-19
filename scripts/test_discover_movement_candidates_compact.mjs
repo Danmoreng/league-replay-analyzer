@@ -37,7 +37,7 @@ assert.equal(compact.candidateMatchesReport.rawPairCandidatesAvailable, false);
 assert.equal(Object.hasOwn(compact.candidateMatchesReport, "rawPairCandidates"), false);
 assert.equal(compact.candidateMatchesReport.topMatches.length, 3);
 assert.equal(compact.provisionalSchema.source.outputMode, "compact-score-only");
-assert.equal(compact.provisionalSchema.rankedPatterns.length, 32);
+assert.equal(compact.provisionalSchema.rankedPatterns.length, 40);
 
 const standard = buildMovementOutputDocuments({
   replayId: "fixture-replay",
