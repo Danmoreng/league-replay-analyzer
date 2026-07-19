@@ -128,15 +128,23 @@ describe("direct add-only item purchase presentation helpers", () => {
   });
 
   it("uses a German direct-component-purchase label without asserting inventory state", () => {
-    expect(replayDirectItemPurchaseLabel(directPurchase(true), () => "Ahri", () => "Verlorenes Kapitel")).toBe(
-      "Ahri · direkter Komponenten-Kauf: Verlorenes Kapitel",
-    );
+    expect(
+      replayDirectItemPurchaseLabel(
+        directPurchase(true),
+        () => "Ahri",
+        () => "Verlorenes Kapitel",
+      ),
+    ).toBe("Ahri · direkter Komponenten-Kauf: Verlorenes Kapitel");
   });
 
   it("uses the same safe direct-purchase label for a non-component item", () => {
-    expect(replayDirectItemPurchaseLabel(directPurchase(false), () => "Ahri", () => "Zhonjas Stundenglas")).toBe(
-      "Ahri · direkter Item-Kauf: Zhonjas Stundenglas",
-    );
+    expect(
+      replayDirectItemPurchaseLabel(
+        directPurchase(false),
+        () => "Ahri",
+        () => "Zhonjas Stundenglas",
+      ),
+    ).toBe("Ahri · direkter Item-Kauf: Zhonjas Stundenglas");
   });
 
   it("keeps the contract replay-only and fail-closed for unavailable item state", () => {
@@ -178,7 +186,7 @@ describe("direct add-only item purchase presentation helpers", () => {
     );
   });
 
-  it("keeps direct purchases distinct on the product timeline without inventing inventory", () => {
+  it("keeps direct-purchase research available without mounting it in the product view", () => {
     const productSource = readFileSync(
       fileURLToPath(new URL("./components/ProductReplayView.vue", import.meta.url)),
       "utf8",
@@ -186,11 +194,10 @@ describe("direct add-only item purchase presentation helpers", () => {
     const appSource = readFileSync(fileURLToPath(new URL("./App.vue", import.meta.url)), "utf8");
 
     expect(appSource).toContain("extractReplayDirectItemPurchasesWithWasm(buffer)");
-    expect(productSource).toContain("kind: \"direct-purchase\"");
-    expect(productSource).toContain("Komponenten-Käufe");
-    expect(productSource).toContain("addProvenanceKey");
-    expect(productSource).toContain(".sort(compareItemPurchaseEvents)");
-    expect(productSource).toContain("kein Slot- oder Inventarstand");
+    expect(productSource).not.toContain('kind: "direct-purchase"');
+    expect(productSource).not.toContain("directItemPurchases?.events");
+    expect(productSource).not.toContain("addProvenanceKey");
+    expect(productSource).not.toContain("player.items");
     expect(productSource).not.toMatch(/directItemPurchases(?:\.value)?\.items\s*=/);
   });
 });

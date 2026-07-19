@@ -170,21 +170,17 @@ describe("item sale-operation presentation helpers", () => {
     );
   });
 
-  it("keeps sale operations on the product timeline without inventing inventory state", () => {
-    const appSource = readFileSync(
-      fileURLToPath(new URL("./App.vue", import.meta.url)),
-      "utf8",
-    );
+  it("keeps sale research available without mounting it in the product view", () => {
+    const appSource = readFileSync(fileURLToPath(new URL("./App.vue", import.meta.url)), "utf8");
     const productSource = readFileSync(
       fileURLToPath(new URL("./components/ProductReplayView.vue", import.meta.url)),
       "utf8",
     );
 
     expect(appSource).toContain("extractReplayItemSalesWithWasm(buffer)");
-    expect(productSource).toContain('kind: "sale-operation"');
-    expect(productSource).toContain("Verkaufsoperation");
-    expect(productSource).toContain("verkauftes Item");
-    expect(productSource).toContain("kein Inventarstand mutiert");
+    expect(productSource).not.toContain('kind: "sale-operation"');
+    expect(productSource).not.toContain("itemSales?.events");
+    expect(productSource).not.toContain("player.items");
     expect(productSource).not.toMatch(/sale[^\n]*(?:itemIcon|itemName)\s*\(/i);
   });
 });

@@ -1,31 +1,21 @@
-<!-- Timeline-first product surface. -->
+<!-- Focused product surface: match score, combat timeline, and compact rosters. -->
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 
 import { usePlayback } from "../composables/usePlayback";
-import {
-  loadReplayItemCatalog,
-  resolveReplayItem,
-  type ReplayItemCatalog,
-} from "../replayItemCatalog";
-import type { PlayerSummary, ReplaySummary } from "../replayParser";
+import { loadReplayItemCatalog, type ReplayItemCatalog } from "../replayItemCatalog";
+import type { ReplayDirectItemPurchasesResult } from "../replayDirectItemPurchases";
+import type { ReplayItemSalesResult } from "../replayItemSales";
 import type { ReplayKillEvent, ReplayKillResult } from "../replayKills";
 import {
   replayObjectiveMonsterLabel,
   type ReplayObjectiveEvent,
   type ReplayObjectiveResult,
 } from "../replayObjectives";
-import type {
-  ReplayDirectItemPurchaseEvent,
-  ReplayDirectItemPurchasesResult,
-} from "../replayDirectItemPurchases";
-import type { ReplayItemSalesResult } from "../replayItemSales";
-import type {
-  ReplayPurchaseLinkedItemUpdatesResult,
-  ReplayPurchaseLinkedResultingItemUpdateEvent,
-} from "../replayPurchaseLinkedItemUpdates";
 import type { ReplayParticipantStatSnapshotsResult } from "../replayParticipantStatSnapshots";
-import type { ReplayWardEvent, ReplayWardResult } from "../replayWards";
+import type { PlayerSummary, ReplaySummary } from "../replayParser";
+import type { ReplayPurchaseLinkedItemUpdatesResult } from "../replayPurchaseLinkedItemUpdates";
+import type { ReplayWardResult } from "../replayWards";
 
 const props = defineProps<{
   summary: ReplaySummary;
@@ -55,36 +45,7 @@ const props = defineProps<{
 
 type ProductEvent =
   | { id: string; kind: "kill"; timestampMillis: number; event: ReplayKillEvent }
-  | { id: string; kind: "objective"; timestampMillis: number; event: ReplayObjectiveEvent }
-  | {
-      id: string;
-      kind: "ward-placement" | "ward-kill";
-      timestampMillis: number;
-      event: ReplayWardEvent;
-    }
-  | {
-      id: string;
-      kind: "purchase-update";
-      timestampMillis: number;
-      event: ReplayPurchaseLinkedResultingItemUpdateEvent;
-    }
-  | {
-      id: string;
-      kind: "direct-purchase";
-      timestampMillis: number;
-      event: ReplayDirectItemPurchaseEvent;
-    }
-  | {
-      id: string;
-      kind: "sale-operation";
-      timestampMillis: number;
-      event: ReplayItemSalesResult["events"][number];
-    };
-
-type ItemPurchaseEvent = Extract<
-  ProductEvent,
-  { kind: "purchase-update" } | { kind: "direct-purchase" }
->;
+  | { id: string; kind: "objective"; timestampMillis: number; event: ReplayObjectiveEvent };
 
 interface TimelineKda {
   kills: number;
@@ -92,26 +53,16 @@ interface TimelineKda {
   assists: number;
 }
 
-interface WardBucket {
-  timestampMillis: number;
-  placements: number;
-  kills: number;
-}
-
 interface CurrentParticipantStats {
   participantId: number;
   timestampMillis: number;
-  experience: number;
   level: number;
-  totalGold: number;
   laneCs: number;
 }
 
 const { currentTime, duration, isPlaying, playbackSpeed, togglePlayback, seek } = usePlayback();
 const selectedParticipantId = ref<number | null>(null);
-const itemCatalog = ref<ReplayItemCatalog | null>(null);
-const itemCatalogLoading = ref(false);
-const itemCatalogError = ref("");
+const staticCatalog = ref<ReplayItemCatalog | null>(null);
 const speeds = [1, 2, 4, 8];
 let catalogRequest = 0;
 
@@ -119,165 +70,27 @@ const participantsById = computed(
   () => new Map(props.summary.players.map((player, index) => [index + 1, player])),
 );
 
-function addProvenanceKey(
-  participantId: number,
-  timestampMillis: number,
-  itemId: number,
-  provenance: ReplayDirectItemPurchaseEvent["provenance"]["addBlock"]["provenance"],
-): string {
-  return [
-    participantId,
-    timestampMillis,
-    itemId,
-    provenance.segmentType,
-    provenance.segmentId,
-    provenance.chunkId,
-    provenance.segmentPayloadOffset,
-    provenance.blockIndex,
-  ].join(":");
-}
-
-function compareItemPurchaseEvents(left: ItemPurchaseEvent, right: ItemPurchaseEvent): number {
-  if (left.timestampMillis !== right.timestampMillis) {
-    return left.timestampMillis - right.timestampMillis;
-  }
-  const leftProvenance = left.event.provenance.addBlock.provenance;
-  const rightProvenance = right.event.provenance.addBlock.provenance;
-  if (leftProvenance.segmentPayloadOffset !== rightProvenance.segmentPayloadOffset) {
-    return leftProvenance.segmentPayloadOffset - rightProvenance.segmentPayloadOffset;
-  }
-  if (leftProvenance.blockIndex !== rightProvenance.blockIndex) {
-    return leftProvenance.blockIndex - rightProvenance.blockIndex;
-  }
-  return left.id.localeCompare(right.id);
-}
-
-const itemPurchaseEvents = computed<ItemPurchaseEvent[]>(() => {
-  const seenAddProvenance = new Set<string>();
-  const purchaseUpdates: ItemPurchaseEvent[] = (props.purchaseLinkedItemUpdates?.events ?? []).map(
-    (event, index) => {
-      seenAddProvenance.add(
-        addProvenanceKey(
-          event.participantId,
-          event.timestampMillis,
-          event.resultingItemId,
-          event.provenance.addBlock.provenance,
-        ),
-      );
-      return {
-        id:
-          "purchase-update-" +
-          index +
-          "-" +
-          event.timestampMillis +
-          "-" +
-          event.participantId +
-          "-" +
-          event.resultingItemId,
-        kind: "purchase-update" as const,
-        timestampMillis: event.timestampMillis,
-        event,
-      };
-    },
-  );
-  const directPurchases: ItemPurchaseEvent[] = [];
-  for (const [index, event] of (props.directItemPurchases?.events ?? []).entries()) {
-    const key = addProvenanceKey(
-      event.participantId,
-      event.timestampMillis,
-      event.itemId,
-      event.provenance.addBlock.provenance,
-    );
-    if (seenAddProvenance.has(key)) continue;
-    seenAddProvenance.add(key);
-    directPurchases.push({
-      id:
-        "direct-purchase-" +
-        index +
-        "-" +
-        event.timestampMillis +
-        "-" +
-        event.participantId +
-        "-" +
-        event.itemId,
-      kind: "direct-purchase",
-      timestampMillis: event.timestampMillis,
-      event,
-    });
-  }
-  return [...purchaseUpdates, ...directPurchases].sort(compareItemPurchaseEvents);
-});
-
 const events = computed<ProductEvent[]>(() =>
   [
     ...(props.kills?.events ?? []).map((event, index) => ({
-      id: "kill-" + index + "-" + event.timestampMillis,
+      id: `kill-${index}-${event.timestampMillis}`,
       kind: "kill" as const,
       timestampMillis: event.timestampMillis,
       event,
     })),
     ...(props.objectives?.events ?? []).map((event, index) => ({
-      id: "objective-" + index + "-" + event.timestampMillis,
+      id: `objective-${index}-${event.timestampMillis}`,
       kind: "objective" as const,
-      timestampMillis: event.timestampMillis,
-      event,
-    })),
-    ...(props.wards?.events ?? []).map((event, index) => ({
-      id: "ward-" + index + "-" + event.timestampMillis + "-" + event.wardEntityNetworkId,
-      kind: event.type === "WARD_PLACED" ? ("ward-placement" as const) : ("ward-kill" as const),
-      timestampMillis: event.timestampMillis,
-      event,
-    })),
-    ...itemPurchaseEvents.value,
-    ...(props.itemSales?.events ?? []).map((event, index) => ({
-      id:
-        "sale-operation-" +
-        index +
-        "-" +
-        event.timestampMillis +
-        "-" +
-        event.participantId +
-        "-" +
-        event.provenance.removalBlock.provenance.segmentPayloadOffset +
-        "-" +
-        event.provenance.removalBlock.provenance.blockIndex,
-      kind: "sale-operation" as const,
       timestampMillis: event.timestampMillis,
       event,
     })),
   ].sort((left, right) => left.timestampMillis - right.timestampMillis),
 );
 
-const primaryEvents = computed(() =>
-  events.value.filter((event) => event.kind !== "ward-placement" && event.kind !== "ward-kill"),
-);
-
 const counts = computed(() => ({
   kills: props.kills?.events.length ?? 0,
   objectives: props.objectives?.events.length ?? 0,
-  purchaseUpdates: props.purchaseLinkedItemUpdates?.events.length ?? 0,
-  directPurchases: itemPurchaseEvents.value.filter((event) => event.kind === "direct-purchase")
-    .length,
-  directComponents: itemPurchaseEvents.value.filter(
-    (event) => event.kind === "direct-purchase" && event.event.componentItem,
-  ).length,
-  purchases: itemPurchaseEvents.value.length,
-  sales: props.itemSales?.events.length ?? 0,
-  wards: props.wards?.events.length ?? 0,
 }));
-
-const wardBuckets = computed<WardBucket[]>(() => {
-  const bucketSize = Math.max(30_000, Math.ceil(Math.max(1, duration.value) / 100));
-  const buckets = new Map<number, WardBucket>();
-  for (const event of props.wards?.events ?? []) {
-    const timestampMillis = Math.floor(event.timestampMillis / bucketSize) * bucketSize;
-    const bucket = buckets.get(timestampMillis) ?? { timestampMillis, placements: 0, kills: 0 };
-    if (event.type === "WARD_PLACED") bucket.placements += 1;
-    else bucket.kills += 1;
-    buckets.set(timestampMillis, bucket);
-  }
-  return [...buckets.values()].sort((left, right) => left.timestampMillis - right.timestampMillis);
-});
 
 const kdaByParticipant = computed(() => {
   const rows = new Map<number, TimelineKda>();
@@ -297,43 +110,22 @@ const kdaByParticipant = computed(() => {
   return rows;
 });
 
-const purchasesByParticipant = computed(() => {
-  const rows = new Map<number, ItemPurchaseEvent[]>();
-  for (const event of itemPurchaseEvents.value) {
-    if (event.timestampMillis > currentTime.value) continue;
-    const participantEvents = rows.get(event.event.participantId) ?? [];
-    participantEvents.push(event);
-    rows.set(event.event.participantId, participantEvents);
-  }
-  return rows;
-});
-
 const participantStatSnapshotRows = computed<CurrentParticipantStats[]>(() => {
   const rows: CurrentParticipantStats[] = [];
   for (const snapshot of props.participantStatSnapshots?.snapshots ?? []) {
-    const participantId = snapshot.participantId;
-    const timestampMillis = snapshot.timestampMillis;
-    const experience = snapshot.experience;
-    const level = snapshot.level;
-    const totalGold = snapshot.totalGold;
-    const laneCs = snapshot.laneMinionsKilled;
     if (
-      !Number.isInteger(participantId) ||
-      !Number.isFinite(timestampMillis) ||
-      !Number.isFinite(experience) ||
-      !Number.isInteger(level) ||
-      !Number.isFinite(totalGold) ||
-      !Number.isFinite(laneCs)
+      !Number.isInteger(snapshot.participantId) ||
+      !Number.isFinite(snapshot.timestampMillis) ||
+      !Number.isInteger(snapshot.level) ||
+      !Number.isFinite(snapshot.laneMinionsKilled)
     ) {
       continue;
     }
     rows.push({
-      participantId,
-      timestampMillis,
-      experience,
-      level,
-      totalGold,
-      laneCs,
+      participantId: snapshot.participantId,
+      timestampMillis: snapshot.timestampMillis,
+      level: snapshot.level,
+      laneCs: snapshot.laneMinionsKilled,
     });
   }
   return rows.sort(
@@ -346,10 +138,7 @@ const currentParticipantStatsById = computed(() => {
   const rows = new Map<number, CurrentParticipantStats>();
   for (const snapshot of participantStatSnapshotRows.value) {
     if (snapshot.timestampMillis > currentTime.value) continue;
-    const previous = rows.get(snapshot.participantId);
-    if (!previous || snapshot.timestampMillis >= previous.timestampMillis) {
-      rows.set(snapshot.participantId, snapshot);
-    }
+    rows.set(snapshot.participantId, snapshot);
   }
   return rows;
 });
@@ -371,7 +160,6 @@ const teams = computed(() =>
         (sum, player) => sum + timelineKda(player.participantId).kills,
         0,
       ),
-      finalKills: players.reduce((sum, player) => sum + player.player.kills, 0),
     };
   }),
 );
@@ -389,18 +177,7 @@ const nearbyEvents = computed(() => {
     .map((event) => ({
       event,
       distance: Math.abs(event.timestampMillis - currentTime.value),
-      priority:
-        event.kind === "kill"
-          ? 0
-          : event.kind === "objective"
-            ? 1
-            : event.kind === "direct-purchase"
-              ? 2
-              : event.kind === "purchase-update"
-                ? 3
-                : event.kind === "sale-operation"
-                  ? 4
-                  : 5,
+      priority: event.kind === "kill" ? 0 : 1,
     }))
     .sort((left, right) => left.distance - right.distance || left.priority - right.priority)
     .slice(0, 8)
@@ -408,64 +185,20 @@ const nearbyEvents = computed(() => {
     .sort((left, right) => left.timestampMillis - right.timestampMillis);
 });
 
-const participantStatsUnavailable = computed(
-  () => Boolean(props.participantStatSnapshotsError) || !props.participantStatSnapshots,
-);
-const purchaseUpdatesUnavailable = computed(() => Boolean(props.purchaseLinkedItemUpdatesError));
-const directPurchasesUnavailable = computed(() => Boolean(props.directItemPurchasesError));
-const salesUnavailable = computed(() => Boolean(props.itemSalesError));
-const purchaseStreamsUnavailable = computed(
-  () => purchaseUpdatesUnavailable.value && directPurchasesUnavailable.value,
-);
-const itemOperationStreamsUnavailable = computed(
-  () => purchaseStreamsUnavailable.value && salesUnavailable.value,
-);
-
-const loadState = computed(() => {
-  if (
-    props.killsLoading ||
-    props.objectivesLoading ||
-    props.wardsLoading ||
-    props.purchaseLinkedItemUpdatesLoading ||
-    props.directItemPurchasesLoading ||
-    props.itemSalesLoading ||
-    props.participantStatSnapshotsLoading
-  ) {
-    return "Replay-Ereignisse werden lokal dekodiert …";
-  }
-  if (
-    props.killsError ||
-    props.objectivesError ||
-    props.wardsError ||
-    props.purchaseLinkedItemUpdatesError ||
-    props.directItemPurchasesError ||
-    props.itemSalesError ||
-    props.participantStatSnapshotsError
-  ) {
-    return "Ein Teil der Replay-Ereignisse ist für diesen Patch nicht verfügbar.";
-  }
-  return "";
-});
-
 watch(
   () => props.summary.gameVersion,
   async (gameVersion) => {
     const request = ++catalogRequest;
-    itemCatalog.value = null;
-    itemCatalogError.value = "";
-    itemCatalogLoading.value = true;
+    staticCatalog.value = null;
     const loaded = await loadReplayItemCatalog(gameVersion);
-    if (request !== catalogRequest) return;
-    itemCatalogLoading.value = false;
-    if (loaded.available) itemCatalog.value = loaded.catalog;
-    else itemCatalogError.value = loaded.error;
+    if (request === catalogRequest && loaded.available) staticCatalog.value = loaded.catalog;
   },
   { immediate: true },
 );
 
 function formatTime(milliseconds: number): string {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000));
-  return Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
 function roleRank(role: string): number {
@@ -486,39 +219,22 @@ function roleLabel(role: string): string {
 function playerName(player: PlayerSummary): string {
   if (!player.riotIdGameName) return "Unknown Player";
   return player.riotIdTagLine
-    ? player.riotIdGameName + "#" + player.riotIdTagLine
+    ? `${player.riotIdGameName}#${player.riotIdTagLine}`
     : player.riotIdGameName;
 }
 
 function ddragonVersion(): string {
-  if (itemCatalog.value) return itemCatalog.value.dataDragonVersion;
+  if (staticCatalog.value) return staticCatalog.value.dataDragonVersion;
   const match = props.summary.gameVersion.match(/^(\d+)\.(\d+)/);
-  return match ? match[1] + "." + match[2] + ".1" : "16.14.1";
+  return match ? `${match[1]}.${match[2]}.1` : "16.14.1";
 }
 
 function championIcon(champion: string): string {
-  return (
-    "https://ddragon.leagueoflegends.com/cdn/" +
-    ddragonVersion() +
-    "/img/champion/" +
-    encodeURIComponent(champion) +
-    ".png"
-  );
-}
-
-function itemName(itemId: number): string {
-  return resolveReplayItem(itemCatalog.value, itemId)?.name ?? "Item #" + itemId;
-}
-
-function itemIcon(itemId: number): string {
-  return (
-    resolveReplayItem(itemCatalog.value, itemId)?.iconUrl ??
-    "https://ddragon.leagueoflegends.com/cdn/" + ddragonVersion() + "/img/item/" + itemId + ".png"
-  );
+  return `https://ddragon.leagueoflegends.com/cdn/${ddragonVersion()}/img/champion/${encodeURIComponent(champion)}.png`;
 }
 
 function participantChampion(participantId: number): string {
-  return participantsById.value.get(participantId)?.champion ?? "P" + participantId;
+  return participantsById.value.get(participantId)?.champion ?? `P${participantId}`;
 }
 
 function timelineKda(participantId: number): TimelineKda {
@@ -529,135 +245,31 @@ function currentParticipantStats(participantId: number): CurrentParticipantStats
   return currentParticipantStatsById.value.get(participantId) ?? null;
 }
 
-function formatCurrentGold(value: number): string {
-  return new Intl.NumberFormat("de-DE", { maximumFractionDigits: 0 }).format(Math.trunc(value));
-}
-
-function visiblePurchases(participantId: number): ItemPurchaseEvent[] {
-  return (purchasesByParticipant.value.get(participantId) ?? []).slice(-5);
-}
-
-function hiddenPurchaseCount(participantId: number): number {
-  return Math.max(0, (purchasesByParticipant.value.get(participantId)?.length ?? 0) - 5);
-}
-
-function purchaseItemId(event: ItemPurchaseEvent): number {
-  return event.kind === "purchase-update" ? event.event.resultingItemId : event.event.itemId;
-}
-
-function purchaseTitle(event: ItemPurchaseEvent): string {
-  const detail =
-    event.kind === "direct-purchase"
-      ? event.event.componentItem
-        ? "direkter Komponenten-Kauf"
-        : "direkter Item-Kauf"
-      : "kaufverknüpftes Ergebnis-Item-Update";
-  return (
-    formatTime(event.timestampMillis) +
-    " · " +
-    itemName(purchaseItemId(event)) +
-    " · " +
-    detail +
-    "; kein Slot- oder Inventarstand"
-  );
-}
-
 function markerLeft(timestampMillis: number): string {
   const percentage = (timestampMillis / Math.max(1, duration.value)) * 100;
-  return Math.max(0, Math.min(100, percentage)) + "%";
-}
-
-function wardHeight(bucket: WardBucket): string {
-  return Math.min(14, 3 + bucket.placements + bucket.kills * 2) + "px";
-}
-
-function wardTitle(bucket: WardBucket): string {
-  return (
-    formatTime(bucket.timestampMillis) +
-    " · " +
-    bucket.placements +
-    " Ward-Platzierungen · " +
-    bucket.kills +
-    " Ward-Kills"
-  );
+  return `${Math.max(0, Math.min(100, percentage))}%`;
 }
 
 function eventInvolves(event: ProductEvent, participantId: number): boolean {
-  if (event.kind === "purchase-update" || event.kind === "direct-purchase") {
-    return event.event.participantId === participantId;
-  }
-  if (event.kind === "sale-operation") return event.event.participantId === participantId;
-  if (event.kind === "kill") {
-    return (
-      event.event.victimParticipantId === participantId ||
-      event.event.killerParticipantId === participantId ||
-      event.event.assistingParticipantIds.includes(participantId)
-    );
-  }
-  if (event.kind === "ward-placement" && event.event.type === "WARD_PLACED") {
-    return event.event.ownerParticipantId === participantId;
-  }
-  if (event.kind === "ward-kill" && event.event.type === "WARD_KILL") {
-    return event.event.killerParticipantId === participantId;
-  }
-  return true;
+  if (event.kind === "objective") return true;
+  return (
+    event.event.victimParticipantId === participantId ||
+    event.event.killerParticipantId === participantId ||
+    event.event.assistingParticipantIds.includes(participantId)
+  );
 }
 
 function eventLabel(event: ProductEvent): string {
   if (event.kind === "objective") return replayObjectiveMonsterLabel(event.event.monsterType);
-  if (event.kind === "purchase-update") {
-    return (
-      participantChampion(event.event.participantId) + " · " + itemName(event.event.resultingItemId)
-    );
-  }
-  if (event.kind === "direct-purchase") {
-    const component = event.event.componentItem ? "Komponente · " : "";
-    return (
-      participantChampion(event.event.participantId) +
-      " · " +
-      component +
-      itemName(event.event.itemId)
-    );
-  }
-  if (event.kind === "sale-operation") {
-    return participantChampion(event.event.participantId) + " · Verkaufsoperation";
-  }
-  if (event.kind === "ward-placement" && event.event.type === "WARD_PLACED") {
-    return participantChampion(event.event.ownerParticipantId) + " platziert Ward";
-  }
-  if (event.kind === "ward-kill" && event.event.type === "WARD_KILL") {
-    return participantChampion(event.event.killerParticipantId) + " zerstört Ward";
-  }
-  if (event.kind !== "kill") return "Ward-Ereignis";
   const killer =
     event.event.killerParticipantId > 0
       ? participantChampion(event.event.killerParticipantId)
       : "Execution";
-  return killer + " → " + participantChampion(event.event.victimParticipantId);
-}
-
-function eventDetail(event: ProductEvent): string {
-  if (event.kind === "purchase-update") {
-    return "Kaufverknüpftes Ergebnis-Update · kein Slot- oder Inventarstand";
-  }
-  if (event.kind === "direct-purchase") {
-    return event.event.componentItem
-      ? "Direkter Komponenten-Kauf · kein Slot- oder Inventarstand"
-      : "Direkter Item-Kauf · kein Slot- oder Inventarstand";
-  }
-  if (event.kind === "sale-operation") {
-    return "Verkaufsoperation · Item, Slot, Gold und Inventarstand nicht dekodiert";
-  }
-  if (event.kind === "kill") return "Champion-Kill";
-  if (event.kind === "objective") return "Elite-Objective";
-  return event.kind === "ward-placement" ? "Ward platziert" : "Ward zerstört";
+  return `${killer} → ${participantChampion(event.event.victimParticipantId)}`;
 }
 
 function eventIcon(event: ProductEvent): string {
-  if (event.kind === "kill") return "bi-lightning-charge-fill";
-  if (event.kind === "objective") return "bi-shield-fill";
-  if (event.kind === "sale-operation") return "bi-cash-coin";
-  return event.kind === "ward-placement" ? "bi-eye-fill" : "bi-eye-slash-fill";
+  return event.kind === "kill" ? "bi-lightning-charge-fill" : "bi-shield-fill";
 }
 
 function onScrub(event: Event): void {
@@ -669,69 +281,32 @@ function onScrub(event: Event): void {
   <section class="product-view" aria-label="Replay viewer">
     <header class="match-scoreboard">
       <div class="score-team score-team-blue">
-        <span class="score-result" :class="{ winner: teams[0].winner }">{{
+        <span :class="{ winner: teams[0].winner }">{{
           teams[0].winner ? "VICTORY" : "DEFEAT"
         }}</span>
         <strong>{{ teams[0].timelineKills }}</strong>
-        <small>{{ teams[0].finalKills }} Kills final</small>
       </div>
       <div class="match-identity">
-        <span class="eyebrow">REPLAY TIMELINE</span>
         <h2>{{ replayName }}</h2>
         <div class="match-meta">
-          <span>Patch {{ summary.gameVersion }}</span>
+          <span>{{ summary.gameVersion }}</span>
           <span>{{ formatTime(summary.gameLengthMillis) }}</span>
-          <span>{{ summary.players.length }} Spieler</span>
         </div>
       </div>
       <div class="score-team score-team-red">
         <strong>{{ teams[1].timelineKills }}</strong>
-        <span class="score-result" :class="{ winner: teams[1].winner }">{{
+        <span :class="{ winner: teams[1].winner }">{{
           teams[1].winner ? "VICTORY" : "DEFEAT"
         }}</span>
-        <small>{{ teams[1].finalKills }} Kills final</small>
       </div>
     </header>
 
     <section class="timeline-card" aria-label="Match timeline">
       <header class="timeline-heading">
-        <div>
-          <span class="eyebrow">MATCH TIMELINE</span>
-          <strong>Alle sicher dekodierten Ereignisse</strong>
-        </div>
-        <div class="timeline-legend" aria-label="Timeline legend">
-          <span class="kill"><i></i>{{ counts.kills }} Kills</span>
-          <span class="objective"><i></i>{{ counts.objectives }} Objectives</span>
-          <span class="purchase-update">
-            <i></i>
-            <template v-if="purchaseLinkedItemUpdatesLoading"
-              >Upgrade-Ergebnisse werden dekodiert</template
-            >
-            <template v-else-if="purchaseUpdatesUnavailable"
-              >Upgrade-Ergebnisse nicht verfügbar</template
-            >
-            <template v-else>{{ counts.purchaseUpdates }} Upgrade-Ergebnisse</template>
-          </span>
-          <span class="direct-purchase">
-            <i></i>
-            <template v-if="directItemPurchasesLoading">Direkte Käufe werden dekodiert</template>
-            <template v-else-if="directPurchasesUnavailable"
-              >Direkte Käufe nicht verfügbar</template
-            >
-            <template v-else>
-              {{ counts.directPurchases }} direkte Käufe
-              <template v-if="counts.directComponents"
-                >· {{ counts.directComponents }} Komponenten</template
-              >
-            </template>
-          </span>
-          <span class="sale-operation">
-            <i></i>
-            <template v-if="itemSalesLoading">Verkaufsoperationen werden dekodiert</template>
-            <template v-else-if="salesUnavailable">Verkaufsoperationen nicht verfügbar</template>
-            <template v-else>{{ counts.sales }} Verkaufsoperationen</template>
-          </span>
-          <span class="ward"><i></i>{{ counts.wards }} Ward-Ereignisse</span>
+        <strong>Timeline</strong>
+        <div class="timeline-legend">
+          <span class="kill"><i></i>{{ counts.kills }}</span>
+          <span class="objective"><i></i>{{ counts.objectives }}</span>
         </div>
       </header>
 
@@ -753,28 +328,16 @@ function onScrub(event: Event): void {
         <div class="timeline-main">
           <div class="timeline-track">
             <div class="timeline-progress" :style="{ width: markerLeft(currentTime) }"></div>
-            <span
-              v-for="bucket in wardBuckets"
-              :key="bucket.timestampMillis"
-              class="ward-density"
-              :style="{ left: markerLeft(bucket.timestampMillis), height: wardHeight(bucket) }"
-              :title="wardTitle(bucket)"
-            ></span>
             <button
-              v-for="event in primaryEvents"
+              v-for="event in events"
               :key="event.id"
               class="event-marker"
               :class="event.kind"
               :style="{ left: markerLeft(event.timestampMillis) }"
-              :title="formatTime(event.timestampMillis) + ' · ' + eventLabel(event)"
+              :title="`${formatTime(event.timestampMillis)} · ${eventLabel(event)}`"
               @click="seek(event.timestampMillis)"
             >
-              <img
-                v-if="event.kind === 'purchase-update' || event.kind === 'direct-purchase'"
-                :src="itemIcon(purchaseItemId(event))"
-                :alt="itemName(purchaseItemId(event))"
-              />
-              <i v-else class="bi" :class="eventIcon(event)"></i>
+              <i class="bi" :class="eventIcon(event)"></i>
             </button>
             <input
               type="range"
@@ -806,7 +369,6 @@ function onScrub(event: Event): void {
           </button>
         </div>
       </div>
-      <p v-if="loadState" class="timeline-status">{{ loadState }}</p>
     </section>
 
     <div class="viewer-grid">
@@ -815,13 +377,12 @@ function onScrub(event: Event): void {
         :key="team.id"
         class="roster"
         :class="team.id === 100 ? 'roster-blue' : 'roster-red'"
-        :aria-label="team.label + ' roster'"
       >
         <div class="roster-title">
           <span class="team-pip"></span>
           <span>{{ team.label }}</span>
-          <small>Stand {{ formatTime(currentTime) }}</small>
         </div>
+
         <button
           v-for="entry in team.players"
           :key="entry.participantId"
@@ -835,87 +396,30 @@ function onScrub(event: Event): void {
               selectedParticipantId === entry.participantId ? null : entry.participantId
           "
         >
-          <img :src="championIcon(entry.player.champion)" :alt="entry.player.champion" />
+          <span class="champion-portrait">
+            <img :src="championIcon(entry.player.champion)" :alt="entry.player.champion" />
+            <small v-if="currentParticipantStats(entry.participantId)">
+              {{ currentParticipantStats(entry.participantId)!.level }}
+            </small>
+          </span>
+
           <span class="player-main">
             <span class="player-heading">
               <span>
                 <b>{{ entry.player.champion }}</b>
                 <small>{{ playerName(entry.player) }}</small>
               </span>
-              <em :title="'K/D/A bis ' + formatTime(currentTime)">
+              <em>
                 {{ timelineKda(entry.participantId).kills }}/{{
                   timelineKda(entry.participantId).deaths
                 }}/{{ timelineKda(entry.participantId).assists }}
               </em>
             </span>
-
-            <span v-if="currentParticipantStats(entry.participantId)" class="live-stats">
-              <small
-                >REPLAY-STATUS ·
-                {{
-                  formatTime(currentParticipantStats(entry.participantId)!.timestampMillis)
-                }}</small
-              >
-              <span title="Aus replay-nativer XP und patch-gepinnten Schwellen abgeleitet">
-                Lvl {{ currentParticipantStats(entry.participantId)!.level }} ·
-                {{ Math.trunc(currentParticipantStats(entry.participantId)!.experience) }} XP
+            <span class="player-stats">
+              <span>{{ roleLabel(entry.player.teamPosition) }}</span>
+              <span v-if="currentParticipantStats(entry.participantId)">
+                {{ Math.trunc(currentParticipantStats(entry.participantId)!.laneCs) }} CS
               </span>
-              <span
-                class="live-gold"
-                title="Replay-nativer Gesamtgoldwert; für die Anzeige auf ganze Goldstücke gekürzt"
-              >
-                <i class="bi bi-coin"></i
-                >{{ formatCurrentGold(currentParticipantStats(entry.participantId)!.totalGold) }}g
-              </span>
-              <span title="Replay-nativer Lane-CS-Snapshot">
-                <i class="bi bi-stack"></i
-                >{{ Math.trunc(currentParticipantStats(entry.participantId)!.laneCs) }} Lane CS
-              </span>
-            </span>
-            <span v-else-if="participantStatSnapshotsLoading" class="live-stats unavailable">
-              <small>REPLAY-STATUS</small>
-              <span>Stat-Snapshots werden lokal dekodiert …</span>
-            </span>
-            <span v-else class="live-stats unavailable" :title="participantStatSnapshotsError">
-              <small>REPLAY-STATUS</small>
-              <span v-if="participantStatsUnavailable"
-                >XP, Level, Gold und Lane-CS für diesen Patch nicht verfügbar</span
-              >
-              <span v-else>Noch kein Snapshot vor {{ formatTime(currentTime) }}</span>
-            </span>
-
-            <span
-              v-if="visiblePurchases(entry.participantId).length"
-              class="purchase-strip"
-              title="Erkannte Kaufereignisse bis zum gewählten Zeitpunkt; kein vollständiger Inventarstand"
-            >
-              <small>DEKODIERTE KÄUFE</small>
-              <span v-if="hiddenPurchaseCount(entry.participantId)" class="hidden-count">
-                +{{ hiddenPurchaseCount(entry.participantId) }}
-              </span>
-              <span
-                v-for="itemEvent in visiblePurchases(entry.participantId)"
-                :key="itemEvent.id"
-                class="purchase-chip"
-                :class="[
-                  itemEvent.kind,
-                  {
-                    component:
-                      itemEvent.kind === 'direct-purchase' && itemEvent.event.componentItem,
-                  },
-                ]"
-                :title="purchaseTitle(itemEvent)"
-              >
-                <img
-                  :src="itemIcon(purchaseItemId(itemEvent))"
-                  :alt="itemName(purchaseItemId(itemEvent))"
-                />
-              </span>
-            </span>
-
-            <span class="player-footer">
-              <small>{{ roleLabel(entry.player.teamPosition) }}</small>
-              <small>K/D/A, Käufe und verfügbare Stat-Snapshots folgen der Timeline</small>
             </span>
           </span>
         </button>
@@ -923,10 +427,7 @@ function onScrub(event: Event): void {
 
       <main class="event-focus">
         <header class="event-window-header">
-          <div>
-            <span class="eyebrow">EREIGNISSE</span>
-            <strong>Rund um {{ formatTime(currentTime) }}</strong>
-          </div>
+          <strong>{{ formatTime(currentTime) }}</strong>
           <button
             v-if="selectedParticipantId !== null"
             class="clear-filter"
@@ -946,82 +447,11 @@ function onScrub(event: Event): void {
           >
             <time>{{ formatTime(event.timestampMillis) }}</time>
             <span class="event-symbol" :class="event.kind">
-              <img
-                v-if="event.kind === 'purchase-update' || event.kind === 'direct-purchase'"
-                :src="itemIcon(purchaseItemId(event))"
-                :alt="itemName(purchaseItemId(event))"
-              />
-              <i v-else class="bi" :class="eventIcon(event)"></i>
+              <i class="bi" :class="eventIcon(event)"></i>
             </span>
-            <span class="event-copy">
-              <b>{{ eventLabel(event) }}</b>
-              <small>{{ eventDetail(event) }}</small>
-            </span>
+            <b>{{ eventLabel(event) }}</b>
           </button>
-          <div v-if="!nearbyEvents.length" class="event-empty">
-            Keine dekodierten Ereignisse in diesem Ausschnitt.
-          </div>
         </div>
-
-        <p
-          class="purchase-boundary"
-          :class="{ unavailable: itemOperationStreamsUnavailable }"
-          :title="
-            [purchaseLinkedItemUpdatesError, directItemPurchasesError, itemSalesError]
-              .filter(Boolean)
-              .join(' ')
-          "
-        >
-          <i
-            class="bi"
-            :class="itemOperationStreamsUnavailable ? 'bi-bag-x-fill' : 'bi-bag-check-fill'"
-          ></i>
-          <span>
-            <template v-if="itemOperationStreamsUnavailable">
-              <b
-                >Item-Käufe nicht verfügbar; Verkaufsströme für diesen Patch ebenfalls nicht
-                verfügbar</b
-              >
-              <small
-                >Es werden keine null Käufe oder Verkäufe behauptet und keine Inventardaten
-                geschätzt.</small
-              >
-            </template>
-            <template v-else>
-              <b>
-                <template v-if="!purchaseStreamsUnavailable">
-                  {{ counts.purchases }} dekodierte Item-Kaufereignisse:
-                  {{ counts.directPurchases }} direkte Käufe und {{ counts.purchaseUpdates }}
-                  kaufverknüpfte Ergebnis-Updates
-                </template>
-                <template v-else>Kaufereignisse nicht verfügbar</template>
-                ·
-                <template v-if="!salesUnavailable">
-                  {{ counts.sales }} Verkaufsoperationen
-                </template>
-                <template v-else>Verkaufsoperationen nicht verfügbar</template>
-              </b>
-              <small>
-                Name und Icon: Data Dragon {{ itemCatalog?.dataDragonVersion ?? "patchgebunden" }}.
-                Direkte Komponenten-Käufe sind mit einem türkisfarbenen Rand markiert. Verkäufe,
-                falls dekodiert, zeigen ausschließlich eine Verkaufsoperation: verkauftes Item,
-                Slot, Instanz, Menge, Goldgewinn, Undo und Inventarverlauf bleiben unavailable.
-                Deshalb wird kein Inventarstand mutiert oder angezeigt.
-                <template v-if="purchaseStreamsUnavailable">
-                  Kaufereignisse sind für diesen Patch nicht verfügbar.
-                </template>
-                <template v-if="salesUnavailable">
-                  Verkaufsoperationen sind für diesen Patch nicht verfügbar; es werden keine
-                  fehlenden Verkäufe geschätzt.
-                </template>
-                <template v-if="itemCatalogLoading"> Itemdaten werden geladen …</template>
-                <template v-else-if="itemCatalogError">
-                  Unbekannte Items bleiben als ID sichtbar.
-                </template>
-              </small>
-            </template>
-          </span>
-        </p>
       </main>
     </div>
   </section>
@@ -1049,12 +479,12 @@ function onScrub(event: Event): void {
 }
 
 .match-scoreboard {
-  min-height: 82px;
+  min-height: 68px;
   display: grid;
   grid-template-columns: 1fr minmax(260px, 1.35fr) 1fr;
   align-items: center;
   gap: 20px;
-  padding: 12px 22px;
+  padding: 10px 22px;
   background: linear-gradient(
     100deg,
     rgba(18, 62, 93, 0.52),
@@ -1070,52 +500,37 @@ function onScrub(event: Event): void {
 }
 
 .match-identity h2 {
-  margin: 3px 0 5px;
+  margin: 0 0 5px;
   overflow: hidden;
   color: #fff;
-  font-size: 0.96rem;
+  font-size: 0.94rem;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.eyebrow,
-.roster-title {
-  color: #8292a8;
-  font-size: 0.6rem;
-  font-weight: 800;
-  letter-spacing: 0.15em;
 }
 
 .match-meta {
   display: flex;
   justify-content: center;
-  gap: 12px;
-  color: #7f8b9d;
-  font-size: 0.66rem;
-}
-
-.match-meta span + span::before {
-  content: "·";
-  margin-right: 12px;
+  gap: 18px;
+  color: #718096;
+  font-size: 0.62rem;
 }
 
 .score-team {
-  display: grid;
+  display: flex;
   align-items: center;
-  gap: 3px 12px;
-}
-
-.score-team-blue {
-  grid-template-columns: auto auto 1fr;
+  gap: 12px;
+  color: #718096;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
 }
 
 .score-team-red {
-  grid-template-columns: 1fr auto auto;
-  text-align: right;
+  justify-content: flex-end;
 }
 
 .score-team strong {
-  grid-row: span 2;
   color: var(--blue);
   font-family: "Cascadia Code", monospace;
   font-size: 2rem;
@@ -1123,31 +538,16 @@ function onScrub(event: Event): void {
 }
 
 .score-team-red strong {
-  order: -1;
   color: var(--red);
 }
 
-.score-team small {
-  color: #8190a4;
-  font-size: 0.62rem;
-}
-
-.score-result {
-  font-size: 0.68rem;
-  font-weight: 900;
-  letter-spacing: 0.12em;
-  opacity: 0.64;
-}
-
-.score-result.winner {
+.score-team .winner {
   color: #f1ce73;
-  opacity: 1;
 }
 
 .timeline-card {
-  padding: 16px 18px 13px;
-  border-color: rgba(77, 185, 247, 0.3);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.24);
+  padding: 12px 16px;
+  border-color: rgba(77, 185, 247, 0.26);
 }
 
 .timeline-heading,
@@ -1155,45 +555,25 @@ function onScrub(event: Event): void {
 .timeline-controls,
 .timeline-legend,
 .player-heading,
-.player-footer,
-.live-stats,
-.purchase-strip,
+.player-stats,
 .event-window-header {
   display: flex;
   align-items: center;
 }
 
-.timeline-heading,
-.event-window-header {
-  justify-content: space-between;
-}
-
 .timeline-heading {
-  align-items: flex-start;
-  gap: 18px;
-  margin-bottom: 15px;
+  justify-content: space-between;
+  margin-bottom: 9px;
 }
 
-.timeline-heading > div:first-child,
-.event-window-header > div,
-.event-copy,
-.purchase-boundary span {
-  display: flex;
-  flex-direction: column;
-}
-
-.timeline-heading strong,
-.event-window-header strong {
-  color: #f4f8fd;
-  font-size: 0.9rem;
+.timeline-heading strong {
+  font-size: 0.78rem;
 }
 
 .timeline-legend {
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 7px 13px;
-  color: #8392a6;
-  font-size: 0.61rem;
+  gap: 13px;
+  color: #8292a8;
+  font-size: 0.58rem;
 }
 
 .timeline-legend span {
@@ -1205,7 +585,6 @@ function onScrub(event: Event): void {
 .timeline-legend i {
   width: 7px;
   height: 7px;
-  display: block;
   border-radius: 50%;
   background: currentColor;
 }
@@ -1213,59 +592,47 @@ function onScrub(event: Event): void {
 .timeline-legend .kill {
   color: var(--red);
 }
+
 .timeline-legend .objective {
   color: var(--gold);
-}
-.timeline-legend .purchase-update {
-  color: #c49aff;
-}
-.timeline-legend .direct-purchase {
-  color: #61d5c3;
-}
-.timeline-legend .sale-operation {
-  color: #f0a85f;
-}
-.timeline-legend .ward {
-  color: #56d6c2;
 }
 
 .timeline-layout {
   display: grid;
   grid-template-columns: auto minmax(300px, 1fr) auto;
-  gap: 18px;
+  gap: 16px;
 }
 
 .timeline-controls {
-  gap: 11px;
+  gap: 10px;
 }
 
 .play-control {
-  width: 42px;
-  height: 42px;
+  width: 38px;
+  height: 38px;
   display: grid;
   place-items: center;
   border: 1px solid rgba(70, 182, 255, 0.46);
   border-radius: 50%;
   background: rgba(30, 140, 212, 0.14);
   color: #7bcbff;
-  font-size: 1.15rem;
+  font-size: 1rem;
 }
 
 .timecode {
   display: flex;
-  min-width: 90px;
+  min-width: 82px;
   flex-direction: column;
   font-family: "Cascadia Code", monospace;
 }
 
 .timecode strong {
-  color: #f3f7fc;
-  font-size: 0.96rem;
+  font-size: 0.9rem;
 }
 
 .timecode span {
   color: #627086;
-  font-size: 0.58rem;
+  font-size: 0.55rem;
 }
 
 .timeline-main {
@@ -1274,20 +641,18 @@ function onScrub(event: Event): void {
 
 .timeline-track {
   position: relative;
-  height: 34px;
-  border: 1px solid rgba(143, 171, 202, 0.08);
-  border-radius: 7px;
-  background:
-    linear-gradient(to bottom, #1a2330 0 8px, transparent 8px 20px, rgba(86, 214, 194, 0.05) 20px),
-    #0a1018;
+  height: 24px;
+  border: 1px solid rgba(143, 171, 202, 0.1);
+  border-radius: 6px;
+  background: #0c131d;
 }
 
 .timeline-track input {
   position: absolute;
   z-index: 4;
-  inset: -6px 0;
+  inset: -7px 0;
   width: 100%;
-  height: 44px;
+  height: 38px;
   margin: 0;
   opacity: 0;
   cursor: pointer;
@@ -1296,82 +661,45 @@ function onScrub(event: Event): void {
 .timeline-progress {
   position: absolute;
   z-index: 1;
-  inset: 0 auto 25px 0;
-  border-radius: 6px 0 0 0;
-  background: linear-gradient(90deg, #297eb6, #4db9f7);
+  inset: 0 auto 0 0;
+  border-radius: 5px;
+  background: rgba(45, 151, 216, 0.3);
 }
 
 .event-marker {
   position: absolute;
   z-index: 5;
-  top: 4px;
-  width: 20px;
-  height: 20px;
+  top: 50%;
+  width: 18px;
+  height: 18px;
   display: grid;
   place-items: center;
   padding: 0;
-  overflow: hidden;
   transform: translate(-50%, -50%);
   border: 1px solid currentColor;
   border-radius: 50%;
   background: #0a111a;
-  color: #dce8f5;
-  font-size: 0.54rem;
+  font-size: 0.5rem;
   cursor: pointer;
 }
 
-.event-marker.kill {
+.event-marker.kill,
+.event-symbol.kill {
   color: var(--red);
 }
-.event-marker.objective {
+
+.event-marker.objective,
+.event-symbol.objective {
   color: var(--gold);
-}
-.event-marker.purchase-update {
-  border-color: #c49aff;
-  color: #c49aff;
-}
-
-.event-marker.direct-purchase {
-  top: 7px;
-  width: 13px;
-  height: 13px;
-  border-color: #61d5c3;
-  border-radius: 3px;
-  color: #61d5c3;
-}
-
-.event-marker.sale-operation {
-  border-color: #f0a85f;
-  color: #f0a85f;
-}
-
-.event-marker img,
-.purchase-chip img,
-.event-symbol img {
-  width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: cover;
-}
-
-.ward-density {
-  position: absolute;
-  z-index: 2;
-  bottom: 2px;
-  width: 3px;
-  transform: translateX(-50%);
-  border-radius: 2px 2px 0 0;
-  background: linear-gradient(#b596ee, #56d6c2);
-  opacity: 0.68;
 }
 
 .timeline-ticks {
   display: flex;
   justify-content: space-between;
-  margin-top: 5px;
+  margin-top: 4px;
   color: #536176;
   font-family: monospace;
-  font-size: 0.51rem;
+  font-size: 0.49rem;
 }
 
 .speed-controls {
@@ -1388,7 +716,7 @@ function onScrub(event: Event): void {
   border-radius: 4px;
   background: transparent;
   color: #67758a;
-  font-size: 0.6rem;
+  font-size: 0.58rem;
   font-weight: 700;
 }
 
@@ -1401,15 +729,9 @@ function onScrub(event: Event): void {
   color: #d9f1ff;
 }
 
-.timeline-status {
-  margin: 8px 0 0 71px;
-  color: #7f8fa4;
-  font-size: 0.6rem;
-}
-
 .viewer-grid {
   display: grid;
-  grid-template-columns: minmax(250px, 310px) minmax(360px, 1fr) minmax(250px, 310px);
+  grid-template-columns: minmax(250px, 310px) minmax(340px, 1fr) minmax(250px, 310px);
   grid-template-areas: "blue events red";
   gap: 10px;
   align-items: start;
@@ -1422,30 +744,22 @@ function onScrub(event: Event): void {
 .roster-blue {
   grid-area: blue;
 }
+
 .roster-red {
   grid-area: red;
 }
 
 .roster-title {
+  min-height: 34px;
   display: flex;
   align-items: center;
-  min-height: 34px;
   gap: 7px;
-  padding: 0 10px;
+  padding: 0 11px;
   border-bottom: 1px solid rgba(143, 171, 202, 0.1);
-}
-
-.roster-title small {
-  margin-left: auto;
-  color: #637186;
-  font-size: 0.52rem;
-  font-weight: 500;
-  letter-spacing: 0;
-}
-
-.live-stats.unavailable {
-  color: #6f7c90;
-  font-weight: 600;
+  color: #8292a8;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.13em;
 }
 
 .team-pip {
@@ -1463,11 +777,11 @@ function onScrub(event: Event): void {
 
 .player-card {
   width: 100%;
-  min-height: 92px;
+  min-height: 70px;
   display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  padding: 9px;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
   border: 0;
   border-bottom: 1px solid rgba(143, 171, 202, 0.08);
   border-left: 2px solid transparent;
@@ -1490,17 +804,38 @@ function onScrub(event: Event): void {
   background: rgba(221, 62, 79, 0.08);
 }
 
-.player-card > img {
-  width: 38px;
-  height: 38px;
-  flex: 0 0 38px;
+.champion-portrait {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+}
+
+.champion-portrait img {
+  width: 100%;
+  height: 100%;
   border: 1px solid rgba(38, 167, 255, 0.62);
   border-radius: 8px;
   object-fit: cover;
 }
 
-.player-card-red > img {
+.player-card-red .champion-portrait img {
   border-color: rgba(255, 89, 100, 0.64);
+}
+
+.champion-portrait small {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  min-width: 16px;
+  padding: 1px 3px;
+  border: 1px solid rgba(143, 171, 202, 0.28);
+  border-radius: 5px;
+  background: #0a111a;
+  color: #fff;
+  font-family: "Cascadia Code", monospace;
+  font-size: 0.5rem;
+  text-align: center;
 }
 
 .player-main {
@@ -1508,11 +843,11 @@ function onScrub(event: Event): void {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
 }
 
 .player-heading,
-.player-footer {
+.player-stats {
   justify-content: space-between;
 }
 
@@ -1523,85 +858,26 @@ function onScrub(event: Event): void {
 }
 
 .player-heading b,
-.event-copy b {
+.event-row b {
   overflow: hidden;
   color: #f6f8fc;
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .player-heading small,
-.player-footer small {
-  overflow: hidden;
+.player-stats {
   color: #6f7c90;
-  font-size: 0.53rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 0.52rem;
 }
 
 .player-heading em {
   color: #d9e3f0;
   font-family: "Cascadia Code", monospace;
-  font-size: 0.68rem;
+  font-size: 0.65rem;
   font-style: normal;
   font-weight: 700;
-}
-
-.live-stats {
-  flex-wrap: wrap;
-  gap: 6px;
-  color: #9aafc7;
-  font-size: 0.52rem;
-  font-weight: 700;
-}
-
-.live-stats > small,
-.purchase-strip > small {
-  color: #5f6c7f;
-  font-size: 0.46rem;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-}
-
-.live-stats i {
-  margin-right: 2px;
-  color: #76c8f5;
-  font-size: 0.48rem;
-}
-
-.live-gold {
-  margin-left: auto;
-  color: #e7c976;
-}
-
-.purchase-strip {
-  min-height: 23px;
-  gap: 5px;
-}
-
-.hidden-count {
-  color: #8978b1;
-  font-size: 0.48rem;
-}
-
-.purchase-chip {
-  width: 22px;
-  height: 22px;
-  display: block;
-  overflow: hidden;
-  border: 1px solid rgba(196, 154, 255, 0.4);
-  border-radius: 4px;
-  background: #0b1119;
-}
-
-.purchase-chip.direct-purchase {
-  border-color: rgba(97, 213, 195, 0.54);
-}
-
-.purchase-chip.component {
-  border-color: #61d5c3;
-  box-shadow: inset 0 0 0 1px rgba(97, 213, 195, 0.22);
 }
 
 .event-focus {
@@ -1611,10 +887,14 @@ function onScrub(event: Event): void {
 }
 
 .event-window-header {
-  min-height: 49px;
-  gap: 10px;
-  padding: 8px 11px;
+  min-height: 42px;
+  justify-content: space-between;
+  padding: 0 11px;
   border-bottom: 1px solid rgba(143, 171, 202, 0.1);
+}
+
+.event-window-header strong {
+  font-size: 0.82rem;
 }
 
 .clear-filter {
@@ -1630,11 +910,11 @@ function onScrub(event: Event): void {
 
 .event-row {
   width: 100%;
-  min-height: 46px;
+  min-height: 44px;
   display: grid;
-  grid-template-columns: 42px 28px minmax(0, 1fr);
+  grid-template-columns: 42px 27px minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   padding: 6px 10px;
   border: 0;
   border-bottom: 1px solid rgba(143, 171, 202, 0.07);
@@ -1654,7 +934,7 @@ function onScrub(event: Event): void {
 .event-row time {
   color: #6f7d91;
   font-family: monospace;
-  font-size: 0.61rem;
+  font-size: 0.6rem;
 }
 
 .event-symbol {
@@ -1662,84 +942,10 @@ function onScrub(event: Event): void {
   height: 27px;
   display: grid;
   place-items: center;
-  overflow: hidden;
   border: 1px solid rgba(143, 171, 202, 0.14);
   border-radius: 6px;
   background: #0b121b;
-  font-size: 0.72rem;
-}
-
-.event-symbol.kill {
-  color: var(--red);
-}
-.event-symbol.objective {
-  color: var(--gold);
-}
-.event-symbol.purchase-update {
-  border-color: rgba(196, 154, 255, 0.4);
-}
-.event-symbol.direct-purchase {
-  border-color: rgba(97, 213, 195, 0.54);
-}
-.event-symbol.sale-operation {
-  border-color: rgba(240, 168, 95, 0.54);
-  color: #f0a85f;
-}
-.event-symbol.ward-placement {
-  color: #56d6c2;
-}
-.event-symbol.ward-kill {
-  color: #b596ee;
-}
-
-.event-copy {
-  min-width: 0;
-  gap: 2px;
-}
-
-.event-copy small {
-  overflow: hidden;
-  color: #69788c;
-  font-size: 0.54rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.event-empty {
-  padding: 24px;
-  color: #69778b;
-  font-size: 0.65rem;
-  text-align: center;
-}
-
-.purchase-boundary {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  margin: 0;
-  padding: 11px;
-  border-top: 1px solid rgba(196, 154, 255, 0.14);
-  background: rgba(93, 59, 126, 0.08);
-  color: #8d9bae;
-}
-
-.purchase-boundary > i {
-  color: #c49aff;
-}
-
-.purchase-boundary span {
-  gap: 2px;
-}
-
-.purchase-boundary b {
-  color: #c9b3ec;
-  font-size: 0.61rem;
-}
-
-.purchase-boundary small {
-  color: #77869a;
-  font-size: 0.55rem;
-  line-height: 1.45;
+  font-size: 0.7rem;
 }
 
 @media (max-width: 1180px) {
@@ -1753,24 +959,18 @@ function onScrub(event: Event): void {
   .match-scoreboard {
     grid-template-columns: 1fr 1fr;
   }
+
   .match-identity {
     grid-column: 1 / -1;
     grid-row: 1;
   }
-  .timeline-heading {
-    flex-direction: column;
-  }
-  .timeline-legend {
-    justify-content: flex-start;
-  }
+
   .timeline-layout {
     grid-template-columns: 1fr;
   }
+
   .speed-controls {
     justify-self: start;
-  }
-  .timeline-status {
-    margin-left: 0;
   }
 }
 

@@ -86,26 +86,25 @@ is `2026-07-23`, its SHA-256 is
 `47f20aae95740df4fb3b66417cabd146abe85c23b432c5fa1bd17d868995f9b0`, and its
 provenance fingerprint is `fnv1a64:7eb24280c8b9ce1d`.
 
-The browser currently renders the real Wasm participant summary, kill timeline,
-objective timeline, ward lifecycle, both exact-build item-purchase subsets,
-the exact-build item-sale-operation stream, and exact-build replay-native
-keyframe XP/level/total-gold/lane-CS snapshots for the locally loaded replay.
+The browser decoding layer exposes the real Wasm participant summary, kill
+timeline, objective timeline, ward lifecycle, both exact-build item-purchase
+subsets, the exact-build item-sale-operation stream, and exact-build
+replay-native keyframe XP/level/total-gold/lane-CS snapshots for the locally
+loaded replay. Not every decoded research stream is mounted in the product
+view.
 
-The default browser landing page is now a timeline-first product replay view.
-Its full-width scrubber prioritizes replay-native kills, elite objectives, and
-the strict purchase-linked item updates, strict direct add-only purchases, and
-a distinct orange sale-operation stream. Ward lifecycle is summarized in a
-lower-emphasis density lane instead of thousands of competing markers. Roster
-K/D/A, recognized item-update icons, and—where the exact-build external profile
-is present—XP, derived level, total gold, and lane CS follow the scrub time.
-XP and gold are displayed by truncating replay-native Float32 state; level uses
-patch-pinned cumulative XP thresholds plus the replay-embedded final level cap,
-and lane CS is emitted only after integral-value and monotonicity gates. Sale
-markers are operation-only and never mutate or imply a current inventory. The
-separate summary level, neutral CS, Ward aggregates, and earned gold remain
-explicitly final-state fields. Seven-slot
-final inventories, fake health/resource bars, the minimap, and ward-position
-research controls are not shown on the product landing page.
+The default browser landing page is a focused timeline product view. Its
+full-width scrubber and event list contain only replay-native champion kills
+and elite objectives. Ward lifecycle, purchase subsets, and sale operations
+remain available to research/debug tooling but are deliberately absent from the
+product timeline. Compact champion cards show the champion portrait, player,
+role, scrub-time K/D/A, and—where the exact-build external profile is
+present—derived level and lane CS. Cumulative total gold is not shown as
+spendable current gold. Partial purchase and operation streams are not shown as
+inventory slots or current inventory. Final inventories, fake health/resource
+bars, the minimap, explanatory decoder copy, and ward-position research
+controls are not shown on the product landing page. Current spendable gold and
+complete timeline inventory remain unavailable pending replay-native decoders.
 
 Item IDs are resolved only for presentation through official static Data Dragon
 data. The productive replay build `16.14.794.5912` is explicitly pinned to Data

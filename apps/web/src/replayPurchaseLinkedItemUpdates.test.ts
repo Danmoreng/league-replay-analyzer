@@ -157,18 +157,18 @@ describe("purchase-linked resulting-item update presentation helpers", () => {
     );
   });
 
-  it("shows purchase-linked events on the timeline without inventing inventory slots", () => {
+  it("keeps purchase research out of the focused product view", () => {
     const source = readFileSync(
       fileURLToPath(new URL("./components/ProductReplayView.vue", import.meta.url)),
       "utf8",
     );
 
-    expect(source).toContain("visiblePurchases(entry.participantId)");
-    expect(source).toContain("itemName(event.event.resultingItemId)");
-    expect(source).toContain("event.timestampMillis > currentTime.value");
-    expect(source).toContain("kein vollständiger Inventarstand");
-    expect(source).toContain("Item-Käufe nicht verfügbar");
-    expect(source).toContain("XP, Level, Gold und Lane-CS für diesen Patch nicht verfügbar");
+    expect(source).toContain('kind: "kill"');
+    expect(source).toContain('kind: "objective"');
+    expect(source).not.toContain('kind: "purchase-update"');
+    expect(source).not.toContain("resultingItemId");
+    expect(source).not.toContain("purchaseLinkedItemUpdates?.events");
+    expect(source).not.toContain("totalGold");
     expect(source).not.toContain("player.items");
     expect(source).not.toContain("function finalItems");
     expect(source).not.toContain("health-bar");
