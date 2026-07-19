@@ -28,12 +28,14 @@ import type { ReplayWardResult } from "./replayWards";
 import type { ReplayDirectItemPurchasesResult } from "./replayDirectItemPurchases";
 import type { ReplayItemSalesResult } from "./replayItemSales";
 import type { ReplayPurchaseLinkedItemUpdatesResult } from "./replayPurchaseLinkedItemUpdates";
+import type { ReplayParticipantStatSnapshotsResult } from "./replayParticipantStatSnapshots";
 import {
   extractReplayDirectItemPurchasesWithWasm,
   extractReplayItemSalesWithWasm,
   extractReplayKillsWithWasm,
   extractReplayObjectivesWithWasm,
   extractReplayPurchaseLinkedItemUpdatesWithWasm,
+  extractReplayParticipantStatSnapshotsWithWasm,
   extractReplayWardsWithWasm,
   parseReplayBufferWithWasm,
 } from "./wasmReplayParser";
@@ -63,6 +65,9 @@ const isLoadingReplayDirectItemPurchases = ref(false);
 const replayItemSales = ref<ReplayItemSalesResult | null>(null);
 const replayItemSalesError = ref("");
 const isLoadingReplayItemSales = ref(false);
+const replayParticipantStatSnapshots = ref<ReplayParticipantStatSnapshotsResult | null>(null);
+const replayParticipantStatSnapshotsError = ref("");
+const isLoadingReplayParticipantStatSnapshots = ref(false);
 const replayMovementStatus = ref("No replay-derived movement fixture loaded yet.");
 const replayBuffer = ref<ArrayBuffer | null>(null);
 const loadedReplayName = ref("");
@@ -83,7 +88,8 @@ const headerStatus = computed(() => {
     isLoadingReplayWards.value ||
     isLoadingReplayPurchaseLinkedItemUpdates.value ||
     isLoadingReplayDirectItemPurchases.value ||
-    isLoadingReplayItemSales.value
+    isLoadingReplayItemSales.value ||
+    isLoadingReplayParticipantStatSnapshots.value
   ) {
     return "Replay wird lokal dekodiert …";
   }
@@ -687,6 +693,9 @@ async function loadReplay(file: File): Promise<void> {
   replayItemSales.value = null;
   replayItemSalesError.value = "";
   isLoadingReplayItemSales.value = true;
+  replayParticipantStatSnapshots.value = null;
+  replayParticipantStatSnapshotsError.value = "";
+  isLoadingReplayParticipantStatSnapshots.value = true;
   loadedReplayName.value = file.name;
   status.value = `Parsing ${file.name}...`;
 
@@ -704,6 +713,21 @@ async function loadReplay(file: File): Promise<void> {
     riotBundle.value = null;
     setDuration(parsedSummary.gameLengthMillis);
     seek(0);
+
+    void extractReplayParticipantStatSnapshotsWithWasm(buffer)
+      .then((decodedSnapshots) => {
+        if (!isCurrentRequest()) return;
+        replayParticipantStatSnapshots.value = decodedSnapshots;
+      })
+      .catch((snapshotError: unknown) => {
+        if (!isCurrentRequest()) return;
+        replayParticipantStatSnapshots.value = null;
+        replayParticipantStatSnapshotsError.value =
+          snapshotError instanceof Error ? snapshotError.message : String(snapshotError);
+      })
+      .finally(() => {
+        if (isCurrentRequest()) isLoadingReplayParticipantStatSnapshots.value = false;
+      });
 
     let killStatus = "Kill timeline unavailable.";
     status.value = `Parsed metadata for ${file.name}. Decoding replay kill events...`;
@@ -843,6 +867,8 @@ async function loadReplay(file: File): Promise<void> {
     replayDirectItemPurchasesError.value = "";
     replayItemSales.value = null;
     replayItemSalesError.value = "";
+    replayParticipantStatSnapshots.value = null;
+    replayParticipantStatSnapshotsError.value = "";
     replayBuffer.value = null;
     errorMessage.value = error instanceof Error ? error.message : String(error);
     status.value = "Replay parsing failed.";
@@ -855,6 +881,7 @@ async function loadReplay(file: File): Promise<void> {
       isLoadingReplayPurchaseLinkedItemUpdates.value = false;
       isLoadingReplayDirectItemPurchases.value = false;
       isLoadingReplayItemSales.value = false;
+      isLoadingReplayParticipantStatSnapshots.value = false;
     }
   }
 }
@@ -909,18 +936,21 @@ function onFileChange(event: Event): void {
           :purchase-linked-item-updates="replayPurchaseLinkedItemUpdates"
           :direct-item-purchases="replayDirectItemPurchases"
           :item-sales="replayItemSales"
+          :participant-stat-snapshots="replayParticipantStatSnapshots"
           :kills-loading="isLoadingReplayKills"
           :objectives-loading="isLoadingReplayObjectives"
           :wards-loading="isLoadingReplayWards"
           :purchase-linked-item-updates-loading="isLoadingReplayPurchaseLinkedItemUpdates"
           :direct-item-purchases-loading="isLoadingReplayDirectItemPurchases"
           :item-sales-loading="isLoadingReplayItemSales"
+          :participant-stat-snapshots-loading="isLoadingReplayParticipantStatSnapshots"
           :kills-error="replayKillsError"
           :objectives-error="replayObjectivesError"
           :wards-error="replayWardsError"
           :purchase-linked-item-updates-error="replayPurchaseLinkedItemUpdatesError"
           :direct-item-purchases-error="replayDirectItemPurchasesError"
           :item-sales-error="replayItemSalesError"
+          :participant-stat-snapshots-error="replayParticipantStatSnapshotsError"
         />
 
         <!-- Summary View -->

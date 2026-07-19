@@ -24,6 +24,7 @@ import type {
   ReplayPurchaseLinkedItemUpdatesResult,
   ReplayPurchaseLinkedResultingItemUpdateEvent,
 } from "../replayPurchaseLinkedItemUpdates";
+import type { ReplayParticipantStatSnapshotsResult } from "../replayParticipantStatSnapshots";
 import type { ReplayWardEvent, ReplayWardResult } from "../replayWards";
 
 const props = defineProps<{
@@ -35,18 +36,21 @@ const props = defineProps<{
   purchaseLinkedItemUpdates: ReplayPurchaseLinkedItemUpdatesResult | null;
   directItemPurchases: ReplayDirectItemPurchasesResult | null;
   itemSales: ReplayItemSalesResult | null;
+  participantStatSnapshots: ReplayParticipantStatSnapshotsResult | null;
   killsLoading: boolean;
   objectivesLoading: boolean;
   wardsLoading: boolean;
   purchaseLinkedItemUpdatesLoading: boolean;
   directItemPurchasesLoading: boolean;
   itemSalesLoading: boolean;
+  participantStatSnapshotsLoading: boolean;
   killsError?: string;
   objectivesError?: string;
   wardsError?: string;
   purchaseLinkedItemUpdatesError?: string;
   directItemPurchasesError?: string;
   itemSalesError?: string;
+  participantStatSnapshotsError?: string;
 }>();
 
 type ProductEvent =
@@ -92,6 +96,13 @@ interface WardBucket {
   timestampMillis: number;
   placements: number;
   kills: number;
+}
+
+interface CurrentParticipantStats {
+  participantId: number;
+  timestampMillis: number;
+  totalGold: number;
+  laneCs: number;
 }
 
 const { currentTime, duration, isPlaying, playbackSpeed, togglePlayback, seek } = usePlayback();
@@ -297,6 +308,46 @@ const purchasesByParticipant = computed(() => {
   return rows;
 });
 
+const participantStatSnapshotRows = computed<CurrentParticipantStats[]>(() => {
+  const rows: CurrentParticipantStats[] = [];
+  for (const snapshot of props.participantStatSnapshots?.snapshots ?? []) {
+    const participantId = snapshot.participantId;
+    const timestampMillis = snapshot.timestampMillis;
+    const totalGold = snapshot.totalGold;
+    const laneCs = snapshot.laneMinionsKilled;
+    if (
+      !Number.isInteger(participantId) ||
+      !Number.isFinite(timestampMillis) ||
+      !Number.isFinite(totalGold) ||
+      !Number.isFinite(laneCs)
+    ) {
+      continue;
+    }
+    rows.push({
+      participantId,
+      timestampMillis,
+      totalGold,
+      laneCs,
+    });
+  }
+  return rows.sort(
+    (left, right) =>
+      left.participantId - right.participantId || left.timestampMillis - right.timestampMillis,
+  );
+});
+
+const currentParticipantStatsById = computed(() => {
+  const rows = new Map<number, CurrentParticipantStats>();
+  for (const snapshot of participantStatSnapshotRows.value) {
+    if (snapshot.timestampMillis > currentTime.value) continue;
+    const previous = rows.get(snapshot.participantId);
+    if (!previous || snapshot.timestampMillis >= previous.timestampMillis) {
+      rows.set(snapshot.participantId, snapshot);
+    }
+  }
+  return rows;
+});
+
 const teams = computed(() =>
   [100, 200].map((teamId) => {
     const players = props.summary.players
@@ -351,8 +402,8 @@ const nearbyEvents = computed(() => {
     .sort((left, right) => left.timestampMillis - right.timestampMillis);
 });
 
-const finalStatsAvailable = computed(
-  () => props.summary.capabilities.validatedFinalPlayerStatsAvailable === true,
+const participantStatsUnavailable = computed(
+  () => Boolean(props.participantStatSnapshotsError) || !props.participantStatSnapshots,
 );
 const purchaseUpdatesUnavailable = computed(() => Boolean(props.purchaseLinkedItemUpdatesError));
 const directPurchasesUnavailable = computed(() => Boolean(props.directItemPurchasesError));
@@ -371,7 +422,8 @@ const loadState = computed(() => {
     props.wardsLoading ||
     props.purchaseLinkedItemUpdatesLoading ||
     props.directItemPurchasesLoading ||
-    props.itemSalesLoading
+    props.itemSalesLoading ||
+    props.participantStatSnapshotsLoading
   ) {
     return "Replay-Ereignisse werden lokal dekodiert …";
   }
@@ -381,7 +433,8 @@ const loadState = computed(() => {
     props.wardsError ||
     props.purchaseLinkedItemUpdatesError ||
     props.directItemPurchasesError ||
-    props.itemSalesError
+    props.itemSalesError ||
+    props.participantStatSnapshotsError
   ) {
     return "Ein Teil der Replay-Ereignisse ist für diesen Patch nicht verfügbar.";
   }
@@ -407,13 +460,6 @@ watch(
 function formatTime(milliseconds: number): string {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000));
   return Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
-}
-
-function formatCompact(value: number): string {
-  return new Intl.NumberFormat("de-DE", {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(value);
 }
 
 function roleRank(role: string): number {
@@ -477,8 +523,12 @@ function timelineKda(participantId: number): TimelineKda {
   return kdaByParticipant.value.get(participantId) ?? { kills: 0, deaths: 0, assists: 0 };
 }
 
-function totalCs(player: PlayerSummary): number {
-  return player.laneMinionsKilled + player.neutralMinionsKilled;
+function currentParticipantStats(participantId: number): CurrentParticipantStats | null {
+  return currentParticipantStatsById.value.get(participantId) ?? null;
+}
+
+function formatCurrentGold(value: number): string {
+  return new Intl.NumberFormat("de-DE", { maximumFractionDigits: 0 }).format(Math.trunc(value));
 }
 
 function visiblePurchases(participantId: number): ItemPurchaseEvent[] {
@@ -782,16 +832,23 @@ function onScrub(event: Event): void {
               </em>
             </span>
 
-            <span v-if="finalStatsAvailable" class="final-stats">
-              <small>FINAL</small>
-              <span><i class="bi bi-star-fill"></i> Lv {{ entry.player.level }}</span>
-              <span><i class="bi bi-stack"></i> {{ totalCs(entry.player) }} CS</span>
-              <span><i class="bi bi-eye-fill"></i> {{ entry.player.wardsPlaced }}/{{ entry.player.wardsKilled }}</span>
-              <span class="final-gold">{{ formatCompact(entry.player.goldEarned) }}g</span>
+            <span v-if="currentParticipantStats(entry.participantId)" class="live-stats">
+              <small>REPLAY-STATUS · {{ formatTime(currentParticipantStats(entry.participantId)!.timestampMillis) }}</small>
+              <span class="live-gold" title="Replay-nativer Gesamtgoldwert; für die Anzeige auf ganze Goldstücke gekürzt">
+                <i class="bi bi-coin"></i>{{ formatCurrentGold(currentParticipantStats(entry.participantId)!.totalGold) }}g
+              </span>
+              <span title="Replay-nativer Lane-CS-Snapshot">
+                <i class="bi bi-stack"></i>{{ Math.trunc(currentParticipantStats(entry.participantId)!.laneCs) }} Lane CS
+              </span>
             </span>
-            <span v-else class="final-stats unavailable">
-              <small>FINAL</small>
-              <span>Für diesen Patch nicht validiert</span>
+            <span v-else-if="participantStatSnapshotsLoading" class="live-stats unavailable">
+              <small>REPLAY-STATUS</small>
+              <span>Stat-Snapshots werden lokal dekodiert …</span>
+            </span>
+            <span v-else class="live-stats unavailable" :title="participantStatSnapshotsError">
+              <small>REPLAY-STATUS</small>
+              <span v-if="participantStatsUnavailable">Gold und Lane-CS für diesen Patch nicht verfügbar</span>
+              <span v-else>Noch kein Snapshot vor {{ formatTime(currentTime) }}</span>
             </span>
 
             <span
@@ -822,7 +879,7 @@ function onScrub(event: Event): void {
 
             <span class="player-footer">
               <small>{{ roleLabel(entry.player.teamPosition) }}</small>
-              <small>K/D/A und dekodierte Käufe folgen der Timeline</small>
+              <small>K/D/A, Käufe und verfügbare Stat-Snapshots folgen der Timeline</small>
             </span>
           </span>
         </button>
@@ -1047,7 +1104,7 @@ function onScrub(event: Event): void {
 .timeline-legend,
 .player-heading,
 .player-footer,
-.final-stats,
+.live-stats,
 .purchase-strip,
 .event-window-header {
   display: flex;
@@ -1312,7 +1369,7 @@ function onScrub(event: Event): void {
   letter-spacing: 0;
 }
 
-.final-stats.unavailable {
+.live-stats.unavailable {
   color: #6f7c90;
   font-weight: 600;
 }
@@ -1417,15 +1474,15 @@ function onScrub(event: Event): void {
   font-weight: 700;
 }
 
-.final-stats {
+.live-stats {
   flex-wrap: wrap;
   gap: 6px;
-  color: #8c9bb0;
+  color: #9aafc7;
   font-size: 0.52rem;
   font-weight: 700;
 }
 
-.final-stats > small,
+.live-stats > small,
 .purchase-strip > small {
   color: #5f6c7f;
   font-size: 0.46rem;
@@ -1433,15 +1490,15 @@ function onScrub(event: Event): void {
   letter-spacing: 0.08em;
 }
 
-.final-stats i {
+.live-stats i {
   margin-right: 2px;
-  color: #8094ad;
+  color: #76c8f5;
   font-size: 0.48rem;
 }
 
-.final-gold {
+.live-gold {
   margin-left: auto;
-  color: #d7bd78;
+  color: #e7c976;
 }
 
 .purchase-strip {

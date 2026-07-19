@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -162,6 +163,19 @@ struct InventorySaleSubsetDecoderProfile {
     std::vector<std::uint8_t> sale_payload_byte2_values;
 };
 
+// Exact-build keyframe participant-state bytes. The cipher table is a
+// profile-supplied bijection; it is never inferred from runtime replay data.
+struct KeyframeParticipantStatsDecoderProfile {
+    std::string segment_type;
+    std::uint8_t channel = 0;
+    std::uint16_t packet_type = 0;
+    std::size_t content_length = 0;
+    std::uint32_t champion_network_id_base = 0;
+    std::array<std::uint8_t, 256> cipher_to_plain{};
+    std::array<std::size_t, 4> total_gold_offsets{};
+    std::array<std::size_t, 4> lane_minions_killed_offsets{};
+};
+
 struct DecoderVersionProfile {
     std::string version_group;
     std::vector<std::string> accepted_game_versions;
@@ -172,6 +186,7 @@ struct DecoderVersionProfile {
     std::optional<InventoryPurchaseSubsetDecoderProfile> inventory_purchase_subset;
     std::optional<InventoryDirectPurchaseSubsetDecoderProfile> inventory_direct_purchase_subset;
     std::optional<InventorySaleSubsetDecoderProfile> inventory_sale_subset;
+    std::optional<KeyframeParticipantStatsDecoderProfile> keyframe_participant_stats;
 };
 
 struct DecoderProfileProvenance {

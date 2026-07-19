@@ -1,0 +1,86 @@
+{
+  "schema": "rofl-replay-participant-stat-snapshots-corpus-expected/v1",
+  "exactReplayBuild": "16.14.794.5912",
+  "versionGroup": "16.14",
+  "fixtures": [
+    { "replayId": "EUW1-7919517389", "partition": "D7", "expectedSnapshotCount": 270, "expectedTimelineFrameCount": 28 },
+    { "replayId": "EUW1-7919624327", "partition": "D7", "expectedSnapshotCount": 270, "expectedTimelineFrameCount": 28 },
+    { "replayId": "EUW1-7920241664", "partition": "D7", "expectedSnapshotCount": 350, "expectedTimelineFrameCount": 36 },
+    { "replayId": "EUW1-7920292147", "partition": "D7", "expectedSnapshotCount": 410, "expectedTimelineFrameCount": 42 },
+    { "replayId": "EUW1-7920341366", "partition": "D7", "expectedSnapshotCount": 260, "expectedTimelineFrameCount": 27 },
+    { "replayId": "EUW1-7920364492", "partition": "D7", "expectedSnapshotCount": 260, "expectedTimelineFrameCount": 27 },
+    { "replayId": "EUW1-7920550565", "partition": "D7", "expectedSnapshotCount": 350, "expectedTimelineFrameCount": 36 },
+    { "replayId": "EUW1-7921377760", "partition": "H3", "expectedSnapshotCount": 250, "expectedTimelineFrameCount": 26 },
+    { "replayId": "EUW1-7921482297", "partition": "H3", "expectedSnapshotCount": 480, "expectedTimelineFrameCount": 49 },
+    { "replayId": "EUW1-7921996430", "partition": "H3", "expectedSnapshotCount": 300, "expectedTimelineFrameCount": 31 }
+  ],
+  "profile": {
+    "path": "packages/rofl-core/profiles/replay-decoder-profiles.v1.json",
+    "origin": "external",
+    "schema": "rofl-replay-decoder-profiles/v1",
+    "registryId": "league-replay-analyzer-offline-validated",
+    "revision": "2026-07-22",
+    "sha256": "6200e96737a85d89a3d5af8e591c4c72af4beaa475c97edf7971f85a87814ec5",
+    "fingerprint": "fnv1a64:0bf533d9339eb246",
+    "cipherToPlainSha256": "c9be1f4971505dcc7c4366329366794108c1b031060039a2bcfd2d60134ed4be"
+  },
+  "profileGrammar": {
+    "segmentType": "keyframe",
+    "channel": 1,
+    "snapshotPacketType": 747,
+    "snapshotContentLength": 1479,
+    "championNetworkIdBase": 1073741997,
+    "totalGoldOffsets": [115, 117, 119, 121],
+    "laneMinionsKilledOffsets": [123, 125, 127, 129]
+  },
+  "runtime": {
+    "schema": "rofl-replay-participant-stat-snapshots/v1",
+    "source": { "runtimeInput": "rofl-only", "riotApiInput": false },
+    "coverage": "profiled-keyframe-participant-stats-only",
+    "initialState": { "timestampMillis": 0, "totalGold": 500, "laneMinionsKilled": 0 },
+    "participantCountPerSnapshot": 10
+  },
+  "expected": {
+    "D7": { "replayCount": 7, "snapshotCount": 2170, "rejectedInvalidOwnerPacketCount": 0, "rejectedInvalidValuePacketCount": 0 },
+    "H3": { "replayCount": 3, "snapshotCount": 1030, "rejectedInvalidOwnerPacketCount": 0, "rejectedInvalidValuePacketCount": 0 },
+    "combined": { "replayCount": 10, "snapshotCount": 3200, "rejectedInvalidOwnerPacketCount": 0, "rejectedInvalidValuePacketCount": 0, "acceptedApiOrderingDifferenceCount": 5 }
+  },
+  "apiOrderingDifferences": [
+    {
+      "replayId": "EUW1-7920292147", "snapshotGroupIndex": 32, "participantId": 4,
+      "snapshotTimestampMillis": 1920550, "apiFrameTimestampMillis": 1920550,
+      "snapshotTotalGold": 15944.7119, "snapshotLaneMinionsKilled": 265,
+      "apiTotalGold": 15942, "apiLaneMinionsKilled": 265
+    },
+    {
+      "replayId": "EUW1-7920292147", "snapshotGroupIndex": 40, "participantId": 4,
+      "snapshotTimestampMillis": 2400734, "apiFrameTimestampMillis": 2400734,
+      "snapshotTotalGold": 23860.916, "snapshotLaneMinionsKilled": 350,
+      "apiTotalGold": 23858, "apiLaneMinionsKilled": 350
+    },
+    {
+      "replayId": "EUW1-7920341366", "snapshotGroupIndex": 13, "participantId": 8,
+      "snapshotTimestampMillis": 780222, "apiFrameTimestampMillis": 780222,
+      "snapshotTotalGold": 3638.64795, "snapshotLaneMinionsKilled": 92,
+      "apiTotalGold": 3624, "apiLaneMinionsKilled": 91
+    },
+    {
+      "replayId": "EUW1-7920364492", "snapshotGroupIndex": 5, "participantId": 7,
+      "snapshotTimestampMillis": 300140, "apiFrameTimestampMillis": 300139,
+      "snapshotTotalGold": 2318.41553, "snapshotLaneMinionsKilled": 1,
+      "apiTotalGold": 2298, "apiLaneMinionsKilled": 1
+    },
+    {
+      "replayId": "EUW1-7921482297", "snapshotGroupIndex": 23, "participantId": 8,
+      "snapshotTimestampMillis": 1380427, "apiFrameTimestampMillis": 1380426,
+      "snapshotTotalGold": 8641.75781, "snapshotLaneMinionsKilled": 163,
+      "apiTotalGold": 8593, "apiLaneMinionsKilled": 160
+    }
+  ],
+  "contract": {
+    "cli": "--extract-replay-participant-stat-snapshots-json <rofl> --decoder-profiles <canonical-profile-json>",
+    "runtimeBoundary": "The native extraction receives only the loaded ROFL and canonical external profile. Match-V5, Timeline, and embedded final stats are opened only after extraction as offline validation oracles.",
+    "apiComparison": "Timeline frame i is compared to replay snapshot group i after flooring replay totalGold to the API integer representation. The explicitly listed ordering differences are the only allowed non-exact comparisons; they are validation exceptions, never runtime fallback data.",
+    "finalState": "The last replay snapshot is a keyframe, not an invented end-of-game state. It must not exceed saved Match-V5 final gold-earned or lane-CS values."
+  }
+}

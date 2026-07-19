@@ -1,6 +1,6 @@
 # Replay Decoder Status
 
-Updated: 2026-07-21
+Updated: 2026-07-22
 Baseline commit: `fe39e13`
 
 This is the canonical handoff for the current decoder state. Read it before
@@ -70,6 +70,7 @@ Wasm, and consumed by the Vue application unless noted otherwise.
 | Purchase-linked resulting-item updates | Timestamp, participant, resulting item ID, matched strict bundle template, and packet provenance in `rofl-replay-purchase-linked-item-updates/v1` | External-profile-only, exact build `16.14.794.5912`: 193/193 offline-validated updates (D7 130, H3 63), zero extras/wrong IDs, maximum 1 ms delta. Strict subset only: 2,326/2,519 profiled add/update packets remain unavailable; no slot, instance, removal/component identity, count, complete inventory, price/gold, or undo state. |
 | Direct add-only item purchases | Timestamp, replay-native participant, structural 13-bit item ID, buildable-component flag, and add-block provenance in `rofl-replay-direct-item-purchases/v1` | External-profile-only, exact build `16.14.794.5912`: 1,278/1,278 exact purchases (D7 844, H3 434), zero extras/wrong IDs, maximum 1 ms delta. This includes 1,043/1,043 buildable components (D7 710, H3 333). It accepts only an isolated champion-owned channel-1 `0x0369`, length 14/15 add, with no relevant `0x0369`/`0x03F9`/`0x0146`/`0x0081` family operation for that owner within +/-1 ms and a decoded ID in the profile-pinned static real-item catalog. It does not expose a general purchase classifier, slot, instance, quantity, price, gold, removal, undo, or inventory state. |
 | Item sale operations | Timestamp, replay-native participant, exact sale-operation classification, and removal-block provenance in `rofl-replay-item-sales/v1` | External-profile-only, exact build `16.14.794.5912`: 116/116 offline-validated sale operations (D7 77, H3 39), zero extras/misses, maximum 1 ms delta. The event proves only the operation and its source block; sold item ID, slot, instance, count/charges, price, gold gain, undo, and inventory state are explicitly unavailable. |
+| Keyframe participant stat snapshots | Timestamp, replay-native participant, Float32 total gold, and integer lane CS in `rofl-replay-participant-stat-snapshots/v1` | External-profile-only, exact build `16.14.794.5912`: champion-owned keyframe `0x02EB`, 1,479-byte payloads, a profile-pinned 256-byte cipher-to-plain permutation, and fixed interleaved Float32LE stripes. D7/H3: 2,170/1,030 snapshots are finite and monotonic; lane CS is integral in every snapshot. Timeline boundary differences are retained as replay ordering diagnostics, never filled from API. |
 
 The historical built-in coverage includes patch groups `15.22`, `15.23`,
 `15.24`, `16.1`, `16.5`, `16.6`, `16.7`, and `16.9`. The externally supplied
@@ -78,25 +79,30 @@ profile additionally validates exact build `16.14.794.5912`: 684/684 kills,
 1,300/1,300 final player-stat values. The same exact external profile also
 enables the strict 193/193 purchase-linked resulting-item-update subset, the
 strict 1,278/1,278 direct-add-only purchase subset, and the exact 116/116
-item-sale-operation stream; none is available through built-in fallback
-profiles. The profile revision is `2026-07-21`, its SHA-256 is
-`f690f77926c09d28998c52e5a56044c4575a23a268f49328c071be02d2359cce`, and its
-provenance fingerprint is `fnv1a64:10b2b8d2727009a0`.
+item-sale-operation stream. It also enables the profile-backed keyframe total-
+gold/lane-CS snapshot surface; none of these exact-build surfaces is available
+through built-in fallback profiles. The profile revision is `2026-07-22`, its SHA-256 is
+`6200e96737a85d89a3d5af8e591c4c72af4beaa475c97edf7971f85a87814ec5`, and its
+provenance fingerprint is `fnv1a64:0bf533d9339eb246`.
 
 The browser currently renders the real Wasm participant summary, kill timeline,
 objective timeline, ward lifecycle, both exact-build item-purchase subsets,
-and the exact-build item-sale-operation stream for the locally loaded replay.
+the exact-build item-sale-operation stream, and exact-build replay-native
+keyframe total-gold/lane-CS snapshots for the locally loaded replay.
 
 The default browser landing page is now a timeline-first product replay view.
 Its full-width scrubber prioritizes replay-native kills, elite objectives, and
 the strict purchase-linked item updates, strict direct add-only purchases, and
 a distinct orange sale-operation stream. Ward lifecycle is summarized in a
 lower-emphasis density lane instead of thousands of competing markers. Roster
-K/D/A and recognized item-update icons follow the scrub time. Sale markers are
-operation-only and never mutate or imply a current inventory. Validated level,
-CS, Ward aggregates, and earned gold remain visible only with explicit final
-labels. Seven-slot final inventories, fake health/resource bars, the minimap,
-and ward-position research controls are not shown on the product landing page.
+K/D/A, recognized item-update icons, and—where the exact-build external profile
+is present—total gold and lane CS follow the scrub time. Gold is displayed by
+truncating the replay-native Float32 state; lane CS is emitted only after the
+decoder's integral-value and monotonicity gates. Sale markers are operation-only
+and never mutate or imply a current inventory. Final level, neutral CS, Ward
+aggregates, and earned gold remain explicitly final-state fields. Seven-slot
+final inventories, fake health/resource bars, the minimap, and ward-position
+research controls are not shown on the product landing page.
 
 Item IDs are resolved only for presentation through official static Data Dragon
 data. The productive replay build `16.14.794.5912` is explicitly pinned to Data
@@ -462,6 +468,60 @@ partial typed-stream boundaries only: neither a directory index/token nor a
 typed record has proven cell or value meaning. Direct, descriptor-guided, and
 raw typed-stream Gold/CS relations remain negative.
 
+#### Productive exact-build keyframe gold and lane-CS snapshots
+
+The 16.14 `0x02EB` owner/keyframe slab now has a separate, promoted decoder
+boundary. It is deliberately independent of the non-semantic `0x01EB`
+directory: only channel-1, champion-owned `0x02EB` packets of exactly 1,479
+bytes are accepted. The external exact-build profile contains the frozen
+bijective `cipherToPlain` permutation (SHA-256 over its 256 raw bytes:
+`c9be1f4971505dcc7c4366329366794108c1b031060039a2bcfd2d60134ed4be`), where
+the prior D7 majority anchor maps raw `p[119]` to Float32LE total-gold byte 2
+and `0x0E` decodes to `0`. Runtime never learns, extends, or refits this table.
+
+After that substitution, two profile-pinned interleaved Float32LE stripes are
+decoded directly from the loaded replay:
+
+| Field | Payload offsets | UI projection | D7 / H3 validation |
+| --- | --- | --- | --- |
+| Total gold | `[115, 117, 119, 121]` | `trunc(Float32)` | 2,170/2,170 and 1,030/1,030 finite, nonnegative, and participant-monotonic; saved Timeline agrees for 2,166/2,170 D7 and 1,029/1,030 H3 snapshots. |
+| Lane CS | `[123, 125, 127, 129]` | exact integral Float32 | 2,170/2,170 and 1,030/1,030 finite, nonnegative, participant-monotonic, and integral; saved Timeline agrees for 2,169/2,170 D7 and 1,029/1,030 H3 snapshots. |
+
+The five retained Timeline deviations are explicit snapshot-boundary evidence,
+not gaps filled at runtime. D7 has four: `EUW1-7920292147` participant 4
+segments 33 and 41 (gold only), `EUW1-7920341366` participant 8 segment 14
+(gold and lane), and `EUW1-7920364492` participant 7 segment 6 (gold only).
+H3 has one: `EUW1-7921482297` participant 8 segment 24 (gold and lane). In
+each, the replay-native values remain finite and monotonic; the preceding and
+following keyframe state shows a shared ordering boundary. The first snapshots
+match the saved Timeline for all 70 D7 and 30 H3 participant tracks; last
+snapshots match 69/70 D7 and 30/30 H3 gold tracks and 70/70 D7 plus 30/30 H3
+lane tracks. These counts are offline validation only.
+
+The normalized surface is `rofl-replay-participant-stat-snapshots/v1`. It is
+implemented in C++, exposed through the external-profile-only Wasm ABI, and
+consumed by the product roster at the current scrub time. Missing, invalid,
+non-bijective, built-in, ambiguous, or non-exact-build profiles fail closed;
+the UI shows stat snapshots unavailable rather than final values or API data.
+
+Reproduce the compact ten-replay D7/H3 gate after building the native CLI:
+
+```powershell
+node .\scripts\validate_replay_participant_stat_snapshots_corpus.mjs --output .\tmp\participant-stat-snapshots-corpus-validation.json
+```
+
+The report is compact and retains only counts, hashes, diagnostics, and the five
+frozen ordering differences; it does not serialize the 3,200 snapshots again.
+
+XP `[83,85,87,89]` and neutral CS `[131,133,135,137]` use the same frozen
+cipher and exhibit strong D7/H3 finite/nonnegative/monotonic Float32 evidence,
+but remain research candidates. XP floors to saved Timeline in 1,029/1,030 H3
+snapshots with one ordering outlier; neutral CS has Float32 fractional/epsilon
+and integer-projection ambiguity. Neither field is part of the profile,
+normalized schema, Wasm output, or browser state. Current gold, level, health,
+max health, mana/resource, damage, alive state, and full inventory remain
+unresolved.
+
 Narrow inventory-component change anchors now survive predeclared holdouts:
 
 - patch 16.9 fixed family `0x0442`, 1,451-byte payload, byte 259 changes on
@@ -502,13 +562,13 @@ a packing test. This is not historical unseen-holdout evidence because p125
 was found in a full-corpus mismatch audit; the LORO result is stability
 diagnostic only.
 
-Neither correlation decodes a value, delta, event, or field boundary. A direct
-packed lane or gold value matches 0/3,100 non-initial keyframe values; the
-`109,119` gold delta matches only 58 Discovery and 19 Holdout transitions, and
-the lane delta only the corresponding 945 unchanged transitions. Thus no
-current or earned gold, numeric lane CS, delta, or last-hit event is decoded.
-Jungle-CS offsets 134..137 remain an imperfect negative control with ten false
-positives.
+Neither older change correlation decodes a delta, event, or component boundary.
+The earlier direct packed lane/gold forms remain negative because they operated
+on encrypted raw bytes, not the later frozen byte permutation and interleaved
+Float32 grammar. They must not be used to infer last hits, purchases, a gold
+delta, or component identity. Jungle-CS raw offsets `134..137` remain an
+imperfect negative control with ten false positives; the separate decoded
+neutral-CS Float32 research stripe is not yet promoted.
 
 The negative boundary is now broader: an exact change-byte correlation is not
 a numeric gold decoder, and no numeric current/earned-gold field has passed a
@@ -537,10 +597,11 @@ intervals and adds 361 unchanged-interval events; the only zero-extra prefix
 candidate covers zero positive deltas. The next keyframe step is therefore a
 stateful replication/record grammar, not a wider static scalar packing.
 
-Position, health, resources, numeric gold, XP, level, numeric CS, damage, KDA,
-and alive state are not decoded. Older supervised keyframe assignments are
-research artifacts, not replay-only runtime fields. The blocker is the inner
-replication/component serialization grammar. See
+Position, health, resources, current gold, XP, level, neutral CS, damage, KDA,
+and alive state are not decoded. Exact-build total gold and lane CS are the
+only productive keyframe state fields. Older supervised keyframe assignments
+remain research artifacts, not replay-only runtime fields. The blocker for the
+remaining state is the inner replication/component serialization grammar. See
 [`keyframe-champion-state-discovery.md`](keyframe-champion-state-discovery.md).
 
 ### Movement
@@ -639,28 +700,27 @@ it does not prove what those bytes mean.
 
 ## Recommended Next Work
 
-1. Preserve fail-closed handling for the two absent patch-16.14 item-ID symbols
-   until new replay coverage exists. In parallel, decode the stateful
-   operation/slot/instance/removal grammar, reject automatic transforms, and
-   reconstruct inventory state; expose item events and a synchronized panel
-   only after the Native/Wasm promotion gate.
-2. Decode the variable-prefix and typed-stream grammar behind the exact
-   patch-16.14 `0x01EB` 366-record directory, using the parallel `0x02EB`
-   block plus the non-semantic `totalGold` and lane-CS change correlations only
-   as search constraints. Use final `statsJson` values plus controlled
-   transitions as replay-only constraints for numeric gold, XP, level, CS,
-   health, and resources; do not treat the directory as decoded state.
-3. Use the exact ward-linked generic handle subset to decode the
+1. Promote or reject the XP and neutral-CS Float32 research stripes with a
+   frozen integer-projection and snapshot-ordering rule. Keep the D7 cipher
+   fixed, use replay-only fields at runtime, and require Native/Wasm/UI tests
+   before widening the productive snapshot schema.
+2. Decode current gold and then the remaining participant state (level,
+   health, max health, mana/resource) from the same exact-build keyframe
+   grammar without reusing Timeline values at runtime.
+3. Preserve fail-closed handling for the two absent patch-16.14 item-ID symbols
+   while decoding the stateful operation/slot/instance/removal grammar and a
+   complete inventory reducer.
+4. Use the exact ward-linked generic handle subset to decode the
    `0x0328`/`0x0170` operation and payload grammar, expand replay-native entity
    identity, then decode the real movement/waypoint protocol. Validate raw
    waypoints before considering interpolation, pathfinding, or movement-speed
    reconstruction.
-4. Decode the isolated versioned ward spawn/companion grammar into X/Y, then
+5. Decode the isolated versioned ward spawn/companion grammar into X/Y, then
    validate the transform against an independent spatial oracle before exposing
    position. Continue subtype, vision radius, removal reason, and the one
    intentionally omitted ambiguous removal form without weakening the zero-extra
    lifecycle boundary.
-5. Promote buildings/plates and then pursue damage, spells, combat effects, and
+6. Promote buildings/plates and then pursue damage, spells, combat effects, and
    other world entities.
 
 These workstreams can be researched in parallel, but each promotion should be

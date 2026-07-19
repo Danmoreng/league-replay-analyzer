@@ -6,6 +6,7 @@
 #include <charconv>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <set>
 #include <sstream>
@@ -204,6 +205,53 @@ void allow_only(const JsonValue& object, std::initializer_list<std::string_view>
     if (value.kind != JsonValue::Kind::array || value.array.empty() || value.array.size() > 16) throw std::runtime_error("profile schema: '" + std::string(name) + "' must be a non-empty bounded array");
     std::set<std::uint8_t> seen; std::vector<std::uint8_t> result;
     for (const JsonValue& element : value.array) { const auto item = static_cast<std::uint8_t>(integer_value(element, name, 255)); if (!seen.insert(item).second) throw std::runtime_error("profile schema: duplicate value in '" + std::string(name) + "'"); result.push_back(item); }
+    return result;
+}
+
+template <std::size_t Count>
+[[nodiscard]] std::array<std::uint8_t, Count> fixed_byte_permutation(
+    const JsonValue& value,
+    std::string_view name
+) {
+    if (value.kind != JsonValue::Kind::array || value.array.size() != Count) {
+        throw std::runtime_error("profile schema: '" + std::string(name) +
+            "' must contain exactly " + std::to_string(Count) + " bytes");
+    }
+    std::array<std::uint8_t, Count> result{};
+    std::array<bool, Count> seen{};
+    for (std::size_t index = 0; index < Count; ++index) {
+        const std::uint8_t item = static_cast<std::uint8_t>(
+            integer_value(value.array[index], name, 255));
+        if (seen[item]) {
+            throw std::runtime_error("profile schema: '" + std::string(name) +
+                "' must be a complete byte permutation");
+        }
+        seen[item] = true;
+        result[index] = item;
+    }
+    return result;
+}
+
+template <std::size_t Count>
+[[nodiscard]] std::array<std::size_t, Count> fixed_offsets(
+    const JsonValue& value,
+    std::string_view name,
+    std::size_t content_length
+) {
+    if (value.kind != JsonValue::Kind::array || value.array.size() != Count) {
+        throw std::runtime_error("profile schema: '" + std::string(name) +
+            "' must contain exactly " + std::to_string(Count) + " offsets");
+    }
+    std::array<std::size_t, Count> result{};
+    for (std::size_t index = 0; index < Count; ++index) {
+        result[index] = static_cast<std::size_t>(
+            integer_value(value.array[index], name, kMaximumContentLength));
+        if (result[index] >= content_length ||
+            (index > 0 && result[index - 1] >= result[index])) {
+            throw std::runtime_error("profile schema: '" + std::string(name) +
+                "' offsets must be strictly ascending and in bounds");
+        }
+    }
     return result;
 }
 
@@ -682,6 +730,41 @@ parse_inventory_direct_purchase_subset(const JsonValue& value) {
     return profile;
 }
 
+[[nodiscard]] KeyframeParticipantStatsDecoderProfile
+parse_keyframe_participant_stats(const JsonValue& value) {
+    if (value.kind != JsonValue::Kind::object) {
+        throw std::runtime_error(
+            "profile schema: 'keyframeParticipantStats' must be an object");
+    }
+    allow_only(value, {"segmentType", "channel", "packetType", "contentLength",
+                       "championNetworkIdBase", "cipherToPlain", "totalGoldOffsets",
+                       "laneMinionsKilledOffsets"});
+    KeyframeParticipantStatsDecoderProfile profile;
+    profile.segment_type = string_value(field(value, "segmentType"), "segmentType", 16);
+    profile.channel = static_cast<std::uint8_t>(integer_value(
+        field(value, "channel"), "channel", 15));
+    profile.packet_type = static_cast<std::uint16_t>(integer_value(
+        field(value, "packetType"), "packetType", 0xffff));
+    profile.content_length = static_cast<std::size_t>(integer_value(
+        field(value, "contentLength"), "contentLength", kMaximumContentLength));
+    profile.champion_network_id_base = static_cast<std::uint32_t>(integer_value(
+        field(value, "championNetworkIdBase"), "championNetworkIdBase", 0xffffffffULL));
+    profile.cipher_to_plain = fixed_byte_permutation<256>(
+        field(value, "cipherToPlain"), "cipherToPlain");
+    profile.total_gold_offsets = fixed_offsets<4>(
+        field(value, "totalGoldOffsets"), "totalGoldOffsets", profile.content_length);
+    profile.lane_minions_killed_offsets = fixed_offsets<4>(
+        field(value, "laneMinionsKilledOffsets"), "laneMinionsKilledOffsets",
+        profile.content_length);
+    if (profile.segment_type != "keyframe" || profile.channel != 1 ||
+        profile.packet_type != 747 || profile.content_length != 1479 ||
+        profile.champion_network_id_base != 1073741997) {
+        throw std::runtime_error(
+            "profile schema: invalid keyframe participant stats invariants");
+    }
+    return profile;
+}
+
 [[nodiscard]] std::string version_group(std::string_view version) {
     const std::size_t first = version.find('.');
     if (first == std::string_view::npos) return std::string(version);
@@ -691,7 +774,9 @@ parse_inventory_direct_purchase_subset(const JsonValue& value) {
 [[nodiscard]] std::string fnv1a64(std::string_view source) {
     std::uint64_t value = 14695981039346656037ULL;
     for (const unsigned char byte : source) { value ^= byte; value *= 1099511628211ULL; }
-    std::ostringstream output; output << "fnv1a64:" << std::hex << value; return output.str();
+    std::ostringstream output;
+    output << "fnv1a64:" << std::hex << std::setfill('0') << std::setw(16) << value;
+    return output.str();
 }
 
 }  // namespace
@@ -720,7 +805,7 @@ DecoderProfileLoadResult parse_decoder_profile_registry_json(std::string_view js
         std::set<std::string> groups;
         std::vector<DecoderVersionProfile> parsed_profiles;
         for (const JsonValue& item : profiles.array) {
-            allow_only(item, {"versionGroup", "acceptedGameVersions", "finalStatsValidated", "kill", "objective", "ward", "inventoryPurchaseSubset", "inventoryDirectPurchaseSubset", "inventorySaleSubset"});
+            allow_only(item, {"versionGroup", "acceptedGameVersions", "finalStatsValidated", "kill", "objective", "ward", "inventoryPurchaseSubset", "inventoryDirectPurchaseSubset", "inventorySaleSubset", "keyframeParticipantStats"});
             DecoderVersionProfile profile;
             profile.version_group = string_value(field(item, "versionGroup"), "versionGroup", 24);
             if (!version_group_is_valid(profile.version_group) || !groups.insert(profile.version_group).second) throw std::runtime_error("profile schema: versionGroup must be unique major.minor digits");
@@ -745,14 +830,20 @@ DecoderProfileLoadResult parse_decoder_profile_registry_json(std::string_view js
             if (inventory_sale.kind != JsonValue::Kind::null_value) {
                 profile.inventory_sale_subset = parse_inventory_sale_subset(inventory_sale);
             }
+            const JsonValue& keyframe_participant_stats = field(item, "keyframeParticipantStats", false);
+            if (keyframe_participant_stats.kind != JsonValue::Kind::null_value) {
+                profile.keyframe_participant_stats = parse_keyframe_participant_stats(
+                    keyframe_participant_stats);
+            }
             if ((profile.inventory_purchase_subset.has_value() ||
                  profile.inventory_direct_purchase_subset.has_value() ||
-                 profile.inventory_sale_subset.has_value()) &&
+                 profile.inventory_sale_subset.has_value() ||
+                 profile.keyframe_participant_stats.has_value()) &&
                 (profile.version_group != "16.14" || profile.accepted_game_versions.size() != 1 ||
                  profile.accepted_game_versions.front() != "16.14.794.5912")) {
-                throw std::runtime_error("profile schema: inventory purchase subsets are restricted to exact build 16.14.794.5912");
+                throw std::runtime_error("profile schema: exact-build decoder subsets are restricted to 16.14.794.5912");
             }
-            if (!profile.final_stats_validated && !profile.kill && !profile.objective && !profile.ward && !profile.inventory_purchase_subset && !profile.inventory_direct_purchase_subset && !profile.inventory_sale_subset) throw std::runtime_error("profile schema: patch profile must declare at least one decoder capability");
+            if (!profile.final_stats_validated && !profile.kill && !profile.objective && !profile.ward && !profile.inventory_purchase_subset && !profile.inventory_direct_purchase_subset && !profile.inventory_sale_subset && !profile.keyframe_participant_stats) throw std::runtime_error("profile schema: patch profile must declare at least one decoder capability");
             parsed_profiles.push_back(std::move(profile));
         }
         provenance.fingerprint = fnv1a64(json);

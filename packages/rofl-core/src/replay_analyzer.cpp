@@ -5838,6 +5838,306 @@ void write_inventory_sale_removal_block_json(
     return output.str();
 }
 
+struct ReplayParticipantStatSnapshot {
+    long long timestamp_millis = 0;
+    int participant_id = 0;
+    float total_gold = 0.0F;
+    float lane_minions_killed = 0.0F;
+    PacketBlock block;
+};
+
+[[nodiscard]] bool keyframe_stat_profile_is_exact(
+    const KeyframeParticipantStatsDecoderProfile& profile
+) {
+    return profile.segment_type == "keyframe" && profile.channel == 1 &&
+           profile.packet_type == 0x02EB && profile.content_length == 1479 &&
+           profile.champion_network_id_base == 1073741997;
+}
+
+[[nodiscard]] bool keyframe_stat_offsets_are_valid(
+    const KeyframeParticipantStatsDecoderProfile& profile
+) {
+    const auto offsets_valid = [&](const std::array<std::size_t, 4>& offsets) {
+        std::set<std::size_t> distinct;
+        for (const std::size_t offset : offsets) {
+            if (offset >= profile.content_length || !distinct.insert(offset).second) {
+                return false;
+            }
+        }
+        return true;
+    };
+    return offsets_valid(profile.total_gold_offsets) &&
+           offsets_valid(profile.lane_minions_killed_offsets);
+}
+
+[[nodiscard]] bool keyframe_stat_cipher_is_bijective(
+    const KeyframeParticipantStatsDecoderProfile& profile
+) {
+    std::array<bool, 256> seen{};
+    for (const std::uint8_t plain : profile.cipher_to_plain) {
+        if (seen[plain]) return false;
+        seen[plain] = true;
+    }
+    return true;
+}
+
+[[nodiscard]] float decode_keyframe_stat_float32_le(
+    const std::vector<std::uint8_t>& decompressed,
+    const PacketBlock& block,
+    const std::array<std::size_t, 4>& offsets,
+    const KeyframeParticipantStatsDecoderProfile& profile
+) {
+    std::uint32_t bits = 0;
+    for (std::size_t index = 0; index < offsets.size(); ++index) {
+        const std::size_t payload_index = block.content_offset + offsets[index];
+        if (payload_index >= decompressed.size() || payload_index >= block.end_offset) {
+            throw std::runtime_error("Keyframe participant stats payload offset escaped packet bounds.");
+        }
+        bits |= static_cast<std::uint32_t>(
+            profile.cipher_to_plain[decompressed[payload_index]]) << (index * 8U);
+    }
+    return std::bit_cast<float>(bits);
+}
+
+[[nodiscard]] int keyframe_stat_owner_to_participant_id(
+    std::uint32_t owner,
+    const KeyframeParticipantStatsDecoderProfile& profile
+) {
+    if (owner <= profile.champion_network_id_base) return 0;
+    const std::uint32_t participant_id = owner - profile.champion_network_id_base;
+    return participant_id <= 10 ? static_cast<int>(participant_id) : 0;
+}
+
+void write_participant_stat_snapshot_block_json(
+    std::ostringstream& output,
+    const PacketBlock& block
+) {
+    output << "{\"channel\":" << static_cast<unsigned int>(block.channel)
+           << ",\"packetType\":" << block.packet_type
+           << ",\"packetTypeHex\":\"" << fixed_hex(block.packet_type, 4) << "\""
+           << ",\"contentLength\":" << block.content_length
+           << ",\"blockParam\":" << block.block_param
+           << ",\"blockParamHex\":\"" << fixed_hex(block.block_param, 8) << "\""
+           << ",\"provenance\":";
+    write_objective_block_provenance_json(output, block);
+    output << '}';
+}
+
+[[nodiscard]] std::string extract_replay_participant_stat_snapshots_impl(
+    const std::vector<std::uint8_t>& bytes,
+    const KillSourceInfo& source,
+    const DecoderProfileRegistry& decoder_profiles
+) {
+    const ReplaySummary summary = parse_replay_bytes(bytes, decoder_profiles);
+    if (summary.game_version != "16.14.794.5912") {
+        throw std::runtime_error(
+            "Keyframe participant stats decoder is restricted to exact build 16.14.794.5912."
+        );
+    }
+    const DecoderVersionProfile* selected = find_decoder_profile(
+        decoder_profiles, summary.game_version);
+    if (selected == nullptr || !selected->keyframe_participant_stats.has_value()) {
+        throw std::runtime_error(
+            "Unsupported replay version " + summary.game_version +
+            ": external decoder registry has no keyframe participant stats profile."
+        );
+    }
+    const KeyframeParticipantStatsDecoderProfile& profile =
+        *selected->keyframe_participant_stats;
+    if (!keyframe_stat_profile_is_exact(profile)) {
+        throw std::runtime_error(
+            "Keyframe participant stats profile must be keyframe/channel-1/0x02EB/content-length-1479."
+        );
+    }
+    if (!keyframe_stat_offsets_are_valid(profile) || !keyframe_stat_cipher_is_bijective(profile)) {
+        throw std::runtime_error(
+            "Keyframe participant stats profile has invalid offsets or a non-bijective cipher table."
+        );
+    }
+
+    std::vector<ReplayParticipantStatSnapshot> snapshots;
+    std::size_t profiled_snapshot_packet_count = 0;
+    std::size_t rejected_invalid_owner_packet_count = 0;
+    std::size_t rejected_invalid_value_packet_count = 0;
+    const PacketFileScan scan = scan_packet_segments(
+        bytes,
+        summary,
+        profile.segment_type,
+        [&](const ReplaySegmentSummary&, const std::vector<std::uint8_t>& decompressed,
+            const PacketBlockParseResult& result) {
+            for (const PacketBlock& block : result.blocks) {
+                if (block.channel != profile.channel || block.packet_type != profile.packet_type ||
+                    block.content_length != profile.content_length) {
+                    continue;
+                }
+                ++profiled_snapshot_packet_count;
+                const int participant_id = keyframe_stat_owner_to_participant_id(
+                    block.block_param, profile);
+                if (participant_id == 0) {
+                    ++rejected_invalid_owner_packet_count;
+                    continue;
+                }
+                const float total_gold = decode_keyframe_stat_float32_le(
+                    decompressed, block, profile.total_gold_offsets, profile);
+                const float lane_minions_killed = decode_keyframe_stat_float32_le(
+                    decompressed, block, profile.lane_minions_killed_offsets, profile);
+                const bool invalid_value = !std::isfinite(total_gold) || total_gold < 0.0F ||
+                    !std::isfinite(lane_minions_killed) || lane_minions_killed < 0.0F ||
+                    std::trunc(lane_minions_killed) != lane_minions_killed;
+                if (invalid_value) {
+                    ++rejected_invalid_value_packet_count;
+                    continue;
+                }
+                snapshots.push_back({
+                    packet_timestamp_millis(block.timestamp_seconds),
+                    participant_id,
+                    total_gold,
+                    lane_minions_killed,
+                    block,
+                });
+            }
+        }
+    );
+    if (scan.selected_segment_count == 0) {
+        throw std::runtime_error("Replay contains no footer-style keyframe records.");
+    }
+    if (scan.exact_segment_count != scan.selected_segment_count || !scan.errors.empty()) {
+        const std::string detail = scan.errors.empty()
+            ? "one or more keyframes were not exactly consumed"
+            : scan.errors.front().code + ": " + scan.errors.front().message;
+        throw std::runtime_error("Replay keyframe packet framing failed: " + detail);
+    }
+    std::sort(snapshots.begin(), snapshots.end(), [](const auto& left, const auto& right) {
+        if (left.timestamp_millis != right.timestamp_millis) {
+            return left.timestamp_millis < right.timestamp_millis;
+        }
+        if (left.participant_id != right.participant_id) {
+            return left.participant_id < right.participant_id;
+        }
+        if (left.block.provenance.segment_id != right.block.provenance.segment_id) {
+            return left.block.provenance.segment_id < right.block.provenance.segment_id;
+        }
+        if (left.block.provenance.segment_payload_offset !=
+            right.block.provenance.segment_payload_offset) {
+            return left.block.provenance.segment_payload_offset <
+                right.block.provenance.segment_payload_offset;
+        }
+        if (left.block.header_offset != right.block.header_offset) {
+            return left.block.header_offset < right.block.header_offset;
+        }
+        return left.block.block_index < right.block.block_index;
+    });
+    for (std::size_t index = 1; index < snapshots.size(); ++index) {
+        const ReplayParticipantStatSnapshot& previous = snapshots[index - 1];
+        const ReplayParticipantStatSnapshot& current = snapshots[index];
+        if (current.timestamp_millis == previous.timestamp_millis &&
+            current.participant_id == previous.participant_id) {
+            throw std::runtime_error(
+                "Keyframe participant stats decoder rejected duplicate participant snapshots at one timestamp."
+            );
+        }
+    }
+    std::array<std::optional<float>, 10> previous_gold;
+    std::array<std::optional<float>, 10> previous_lane_minions;
+    std::vector<ReplayParticipantStatSnapshot> monotonic_snapshots;
+    monotonic_snapshots.reserve(snapshots.size());
+    for (const ReplayParticipantStatSnapshot& snapshot : snapshots) {
+        const std::size_t participant_index =
+            static_cast<std::size_t>(snapshot.participant_id - 1);
+        if ((previous_gold[participant_index].has_value() &&
+                snapshot.total_gold < *previous_gold[participant_index]) ||
+            (previous_lane_minions[participant_index].has_value() &&
+                snapshot.lane_minions_killed < *previous_lane_minions[participant_index])) {
+            ++rejected_invalid_value_packet_count;
+            continue;
+        }
+        previous_gold[participant_index] = snapshot.total_gold;
+        previous_lane_minions[participant_index] = snapshot.lane_minions_killed;
+        monotonic_snapshots.push_back(snapshot);
+    }
+    snapshots = std::move(monotonic_snapshots);
+    if (rejected_invalid_owner_packet_count != 0 || rejected_invalid_value_packet_count != 0) {
+        throw std::runtime_error(
+            "Keyframe participant stats decoder rejected invalid owner or value packets."
+        );
+    }
+    std::size_t keyframe_group_count = 0;
+    for (std::size_t start = 0; start < snapshots.size();) {
+        const long long timestamp_millis = snapshots[start].timestamp_millis;
+        if (keyframe_group_count > 0 &&
+            timestamp_millis <= snapshots[start - 1].timestamp_millis) {
+            throw std::runtime_error(
+                "Keyframe participant stats decoder requires strictly increasing snapshot groups."
+            );
+        }
+        for (int participant_id = 1; participant_id <= 10; ++participant_id) {
+            const std::size_t index = start + static_cast<std::size_t>(participant_id - 1);
+            if (index >= snapshots.size() || snapshots[index].timestamp_millis != timestamp_millis ||
+                snapshots[index].participant_id != participant_id) {
+                throw std::runtime_error(
+                    "Keyframe participant stats decoder requires complete participant groups of 1 through 10."
+                );
+            }
+        }
+        start += 10;
+        ++keyframe_group_count;
+    }
+    if (keyframe_group_count != scan.selected_segment_count) {
+        throw std::runtime_error(
+            "Keyframe participant stats decoder group count does not match keyframe segment count."
+        );
+    }
+
+    std::ostringstream output;
+    output << "{\"schema\":\"rofl-replay-participant-stat-snapshots/v1\",\"source\":{\"replayPath\":";
+    if (source.has_file) output << '\"' << json_escape(source.replay_path) << '\"';
+    else output << "null";
+    output << ",\"replayId\":";
+    if (source.has_file) output << '\"' << json_escape(source.replay_id) << '\"';
+    else output << "null";
+    output << ",\"matchId\":";
+    if (source.has_file) output << '\"' << json_escape(source.match_id) << '\"';
+    else output << "null";
+    output << ",\"runtimeInput\":\"rofl-only\",\"riotApiInput\":false}"
+           << ",\"gameVersion\":\"" << json_escape(summary.game_version)
+           << "\",\"versionGroup\":\"" << packet_version_group(summary.game_version)
+           << "\",\"profile\":{\"segmentType\":\"" << json_escape(profile.segment_type)
+           << "\",\"channel\":" << static_cast<unsigned int>(profile.channel)
+           << ",\"snapshotPacketType\":" << profile.packet_type
+           << ",\"snapshotPacketTypeHex\":\"" << fixed_hex(profile.packet_type, 4)
+           << "\",\"snapshotContentLength\":" << profile.content_length
+           << ",\"championNetworkIdBase\":" << profile.champion_network_id_base
+           << ",\"championNetworkIdBaseHex\":\""
+           << fixed_hex(profile.champion_network_id_base, 8) << "\"";
+    write_decoder_profile_provenance_fields(output, &decoder_profiles);
+    output << "},\"snapshots\":[";
+    for (std::size_t index = 0; index < snapshots.size(); ++index) {
+        if (index > 0) output << ',';
+        const ReplayParticipantStatSnapshot& snapshot = snapshots[index];
+        output << "{\"timestampMillis\":" << snapshot.timestamp_millis
+               << ",\"participantId\":" << snapshot.participant_id
+               << ",\"totalGold\":" << std::setprecision(std::numeric_limits<float>::max_digits10)
+               << snapshot.total_gold
+               << ",\"laneMinionsKilled\":" << snapshot.lane_minions_killed
+               << ",\"provenance\":{\"snapshotBlock\":";
+        write_participant_stat_snapshot_block_json(output, snapshot.block);
+        output << "}}";
+    }
+    const std::size_t keyframe_record_count = static_cast<std::size_t>(std::count_if(
+        summary.container.segments.begin(), summary.container.segments.end(),
+        [](const ReplaySegmentSummary& segment) { return segment.type == "keyframe"; }));
+    output << "],\"diagnostics\":{\"keyframeRecordCount\":" << keyframe_record_count
+           << ",\"keyframeSegmentCount\":" << scan.selected_segment_count
+           << ",\"decompressedKeyframeBytes\":" << scan.input_bytes
+           << ",\"packetBlockCount\":" << scan.packet_count
+           << ",\"profiledSnapshotPacketCount\":" << profiled_snapshot_packet_count
+           << ",\"rejectedInvalidOwnerPacketCount\":" << rejected_invalid_owner_packet_count
+           << ",\"rejectedInvalidValuePacketCount\":" << rejected_invalid_value_packet_count
+           << ",\"emittedSnapshotCount\":" << snapshots.size()
+           << ",\"exactPacketFraming\":true,\"coverage\":\"profiled-keyframe-participant-stats-only\"}}";
+    return output.str();
+}
+
 }  // namespace
 
 std::string extract_replay_purchase_linked_item_updates_json(
@@ -5912,6 +6212,32 @@ std::string extract_replay_item_sales_file_json(
     const std::size_t separator = source.match_id.find('-');
     if (separator != std::string::npos) source.match_id[separator] = '_';
     return extract_replay_item_sales_impl(
+        read_file_bytes(source.replay_path), source, decoder_profiles);
+}
+
+std::string extract_replay_participant_stat_snapshots_json(
+    const std::vector<std::uint8_t>& bytes,
+    const DecoderProfileRegistry& decoder_profiles
+) {
+    return extract_replay_participant_stat_snapshots_impl(bytes, {}, decoder_profiles);
+}
+
+std::string extract_replay_participant_stat_snapshots_file_json(
+    const std::string& path,
+    const DecoderProfileRegistry& decoder_profiles
+) {
+    std::error_code error;
+    std::filesystem::path absolute = std::filesystem::absolute(path, error);
+    if (error) absolute = std::filesystem::path(path);
+    absolute = absolute.lexically_normal();
+    KillSourceInfo source;
+    source.has_file = true;
+    source.replay_path = absolute.string();
+    source.replay_id = absolute.stem().string();
+    source.match_id = source.replay_id;
+    const std::size_t separator = source.match_id.find('-');
+    if (separator != std::string::npos) source.match_id[separator] = '_';
+    return extract_replay_participant_stat_snapshots_impl(
         read_file_bytes(source.replay_path), source, decoder_profiles);
 }
 

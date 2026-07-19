@@ -11,6 +11,10 @@ import type { ReplayWardResult } from "./replayWards";
 import type { ReplayPurchaseLinkedItemUpdatesResult } from "./replayPurchaseLinkedItemUpdates";
 import type { ReplayDirectItemPurchasesResult } from "./replayDirectItemPurchases";
 import type { ReplayItemSalesResult } from "./replayItemSales";
+import {
+  parseReplayParticipantStatSnapshotsResult,
+  type ReplayParticipantStatSnapshotsResult,
+} from "./replayParticipantStatSnapshots";
 import type { ReplaySummary } from "./replayParser";
 import createReplayModule from "./generated/wasm/rofl_wasm.js";
 import defaultDecoderProfileRegistryJson from "../../../packages/rofl-core/profiles/replay-decoder-profiles.v1.json?raw";
@@ -262,6 +266,29 @@ export async function extractReplayItemSalesWithWasm(
     return parseJsonResult<ReplayItemSalesResult>(
       module,
       extractItemSales(replayPointer, size, profilePointer, profileSize),
+    );
+  });
+}
+
+export async function extractReplayParticipantStatSnapshotsWithWasm(
+  buffer: ArrayBuffer,
+  profileJson = DEFAULT_DECODER_PROFILE_REGISTRY_JSON,
+): Promise<ReplayParticipantStatSnapshotsResult> {
+  return withReplayAndProfileBuffers(buffer, profileJson, (module, replayPointer, size, profilePointer, profileSize) => {
+    const extractParticipantStatSnapshots = module.cwrap<
+      (input: number, size: number, profiles: number, profileSize: number) => number
+    >("lra_extract_replay_participant_stat_snapshots_buffer_with_profiles", "number", [
+      "number",
+      "number",
+      "number",
+      "number",
+    ]);
+
+    return parseReplayParticipantStatSnapshotsResult(
+      parseJsonResult<Record<string, unknown>>(
+        module,
+        extractParticipantStatSnapshots(replayPointer, size, profilePointer, profileSize),
+      ),
     );
   });
 }

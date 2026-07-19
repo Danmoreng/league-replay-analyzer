@@ -181,6 +181,17 @@ struct ReplaySummary {
     const std::string& path,
     const DecoderProfileRegistry& decoder_profiles
 );
+// Exact-build, external-profile-only keyframe participant stat snapshots.
+// There is intentionally no built-in overload: callers must supply the
+// profile-pinned byte substitution and fixed offsets.
+[[nodiscard]] std::string extract_replay_participant_stat_snapshots_json(
+    const std::vector<std::uint8_t>& bytes,
+    const DecoderProfileRegistry& decoder_profiles
+);
+[[nodiscard]] std::string extract_replay_participant_stat_snapshots_file_json(
+    const std::string& path,
+    const DecoderProfileRegistry& decoder_profiles
+);
 [[nodiscard]] std::string extract_replay_ward_position_candidates_json(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] std::string extract_replay_ward_position_candidates_json(
     const std::vector<std::uint8_t>& bytes,

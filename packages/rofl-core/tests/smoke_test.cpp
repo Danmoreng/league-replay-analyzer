@@ -5,6 +5,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <zstd.h>
@@ -1356,6 +1357,144 @@ bool test_replay_ward_position_research_fixture() {
         ) != std::string::npos;
 }
 
+std::vector<std::uint8_t> build_footer_keyframe_participant_stats_fixture(
+    bool include_duplicate_participant_snapshot = false,
+    bool include_invalid_owner_snapshot = false,
+    bool include_invalid_value_snapshot = false
+) {
+    constexpr std::uint32_t champion_base = 0x400000AD;
+    constexpr std::uint16_t snapshot_packet_type = 0x02EB;
+    constexpr std::size_t snapshot_content_length = 1479;
+    const auto make_snapshot = [](float gold, float lane) {
+        std::vector<std::uint8_t> payload(snapshot_content_length, 0);
+        const auto write_interleaved_float = [&](const std::array<std::size_t, 4>& offsets,
+                                                   float value) {
+            const std::uint32_t bits = std::bit_cast<std::uint32_t>(value);
+            for (std::size_t index = 0; index < offsets.size(); ++index) {
+                payload[offsets[index]] = static_cast<std::uint8_t>(
+                    (bits >> (index * 8U)) & 0xFFU);
+            }
+        };
+        write_interleaved_float({115, 117, 119, 121}, gold);
+        write_interleaved_float({123, 125, 127, 129}, lane);
+        return payload;
+    };
+
+    const auto make_keyframe_payload = [&](float timestamp, float gold_base, float lane_base) {
+        std::vector<std::uint8_t> payload;
+        for (int participant_id = 1; participant_id <= 10; ++participant_id) {
+            const float gold = participant_id == 1 ? gold_base : gold_base + participant_id;
+            append_packet_block_with_content(
+                payload,
+                timestamp,
+                snapshot_packet_type,
+                champion_base + static_cast<std::uint32_t>(participant_id),
+                make_snapshot(gold, lane_base + participant_id - 1)
+            );
+        }
+        return payload;
+    };
+    std::vector<std::uint8_t> first_keyframe = make_keyframe_payload(0.0F, 500.25F, 0.0F);
+    std::vector<std::uint8_t> second_keyframe = make_keyframe_payload(60.0F, 610.5F, 12.0F);
+    if (include_duplicate_participant_snapshot) {
+        append_packet_block_with_content(
+            second_keyframe, 60.0F, snapshot_packet_type, champion_base + 1, make_snapshot(611.0F, 13.0F));
+    }
+    if (include_invalid_owner_snapshot) {
+        append_packet_block_with_content(
+            second_keyframe, 60.0F, snapshot_packet_type, champion_base + 11, make_snapshot(700.0F, 15.0F));
+    }
+    if (include_invalid_value_snapshot) {
+        append_packet_block_with_content(
+            second_keyframe, 120.0F, snapshot_packet_type, champion_base + 1, make_snapshot(600.0F, 13.0F));
+    }
+
+    const std::string metadata =
+        R"({"gameLength":120000,"lastGameChunkId":0,"lastKeyFrameId":2,"statsJson":"[]"})";
+    const auto first_compressed = compress_zstd_payload(std::string(
+        reinterpret_cast<const char*>(first_keyframe.data()), first_keyframe.size()));
+    const auto second_compressed = compress_zstd_payload(std::string(
+        reinterpret_cast<const char*>(second_keyframe.data()), second_keyframe.size()));
+    if (first_compressed.empty() || second_compressed.empty()) return {};
+    constexpr std::size_t first_header_offset = 32;
+    constexpr std::size_t first_payload_offset = first_header_offset + 17;
+    const std::size_t second_header_offset = first_payload_offset + first_compressed.size();
+    const std::size_t second_payload_offset = second_header_offset + 17;
+    const std::size_t metadata_offset = second_payload_offset + second_compressed.size();
+    const std::size_t total_size = metadata_offset + metadata.size() + 4;
+    std::vector<std::uint8_t> bytes(total_size, 0);
+    write_ascii(bytes, 0, "RIOT");
+    bytes[4] = 0x02;
+    write_ascii(bytes, 16, "16.14.794.5912");
+    write_zstd_record_header(bytes, first_header_offset, 1, 3, 2,
+        static_cast<std::uint32_t>(first_keyframe.size()), static_cast<std::uint32_t>(first_compressed.size()));
+    std::copy(first_compressed.begin(), first_compressed.end(), bytes.begin() + first_payload_offset);
+    write_zstd_record_header(bytes, second_header_offset, 2, 5, 2,
+        static_cast<std::uint32_t>(second_keyframe.size()), static_cast<std::uint32_t>(second_compressed.size()));
+    std::copy(second_compressed.begin(), second_compressed.end(), bytes.begin() + second_payload_offset);
+    write_ascii(bytes, metadata_offset, metadata);
+    write_u32_le(bytes, total_size - 4, static_cast<std::uint32_t>(metadata.size()));
+    return bytes;
+}
+
+std::string keyframe_participant_stats_profile_json() {
+    std::ostringstream output;
+    output << R"json({"schema":"rofl-replay-decoder-profiles/v1","registryId":"keyframe-stats-smoke","revision":1,"profiles":[{"versionGroup":"16.14","acceptedGameVersions":["16.14.794.5912"],"keyframeParticipantStats":{"segmentType":"keyframe","channel":1,"packetType":747,"contentLength":1479,"championNetworkIdBase":1073741997,"cipherToPlain":[)json";
+    for (int value = 0; value < 256; ++value) {
+        if (value > 0) output << ',';
+        output << value;
+    }
+    output << R"json(],"totalGoldOffsets":[115,117,119,121],"laneMinionsKilledOffsets":[123,125,127,129]}}]})json";
+    return output.str();
+}
+
+bool test_replay_participant_stat_snapshots_fixture() {
+    const auto loaded = rofl::core::parse_decoder_profile_registry_json(
+        keyframe_participant_stats_profile_json());
+    if (!loaded.ok() || !loaded.registry.has_value()) return false;
+    const std::string json = rofl::core::extract_replay_participant_stat_snapshots_json(
+        build_footer_keyframe_participant_stats_fixture(), *loaded.registry);
+    bool duplicate_rejected = false;
+    bool invalid_owner_rejected = false;
+    bool invalid_value_rejected = false;
+    try {
+        (void)rofl::core::extract_replay_participant_stat_snapshots_json(
+            build_footer_keyframe_participant_stats_fixture(true), *loaded.registry);
+    } catch (const std::exception& error) {
+        duplicate_rejected = std::string_view(error.what()).find(
+            "rejected duplicate participant snapshots") != std::string_view::npos;
+    }
+    try {
+        (void)rofl::core::extract_replay_participant_stat_snapshots_json(
+            build_footer_keyframe_participant_stats_fixture(false, true), *loaded.registry);
+    } catch (const std::exception& error) {
+        invalid_owner_rejected = std::string_view(error.what()).find(
+            "rejected invalid owner or value packets") != std::string_view::npos;
+    }
+    try {
+        (void)rofl::core::extract_replay_participant_stat_snapshots_json(
+            build_footer_keyframe_participant_stats_fixture(false, false, true), *loaded.registry);
+    } catch (const std::exception& error) {
+        invalid_value_rejected = std::string_view(error.what()).find(
+            "rejected invalid owner or value packets") != std::string_view::npos;
+    }
+    return json.find("\"schema\":\"rofl-replay-participant-stat-snapshots/v1\"") != std::string::npos &&
+           duplicate_rejected &&
+           invalid_owner_rejected &&
+           invalid_value_rejected &&
+           json.find("\"runtimeInput\":\"rofl-only\",\"riotApiInput\":false") != std::string::npos &&
+           json.find("\"origin\":\"external\"") != std::string::npos &&
+           json.find("\"snapshotPacketType\":747") != std::string::npos &&
+           json.find("\"timestampMillis\":0,\"participantId\":1,\"totalGold\":500.25,\"laneMinionsKilled\":0") != std::string::npos &&
+           json.find("\"timestampMillis\":60000,\"participantId\":1,\"totalGold\":610.5,\"laneMinionsKilled\":12") != std::string::npos &&
+           json.find("\"keyframeSegmentCount\":2") != std::string::npos &&
+           json.find("\"profiledSnapshotPacketCount\":20") != std::string::npos &&
+           json.find("\"rejectedInvalidOwnerPacketCount\":0") != std::string::npos &&
+           json.find("\"rejectedInvalidValuePacketCount\":0") != std::string::npos &&
+           json.find("\"emittedSnapshotCount\":20") != std::string::npos &&
+           json.find("\"exactPacketFraming\":true") != std::string::npos;
+}
+
 bool test_decoder_profile_registry_loader() {
     const std::string valid_profile = R"json({
         "schema":"rofl-replay-decoder-profiles/v1",
@@ -1430,6 +1569,67 @@ bool test_decoder_profile_registry_loader() {
             !result.errors.empty();
     };
 
+    const auto keyframe_participant_stats_profile_json = [](std::string_view build) {
+        std::ostringstream output;
+        output << R"json({
+            "schema":"rofl-replay-decoder-profiles/v1",
+            "registryId":"smoke-test-keyframe-stats",
+            "revision":1,
+            "profiles":[{
+                "versionGroup":"16.14",
+                "acceptedGameVersions":[")json" << build << R"json("],
+                "keyframeParticipantStats":{
+                    "segmentType":"keyframe",
+                    "channel":1,
+                    "packetType":747,
+                    "contentLength":1479,
+                    "championNetworkIdBase":1073741997,
+                    "cipherToPlain":[)json";
+        for (std::uint16_t value = 0; value < 256; ++value) {
+            if (value != 0) output << ',';
+            output << value;
+        }
+        output << R"json(],
+                    "totalGoldOffsets":[115,117,119,121],
+                    "laneMinionsKilledOffsets":[123,125,127,129]
+                }
+            }]
+        })json";
+        return output.str();
+    };
+
+    const std::string keyframe_participant_stats_profile =
+        keyframe_participant_stats_profile_json("16.14.794.5912");
+    const rofl::core::DecoderProfileLoadResult keyframe_stats_loaded =
+        rofl::core::parse_decoder_profile_registry_json(keyframe_participant_stats_profile);
+    const rofl::core::DecoderVersionProfile* keyframe_stats_profile =
+        keyframe_stats_loaded.registry.has_value()
+            ? rofl::core::find_decoder_profile(
+                  *keyframe_stats_loaded.registry, "16.14.794.5912")
+            : nullptr;
+    if (!keyframe_stats_loaded.ok() || keyframe_stats_profile == nullptr ||
+        keyframe_stats_loaded.registry->provenance().fingerprint.size() !=
+            std::string("fnv1a64:").size() + 16 ||
+        !keyframe_stats_profile->keyframe_participant_stats.has_value()) {
+        return false;
+    }
+    const rofl::core::KeyframeParticipantStatsDecoderProfile& keyframe_stats =
+        *keyframe_stats_profile->keyframe_participant_stats;
+    if (keyframe_stats.segment_type != "keyframe" || keyframe_stats.channel != 1 ||
+        keyframe_stats.packet_type != 747 || keyframe_stats.content_length != 1479 ||
+        keyframe_stats.champion_network_id_base != 1073741997 ||
+        keyframe_stats.cipher_to_plain[0] != 0 ||
+        keyframe_stats.cipher_to_plain[255] != 255 ||
+        keyframe_stats.total_gold_offsets != std::array<std::size_t, 4>{115, 117, 119, 121} ||
+        keyframe_stats.lane_minions_killed_offsets !=
+            std::array<std::size_t, 4>{123, 125, 127, 129}) {
+        return false;
+    }
+    std::string duplicate_cipher_profile = keyframe_participant_stats_profile;
+    const std::size_t cipher_tail = duplicate_cipher_profile.rfind(",255]");
+    if (cipher_tail == std::string::npos) return false;
+    duplicate_cipher_profile.replace(cipher_tail, 4, ",254]");
+
     const std::string minimal_profile = R"json({
         "schema":"rofl-replay-decoder-profiles/v1",
         "registryId":"smoke-test",
@@ -1481,6 +1681,8 @@ bool test_decoder_profile_registry_loader() {
         is_atomic_rejection(duplicate_version_profile) &&
         is_atomic_rejection(invalid_end_offset_profile) &&
         is_atomic_rejection(oversized_profile) &&
+        is_atomic_rejection(duplicate_cipher_profile) &&
+        is_atomic_rejection(keyframe_participant_stats_profile_json("16.14.794.5913")) &&
         rofl::core::parse_decoder_profile_registry_json(minimal_profile).ok();
 }
 
@@ -1536,6 +1738,10 @@ int main() {
     }
 
     if (!test_replay_ward_position_research_fixture()) {
+        return EXIT_FAILURE;
+    }
+
+    if (!test_replay_participant_stat_snapshots_fixture()) {
         return EXIT_FAILURE;
     }
 

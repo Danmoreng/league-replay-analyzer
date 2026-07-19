@@ -210,7 +210,7 @@ function fnv1a64(value: string): string {
     hash ^= BigInt(byte);
     hash = BigInt.asUintN(64, hash * 0x100000001b3n);
   }
-  return `fnv1a64:${hash.toString(16)}`;
+  return `fnv1a64:${hash.toString(16).padStart(16, "0")}`;
 }
 
 function requestUrl(input: RequestInfo | URL): string {
