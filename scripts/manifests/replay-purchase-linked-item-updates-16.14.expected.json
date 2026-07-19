@@ -19,9 +19,9 @@
     "origin": "external",
     "schema": "rofl-replay-decoder-profiles/v1",
     "registryId": "league-replay-analyzer-offline-validated",
-    "revision": "2026-07-19",
-    "sha256": "7d1acdfe60570444046008576ee5e87bdf0469571d34b08047ad750e9016d9dc",
-    "fingerprint": "fnv1a64:83ab2d53ad236fbf"
+    "revision": "2026-07-20",
+    "sha256": "2dadd1bad5507554813c2ad22bf4066fdd89ee4e7c3a738080ca64a835b7bedf",
+    "fingerprint": "fnv1a64:52158d03db096c70"
   },
   "runtime": {
     "schema": "rofl-replay-purchase-linked-item-updates/v1",

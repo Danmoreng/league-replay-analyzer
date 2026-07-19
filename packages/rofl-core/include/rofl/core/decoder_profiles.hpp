@@ -117,6 +117,33 @@ struct InventoryPurchaseSubsetDecoderProfile {
     std::vector<InventoryPurchaseTemplate> templates;
 };
 
+// Patch-pinned static game metadata used only to constrain a replay-native
+// direct-purchase subset. It contains no match state and is never fetched at
+// runtime.
+struct InventoryStaticItemCatalogProfile {
+    std::string provider;
+    std::string version;
+    std::string locale;
+    std::string source_url;
+    std::size_t source_byte_length = 0;
+    std::string source_sha256;
+    std::size_t entry_count = 0;
+    std::vector<std::uint16_t> real_item_ids;
+    std::vector<std::uint16_t> component_item_ids;
+};
+
+// A deliberately narrow exact-build subset for isolated add-only item
+// updates. It is not a general purchase classifier or inventory model.
+struct InventoryDirectPurchaseSubsetDecoderProfile {
+    std::string segment_type;
+    std::uint8_t channel = 0;
+    std::uint32_t champion_network_id_base = 0;
+    InventoryPurchasePacketFamilyProfile add;
+    std::vector<std::uint16_t> blocking_packet_types;
+    std::size_t isolation_tolerance_millis = 0;
+    InventoryStaticItemCatalogProfile static_item_catalog;
+};
+
 struct DecoderVersionProfile {
     std::string version_group;
     std::vector<std::string> accepted_game_versions;
@@ -125,6 +152,7 @@ struct DecoderVersionProfile {
     std::optional<ObjectiveDecoderProfile> objective;
     std::optional<WardDecoderProfile> ward;
     std::optional<InventoryPurchaseSubsetDecoderProfile> inventory_purchase_subset;
+    std::optional<InventoryDirectPurchaseSubsetDecoderProfile> inventory_direct_purchase_subset;
 };
 
 struct DecoderProfileProvenance {

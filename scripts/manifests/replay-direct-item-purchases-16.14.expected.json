@@ -1,0 +1,59 @@
+{
+  "schema": "rofl-replay-direct-item-purchases-corpus-expected/v1",
+  "exactReplayBuild": "16.14.794.5912",
+  "versionGroup": "16.14",
+  "fixtures": [
+    { "replayId": "EUW1-7919517389", "partition": "D7" },
+    { "replayId": "EUW1-7919624327", "partition": "D7" },
+    { "replayId": "EUW1-7920241664", "partition": "D7" },
+    { "replayId": "EUW1-7920292147", "partition": "D7" },
+    { "replayId": "EUW1-7920341366", "partition": "D7" },
+    { "replayId": "EUW1-7920364492", "partition": "D7" },
+    { "replayId": "EUW1-7920550565", "partition": "D7" },
+    { "replayId": "EUW1-7921377760", "partition": "H3" },
+    { "replayId": "EUW1-7921482297", "partition": "H3" },
+    { "replayId": "EUW1-7921996430", "partition": "H3" }
+  ],
+  "profile": {
+    "path": "packages/rofl-core/profiles/replay-decoder-profiles.v1.json",
+    "origin": "external",
+    "schema": "rofl-replay-decoder-profiles/v1",
+    "registryId": "league-replay-analyzer-offline-validated",
+    "revision": "2026-07-20",
+    "sha256": "2dadd1bad5507554813c2ad22bf4066fdd89ee4e7c3a738080ca64a835b7bedf",
+    "fingerprint": "fnv1a64:52158d03db096c70"
+  },
+  "runtime": {
+    "schema": "rofl-replay-direct-item-purchases/v1",
+    "eventType": "DIRECT_ADD_ONLY_ITEM_PURCHASE",
+    "source": { "runtimeInput": "rofl-only", "riotApiInput": false },
+    "coverage": "strict-direct-add-only-subset-not-complete",
+    "timestampToleranceMillis": 1
+  },
+  "expected": {
+    "D7": { "emittedEventCount": 844, "componentItemEventCount": 710, "offlineMatchedEventCount": 844, "extraRuntimeEventCount": 0, "wrongItemIdEventCount": 0, "maximumAbsoluteTimestampDeltaMillis": 1 },
+    "H3": { "emittedEventCount": 434, "componentItemEventCount": 333, "offlineMatchedEventCount": 434, "extraRuntimeEventCount": 0, "wrongItemIdEventCount": 0, "maximumAbsoluteTimestampDeltaMillis": 1 },
+    "combined": { "emittedEventCount": 1278, "componentItemEventCount": 1043, "offlineMatchedEventCount": 1278, "extraRuntimeEventCount": 0, "wrongItemIdEventCount": 0, "maximumAbsoluteTimestampDeltaMillis": 1 }
+  },
+  "grammar": {
+    "profileKey": "inventoryDirectPurchaseSubset",
+    "segmentType": "chunk",
+    "channel": 1,
+    "championNetworkIdBase": 1073741997,
+    "addPacketType": 873,
+    "addContentLengths": [14, 15],
+    "blockingPacketTypes": [1017, 326, 129],
+    "isolationToleranceMillis": 1,
+    "staticItemCatalog": {
+      "version": "16.14.1",
+      "locale": "en_US",
+      "source": "Data Dragon",
+      "byteLength": 583139,
+      "sha256": "0094f848489371da9e86b9f210f70b6ce0a3982c9063c7c734099cd5a88ddb75",
+      "entryCount": 706
+    },
+    "realItemIds": [1001,1004,1006,1011,1018,1026,1027,1028,1029,1031,1033,1036,1037,1038,1042,1043,1052,1053,1054,1055,1056,1057,1058,1082,1083,1086,1101,1102,1103,1105,1106,1107,1120,2003,2019,2020,2021,2022,2031,2051,2055,2065,2138,2139,2140,2141,2420,2421,2501,2502,2503,2504,2508,2510,2512,2517,2520,2522,2523,2524,2525,2526,3003,3004,3006,3008,3009,3020,3024,3026,3031,3032,3033,3035,3036,3041,3044,3046,3047,3050,3051,3053,3057,3065,3066,3067,3068,3070,3071,3072,3073,3074,3075,3076,3077,3078,3082,3083,3084,3085,3086,3087,3089,3091,3094,3097,3100,3102,3107,3108,3109,3110,3111,3112,3113,3114,3115,3116,3118,3119,3123,3124,3133,3134,3135,3137,3139,3140,3142,3143,3144,3145,3146,3147,3152,3153,3155,3156,3157,3158,3161,3165,3168,3170,3171,3172,3173,3174,3175,3177,3179,3181,3184,3190,3211,3222,3302,3504,3508,3742,3748,3801,3802,3803,3814,3865,3869,3870,3871,3876,3877,3916,4005,4401,4628,4629,4630,4632,4633,4642,4645,4646,6333,6609,6610,6616,6617,6620,6621,6631,6653,6655,6657,6660,6662,6664,6665,6670,6672,6673,6675,6676,6690,6692,6694,6695,6696,6697,6698,6699,8010,8020],
+    "componentItemIds": [1001,1004,1006,1011,1018,1026,1027,1028,1029,1031,1033,1036,1037,1038,1042,1043,1052,1053,1057,1058,1082,2019,2020,2021,2022,2031,2420,2421,2508,2526,3006,3008,3009,3020,3024,3035,3044,3047,3051,3057,3066,3067,3070,3076,3077,3082,3086,3108,3111,3113,3114,3123,3133,3134,3140,3144,3145,3147,3155,3158,3211,3801,3802,3803,3916,4630,4632,4642,6660,6670,6690]
+  },
+  "semanticBoundary": "A direct add-only item purchase is one isolated replay-native champion-owned 0x0369 add packet whose structural item ID is a pinned real static item. The exact Data Dragon catalog classifies only the decoded ID as a buildable component when its `into` relation is non-empty; it contributes no match state. Both complete ID arrays are frozen and validated. No slot, item instance, stack/count, price, gold, removal, undo, or complete inventory state is claimed."
+}

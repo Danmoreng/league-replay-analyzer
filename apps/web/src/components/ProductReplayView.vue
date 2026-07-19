@@ -16,6 +16,10 @@ import {
   type ReplayObjectiveResult,
 } from "../replayObjectives";
 import type {
+  ReplayDirectItemPurchaseEvent,
+  ReplayDirectItemPurchasesResult,
+} from "../replayDirectItemPurchases";
+import type {
   ReplayPurchaseLinkedItemUpdatesResult,
   ReplayPurchaseLinkedResultingItemUpdateEvent,
 } from "../replayPurchaseLinkedItemUpdates";
@@ -28,14 +32,17 @@ const props = defineProps<{
   objectives: ReplayObjectiveResult | null;
   wards: ReplayWardResult | null;
   purchaseLinkedItemUpdates: ReplayPurchaseLinkedItemUpdatesResult | null;
+  directItemPurchases: ReplayDirectItemPurchasesResult | null;
   killsLoading: boolean;
   objectivesLoading: boolean;
   wardsLoading: boolean;
   purchaseLinkedItemUpdatesLoading: boolean;
+  directItemPurchasesLoading: boolean;
   killsError?: string;
   objectivesError?: string;
   wardsError?: string;
   purchaseLinkedItemUpdatesError?: string;
+  directItemPurchasesError?: string;
 }>();
 
 type ProductEvent =
@@ -52,7 +59,18 @@ type ProductEvent =
       kind: "purchase-update";
       timestampMillis: number;
       event: ReplayPurchaseLinkedResultingItemUpdateEvent;
+    }
+  | {
+      id: string;
+      kind: "direct-purchase";
+      timestampMillis: number;
+      event: ReplayDirectItemPurchaseEvent;
     };
+
+type ItemPurchaseEvent = Extract<
+  ProductEvent,
+  { kind: "purchase-update" } | { kind: "direct-purchase" }
+>;
 
 interface TimelineKda {
   kills: number;
@@ -78,6 +96,95 @@ const participantsById = computed(
   () => new Map(props.summary.players.map((player, index) => [index + 1, player])),
 );
 
+function addProvenanceKey(
+  participantId: number,
+  timestampMillis: number,
+  itemId: number,
+  provenance: ReplayDirectItemPurchaseEvent["provenance"]["addBlock"]["provenance"],
+): string {
+  return [
+    participantId,
+    timestampMillis,
+    itemId,
+    provenance.segmentType,
+    provenance.segmentId,
+    provenance.chunkId,
+    provenance.segmentPayloadOffset,
+    provenance.blockIndex,
+  ].join(":");
+}
+
+function compareItemPurchaseEvents(left: ItemPurchaseEvent, right: ItemPurchaseEvent): number {
+  if (left.timestampMillis !== right.timestampMillis) {
+    return left.timestampMillis - right.timestampMillis;
+  }
+  const leftProvenance = left.event.provenance.addBlock.provenance;
+  const rightProvenance = right.event.provenance.addBlock.provenance;
+  if (leftProvenance.segmentPayloadOffset !== rightProvenance.segmentPayloadOffset) {
+    return leftProvenance.segmentPayloadOffset - rightProvenance.segmentPayloadOffset;
+  }
+  if (leftProvenance.blockIndex !== rightProvenance.blockIndex) {
+    return leftProvenance.blockIndex - rightProvenance.blockIndex;
+  }
+  return left.id.localeCompare(right.id);
+}
+
+const itemPurchaseEvents = computed<ItemPurchaseEvent[]>(() => {
+  const seenAddProvenance = new Set<string>();
+  const purchaseUpdates: ItemPurchaseEvent[] = (props.purchaseLinkedItemUpdates?.events ?? []).map(
+    (event, index) => {
+      seenAddProvenance.add(
+        addProvenanceKey(
+          event.participantId,
+          event.timestampMillis,
+          event.resultingItemId,
+          event.provenance.addBlock.provenance,
+        ),
+      );
+      return {
+        id:
+          "purchase-update-" +
+          index +
+          "-" +
+          event.timestampMillis +
+          "-" +
+          event.participantId +
+          "-" +
+          event.resultingItemId,
+        kind: "purchase-update" as const,
+        timestampMillis: event.timestampMillis,
+        event,
+      };
+    },
+  );
+  const directPurchases: ItemPurchaseEvent[] = [];
+  for (const [index, event] of (props.directItemPurchases?.events ?? []).entries()) {
+    const key = addProvenanceKey(
+      event.participantId,
+      event.timestampMillis,
+      event.itemId,
+      event.provenance.addBlock.provenance,
+    );
+    if (seenAddProvenance.has(key)) continue;
+    seenAddProvenance.add(key);
+    directPurchases.push({
+      id:
+        "direct-purchase-" +
+        index +
+        "-" +
+        event.timestampMillis +
+        "-" +
+        event.participantId +
+        "-" +
+        event.itemId,
+      kind: "direct-purchase",
+      timestampMillis: event.timestampMillis,
+      event,
+    });
+  }
+  return [...purchaseUpdates, ...directPurchases].sort(compareItemPurchaseEvents);
+});
+
 const events = computed<ProductEvent[]>(() =>
   [
     ...(props.kills?.events ?? []).map((event, index) => ({
@@ -98,20 +205,7 @@ const events = computed<ProductEvent[]>(() =>
       timestampMillis: event.timestampMillis,
       event,
     })),
-    ...(props.purchaseLinkedItemUpdates?.events ?? []).map((event, index) => ({
-      id:
-        "purchase-" +
-        index +
-        "-" +
-        event.timestampMillis +
-        "-" +
-        event.participantId +
-        "-" +
-        event.resultingItemId,
-      kind: "purchase-update" as const,
-      timestampMillis: event.timestampMillis,
-      event,
-    })),
+    ...itemPurchaseEvents.value,
   ].sort((left, right) => left.timestampMillis - right.timestampMillis),
 );
 
@@ -124,7 +218,13 @@ const primaryEvents = computed(() =>
 const counts = computed(() => ({
   kills: props.kills?.events.length ?? 0,
   objectives: props.objectives?.events.length ?? 0,
-  purchases: props.purchaseLinkedItemUpdates?.events.length ?? 0,
+  purchaseUpdates: props.purchaseLinkedItemUpdates?.events.length ?? 0,
+  directPurchases: itemPurchaseEvents.value.filter((event) => event.kind === "direct-purchase")
+    .length,
+  directComponents: itemPurchaseEvents.value.filter(
+    (event) => event.kind === "direct-purchase" && event.event.componentItem,
+  ).length,
+  purchases: itemPurchaseEvents.value.length,
   wards: props.wards?.events.length ?? 0,
 }));
 
@@ -160,12 +260,12 @@ const kdaByParticipant = computed(() => {
 });
 
 const purchasesByParticipant = computed(() => {
-  const rows = new Map<number, ReplayPurchaseLinkedResultingItemUpdateEvent[]>();
-  for (const event of props.purchaseLinkedItemUpdates?.events ?? []) {
+  const rows = new Map<number, ItemPurchaseEvent[]>();
+  for (const event of itemPurchaseEvents.value) {
     if (event.timestampMillis > currentTime.value) continue;
-    const participantEvents = rows.get(event.participantId) ?? [];
+    const participantEvents = rows.get(event.event.participantId) ?? [];
     participantEvents.push(event);
-    rows.set(event.participantId, participantEvents);
+    rows.set(event.event.participantId, participantEvents);
   }
   return rows;
 });
@@ -210,9 +310,11 @@ const nearbyEvents = computed(() => {
           ? 0
           : event.kind === "objective"
             ? 1
-            : event.kind === "purchase-update"
+            : event.kind === "direct-purchase"
               ? 2
-              : 3,
+              : event.kind === "purchase-update"
+                ? 3
+                : 4,
     }))
     .sort((left, right) => left.distance - right.distance || left.priority - right.priority)
     .slice(0, 8)
@@ -223,14 +325,19 @@ const nearbyEvents = computed(() => {
 const finalStatsAvailable = computed(
   () => props.summary.capabilities.validatedFinalPlayerStatsAvailable === true,
 );
-const purchaseStreamUnavailable = computed(() => Boolean(props.purchaseLinkedItemUpdatesError));
+const purchaseUpdatesUnavailable = computed(() => Boolean(props.purchaseLinkedItemUpdatesError));
+const directPurchasesUnavailable = computed(() => Boolean(props.directItemPurchasesError));
+const purchaseStreamsUnavailable = computed(
+  () => purchaseUpdatesUnavailable.value && directPurchasesUnavailable.value,
+);
 
 const loadState = computed(() => {
   if (
     props.killsLoading ||
     props.objectivesLoading ||
     props.wardsLoading ||
-    props.purchaseLinkedItemUpdatesLoading
+    props.purchaseLinkedItemUpdatesLoading ||
+    props.directItemPurchasesLoading
   ) {
     return "Replay-Ereignisse werden lokal dekodiert …";
   }
@@ -238,7 +345,8 @@ const loadState = computed(() => {
     props.killsError ||
     props.objectivesError ||
     props.wardsError ||
-    props.purchaseLinkedItemUpdatesError
+    props.purchaseLinkedItemUpdatesError ||
+    props.directItemPurchasesError
   ) {
     return "Ein Teil der Replay-Ereignisse ist für diesen Patch nicht verfügbar.";
   }
@@ -338,7 +446,7 @@ function totalCs(player: PlayerSummary): number {
   return player.laneMinionsKilled + player.neutralMinionsKilled;
 }
 
-function visiblePurchases(participantId: number) {
+function visiblePurchases(participantId: number): ItemPurchaseEvent[] {
   return (purchasesByParticipant.value.get(participantId) ?? []).slice(-5);
 }
 
@@ -346,12 +454,24 @@ function hiddenPurchaseCount(participantId: number): number {
   return Math.max(0, (purchasesByParticipant.value.get(participantId)?.length ?? 0) - 5);
 }
 
-function purchaseTitle(event: ReplayPurchaseLinkedResultingItemUpdateEvent): string {
+function purchaseItemId(event: ItemPurchaseEvent): number {
+  return event.kind === "purchase-update" ? event.event.resultingItemId : event.event.itemId;
+}
+
+function purchaseTitle(event: ItemPurchaseEvent): string {
+  const detail =
+    event.kind === "direct-purchase"
+      ? event.event.componentItem
+        ? "direkter Komponenten-Kauf"
+        : "direkter Item-Kauf"
+      : "kaufverknüpftes Ergebnis-Item-Update";
   return (
     formatTime(event.timestampMillis) +
     " · " +
-    itemName(event.resultingItemId) +
-    " · erkannter Kauf im verifizierten Teilstrom; kein Slot- oder Inventarstand"
+    itemName(purchaseItemId(event)) +
+    " · " +
+    detail +
+    "; kein Slot- oder Inventarstand"
   );
 }
 
@@ -376,7 +496,9 @@ function wardTitle(bucket: WardBucket): string {
 }
 
 function eventInvolves(event: ProductEvent, participantId: number): boolean {
-  if (event.kind === "purchase-update") return event.event.participantId === participantId;
+  if (event.kind === "purchase-update" || event.kind === "direct-purchase") {
+    return event.event.participantId === participantId;
+  }
   if (event.kind === "kill") {
     return (
       event.event.victimParticipantId === participantId ||
@@ -398,6 +520,10 @@ function eventLabel(event: ProductEvent): string {
   if (event.kind === "purchase-update") {
     return participantChampion(event.event.participantId) + " · " + itemName(event.event.resultingItemId);
   }
+  if (event.kind === "direct-purchase") {
+    const component = event.event.componentItem ? "Komponente · " : "";
+    return participantChampion(event.event.participantId) + " · " + component + itemName(event.event.itemId);
+  }
   if (event.kind === "ward-placement" && event.event.type === "WARD_PLACED") {
     return participantChampion(event.event.ownerParticipantId) + " platziert Ward";
   }
@@ -414,7 +540,12 @@ function eventLabel(event: ProductEvent): string {
 
 function eventDetail(event: ProductEvent): string {
   if (event.kind === "purchase-update") {
-    return "Erkannter Kauf · verifizierter Teilstrom, noch kein vollständiger Inventarstand";
+    return "Kaufverknüpftes Ergebnis-Update · kein Slot- oder Inventarstand";
+  }
+  if (event.kind === "direct-purchase") {
+    return event.event.componentItem
+      ? "Direkter Komponenten-Kauf · kein Slot- oder Inventarstand"
+      : "Direkter Item-Kauf · kein Slot- oder Inventarstand";
   }
   if (event.kind === "kill") return "Champion-Kill";
   if (event.kind === "objective") return "Elite-Objective";
@@ -469,11 +600,20 @@ function onScrub(event: Event): void {
         <div class="timeline-legend" aria-label="Timeline legend">
           <span class="kill"><i></i>{{ counts.kills }} Kills</span>
           <span class="objective"><i></i>{{ counts.objectives }} Objectives</span>
-          <span class="purchase">
+          <span class="purchase-update">
             <i></i>
-            <template v-if="purchaseLinkedItemUpdatesLoading">Item-Käufe werden dekodiert</template>
-            <template v-else-if="purchaseStreamUnavailable">Item-Käufe nicht verfügbar</template>
-            <template v-else>{{ counts.purchases }} erkannte Käufe</template>
+            <template v-if="purchaseLinkedItemUpdatesLoading">Upgrade-Ergebnisse werden dekodiert</template>
+            <template v-else-if="purchaseUpdatesUnavailable">Upgrade-Ergebnisse nicht verfügbar</template>
+            <template v-else>{{ counts.purchaseUpdates }} Upgrade-Ergebnisse</template>
+          </span>
+          <span class="direct-purchase">
+            <i></i>
+            <template v-if="directItemPurchasesLoading">Direkte Käufe werden dekodiert</template>
+            <template v-else-if="directPurchasesUnavailable">Direkte Käufe nicht verfügbar</template>
+            <template v-else>
+              {{ counts.directPurchases }} direkte Käufe
+              <template v-if="counts.directComponents">· {{ counts.directComponents }} Komponenten</template>
+            </template>
           </span>
           <span class="ward"><i></i>{{ counts.wards }} Ward-Ereignisse</span>
         </div>
@@ -514,9 +654,9 @@ function onScrub(event: Event): void {
               @click="seek(event.timestampMillis)"
             >
               <img
-                v-if="event.kind === 'purchase-update'"
-                :src="itemIcon(event.event.resultingItemId)"
-                :alt="itemName(event.event.resultingItemId)"
+                v-if="event.kind === 'purchase-update' || event.kind === 'direct-purchase'"
+                :src="itemIcon(purchaseItemId(event))"
+                :alt="itemName(purchaseItemId(event))"
               />
               <i v-else class="bi" :class="eventIcon(event)"></i>
             </button>
@@ -610,26 +750,30 @@ function onScrub(event: Event): void {
               class="purchase-strip"
               title="Erkannte Kaufereignisse bis zum gewählten Zeitpunkt; kein vollständiger Inventarstand"
             >
-              <small>KÄUFE</small>
+              <small>DEKODIERTE KÄUFE</small>
               <span v-if="hiddenPurchaseCount(entry.participantId)" class="hidden-count">
                 +{{ hiddenPurchaseCount(entry.participantId) }}
               </span>
               <span
                 v-for="itemEvent in visiblePurchases(entry.participantId)"
-                :key="itemEvent.timestampMillis + '-' + itemEvent.resultingItemId"
+                :key="itemEvent.id"
                 class="purchase-chip"
+                :class="[
+                  itemEvent.kind,
+                  { component: itemEvent.kind === 'direct-purchase' && itemEvent.event.componentItem },
+                ]"
                 :title="purchaseTitle(itemEvent)"
               >
                 <img
-                  :src="itemIcon(itemEvent.resultingItemId)"
-                  :alt="itemName(itemEvent.resultingItemId)"
+                  :src="itemIcon(purchaseItemId(itemEvent))"
+                  :alt="itemName(purchaseItemId(itemEvent))"
                 />
               </span>
             </span>
 
             <span class="player-footer">
               <small>{{ roleLabel(entry.player.teamPosition) }}</small>
-              <small>K/D/A und Käufe folgen der Timeline</small>
+              <small>K/D/A und dekodierte Käufe folgen der Timeline</small>
             </span>
           </span>
         </button>
@@ -661,9 +805,9 @@ function onScrub(event: Event): void {
             <time>{{ formatTime(event.timestampMillis) }}</time>
             <span class="event-symbol" :class="event.kind">
               <img
-                v-if="event.kind === 'purchase-update'"
-                :src="itemIcon(event.event.resultingItemId)"
-                :alt="itemName(event.event.resultingItemId)"
+                v-if="event.kind === 'purchase-update' || event.kind === 'direct-purchase'"
+                :src="itemIcon(purchaseItemId(event))"
+                :alt="itemName(purchaseItemId(event))"
               />
               <i v-else class="bi" :class="eventIcon(event)"></i>
             </span>
@@ -679,24 +823,29 @@ function onScrub(event: Event): void {
 
         <p
           class="purchase-boundary"
-          :class="{ unavailable: purchaseStreamUnavailable }"
-          :title="purchaseLinkedItemUpdatesError"
+          :class="{ unavailable: purchaseStreamsUnavailable }"
+          :title="[purchaseLinkedItemUpdatesError, directItemPurchasesError].filter(Boolean).join(' ')"
         >
           <i
             class="bi"
-            :class="purchaseStreamUnavailable ? 'bi-bag-x-fill' : 'bi-bag-check-fill'"
+            :class="purchaseStreamsUnavailable ? 'bi-bag-x-fill' : 'bi-bag-check-fill'"
           ></i>
           <span>
-            <template v-if="purchaseStreamUnavailable">
-              <b>Item-Kaufstrom für diesen Patch nicht verfügbar</b>
+            <template v-if="purchaseStreamsUnavailable">
+              <b>Item-Käufe nicht verfügbar für diesen Patch</b>
               <small>Es werden keine null Käufe behauptet und keine Inventardaten geschätzt.</small>
             </template>
             <template v-else>
-              <b>{{ counts.purchases }} erkannte Item-Kaufereignisse</b>
+              <b>
+                {{ counts.purchases }} dekodierte Item-Kaufereignisse:
+                {{ counts.directPurchases }} direkte Käufe und {{ counts.purchaseUpdates }}
+                kaufverknüpfte Ergebnis-Updates
+              </b>
               <small>
                 Name und Icon: Data Dragon {{ itemCatalog?.dataDragonVersion ?? "patchgebunden" }}.
-                Verkäufe, Slots, verbrauchte Komponenten und Undo fehlen noch; deshalb wird kein
-                erfundener Inventarstand angezeigt.
+                Direkte Komponenten-Käufe sind mit einem türkisfarbenen Rand markiert. Verkäufe,
+                Slots, verbrauchte Komponenten, Undo und der vollständige Inventarverlauf fehlen
+                noch; deshalb wird kein erfundener Inventarstand angezeigt.
                 <template v-if="itemCatalogLoading"> Itemdaten werden geladen …</template>
                 <template v-else-if="itemCatalogError">
                   Unbekannte Items bleiben als ID sichtbar.
@@ -889,7 +1038,8 @@ function onScrub(event: Event): void {
 
 .timeline-legend .kill { color: var(--red); }
 .timeline-legend .objective { color: var(--gold); }
-.timeline-legend .purchase { color: #c49aff; }
+.timeline-legend .purchase-update { color: #c49aff; }
+.timeline-legend .direct-purchase { color: #61d5c3; }
 .timeline-legend .ward { color: #56d6c2; }
 
 .timeline-layout {
@@ -986,6 +1136,15 @@ function onScrub(event: Event): void {
 .event-marker.purchase-update {
   border-color: #c49aff;
   color: #c49aff;
+}
+
+.event-marker.direct-purchase {
+  top: 7px;
+  width: 13px;
+  height: 13px;
+  border-color: #61d5c3;
+  border-radius: 3px;
+  color: #61d5c3;
 }
 
 .event-marker img,
@@ -1234,6 +1393,15 @@ function onScrub(event: Event): void {
   background: #0b1119;
 }
 
+.purchase-chip.direct-purchase {
+  border-color: rgba(97, 213, 195, 0.54);
+}
+
+.purchase-chip.component {
+  border-color: #61d5c3;
+  box-shadow: inset 0 0 0 1px rgba(97, 213, 195, 0.22);
+}
+
 .event-focus {
   grid-area: events;
   min-height: 100%;
@@ -1302,6 +1470,7 @@ function onScrub(event: Event): void {
 .event-symbol.kill { color: var(--red); }
 .event-symbol.objective { color: var(--gold); }
 .event-symbol.purchase-update { border-color: rgba(196, 154, 255, 0.4); }
+.event-symbol.direct-purchase { border-color: rgba(97, 213, 195, 0.54); }
 .event-symbol.ward-placement { color: #56d6c2; }
 .event-symbol.ward-kill { color: #b596ee; }
 

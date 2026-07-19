@@ -9,6 +9,7 @@ import type { ReplayObjectiveResult } from "./replayObjectives";
 import type { ReplayWardPositionResearchResult } from "./replayWardPositionResearch";
 import type { ReplayWardResult } from "./replayWards";
 import type { ReplayPurchaseLinkedItemUpdatesResult } from "./replayPurchaseLinkedItemUpdates";
+import type { ReplayDirectItemPurchasesResult } from "./replayDirectItemPurchases";
 import type { ReplaySummary } from "./replayParser";
 import createReplayModule from "./generated/wasm/rofl_wasm.js";
 import defaultDecoderProfileRegistryJson from "../../../packages/rofl-core/profiles/replay-decoder-profiles.v1.json?raw";
@@ -216,6 +217,31 @@ export async function extractReplayPurchaseLinkedItemUpdatesWithWasm(
       extractPurchaseLinkedItemUpdates(replayPointer, size, profilePointer, profileSize),
     );
   });
+}
+
+export async function extractReplayDirectItemPurchasesWithWasm(
+  buffer: ArrayBuffer,
+  profileJson = DEFAULT_DECODER_PROFILE_REGISTRY_JSON,
+): Promise<ReplayDirectItemPurchasesResult> {
+  return withReplayAndProfileBuffers(
+    buffer,
+    profileJson,
+    (module, replayPointer, size, profilePointer, profileSize) => {
+      const extractDirectItemPurchases = module.cwrap<
+        (input: number, size: number, profiles: number, profileSize: number) => number
+      >("lra_extract_replay_direct_item_purchases_buffer_with_profiles", "number", [
+        "number",
+        "number",
+        "number",
+        "number",
+      ]);
+
+      return parseJsonResult<ReplayDirectItemPurchasesResult>(
+        module,
+        extractDirectItemPurchases(replayPointer, size, profilePointer, profileSize),
+      );
+    },
+  );
 }
 
 /**

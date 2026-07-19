@@ -207,6 +207,32 @@ void allow_only(const JsonValue& object, std::initializer_list<std::string_view>
     return result;
 }
 
+[[nodiscard]] std::vector<std::uint16_t> sorted_uint16_array(
+    const JsonValue& value,
+    std::string_view name,
+    std::size_t maximum_count
+) {
+    if (value.kind != JsonValue::Kind::array || value.array.empty() ||
+        value.array.size() > maximum_count) {
+        throw std::runtime_error(
+            "profile schema: '" + std::string(name) +
+            "' must be a non-empty bounded array");
+    }
+    std::vector<std::uint16_t> result;
+    result.reserve(value.array.size());
+    for (const JsonValue& element : value.array) {
+        const auto item = static_cast<std::uint16_t>(
+            integer_value(element, name, 0xffff));
+        if (item == 0 || (!result.empty() && result.back() >= item)) {
+            throw std::runtime_error(
+                "profile schema: '" + std::string(name) +
+                "' must be strictly sorted and unique");
+        }
+        result.push_back(item);
+    }
+    return result;
+}
+
 [[nodiscard]] KillDecoderProfile parse_kill(const JsonValue& value) {
     allow_only(value, {"channel", "ownerSequencePacketType", "deathMarkerPacketType", "deathMarkerContentLength", "championNetworkIdBase", "timestampToleranceMillis", "ownerOrder"});
     KillDecoderProfile profile;
@@ -448,6 +474,142 @@ inventory_purchase_family_profile(
     return profile;
 }
 
+static constexpr std::array<std::uint16_t, 212> kInventoryRealItemIds16_14{{
+    1001, 1004, 1006, 1011, 1018, 1026, 1027, 1028, 1029, 1031, 1033, 1036,
+    1037, 1038, 1042, 1043, 1052, 1053, 1054, 1055, 1056, 1057, 1058, 1082,
+    1083, 1086, 1101, 1102, 1103, 1105, 1106, 1107, 1120, 2003, 2019, 2020,
+    2021, 2022, 2031, 2051, 2055, 2065, 2138, 2139, 2140, 2141, 2420, 2421,
+    2501, 2502, 2503, 2504, 2508, 2510, 2512, 2517, 2520, 2522, 2523, 2524,
+    2525, 2526, 3003, 3004, 3006, 3008, 3009, 3020, 3024, 3026, 3031, 3032,
+    3033, 3035, 3036, 3041, 3044, 3046, 3047, 3050, 3051, 3053, 3057, 3065,
+    3066, 3067, 3068, 3070, 3071, 3072, 3073, 3074, 3075, 3076, 3077, 3078,
+    3082, 3083, 3084, 3085, 3086, 3087, 3089, 3091, 3094, 3097, 3100, 3102,
+    3107, 3108, 3109, 3110, 3111, 3112, 3113, 3114, 3115, 3116, 3118, 3119,
+    3123, 3124, 3133, 3134, 3135, 3137, 3139, 3140, 3142, 3143, 3144, 3145,
+    3146, 3147, 3152, 3153, 3155, 3156, 3157, 3158, 3161, 3165, 3168, 3170,
+    3171, 3172, 3173, 3174, 3175, 3177, 3179, 3181, 3184, 3190, 3211, 3222,
+    3302, 3504, 3508, 3742, 3748, 3801, 3802, 3803, 3814, 3865, 3869, 3870,
+    3871, 3876, 3877, 3916, 4005, 4401, 4628, 4629, 4630, 4632, 4633, 4642,
+    4645, 4646, 6333, 6609, 6610, 6616, 6617, 6620, 6621, 6631, 6653, 6655,
+    6657, 6660, 6662, 6664, 6665, 6670, 6672, 6673, 6675, 6676, 6690, 6692,
+    6694, 6695, 6696, 6697, 6698, 6699, 8010, 8020,
+}};
+
+static constexpr std::array<std::uint16_t, 71> kInventoryComponentItemIds16_14{{
+    1001, 1004, 1006, 1011, 1018, 1026, 1027, 1028, 1029, 1031, 1033, 1036,
+    1037, 1038, 1042, 1043, 1052, 1053, 1057, 1058, 1082, 2019, 2020, 2021,
+    2022, 2031, 2420, 2421, 2508, 2526, 3006, 3008, 3009, 3020, 3024, 3035,
+    3044, 3047, 3051, 3057, 3066, 3067, 3070, 3076, 3077, 3082, 3086, 3108,
+    3111, 3113, 3114, 3123, 3133, 3134, 3140, 3144, 3145, 3147, 3155, 3158,
+    3211, 3801, 3802, 3803, 3916, 4630, 4632, 4642, 6660, 6670, 6690,
+}};
+
+[[nodiscard]] InventoryStaticItemCatalogProfile parse_inventory_static_item_catalog(
+    const JsonValue& value
+) {
+    if (value.kind != JsonValue::Kind::object) {
+        throw std::runtime_error("profile schema: 'staticItemCatalog' must be an object");
+    }
+    allow_only(value, {"provider", "version", "locale", "sourceUrl", "sourceByteLength", "sourceSha256", "entryCount", "realItemIds", "componentItemIds"});
+
+    InventoryStaticItemCatalogProfile catalog;
+    catalog.provider = string_value(field(value, "provider"), "provider", 64);
+    catalog.version = string_value(field(value, "version"), "version", 32);
+    catalog.locale = string_value(field(value, "locale"), "locale", 16);
+    catalog.source_url = string_value(field(value, "sourceUrl"), "sourceUrl", 256);
+    catalog.source_byte_length = static_cast<std::size_t>(integer_value(
+        field(value, "sourceByteLength"), "sourceByteLength", kMaximumProfileBytes * 8ULL));
+    catalog.source_sha256 = string_value(field(value, "sourceSha256"), "sourceSha256", 64);
+    catalog.entry_count = static_cast<std::size_t>(integer_value(
+        field(value, "entryCount"), "entryCount", 4096));
+    catalog.real_item_ids = sorted_uint16_array(
+        field(value, "realItemIds"), "realItemIds", 1024);
+    catalog.component_item_ids = sorted_uint16_array(
+        field(value, "componentItemIds"), "componentItemIds", 1024);
+
+    static constexpr std::string_view kProvider = "Riot Data Dragon";
+    static constexpr std::string_view kVersion = "16.14.1";
+    static constexpr std::string_view kLocale = "en_US";
+    static constexpr std::string_view kSourceUrl =
+        "https://ddragon.leagueoflegends.com/cdn/16.14.1/data/en_US/item.json";
+    static constexpr std::string_view kSourceSha256 =
+        "0094f848489371da9e86b9f210f70b6ce0a3982c9063c7c734099cd5a88ddb75";
+    if (catalog.provider != kProvider || catalog.version != kVersion ||
+        catalog.locale != kLocale || catalog.source_url != kSourceUrl ||
+        catalog.source_byte_length != 583139 || catalog.source_sha256 != kSourceSha256 ||
+        catalog.entry_count != 706 ||
+        catalog.real_item_ids.size() != kInventoryRealItemIds16_14.size() ||
+        catalog.component_item_ids.size() != kInventoryComponentItemIds16_14.size() ||
+        !std::equal(
+            catalog.real_item_ids.begin(), catalog.real_item_ids.end(),
+            kInventoryRealItemIds16_14.begin(), kInventoryRealItemIds16_14.end()) ||
+        !std::equal(
+            catalog.component_item_ids.begin(), catalog.component_item_ids.end(),
+            kInventoryComponentItemIds16_14.begin(), kInventoryComponentItemIds16_14.end())) {
+        throw std::runtime_error(
+            "profile schema: static item catalog must match the pinned 16.14.1 Data Dragon catalog");
+    }
+    for (const std::uint16_t item_id : catalog.real_item_ids) {
+        if (item_id > 8191) {
+            throw std::runtime_error("profile schema: realItemIds must not exceed 8191");
+        }
+    }
+    for (const std::uint16_t item_id : catalog.component_item_ids) {
+        if (!std::binary_search(
+                catalog.real_item_ids.begin(), catalog.real_item_ids.end(), item_id)) {
+            throw std::runtime_error(
+                "profile schema: componentItemIds must be a subset of realItemIds");
+        }
+    }
+    return catalog;
+}
+
+[[nodiscard]] InventoryDirectPurchaseSubsetDecoderProfile
+parse_inventory_direct_purchase_subset(const JsonValue& value) {
+    if (value.kind != JsonValue::Kind::object) {
+        throw std::runtime_error(
+            "profile schema: 'inventoryDirectPurchaseSubset' must be an object");
+    }
+    allow_only(value, {"segmentType", "channel", "championNetworkIdBase", "add", "blockingPacketTypes", "isolationToleranceMillis", "staticItemCatalog"});
+
+    InventoryDirectPurchaseSubsetDecoderProfile profile;
+    profile.segment_type = string_value(field(value, "segmentType"), "segmentType", 16);
+    profile.channel = static_cast<std::uint8_t>(integer_value(
+        field(value, "channel"), "channel", 15));
+    profile.champion_network_id_base = static_cast<std::uint32_t>(integer_value(
+        field(value, "championNetworkIdBase"), "championNetworkIdBase", 0xffffffffULL));
+    profile.add = parse_inventory_purchase_family(field(value, "add"), "add");
+    const JsonValue& blocking = field(value, "blockingPacketTypes");
+    if (blocking.kind != JsonValue::Kind::array || blocking.array.size() != 3) {
+        throw std::runtime_error(
+            "profile schema: blockingPacketTypes must contain exactly three frozen packet types");
+    }
+    for (const JsonValue& packet_type : blocking.array) {
+        profile.blocking_packet_types.push_back(static_cast<std::uint16_t>(
+            integer_value(packet_type, "blockingPacketTypes", 0xffff)));
+    }
+    static constexpr std::array<std::uint16_t, 3> kBlockingPacketTypes{{1017, 326, 129}};
+    if (!std::equal(profile.blocking_packet_types.begin(), profile.blocking_packet_types.end(),
+                    kBlockingPacketTypes.begin(), kBlockingPacketTypes.end())) {
+        throw std::runtime_error(
+            "profile schema: blockingPacketTypes must match the frozen 16.14 isolation blockers");
+    }
+    profile.isolation_tolerance_millis = static_cast<std::size_t>(integer_value(
+        field(value, "isolationToleranceMillis"), "isolationToleranceMillis", 1000));
+    profile.static_item_catalog = parse_inventory_static_item_catalog(
+        field(value, "staticItemCatalog"));
+
+    if (profile.segment_type != "chunk" || profile.channel != 1 ||
+        profile.champion_network_id_base != 1073741997 ||
+        profile.add.packet_type != 873 ||
+        profile.add.content_lengths.exact_values != std::vector<std::size_t>{14, 15} ||
+        profile.isolation_tolerance_millis != 1) {
+        throw std::runtime_error(
+            "profile schema: invalid inventory direct purchase subset invariants");
+    }
+    return profile;
+}
+
 [[nodiscard]] std::string version_group(std::string_view version) {
     const std::size_t first = version.find('.');
     if (first == std::string_view::npos) return std::string(version);
@@ -486,7 +648,7 @@ DecoderProfileLoadResult parse_decoder_profile_registry_json(std::string_view js
         std::set<std::string> groups;
         std::vector<DecoderVersionProfile> parsed_profiles;
         for (const JsonValue& item : profiles.array) {
-            allow_only(item, {"versionGroup", "acceptedGameVersions", "finalStatsValidated", "kill", "objective", "ward", "inventoryPurchaseSubset"});
+            allow_only(item, {"versionGroup", "acceptedGameVersions", "finalStatsValidated", "kill", "objective", "ward", "inventoryPurchaseSubset", "inventoryDirectPurchaseSubset"});
             DecoderVersionProfile profile;
             profile.version_group = string_value(field(item, "versionGroup"), "versionGroup", 24);
             if (!version_group_is_valid(profile.version_group) || !groups.insert(profile.version_group).second) throw std::runtime_error("profile schema: versionGroup must be unique major.minor digits");
@@ -503,12 +665,17 @@ DecoderProfileLoadResult parse_decoder_profile_registry_json(std::string_view js
             const JsonValue& ward = field(item, "ward", false); if (ward.kind != JsonValue::Kind::null_value) profile.ward = parse_ward(ward);
             const JsonValue& inventory_purchase = field(item, "inventoryPurchaseSubset", false);
             if (inventory_purchase.kind != JsonValue::Kind::null_value) profile.inventory_purchase_subset = parse_inventory_purchase_subset(inventory_purchase);
-            if (profile.inventory_purchase_subset.has_value() &&
+            const JsonValue& inventory_direct_purchase = field(item, "inventoryDirectPurchaseSubset", false);
+            if (inventory_direct_purchase.kind != JsonValue::Kind::null_value) {
+                profile.inventory_direct_purchase_subset = parse_inventory_direct_purchase_subset(inventory_direct_purchase);
+            }
+            if ((profile.inventory_purchase_subset.has_value() ||
+                 profile.inventory_direct_purchase_subset.has_value()) &&
                 (profile.version_group != "16.14" || profile.accepted_game_versions.size() != 1 ||
                  profile.accepted_game_versions.front() != "16.14.794.5912")) {
-                throw std::runtime_error("profile schema: inventory purchase subset is restricted to exact build 16.14.794.5912");
+                throw std::runtime_error("profile schema: inventory purchase subsets are restricted to exact build 16.14.794.5912");
             }
-            if (!profile.final_stats_validated && !profile.kill && !profile.objective && !profile.ward && !profile.inventory_purchase_subset) throw std::runtime_error("profile schema: patch profile must declare at least one decoder capability");
+            if (!profile.final_stats_validated && !profile.kill && !profile.objective && !profile.ward && !profile.inventory_purchase_subset && !profile.inventory_direct_purchase_subset) throw std::runtime_error("profile schema: patch profile must declare at least one decoder capability");
             parsed_profiles.push_back(std::move(profile));
         }
         provenance.fingerprint = fnv1a64(json);

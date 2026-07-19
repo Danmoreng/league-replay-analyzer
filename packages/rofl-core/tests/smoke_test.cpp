@@ -933,6 +933,172 @@ bool test_replay_inventory_purchase_subset_fixture() {
            json.find("\"goldStateAvailable\":false") != std::string::npos;
 }
 
+void set_inventory_payload_bit(
+    std::vector<std::uint8_t>& payload, std::size_t bit
+) {
+    payload[bit >> 3U] |= static_cast<std::uint8_t>(1U << (bit & 7U));
+}
+
+std::vector<std::uint8_t> direct_purchase_item_payload(std::uint16_t item_id) {
+    std::vector<std::uint8_t> payload(14, 0);
+    if (item_id == 1001) {
+        // Validated 16.14 grammar for Boots (a Data-Dragon-pinned component).
+        for (const std::size_t bit : {67U, 71U, 73U, 75U, 78U}) {
+            set_inventory_payload_bit(payload, bit);
+        }
+    } else if (item_id == 8191) {
+        // A structurally decodable, but non-catalog, value. It must not escape
+        // the static-catalog gate as a replay item purchase.
+        for (const std::size_t bit : {66U, 68U, 71U, 72U, 73U, 76U, 79U}) {
+            set_inventory_payload_bit(payload, bit);
+        }
+    }
+    return payload;
+}
+
+std::vector<std::uint8_t> build_footer_direct_item_purchase_fixture(
+    const std::string& game_version = "16.14.794.5912"
+) {
+    constexpr std::uint32_t champion_base = 0x400000AD;
+    constexpr std::uint16_t add_packet_type = 0x0369;
+    constexpr std::uint16_t removal_packet_type = 0x03F9;
+    std::vector<std::uint8_t> payload;
+    const std::vector<std::uint8_t> removal_six(6, 0);
+    const auto boots = direct_purchase_item_payload(1001);
+    const auto non_catalog = direct_purchase_item_payload(8191);
+    const std::vector<std::uint8_t> missing_item_symbol(14, 0);
+
+    append_packet_block_with_content(payload, 10.0F, add_packet_type, champion_base + 1, boots);
+    append_packet_block_with_content(payload, 20.0F, add_packet_type, champion_base + 2, non_catalog);
+    append_packet_block_with_content(payload, 30.0F, add_packet_type, champion_base + 3, boots);
+    append_packet_block_with_content(payload, 30.0F, removal_packet_type, champion_base + 3, removal_six);
+    append_packet_block_with_content(payload, 40.0F, add_packet_type, champion_base + 4, boots);
+    append_packet_block_with_content(payload, 40.001F, removal_packet_type, champion_base + 4, removal_six);
+    append_packet_block_with_content(payload, 50.0F, add_packet_type, champion_base + 5, missing_item_symbol);
+
+    const std::string metadata =
+        R"({"gameLength":60000,"lastGameChunkId":1,"lastKeyFrameId":0,"statsJson":"[]"})";
+    const auto compressed = compress_zstd_payload(std::string(
+        reinterpret_cast<const char*>(payload.data()), payload.size()));
+    if (compressed.empty()) return {};
+
+    constexpr std::size_t header_offset = 32;
+    constexpr std::size_t payload_offset = header_offset + 17;
+    const std::size_t metadata_offset = payload_offset + compressed.size();
+    const std::size_t total_size = metadata_offset + metadata.size() + 4;
+    std::vector<std::uint8_t> bytes(total_size, 0);
+    write_ascii(bytes, 0, "RIOT");
+    bytes[4] = 0x02;
+    write_ascii(bytes, 16, game_version);
+    write_zstd_record_header(bytes, header_offset, 1, 2, 1,
+        static_cast<std::uint32_t>(payload.size()), static_cast<std::uint32_t>(compressed.size()));
+    std::copy(compressed.begin(), compressed.end(), bytes.begin() + payload_offset);
+    write_ascii(bytes, metadata_offset, metadata);
+    write_u32_le(bytes, total_size - 4, static_cast<std::uint32_t>(metadata.size()));
+    return bytes;
+}
+
+std::string inventory_direct_purchase_subset_profile_json(
+    const std::string& accepted_version = "16.14.794.5912"
+) {
+    // These lists deliberately mirror the exact pinned 16.14.1 Data Dragon
+    // catalog in replay-decoder-profiles.v1.json. The parser requires all
+    // 212 real IDs and the 71-item buildable-component subset, so this is also a strict
+    // parser regression test rather than a reduced test-only catalog.
+    const std::vector<std::uint16_t> real_item_ids{
+        1001,1004,1006,1011,1018,1026,1027,1028,1029,1031,1033,1036,1037,1038,1042,
+        1043,1052,1053,1054,1055,1056,1057,1058,1082,1083,1086,1101,1102,1103,1105,
+        1106,1107,1120,2003,2019,2020,2021,2022,2031,2051,2055,2065,2138,2139,2140,
+        2141,2420,2421,2501,2502,2503,2504,2508,2510,2512,2517,2520,2522,2523,2524,
+        2525,2526,3003,3004,3006,3008,3009,3020,3024,3026,3031,3032,3033,3035,3036,
+        3041,3044,3046,3047,3050,3051,3053,3057,3065,3066,3067,3068,3070,3071,3072,
+        3073,3074,3075,3076,3077,3078,3082,3083,3084,3085,3086,3087,3089,3091,3094,
+        3097,3100,3102,3107,3108,3109,3110,3111,3112,3113,3114,3115,3116,3118,3119,
+        3123,3124,3133,3134,3135,3137,3139,3140,3142,3143,3144,3145,3146,3147,3152,
+        3153,3155,3156,3157,3158,3161,3165,3168,3170,3171,3172,3173,3174,3175,3177,
+        3179,3181,3184,3190,3211,3222,3302,3504,3508,3742,3748,3801,3802,3803,3814,
+        3865,3869,3870,3871,3876,3877,3916,4005,4401,4628,4629,4630,4632,4633,4642,
+        4645,4646,6333,6609,6610,6616,6617,6620,6621,6631,6653,6655,6657,6660,6662,
+        6664,6665,6670,6672,6673,6675,6676,6690,6692,6694,6695,6696,6697,6698,6699,
+        8010,8020};
+    const std::vector<std::uint16_t> component_item_ids{
+        1001,1004,1006,1011,1018,1026,1027,1028,1029,1031,1033,1036,1037,1038,1042,
+        1043,1052,1053,1057,1058,1082,2019,2020,2021,2022,2031,2420,2421,2508,2526,
+        3006,3008,3009,3020,3024,3035,3044,3047,3051,3057,3066,3067,3070,3076,3077,
+        3082,3086,3108,3111,3113,3114,3123,3133,3134,3140,3144,3145,3147,3155,3158,
+        3211,3801,3802,3803,3916,4630,4632,4642,6660,6670,6690};
+    const auto write_ids = [](std::ostringstream& output,
+                              const std::vector<std::uint16_t>& values) {
+        for (std::size_t index = 0; index < values.size(); ++index) {
+            if (index > 0) output << ',';
+            output << values[index];
+        }
+    };
+    std::ostringstream output;
+    output << R"json({"schema":"rofl-replay-decoder-profiles/v1","registryId":"inventory-direct-purchase-smoke","revision":1,"profiles":[{"versionGroup":"16.14","acceptedGameVersions":[")json"
+           << accepted_version << R"json("],"inventoryDirectPurchaseSubset":{"segmentType":"chunk","channel":1,"championNetworkIdBase":1073741997,"add":{"packetType":873,"contentLengths":{"exact":[14,15]}},"blockingPacketTypes":[1017,326,129],"isolationToleranceMillis":1,"staticItemCatalog":{"provider":"Riot Data Dragon","version":"16.14.1","locale":"en_US","sourceUrl":"https://ddragon.leagueoflegends.com/cdn/16.14.1/data/en_US/item.json","sourceByteLength":583139,"sourceSha256":"0094f848489371da9e86b9f210f70b6ce0a3982c9063c7c734099cd5a88ddb75","entryCount":706,"realItemIds":[)json";
+    write_ids(output, real_item_ids);
+    output << R"json(],"componentItemIds":[)json";
+    write_ids(output, component_item_ids);
+    output << R"json(]}}}]})json";
+    return output.str();
+}
+
+bool test_replay_direct_item_purchase_subset_fixture() {
+    const auto loaded = rofl::core::parse_decoder_profile_registry_json(
+        inventory_direct_purchase_subset_profile_json());
+    if (!loaded.ok() || !loaded.registry.has_value()) return false;
+
+    const std::string json = rofl::core::extract_replay_direct_item_purchases_json(
+        build_footer_direct_item_purchase_fixture(), *loaded.registry);
+    bool unsupported_build_rejected = false;
+    try {
+        (void)rofl::core::extract_replay_direct_item_purchases_json(
+            build_footer_direct_item_purchase_fixture("16.14.794.5913"), *loaded.registry);
+    } catch (const std::exception&) {
+        unsupported_build_rejected = true;
+    }
+    const auto wrong_accepted_version = rofl::core::parse_decoder_profile_registry_json(
+        inventory_direct_purchase_subset_profile_json("16.14.794.5913"));
+    std::string unfrozen_blockers = inventory_direct_purchase_subset_profile_json();
+    const std::size_t blockers = unfrozen_blockers.find("\"blockingPacketTypes\":[1017,326,129]");
+    if (blockers == std::string::npos) return false;
+    unfrozen_blockers.replace(blockers, std::string("\"blockingPacketTypes\":[1017,326,129]").size(),
+        "\"blockingPacketTypes\":[1017,327,129]");
+    const auto invalid_blockers = rofl::core::parse_decoder_profile_registry_json(unfrozen_blockers);
+    std::string unfrozen_catalog = inventory_direct_purchase_subset_profile_json();
+    const std::size_t catalog_id = unfrozen_catalog.find(",1082,1083,1086,");
+    if (catalog_id == std::string::npos) return false;
+    unfrozen_catalog.replace(catalog_id, std::string(",1082,1083,1086,").size(),
+        ",1082,1084,1086,");
+    const auto invalid_catalog = rofl::core::parse_decoder_profile_registry_json(unfrozen_catalog);
+
+    return unsupported_build_rejected && !wrong_accepted_version.ok() &&
+           !wrong_accepted_version.registry.has_value() && !invalid_blockers.ok() &&
+           !invalid_blockers.registry.has_value() && !invalid_catalog.ok() &&
+           !invalid_catalog.registry.has_value() &&
+           json.find("\"schema\":\"rofl-replay-direct-item-purchases/v1\"") != std::string::npos &&
+           json.find("\"runtimeInput\":\"rofl-only\",\"riotApiInput\":false") != std::string::npos &&
+           json.find("\"origin\":\"external\"") != std::string::npos &&
+           json.find("\"realItemIdCount\":212,\"componentItemIdCount\":71") != std::string::npos &&
+           json.find("\"type\":\"DIRECT_ADD_ONLY_ITEM_PURCHASE\",\"timestampMillis\":10000,\"participantId\":1,\"participantNetworkId\":1073741998,\"participantNetworkIdHex\":\"0x400000AE\",\"itemId\":1001,\"componentItem\":true") != std::string::npos &&
+           json.find("\"addBlock\":{\"family\":\"add\",\"channel\":1,\"packetType\":873") != std::string::npos &&
+           json.find("\"availability\":{\"slot\":false,\"itemInstance\":false,\"countOrCharges\":false,\"price\":false,\"goldState\":false,\"inventoryState\":false}") != std::string::npos &&
+           json.find("\"knownInventoryOperationPacketCount\":7") != std::string::npos &&
+           json.find("\"profiledAddUpdatePacketCount\":5") != std::string::npos &&
+           json.find("\"knownOwnerTimeGroupCount\":6") != std::string::npos &&
+           json.find("\"profiledSingleAddOnlyGroupCount\":4") != std::string::npos &&
+           json.find("\"rejectedNonSingletonGroupCount\":1") != std::string::npos &&
+           json.find("\"rejectedNeighborOperationGroupCount\":1") != std::string::npos &&
+           json.find("\"rejectedUnavailableItemIdGroupCount\":1") != std::string::npos &&
+           json.find("\"rejectedStaticItemCatalogGroupCount\":1") != std::string::npos &&
+           json.find("\"emittedEventCount\":1") != std::string::npos &&
+           json.find("\"componentItemEventCount\":1") != std::string::npos &&
+           json.find("\"exactPacketFraming\":true") != std::string::npos &&
+           json.find("\"coverage\":\"strict-direct-add-only-subset-not-complete\"") != std::string::npos &&
+           json.find("\"inventoryStateAvailable\":false") != std::string::npos;
+}
+
 bool test_replay_ward_extractor_fixture() {
     const std::string json =
         rofl::core::extract_replay_wards_json(build_footer_ward_fixture());
@@ -1218,6 +1384,10 @@ int main() {
     }
 
     if (!test_replay_inventory_purchase_subset_fixture()) {
+        return EXIT_FAILURE;
+    }
+
+    if (!test_replay_direct_item_purchase_subset_fixture()) {
         return EXIT_FAILURE;
     }
 

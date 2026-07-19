@@ -7,16 +7,20 @@ Patch 16.9 has a reproducible, exact decoder for the item ID carried by the
 field, but it is not yet a complete inventory transaction decoder.
 
 For exact build `16.14.794.5912`, the shared C++ core, Wasm boundary, and Vue
-client productively expose the narrow, external-profile-only schema
-`rofl-replay-purchase-linked-item-updates/v1`. It emits only strict
-purchase-linked resulting-item updates from the loaded `.rofl`; saved Riot
-fixtures remain offline discovery/validation oracles and are never runtime
-inputs or fallbacks.
+client productively expose two complementary, external-profile-only schemas:
+`rofl-replay-purchase-linked-item-updates/v1` for strict transform/resulting
+updates, and `rofl-replay-direct-item-purchases/v1` for strict isolated direct
+adds. Both consume only the loaded `.rofl` and canonical local profile bytes;
+saved Riot fixtures remain offline discovery/validation oracles and are never
+runtime inputs or fallbacks.
 
 Runtime promotion remains blocked for complete inventory reconstruction because
 the 6/7-byte removal family still has no decoded slot or item-instance
 reference. Consequently, a removal cannot yet be mapped to the item that left
 a champion's inventory without using an offline Riot label.
+
+The canonical profile revision is `2026-07-20` with fingerprint
+`fnv1a64:52158d03db096c70`.
 
 ## Reproducing the result
 
@@ -379,6 +383,52 @@ This remains deliberately a small exact subset: 2,326/2,519 profiled
 add/update packets remain unavailable, and the result is not a complete
 purchase stream. It does not identify consumed or removed components, slot,
 item instance, count/charges, price, gold state, undo, or current inventory.
+
+### Patch-16.14 strict direct add-only purchase subset
+
+The complementary direct-purchase gate avoids interpreting every add/update as
+a buy. It starts from one champion-owned channel-1 `0x0369` add of exact length
+14 or 15 in an owner/time group, then requires that the same owner has no
+relevant `0x0369`, `0x03F9`, `0x0146`, or `0x0081` operation within +/-1 ms.
+Thus it deliberately excludes transformations, removals, contextual changes,
+and Undo-adjacent operation groups rather than guessing their semantics.
+
+The replay-derived structural 13-bit item ID is then filtered by static item
+metadata embedded in the canonical external profile. The metadata is exactly
+the saved official Riot Data Dragon `16.14.1` `en_US` catalog, 583,139 bytes,
+706 catalog entries, SHA-256
+`0094f848489371da9e86b9f210f70b6ce0a3982c9063c7c734099cd5a88ddb75`. Its
+frozen semantic-free selection contains 212 purchasable Summoner's-Rift real
+item IDs at or below 8191 and 71 buildable component IDs whose Data Dragon
+`into` relation is non-empty. The strict loader compares both complete arrays
+against the frozen catalog, so matching metadata and list sizes alone cannot
+widen the gate. It classifies only the already
+decoded replay item ID and supplies no match-state fallback. 2,010/2,422
+static-grant/non-real candidates are rejected instead of emitted.
+
+This is promoted through C++, the Native CLI, the Wasm ABI, TypeScript, and the
+Vue product view as `rofl-replay-direct-item-purchases/v1` for exact build
+`16.14.794.5912`. It must have the canonical external profile; missing,
+invalid, built-in, ambiguous, or other-build selection is unavailable. The
+runtime event includes timestamp, replay-native participant/network ID,
+structural item ID, a component flag, and exact add-block provenance. It makes
+no claim about slot, item instance, count/charges, price, gold, removal, undo,
+or current inventory state.
+
+Reproduce its corpus gate with:
+
+```powershell
+node .\scripts\validate_replay_direct_item_purchases_corpus.mjs
+```
+
+Across the fixed seven-replay D7 and three-replay H3 split, it emits 844/844
+D7 plus 434/434 H3 exact purchases, 1,278/1,278 combined, with zero extras,
+zero wrong IDs, and a maximum one-millisecond timestamp delta. It includes
+710/710 D7 plus 333/333 H3 buildable-component purchases, 1,043/1,043 combined. Its emitted
+events are disjoint from the 193 strict purchase-linked resulting-item updates;
+together, the two productive streams exactly recover 1,471/1,973 saved
+Timeline purchase labels (74.6%). Timeline is only the offline corpus oracle,
+not a runtime input.
 
 ### Negative promotion controls for direct recipe/removal rules
 

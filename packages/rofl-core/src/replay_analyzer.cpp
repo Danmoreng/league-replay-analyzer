@@ -5264,6 +5264,306 @@ void write_inventory_purchase_block_json(
     return output.str();
 }
 
+struct InventoryDirectPurchaseRelevantBlock {
+    PacketBlock block;
+    long long timestamp_millis = 0;
+    int participant_id = 0;
+    bool is_add_packet = false;
+    std::vector<std::uint8_t> payload;
+};
+
+[[nodiscard]] int inventory_direct_purchase_owner_to_participant_id(
+    std::uint32_t owner,
+    const InventoryDirectPurchaseSubsetDecoderProfile& profile
+) {
+    if (owner <= profile.champion_network_id_base) return 0;
+    const std::uint32_t participant_id = owner - profile.champion_network_id_base;
+    return participant_id <= 10 ? static_cast<int>(participant_id) : 0;
+}
+
+[[nodiscard]] bool inventory_direct_purchase_is_known_operation(
+    std::uint16_t packet_type,
+    const InventoryDirectPurchaseSubsetDecoderProfile& profile
+) {
+    return packet_type == profile.add.packet_type ||
+        std::find(
+            profile.blocking_packet_types.begin(),
+            profile.blocking_packet_types.end(),
+            packet_type
+        ) != profile.blocking_packet_types.end();
+}
+
+[[nodiscard]] bool inventory_direct_purchase_has_neighbor_operation(
+    const std::map<std::pair<int, long long>, std::vector<InventoryDirectPurchaseRelevantBlock>>& groups,
+    int participant_id,
+    long long timestamp_millis,
+    std::size_t tolerance_millis
+) {
+    for (std::size_t delta = 1; delta <= tolerance_millis; ++delta) {
+        const long long signed_delta = static_cast<long long>(delta);
+        if (timestamp_millis >= signed_delta &&
+            groups.contains({participant_id, timestamp_millis - signed_delta})) return true;
+        if (timestamp_millis <= std::numeric_limits<long long>::max() - signed_delta &&
+            groups.contains({participant_id, timestamp_millis + signed_delta})) return true;
+    }
+    return false;
+}
+
+void write_inventory_direct_purchase_add_block_json(
+    std::ostringstream& output,
+    const InventoryDirectPurchaseRelevantBlock& relevant
+) {
+    output << "{\"family\":\"add\",\"channel\":"
+           << static_cast<unsigned int>(relevant.block.channel)
+           << ",\"packetType\":" << relevant.block.packet_type
+           << ",\"packetTypeHex\":\"" << fixed_hex(relevant.block.packet_type, 4) << "\""
+           << ",\"contentLength\":" << relevant.block.content_length
+           << ",\"blockParam\":" << relevant.block.block_param
+           << ",\"blockParamHex\":\"" << fixed_hex(relevant.block.block_param, 8) << "\""
+           << ",\"provenance\":";
+    write_objective_block_provenance_json(output, relevant.block);
+    output << '}';
+}
+
+[[nodiscard]] std::string extract_replay_direct_item_purchases_impl(
+    const std::vector<std::uint8_t>& bytes,
+    const KillSourceInfo& source,
+    const DecoderProfileRegistry& decoder_profiles
+) {
+    const ReplaySummary summary = parse_replay_bytes(bytes, decoder_profiles);
+    if (summary.game_version != "16.14.794.5912") {
+        throw std::runtime_error(
+            "Inventory direct purchase subset decoder is restricted to exact build 16.14.794.5912."
+        );
+    }
+    const DecoderVersionProfile* selected = find_decoder_profile(
+        decoder_profiles, summary.game_version);
+    if (selected == nullptr || !selected->inventory_direct_purchase_subset.has_value()) {
+        throw std::runtime_error(
+            "Unsupported replay version " + summary.game_version +
+            ": external decoder registry has no inventory direct purchase subset profile."
+        );
+    }
+    const InventoryDirectPurchaseSubsetDecoderProfile& profile =
+        *selected->inventory_direct_purchase_subset;
+
+    std::map<std::pair<int, long long>, std::vector<InventoryDirectPurchaseRelevantBlock>> groups;
+    std::size_t known_inventory_operation_packet_count = 0;
+    std::size_t profiled_add_update_packet_count = 0;
+    const PacketFileScan scan = scan_packet_segments(
+        bytes,
+        summary,
+        profile.segment_type,
+        [&](const ReplaySegmentSummary&,
+            const std::vector<std::uint8_t>& decompressed,
+            const PacketBlockParseResult& result) {
+            for (const PacketBlock& block : result.blocks) {
+                if (block.channel != profile.channel ||
+                    !inventory_direct_purchase_is_known_operation(block.packet_type, profile)) continue;
+                const int participant_id = inventory_direct_purchase_owner_to_participant_id(
+                    block.block_param, profile);
+                if (participant_id == 0) continue;
+                ++known_inventory_operation_packet_count;
+                const bool is_add_packet = block.packet_type == profile.add.packet_type;
+                InventoryDirectPurchaseRelevantBlock relevant{
+                    block,
+                    packet_timestamp_millis(block.timestamp_seconds),
+                    participant_id,
+                    is_add_packet,
+                    {},
+                };
+                if (is_add_packet && inventory_purchase_length_is_profiled(
+                        block.content_length, profile.add.content_lengths)) {
+                    ++profiled_add_update_packet_count;
+                    relevant.payload.assign(
+                        decompressed.begin() + static_cast<std::ptrdiff_t>(block.content_offset),
+                        decompressed.begin() + static_cast<std::ptrdiff_t>(block.end_offset)
+                    );
+                }
+                groups[{participant_id, relevant.timestamp_millis}].push_back(
+                    std::move(relevant));
+            }
+        }
+    );
+    if (scan.selected_segment_count == 0) {
+        throw std::runtime_error("Replay contains no footer-style chunk records.");
+    }
+    if (scan.exact_segment_count != scan.selected_segment_count || !scan.errors.empty()) {
+        const std::string detail = scan.errors.empty()
+            ? "one or more chunks were not exactly consumed"
+            : scan.errors.front().code + ": " + scan.errors.front().message;
+        throw std::runtime_error("Replay chunk packet framing failed: " + detail);
+    }
+
+    struct EmittedEvent {
+        long long timestamp_millis = 0;
+        int participant_id = 0;
+        std::uint16_t item_id = 0;
+        bool component_item = false;
+        InventoryDirectPurchaseRelevantBlock add;
+    };
+    std::vector<EmittedEvent> events;
+    std::size_t profiled_single_add_only_group_count = 0;
+    std::size_t rejected_non_singleton_group_count = 0;
+    std::size_t rejected_non_add_or_length_group_count = 0;
+    std::size_t rejected_neighbor_operation_group_count = 0;
+    std::size_t rejected_unavailable_item_id_group_count = 0;
+    std::size_t rejected_static_item_catalog_group_count = 0;
+    std::size_t component_item_event_count = 0;
+
+    for (auto& [key, group] : groups) {
+        std::stable_sort(group.begin(), group.end(), [](const auto& left, const auto& right) {
+            if (left.block.provenance.segment_payload_offset !=
+                right.block.provenance.segment_payload_offset) {
+                return left.block.provenance.segment_payload_offset <
+                    right.block.provenance.segment_payload_offset;
+            }
+            if (left.block.header_offset != right.block.header_offset) {
+                return left.block.header_offset < right.block.header_offset;
+            }
+            return left.block.block_index < right.block.block_index;
+        });
+        if (group.size() != 1) {
+            ++rejected_non_singleton_group_count;
+            continue;
+        }
+        InventoryDirectPurchaseRelevantBlock& candidate = group.front();
+        if (!candidate.is_add_packet || !inventory_purchase_length_is_profiled(
+                candidate.block.content_length, profile.add.content_lengths)) {
+            ++rejected_non_add_or_length_group_count;
+            continue;
+        }
+        ++profiled_single_add_only_group_count;
+        if (inventory_direct_purchase_has_neighbor_operation(
+                groups,
+                key.first,
+                key.second,
+                profile.isolation_tolerance_millis)) {
+            ++rejected_neighbor_operation_group_count;
+            continue;
+        }
+        const auto item_id = decode_inventory_item_id_16_14(candidate.payload);
+        if (!item_id.has_value()) {
+            ++rejected_unavailable_item_id_group_count;
+            continue;
+        }
+        const InventoryStaticItemCatalogProfile& catalog = profile.static_item_catalog;
+        if (!std::binary_search(
+                catalog.real_item_ids.begin(), catalog.real_item_ids.end(), *item_id)) {
+            ++rejected_static_item_catalog_group_count;
+            continue;
+        }
+        const bool component_item = std::binary_search(
+            catalog.component_item_ids.begin(), catalog.component_item_ids.end(), *item_id);
+        if (component_item) ++component_item_event_count;
+        events.push_back({
+            key.second,
+            key.first,
+            *item_id,
+            component_item,
+            candidate,
+        });
+    }
+    std::sort(events.begin(), events.end(), [](const EmittedEvent& left, const EmittedEvent& right) {
+        if (left.add.block.provenance.segment_payload_offset !=
+            right.add.block.provenance.segment_payload_offset) {
+            return left.add.block.provenance.segment_payload_offset <
+                right.add.block.provenance.segment_payload_offset;
+        }
+        if (left.add.block.header_offset != right.add.block.header_offset) {
+            return left.add.block.header_offset < right.add.block.header_offset;
+        }
+        return left.add.block.block_index < right.add.block.block_index;
+    });
+
+    std::ostringstream output;
+    output << "{\"schema\":\"rofl-replay-direct-item-purchases/v1\",\"generatedAtUtc\":\""
+           << current_utc_iso8601() << "\",\"source\":{\"replayPath\":";
+    if (source.has_file) output << '"' << json_escape(source.replay_path) << '"';
+    else output << "null";
+    output << ",\"replayId\":";
+    if (source.has_file) output << '"' << json_escape(source.replay_id) << '"';
+    else output << "null";
+    output << ",\"matchId\":";
+    if (source.has_file) output << '"' << json_escape(source.match_id) << '"';
+    else output << "null";
+    output << ",\"runtimeInput\":\"rofl-only\",\"riotApiInput\":false}"
+           << ",\"gameVersion\":\"" << json_escape(summary.game_version)
+           << "\",\"versionGroup\":\"" << packet_version_group(summary.game_version)
+           << "\",\"profile\":{\"segmentType\":\"" << profile.segment_type
+           << "\",\"channel\":" << static_cast<unsigned int>(profile.channel)
+           << ",\"championNetworkIdBase\":" << profile.champion_network_id_base
+           << ",\"championNetworkIdBaseHex\":\""
+           << fixed_hex(profile.champion_network_id_base, 8) << "\""
+           << ",\"addUpdatePacketType\":" << profile.add.packet_type
+           << ",\"addUpdatePacketTypeHex\":\"" << fixed_hex(profile.add.packet_type, 4)
+           << "\",\"contentLengths\":";
+    write_size_array_json(output, profile.add.content_lengths);
+    output << ",\"blockingPacketTypes\":[";
+    for (std::size_t index = 0; index < profile.blocking_packet_types.size(); ++index) {
+        if (index > 0) output << ',';
+        output << profile.blocking_packet_types[index];
+    }
+    output << "],\"blockingPacketTypesHex\":[";
+    for (std::size_t index = 0; index < profile.blocking_packet_types.size(); ++index) {
+        if (index > 0) output << ',';
+        output << '"' << fixed_hex(profile.blocking_packet_types[index], 4) << '"';
+    }
+    const InventoryStaticItemCatalogProfile& catalog = profile.static_item_catalog;
+    output << "],\"isolationToleranceMillis\":" << profile.isolation_tolerance_millis
+           << ",\"staticItemCatalog\":{\"provider\":\"" << json_escape(catalog.provider)
+           << "\",\"version\":\"" << json_escape(catalog.version)
+           << "\",\"locale\":\"" << json_escape(catalog.locale)
+           << "\",\"sourceUrl\":\"" << json_escape(catalog.source_url)
+           << "\",\"sourceByteLength\":" << catalog.source_byte_length
+           << ",\"sourceSha256\":\"" << json_escape(catalog.source_sha256)
+           << "\",\"entryCount\":" << catalog.entry_count
+           << ",\"realItemIdCount\":" << catalog.real_item_ids.size()
+           << ",\"componentItemIdCount\":" << catalog.component_item_ids.size() << '}';
+    write_decoder_profile_provenance_fields(output, &decoder_profiles);
+    output << "},\"events\":[";
+    for (std::size_t index = 0; index < events.size(); ++index) {
+        if (index > 0) output << ',';
+        const EmittedEvent& event = events[index];
+        const std::uint32_t network_id = profile.champion_network_id_base +
+            static_cast<std::uint32_t>(event.participant_id);
+        output << "{\"type\":\"DIRECT_ADD_ONLY_ITEM_PURCHASE\",\"timestampMillis\":"
+               << event.timestamp_millis << ",\"participantId\":" << event.participant_id
+               << ",\"participantNetworkId\":" << network_id
+               << ",\"participantNetworkIdHex\":\"" << fixed_hex(network_id, 8)
+               << "\",\"itemId\":" << event.item_id
+               << ",\"componentItem\":" << (event.component_item ? "true" : "false")
+               << ",\"classification\":\"direct-add-only\""
+               << ",\"availability\":{\"slot\":false,\"itemInstance\":false,"
+                  "\"countOrCharges\":false,\"price\":false,\"goldState\":false,"
+                  "\"inventoryState\":false},\"provenance\":{\"addBlock\":";
+        write_inventory_direct_purchase_add_block_json(output, event.add);
+        output << "}}";
+    }
+    output << "],\"diagnostics\":{\"footerRecordCount\":" << summary.container.segments.size()
+           << ",\"chunkRecordCount\":" << scan.selected_segment_count
+           << ",\"decompressedChunkBytes\":" << scan.input_bytes
+           << ",\"packetBlockCount\":" << scan.packet_count
+           << ",\"knownInventoryOperationPacketCount\":" << known_inventory_operation_packet_count
+           << ",\"profiledAddUpdatePacketCount\":" << profiled_add_update_packet_count
+           << ",\"knownOwnerTimeGroupCount\":" << groups.size()
+           << ",\"profiledSingleAddOnlyGroupCount\":" << profiled_single_add_only_group_count
+           << ",\"rejectedNonSingletonGroupCount\":" << rejected_non_singleton_group_count
+           << ",\"rejectedNonAddOrLengthGroupCount\":" << rejected_non_add_or_length_group_count
+           << ",\"rejectedNeighborOperationGroupCount\":" << rejected_neighbor_operation_group_count
+           << ",\"rejectedUnavailableItemIdGroupCount\":" << rejected_unavailable_item_id_group_count
+           << ",\"rejectedStaticItemCatalogGroupCount\":" << rejected_static_item_catalog_group_count
+           << ",\"emittedEventCount\":" << events.size()
+           << ",\"componentItemEventCount\":" << component_item_event_count
+           << ",\"exactPacketFraming\":true,\"coverage\":\"strict-direct-add-only-subset-not-complete\""
+           << ",\"generalPurchaseClassificationAvailable\":false"
+           << ",\"slotAvailable\":false,\"itemInstanceAvailable\":false"
+           << ",\"countOrChargesAvailable\":false,\"priceAvailable\":false"
+           << ",\"goldStateAvailable\":false,\"inventoryStateAvailable\":false"
+           << ",\"removedItemIdentityAvailable\":false,\"undoAvailable\":false}}";
+    return output.str();
+}
+
 }  // namespace
 
 std::string extract_replay_purchase_linked_item_updates_json(
@@ -5287,6 +5587,32 @@ std::string extract_replay_purchase_linked_item_updates_file_json(
     const std::size_t separator = source.match_id.find('-');
     if (separator != std::string::npos) source.match_id[separator] = '_';
     return extract_replay_purchase_linked_item_updates_impl(read_file_bytes(source.replay_path), source, decoder_profiles);
+}
+
+std::string extract_replay_direct_item_purchases_json(
+    const std::vector<std::uint8_t>& bytes,
+    const DecoderProfileRegistry& decoder_profiles
+) {
+    return extract_replay_direct_item_purchases_impl(bytes, {}, decoder_profiles);
+}
+
+std::string extract_replay_direct_item_purchases_file_json(
+    const std::string& path,
+    const DecoderProfileRegistry& decoder_profiles
+) {
+    std::error_code error;
+    std::filesystem::path absolute = std::filesystem::absolute(path, error);
+    if (error) absolute = std::filesystem::path(path);
+    absolute = absolute.lexically_normal();
+    KillSourceInfo source;
+    source.has_file = true;
+    source.replay_path = absolute.string();
+    source.replay_id = absolute.stem().string();
+    source.match_id = source.replay_id;
+    const std::size_t separator = source.match_id.find('-');
+    if (separator != std::string::npos) source.match_id[separator] = '_';
+    return extract_replay_direct_item_purchases_impl(
+        read_file_bytes(source.replay_path), source, decoder_profiles);
 }
 
 std::string replay_summary_to_json(const ReplaySummary& summary) {
