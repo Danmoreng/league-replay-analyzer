@@ -1,6 +1,7 @@
 #include "rofl/core/decoder_profiles.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <charconv>
 #include <filesystem>
@@ -283,6 +284,170 @@ void allow_only(const JsonValue& object, std::initializer_list<std::string_view>
     return profile;
 }
 
+[[nodiscard]] InventoryPurchasePacketFamilyProfile parse_inventory_purchase_family(
+    const JsonValue& value,
+    std::string_view name
+) {
+    if (value.kind != JsonValue::Kind::object) {
+        throw std::runtime_error("profile schema: '" + std::string(name) + "' must be an object");
+    }
+    allow_only(value, {"packetType", "contentLengths"});
+    InventoryPurchasePacketFamilyProfile family;
+    family.packet_type = static_cast<std::uint16_t>(integer_value(
+        field(value, "packetType"), "packetType", 0xffff));
+    family.content_lengths = length_constraint(
+        field(value, "contentLengths"), "contentLengths");
+    if (family.packet_type == 0 || family.content_lengths.exact_values.empty() ||
+        family.content_lengths.minimum.has_value() || family.content_lengths.maximum.has_value()) {
+        throw std::runtime_error("profile schema: inventory purchase family requires a packet type and exact content lengths");
+    }
+    return family;
+}
+
+[[nodiscard]] InventoryPurchaseBundleFamily inventory_purchase_family_name(
+    const JsonValue& value
+) {
+    const std::string name = string_value(value, "family", 32);
+    if (name == "add") return InventoryPurchaseBundleFamily::add;
+    if (name == "removal") return InventoryPurchaseBundleFamily::removal;
+    if (name == "removalContext") return InventoryPurchaseBundleFamily::removal_context;
+    if (name == "undoComponent") return InventoryPurchaseBundleFamily::undo_component;
+    throw std::runtime_error("profile schema: unknown inventory purchase template family '" + name + "'");
+}
+
+[[nodiscard]] bool inventory_purchase_length_is_profiled(
+    std::size_t length,
+    const InventoryPurchasePacketFamilyProfile& family
+) {
+    return std::find(
+        family.content_lengths.exact_values.begin(),
+        family.content_lengths.exact_values.end(), length
+    ) != family.content_lengths.exact_values.end();
+}
+
+[[nodiscard]] const InventoryPurchasePacketFamilyProfile*
+inventory_purchase_family_profile(
+    InventoryPurchaseBundleFamily family,
+    const InventoryPurchaseSubsetDecoderProfile& profile
+) {
+    switch (family) {
+        case InventoryPurchaseBundleFamily::add: return &profile.add;
+        case InventoryPurchaseBundleFamily::removal: return &profile.removal;
+        case InventoryPurchaseBundleFamily::removal_context: return &profile.removal_context;
+        case InventoryPurchaseBundleFamily::undo_component: return nullptr;
+    }
+    return nullptr;
+}
+
+[[nodiscard]] std::string inventory_purchase_template_key(
+    const InventoryPurchaseTemplate& template_value
+) {
+    std::ostringstream key;
+    for (const InventoryPurchaseTemplateToken& token : template_value.tokens) {
+        key << static_cast<unsigned int>(token.family) << ':' << token.content_length << ';';
+    }
+    return key.str();
+}
+
+[[nodiscard]] InventoryPurchaseSubsetDecoderProfile parse_inventory_purchase_subset(
+    const JsonValue& value
+) {
+    if (value.kind != JsonValue::Kind::object) {
+        throw std::runtime_error("profile schema: 'inventoryPurchaseSubset' must be an object");
+    }
+    allow_only(value, {"segmentType", "channel", "championNetworkIdBase", "add", "removal", "removalContext", "undoComponent", "templates"});
+    InventoryPurchaseSubsetDecoderProfile profile;
+    profile.segment_type = string_value(field(value, "segmentType"), "segmentType", 16);
+    profile.channel = static_cast<std::uint8_t>(integer_value(field(value, "channel"), "channel", 15));
+    profile.champion_network_id_base = static_cast<std::uint32_t>(integer_value(
+        field(value, "championNetworkIdBase"), "championNetworkIdBase", 0xffffffffULL));
+    profile.add = parse_inventory_purchase_family(field(value, "add"), "add");
+    profile.removal = parse_inventory_purchase_family(field(value, "removal"), "removal");
+    profile.removal_context = parse_inventory_purchase_family(field(value, "removalContext"), "removalContext");
+    const JsonValue& undo = field(value, "undoComponent");
+    if (undo.kind != JsonValue::Kind::object) {
+        throw std::runtime_error("profile schema: 'undoComponent' must be an object");
+    }
+    allow_only(undo, {"packetType"});
+    profile.undo_component_packet_type = static_cast<std::uint16_t>(integer_value(
+        field(undo, "packetType"), "packetType", 0xffff));
+    const JsonValue& templates = field(value, "templates");
+    if (templates.kind != JsonValue::Kind::array || templates.array.size() != 10) {
+        throw std::runtime_error("profile schema: inventory purchase subset requires exactly ten frozen templates");
+    }
+    if (profile.segment_type != "chunk" || profile.channel == 0 ||
+        profile.champion_network_id_base == 0 || profile.add.packet_type == 0 ||
+        profile.removal.packet_type == 0 || profile.removal_context.packet_type == 0 ||
+        profile.undo_component_packet_type == 0 ||
+        profile.add.packet_type == profile.removal.packet_type ||
+        profile.add.packet_type == profile.removal_context.packet_type ||
+        profile.add.packet_type == profile.undo_component_packet_type ||
+        profile.removal.packet_type == profile.removal_context.packet_type ||
+        profile.removal.packet_type == profile.undo_component_packet_type ||
+        profile.removal_context.packet_type == profile.undo_component_packet_type ||
+        !inventory_purchase_length_is_profiled(14, profile.add) ||
+        !inventory_purchase_length_is_profiled(15, profile.add) ||
+        !inventory_purchase_length_is_profiled(6, profile.removal) ||
+        !inventory_purchase_length_is_profiled(7, profile.removal) ||
+        !inventory_purchase_length_is_profiled(2, profile.removal_context) ||
+        !inventory_purchase_length_is_profiled(3, profile.removal_context) ||
+        !inventory_purchase_length_is_profiled(4, profile.removal_context) ||
+        profile.add.content_lengths.exact_values.size() != 2 ||
+        profile.removal.content_lengths.exact_values.size() != 2 ||
+        profile.removal_context.content_lengths.exact_values.size() != 3) {
+        throw std::runtime_error("profile schema: invalid inventory purchase subset invariants");
+    }
+
+    std::set<std::string> template_keys;
+    std::size_t total_tokens = 0;
+    for (const JsonValue& template_json : templates.array) {
+        if (template_json.kind != JsonValue::Kind::array || template_json.array.size() < 2 || template_json.array.size() > 8) {
+            throw std::runtime_error("profile schema: inventory purchase template must contain two to eight tokens");
+        }
+        InventoryPurchaseTemplate parsed;
+        std::size_t add_count = 0;
+        for (const JsonValue& token_json : template_json.array) {
+            if (token_json.kind != JsonValue::Kind::object) {
+                throw std::runtime_error("profile schema: inventory purchase template token must be an object");
+            }
+            allow_only(token_json, {"family", "contentLength"});
+            const InventoryPurchaseBundleFamily family = inventory_purchase_family_name(field(token_json, "family"));
+            const std::size_t content_length = static_cast<std::size_t>(integer_value(
+                field(token_json, "contentLength"), "contentLength", kMaximumContentLength));
+            const InventoryPurchasePacketFamilyProfile* family_profile =
+                inventory_purchase_family_profile(family, profile);
+            if (content_length == 0 ||
+                (family_profile != nullptr && !inventory_purchase_length_is_profiled(content_length, *family_profile))) {
+                throw std::runtime_error("profile schema: inventory purchase template token content length is not profiled");
+            }
+            if (family == InventoryPurchaseBundleFamily::add) ++add_count;
+            parsed.tokens.push_back({family, content_length});
+        }
+        if (add_count != 1 || parsed.tokens.back().family != InventoryPurchaseBundleFamily::add ||
+            parsed.tokens.back().content_length != 14) {
+            throw std::runtime_error("profile schema: inventory purchase template must end with exactly one 14-byte add token");
+        }
+        total_tokens += parsed.tokens.size();
+        if (total_tokens > 128 || !template_keys.insert(inventory_purchase_template_key(parsed)).second) {
+            throw std::runtime_error("profile schema: duplicate or excessive inventory purchase templates");
+        }
+        profile.templates.push_back(std::move(parsed));
+    }
+    static constexpr std::array<std::string_view, 10> kFrozenTemplateKeys{{
+        "1:6;1:6;0:14;", "1:7;1:6;0:14;", "1:7;0:14;",
+        "1:6;1:7;1:7;0:14;", "1:6;1:6;1:7;0:14;",
+        "1:7;1:6;1:7;0:14;", "1:7;1:7;0:14;",
+        "1:7;1:7;1:6;0:14;", "1:7;1:7;1:7;0:14;",
+        "1:6;1:6;1:7;1:7;0:14;",
+    }};
+    for (std::size_t index = 0; index < profile.templates.size(); ++index) {
+        if (inventory_purchase_template_key(profile.templates[index]) != kFrozenTemplateKeys[index]) {
+            throw std::runtime_error("profile schema: inventory purchase templates do not match the frozen 16.14 subset");
+        }
+    }
+    return profile;
+}
+
 [[nodiscard]] std::string version_group(std::string_view version) {
     const std::size_t first = version.find('.');
     if (first == std::string_view::npos) return std::string(version);
@@ -321,7 +486,7 @@ DecoderProfileLoadResult parse_decoder_profile_registry_json(std::string_view js
         std::set<std::string> groups;
         std::vector<DecoderVersionProfile> parsed_profiles;
         for (const JsonValue& item : profiles.array) {
-            allow_only(item, {"versionGroup", "acceptedGameVersions", "finalStatsValidated", "kill", "objective", "ward"});
+            allow_only(item, {"versionGroup", "acceptedGameVersions", "finalStatsValidated", "kill", "objective", "ward", "inventoryPurchaseSubset"});
             DecoderVersionProfile profile;
             profile.version_group = string_value(field(item, "versionGroup"), "versionGroup", 24);
             if (!version_group_is_valid(profile.version_group) || !groups.insert(profile.version_group).second) throw std::runtime_error("profile schema: versionGroup must be unique major.minor digits");
@@ -336,7 +501,14 @@ DecoderProfileLoadResult parse_decoder_profile_registry_json(std::string_view js
             const JsonValue& kill = field(item, "kill", false); if (kill.kind != JsonValue::Kind::null_value) profile.kill = parse_kill(kill);
             const JsonValue& objective = field(item, "objective", false); if (objective.kind != JsonValue::Kind::null_value) profile.objective = parse_objective(objective);
             const JsonValue& ward = field(item, "ward", false); if (ward.kind != JsonValue::Kind::null_value) profile.ward = parse_ward(ward);
-            if (!profile.final_stats_validated && !profile.kill && !profile.objective && !profile.ward) throw std::runtime_error("profile schema: patch profile must declare at least one decoder capability");
+            const JsonValue& inventory_purchase = field(item, "inventoryPurchaseSubset", false);
+            if (inventory_purchase.kind != JsonValue::Kind::null_value) profile.inventory_purchase_subset = parse_inventory_purchase_subset(inventory_purchase);
+            if (profile.inventory_purchase_subset.has_value() &&
+                (profile.version_group != "16.14" || profile.accepted_game_versions.size() != 1 ||
+                 profile.accepted_game_versions.front() != "16.14.794.5912")) {
+                throw std::runtime_error("profile schema: inventory purchase subset is restricted to exact build 16.14.794.5912");
+            }
+            if (!profile.final_stats_validated && !profile.kill && !profile.objective && !profile.ward && !profile.inventory_purchase_subset) throw std::runtime_error("profile schema: patch profile must declare at least one decoder capability");
             parsed_profiles.push_back(std::move(profile));
         }
         provenance.fingerprint = fnv1a64(json);

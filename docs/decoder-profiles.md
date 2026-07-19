@@ -56,6 +56,15 @@ ten saved replay/API fixture pairs as follows:
 | Ward placements | normalized events | 1,477 / 1,477 |
 | Ward removals | normalized events | 484 / 484 |
 | Final player stats | validated final scalar/item fields | 1,300 / 1,300 |
+| Purchase-linked resulting-item updates | strict `rofl-replay-purchase-linked-item-updates/v1` subset | 193 / 193 (D7 130, H3 63), zero extras or wrong IDs, maximum 1 ms delta |
+
+The purchase-linked resulting-item-update surface is available only through
+this exact-build external profile. It consumes the loaded replay and selected
+local profile bytes only, and fails closed for a missing, invalid, non-external,
+or non-`16.14.794.5912` profile. It is a strict subset rather than a complete
+purchase or inventory timeline: 2,326/2,519 profiled add/update packets remain
+unavailable, as do slot, item instance, removal, component identity, full
+inventory, gold/price, and undo state.
 
 Ward position remains unavailable: the corresponding 16.14 research produced
 zero valid coordinate candidates. The profile neither supplies nor infers a

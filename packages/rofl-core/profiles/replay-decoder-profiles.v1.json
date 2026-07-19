@@ -1,7 +1,7 @@
 {
   "schema": "rofl-replay-decoder-profiles/v1",
   "registryId": "league-replay-analyzer-offline-validated",
-  "revision": "2026-07-18",
+  "revision": "2026-07-19",
   "profiles": [
     {
       "versionGroup": "15.22",
@@ -456,6 +456,27 @@
           "primaryMaximumContentLength": 73,
           "companionContentLength": 63
         }
+      },
+      "inventoryPurchaseSubset": {
+        "segmentType": "chunk",
+        "channel": 1,
+        "championNetworkIdBase": 1073741997,
+        "add": { "packetType": 873, "contentLengths": { "exact": [14, 15] } },
+        "removal": { "packetType": 1017, "contentLengths": { "exact": [6, 7] } },
+        "removalContext": { "packetType": 326, "contentLengths": { "exact": [2, 3, 4] } },
+        "undoComponent": { "packetType": 129 },
+        "templates": [
+          [{ "family": "removal", "contentLength": 6 }, { "family": "removal", "contentLength": 6 }, { "family": "add", "contentLength": 14 }],
+          [{ "family": "removal", "contentLength": 7 }, { "family": "removal", "contentLength": 6 }, { "family": "add", "contentLength": 14 }],
+          [{ "family": "removal", "contentLength": 7 }, { "family": "add", "contentLength": 14 }],
+          [{ "family": "removal", "contentLength": 6 }, { "family": "removal", "contentLength": 7 }, { "family": "removal", "contentLength": 7 }, { "family": "add", "contentLength": 14 }],
+          [{ "family": "removal", "contentLength": 6 }, { "family": "removal", "contentLength": 6 }, { "family": "removal", "contentLength": 7 }, { "family": "add", "contentLength": 14 }],
+          [{ "family": "removal", "contentLength": 7 }, { "family": "removal", "contentLength": 6 }, { "family": "removal", "contentLength": 7 }, { "family": "add", "contentLength": 14 }],
+          [{ "family": "removal", "contentLength": 7 }, { "family": "removal", "contentLength": 7 }, { "family": "add", "contentLength": 14 }],
+          [{ "family": "removal", "contentLength": 7 }, { "family": "removal", "contentLength": 7 }, { "family": "removal", "contentLength": 6 }, { "family": "add", "contentLength": 14 }],
+          [{ "family": "removal", "contentLength": 7 }, { "family": "removal", "contentLength": 7 }, { "family": "removal", "contentLength": 7 }, { "family": "add", "contentLength": 14 }],
+          [{ "family": "removal", "contentLength": 6 }, { "family": "removal", "contentLength": 6 }, { "family": "removal", "contentLength": 7 }, { "family": "removal", "contentLength": 7 }, { "family": "add", "contentLength": 14 }]
+        ]
       }
     }
   ]

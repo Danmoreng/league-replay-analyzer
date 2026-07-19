@@ -157,6 +157,14 @@ struct ReplaySummary {
     const std::string& path,
     const DecoderProfileRegistry& decoder_profiles
 );
+[[nodiscard]] std::string extract_replay_purchase_linked_item_updates_json(
+    const std::vector<std::uint8_t>& bytes,
+    const DecoderProfileRegistry& decoder_profiles
+);
+[[nodiscard]] std::string extract_replay_purchase_linked_item_updates_file_json(
+    const std::string& path,
+    const DecoderProfileRegistry& decoder_profiles
+);
 [[nodiscard]] std::string extract_replay_ward_position_candidates_json(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] std::string extract_replay_ward_position_candidates_json(
     const std::vector<std::uint8_t>& bytes,

@@ -383,6 +383,82 @@ std::vector<std::uint8_t> build_footer_objective_fixture() {
     return bytes;
 }
 
+std::vector<std::uint8_t> build_footer_inventory_purchase_fixture(
+    const std::string& game_version = "16.14.794.5912"
+) {
+    constexpr std::uint32_t champion_base = 0x400000AD;
+    constexpr std::uint16_t add_packet_type = 0x0369;
+    constexpr std::uint16_t removal_packet_type = 0x03F9;
+    constexpr std::uint16_t removal_context_packet_type = 0x0146;
+    constexpr std::uint16_t undo_component_packet_type = 0x0081;
+    std::vector<std::uint8_t> first_chunk_payload;
+    std::vector<std::uint8_t> payload;
+    const std::vector<std::uint8_t> removal_six(6, 0);
+    const std::vector<std::uint8_t> context_two(2, 0);
+    std::vector<std::uint8_t> available_add(14, 0);
+    available_add[9] = 0x01;  // q72=1: avoids both fail-closed missing symbols.
+    const std::vector<std::uint8_t> unavailable_add(14, 0);
+    const std::vector<std::uint8_t> long_add(15, 0);
+
+    // Deliberately span the first selected group across chunks. Decompressed
+    // offsets restart at zero in the second chunk, so source ordering must use
+    // segment provenance before local packet offsets.
+    append_packet_block_with_content(first_chunk_payload, 10.0F, removal_packet_type, champion_base + 1, removal_six);
+    append_packet_block_with_content(first_chunk_payload, 10.0F, removal_packet_type, champion_base + 1, removal_six);
+    append_packet_block_with_content(payload, 10.0F, add_packet_type, champion_base + 1, available_add);
+
+    append_packet_block_with_content(payload, 20.0F, removal_packet_type, champion_base + 2, removal_six);
+    append_packet_block_with_content(payload, 20.0F, removal_packet_type, champion_base + 2, removal_six);
+    append_packet_block_with_content(payload, 20.0F, add_packet_type, champion_base + 2, unavailable_add);
+
+    append_packet_block_with_content(payload, 30.0F, removal_packet_type, champion_base + 3, removal_six);
+    append_packet_block_with_content(payload, 30.0F, removal_packet_type, champion_base + 3, removal_six);
+    append_packet_block_with_content(payload, 30.0F, removal_context_packet_type, champion_base + 3, context_two);
+    append_packet_block_with_content(payload, 30.0F, add_packet_type, champion_base + 3, available_add);
+
+    append_packet_block_with_content(payload, 40.0F, removal_packet_type, champion_base + 4, removal_six);
+    append_packet_block_with_content(payload, 40.0F, removal_packet_type, champion_base + 4, removal_six);
+    append_packet_block_with_content(payload, 40.0F, add_packet_type, champion_base + 4, long_add);
+
+    append_packet_block_with_content(payload, 50.0F, add_packet_type, champion_base + 5, available_add);
+    append_packet_block_with_content(payload, 50.0F, removal_packet_type, champion_base + 5, removal_six);
+    append_packet_block_with_content(payload, 50.0F, removal_packet_type, champion_base + 5, removal_six);
+
+    append_packet_block_with_content(payload, 60.0F, removal_packet_type, champion_base + 6, removal_six);
+    append_packet_block_with_content(payload, 60.0F, removal_packet_type, champion_base + 6, removal_six);
+    append_packet_block_with_content(payload, 60.0F, undo_component_packet_type, champion_base + 6, context_two);
+    append_packet_block_with_content(payload, 60.0F, add_packet_type, champion_base + 6, available_add);
+
+    const std::string metadata =
+        "{\"gameLength\":60000,\"lastGameChunkId\":2,\"lastKeyFrameId\":0,\"statsJson\":\"[]\"}";
+    const auto first_chunk_compressed = compress_zstd_payload(std::string(
+        reinterpret_cast<const char*>(first_chunk_payload.data()), first_chunk_payload.size()));
+    const auto compressed = compress_zstd_payload(std::string(
+        reinterpret_cast<const char*>(payload.data()), payload.size()));
+    if (first_chunk_compressed.empty() || compressed.empty()) return {};
+    constexpr std::size_t first_chunk_header_offset = 32;
+    constexpr std::size_t first_chunk_payload_offset = first_chunk_header_offset + 17;
+    const std::size_t header_offset = first_chunk_payload_offset + first_chunk_compressed.size();
+    const std::size_t payload_offset = header_offset + 17;
+    const std::size_t metadata_offset = payload_offset + compressed.size();
+    const std::size_t total_size = metadata_offset + metadata.size() + 4;
+    std::vector<std::uint8_t> bytes(total_size, 0);
+    write_ascii(bytes, 0, "RIOT");
+    bytes[4] = 0x02;
+    write_ascii(bytes, 16, game_version);
+    write_zstd_record_header(bytes, first_chunk_header_offset, 1, 2, 1,
+        static_cast<std::uint32_t>(first_chunk_payload.size()),
+        static_cast<std::uint32_t>(first_chunk_compressed.size()));
+    std::copy(first_chunk_compressed.begin(), first_chunk_compressed.end(),
+        bytes.begin() + first_chunk_payload_offset);
+    write_zstd_record_header(bytes, header_offset, 2, 3, 1,
+        static_cast<std::uint32_t>(payload.size()), static_cast<std::uint32_t>(compressed.size()));
+    std::copy(compressed.begin(), compressed.end(), bytes.begin() + payload_offset);
+    write_ascii(bytes, metadata_offset, metadata);
+    write_u32_le(bytes, total_size - 4, static_cast<std::uint32_t>(metadata.size()));
+    return bytes;
+}
+
 std::vector<std::uint8_t> build_classic_invalid_final_stats_fixture() {
     std::vector<std::uint8_t> bytes = build_classic_rofl_fixture();
     const std::string needle_text = "\\\"EXP\\\":\\\"19342\\\"";
@@ -738,6 +814,125 @@ bool test_replay_objective_extractor_fixture() {
            json.find("\"elementalDragonSubtypeAvailable\":false") != std::string::npos;
 }
 
+std::string inventory_purchase_subset_profile_json(
+    const std::string& accepted_version = "16.14.794.5912"
+) {
+    return R"json({
+        "schema":"rofl-replay-decoder-profiles/v1",
+        "registryId":"inventory-purchase-smoke",
+        "revision":1,
+        "profiles":[{
+            "versionGroup":"16.14",
+            "acceptedGameVersions":[")json" + accepted_version + R"json("],
+            "inventoryPurchaseSubset":{
+                "segmentType":"chunk",
+                "channel":1,
+                "championNetworkIdBase":1073741997,
+                "add":{"packetType":873,"contentLengths":{"exact":[14,15]}},
+                "removal":{"packetType":1017,"contentLengths":{"exact":[6,7]}},
+                "removalContext":{"packetType":326,"contentLengths":{"exact":[2,3,4]}},
+                "undoComponent":{"packetType":129},
+                "templates":[[
+                    {"family":"removal","contentLength":6},
+                    {"family":"removal","contentLength":6},
+                    {"family":"add","contentLength":14}
+                ],[
+                    {"family":"removal","contentLength":7},
+                    {"family":"removal","contentLength":6},
+                    {"family":"add","contentLength":14}
+                ],[
+                    {"family":"removal","contentLength":7},
+                    {"family":"add","contentLength":14}
+                ],[
+                    {"family":"removal","contentLength":6},
+                    {"family":"removal","contentLength":7},
+                    {"family":"removal","contentLength":7},
+                    {"family":"add","contentLength":14}
+                ],[
+                    {"family":"removal","contentLength":6},
+                    {"family":"removal","contentLength":6},
+                    {"family":"removal","contentLength":7},
+                    {"family":"add","contentLength":14}
+                ],[
+                    {"family":"removal","contentLength":7},
+                    {"family":"removal","contentLength":6},
+                    {"family":"removal","contentLength":7},
+                    {"family":"add","contentLength":14}
+                ],[
+                    {"family":"removal","contentLength":7},
+                    {"family":"removal","contentLength":7},
+                    {"family":"add","contentLength":14}
+                ],[
+                    {"family":"removal","contentLength":7},
+                    {"family":"removal","contentLength":7},
+                    {"family":"removal","contentLength":6},
+                    {"family":"add","contentLength":14}
+                ],[
+                    {"family":"removal","contentLength":7},
+                    {"family":"removal","contentLength":7},
+                    {"family":"removal","contentLength":7},
+                    {"family":"add","contentLength":14}
+                ],[
+                    {"family":"removal","contentLength":6},
+                    {"family":"removal","contentLength":6},
+                    {"family":"removal","contentLength":7},
+                    {"family":"removal","contentLength":7},
+                    {"family":"add","contentLength":14}
+                ]]
+            }
+        }]
+    })json";
+}
+
+bool test_replay_inventory_purchase_subset_fixture() {
+    const auto loaded = rofl::core::parse_decoder_profile_registry_json(
+        inventory_purchase_subset_profile_json());
+    if (!loaded.ok() || !loaded.registry.has_value()) return false;
+    const std::string json = rofl::core::extract_replay_purchase_linked_item_updates_json(
+        build_footer_inventory_purchase_fixture(), *loaded.registry);
+    bool unsupported_build_rejected = false;
+    try {
+        (void)rofl::core::extract_replay_purchase_linked_item_updates_json(
+            build_footer_inventory_purchase_fixture("16.14.794.5913"), *loaded.registry);
+    } catch (const std::exception&) {
+        unsupported_build_rejected = true;
+    }
+    const auto wrong_accepted_version = rofl::core::parse_decoder_profile_registry_json(
+        inventory_purchase_subset_profile_json("16.14.794.5913"));
+    std::string unfrozen_templates = inventory_purchase_subset_profile_json();
+    const std::size_t first_removal_length =
+        unfrozen_templates.find("\"contentLength\":6");
+    if (first_removal_length == std::string::npos) return false;
+    const std::size_t replacement = unfrozen_templates.find('6', first_removal_length);
+    unfrozen_templates[replacement] = '7';
+    const auto unfrozen_profile = rofl::core::parse_decoder_profile_registry_json(unfrozen_templates);
+    return unsupported_build_rejected && !wrong_accepted_version.ok() &&
+           !wrong_accepted_version.registry.has_value() &&
+           !unfrozen_profile.ok() && !unfrozen_profile.registry.has_value() &&
+           json.find("\"schema\":\"rofl-replay-purchase-linked-item-updates/v1\"") != std::string::npos &&
+           json.find("\"runtimeInput\":\"rofl-only\",\"riotApiInput\":false") != std::string::npos &&
+           json.find("\"origin\":\"external\"") != std::string::npos &&
+           json.find("\"addUpdatePacketType\":873") != std::string::npos &&
+           json.find("\"contentLengths\":[14,15]") != std::string::npos &&
+           json.find("\"type\":\"PURCHASE_LINKED_RESULTING_ITEM_UPDATE\",\"timestampMillis\":10000,\"participantId\":1,\"participantNetworkId\":1073741998,\"participantNetworkIdHex\":\"0x400000AE\",\"resultingItemId\":7546") != std::string::npos &&
+           json.find("\"matchedTemplateSignature\":\"removal:6>removal:6>add:14\"") != std::string::npos &&
+           json.find("\"groupBlocks\":[{\"family\":\"removal\"") != std::string::npos &&
+           json.find("\"profiledAddUpdatePacketCount\":6") != std::string::npos &&
+           json.find("\"profiledOwnerTimeGroupCount\":6") != std::string::npos &&
+           json.find("\"matchedTemplateGroupCount\":2") != std::string::npos &&
+           json.find("\"rejectedNonmatchingGroupCount\":4") != std::string::npos &&
+           json.find("\"rejectedUnavailableItemIdGroupCount\":1") != std::string::npos &&
+           json.find("\"emittedEventCount\":1") != std::string::npos &&
+           json.find("\"unavailableAddUpdatePacketCount\":5") != std::string::npos &&
+           json.find("\"coverage\":\"strict-subset-not-complete\"") != std::string::npos &&
+           json.find("\"completePurchaseTimelineAvailable\":false") != std::string::npos &&
+           json.find("\"inventoryTimelineAvailable\":false") != std::string::npos &&
+           json.find("\"currentInventoryAvailable\":false") != std::string::npos &&
+           json.find("\"slotAvailable\":false") != std::string::npos &&
+           json.find("\"itemInstanceAvailable\":false") != std::string::npos &&
+           json.find("\"goldStateAvailable\":false") != std::string::npos;
+}
+
 bool test_replay_ward_extractor_fixture() {
     const std::string json =
         rofl::core::extract_replay_wards_json(build_footer_ward_fixture());
@@ -1019,6 +1214,10 @@ int main() {
     }
 
     if (!test_replay_objective_extractor_fixture()) {
+        return EXIT_FAILURE;
+    }
+
+    if (!test_replay_inventory_purchase_subset_fixture()) {
         return EXIT_FAILURE;
     }
 

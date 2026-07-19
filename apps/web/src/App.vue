@@ -24,12 +24,12 @@ import {
 import { type PlayerSummary, type ReplaySummary } from "./replayParser";
 import type { ReplayKillResult } from "./replayKills";
 import type { ReplayObjectiveResult } from "./replayObjectives";
-import type { ReplayWardPositionResearchResult } from "./replayWardPositionResearch";
 import type { ReplayWardResult } from "./replayWards";
+import type { ReplayPurchaseLinkedItemUpdatesResult } from "./replayPurchaseLinkedItemUpdates";
 import {
   extractReplayKillsWithWasm,
   extractReplayObjectivesWithWasm,
-  extractReplayWardPositionCandidatesWithWasm,
+  extractReplayPurchaseLinkedItemUpdatesWithWasm,
   extractReplayWardsWithWasm,
   parseReplayBufferWithWasm,
 } from "./wasmReplayParser";
@@ -50,17 +50,17 @@ const isLoadingReplayObjectives = ref(false);
 const replayWards = ref<ReplayWardResult | null>(null);
 const replayWardsError = ref("");
 const isLoadingReplayWards = ref(false);
-const replayWardPositionCandidates = ref<ReplayWardPositionResearchResult | null>(null);
-const replayWardPositionCandidatesError = ref("");
-const isLoadingReplayWardPositionCandidates = ref(false);
+const replayPurchaseLinkedItemUpdates = ref<ReplayPurchaseLinkedItemUpdatesResult | null>(null);
+const replayPurchaseLinkedItemUpdatesError = ref("");
+const isLoadingReplayPurchaseLinkedItemUpdates = ref(false);
 const replayMovementStatus = ref("No replay-derived movement fixture loaded yet.");
-const parserEngine = ref("C++/Wasm");
 const replayBuffer = ref<ArrayBuffer | null>(null);
 const loadedReplayName = ref("");
 const status = ref("Pick a replay file to parse it with the C++/Wasm replay parser.");
 const errorMessage = ref("");
 const isLoading = ref(false);
 const activePage = ref<"product" | "summary" | "browser" | "inspector">("product");
+let replayLoadRequest = 0;
 const headerStatus = computed(() => {
   if (activePage.value !== "product" || !summary.value) {
     return status.value;
@@ -71,16 +71,12 @@ const headerStatus = computed(() => {
     isLoadingReplayKills.value ||
     isLoadingReplayObjectives.value ||
     isLoadingReplayWards.value ||
-    isLoadingReplayWardPositionCandidates.value
+    isLoadingReplayPurchaseLinkedItemUpdates.value
   ) {
     return "Replay wird lokal dekodiert …";
   }
 
-  const wardStatus =
-    replayWardsError.value || !replayWards.value
-      ? "Ward-Lifecycle nicht verfügbar"
-      : `${replayWards.value.events.filter((event) => event.type === "WARD_PLACED").length} Standard-Ward-Platzierungen · ${replayWards.value.events.filter((event) => event.type === "WARD_KILL").length} konservative Ward-Kills`;
-  return `${replayKills.value?.events.length ?? 0} Kills · ${replayObjectives.value?.events.length ?? 0} Elite-Objectives · ${wardStatus} · Replay-only · lokal verarbeitet`;
+  return "Timeline bereit · Ereignisse lokal aus der geladenen Replay-Datei dekodiert";
 });
 function toDdragonVersion(version: string): string {
   const match = version.match(/^(\d+)\.(\d+)/);
@@ -475,14 +471,20 @@ const replayMinimapEmptyMessage = computed(() =>
     : "No Riot or replay-derived movement fixture is available for this replay.",
 );
 
-async function loadMovementData(matchId: string | null): Promise<string> {
+async function loadMovementData(matchId: string | null, requestId: number): Promise<string> {
+  if (requestId !== replayLoadRequest) {
+    return "(Replay load superseded)";
+  }
+
   apiMovement.value = [];
   replayMovement.value = [];
   replayMovementStatus.value = "No replay-derived movement fixture loaded yet.";
+  const currentRiotBundle = riotBundle.value;
+  const currentSummary = summary.value;
 
   let apiStatus = "(No API movement fixture available)";
-  if (riotBundle.value) {
-    apiMovement.value = buildApiMovementFromBundle(riotBundle.value);
+  if (currentRiotBundle) {
+    apiMovement.value = buildApiMovementFromBundle(currentRiotBundle);
     const apiValid = apiMovement.value.filter((player) => player.positions.length > 0).length;
     apiStatus =
       apiValid > 0
@@ -496,8 +498,11 @@ async function loadMovementData(matchId: string | null): Promise<string> {
   if (matchId) {
     try {
       const replayFixture = await loadReplayMovementFixture(matchId);
+      if (requestId !== replayLoadRequest) {
+        return "(Replay load superseded)";
+      }
       replayMovement.value = replayFixture
-        ? buildReplayMovementFromFixture(replayFixture, riotBundle.value, summary.value)
+        ? buildReplayMovementFromFixture(replayFixture, currentRiotBundle, currentSummary)
         : [];
       replayMovementStatus.value = summarizeReplayMovementFixture(
         replayFixture,
@@ -505,6 +510,9 @@ async function loadMovementData(matchId: string | null): Promise<string> {
       );
       replayStatus = replayMovementStatus.value;
     } catch (error) {
+      if (requestId !== replayLoadRequest) {
+        return "(Replay load superseded)";
+      }
       replayMovement.value = [];
       replayMovementStatus.value = `(Replay-derived movement unavailable: ${error instanceof Error ? error.message : String(error)})`;
       replayStatus = replayMovementStatus.value;
@@ -634,8 +642,21 @@ function formatFileSize(bytes: number): string {
 }
 
 async function loadReplay(file: File): Promise<void> {
+  const requestId = ++replayLoadRequest;
+  const isCurrentRequest = () => requestId === replayLoadRequest;
+
   isLoading.value = true;
   errorMessage.value = "";
+  summary.value = null;
+  browserModel.value = null;
+  riotBundle.value = null;
+  apiMovement.value = [];
+  replayMovement.value = [];
+  riotFixtureStatus.value = "No Riot fixture loaded yet.";
+  replayMovementStatus.value = "No replay-derived movement fixture loaded yet.";
+  replayBuffer.value = null;
+  setDuration(0);
+  seek(0);
   replayKills.value = null;
   replayKillsError.value = "";
   isLoadingReplayKills.value = true;
@@ -645,52 +666,64 @@ async function loadReplay(file: File): Promise<void> {
   replayWards.value = null;
   replayWardsError.value = "";
   isLoadingReplayWards.value = true;
-  replayWardPositionCandidates.value = null;
-  replayWardPositionCandidatesError.value = "";
-  isLoadingReplayWardPositionCandidates.value = true;
+  replayPurchaseLinkedItemUpdates.value = null;
+  replayPurchaseLinkedItemUpdatesError.value = "";
+  isLoadingReplayPurchaseLinkedItemUpdates.value = true;
   loadedReplayName.value = file.name;
   status.value = `Parsing ${file.name}...`;
 
   try {
     const buffer = await file.arrayBuffer();
+    if (!isCurrentRequest()) return;
     replayBuffer.value = buffer;
     const bytes = new Uint8Array(buffer);
     const parsedSummary = await parseReplayBufferWithWasm(buffer);
+    if (!isCurrentRequest()) return;
     const derivedMatchId = deriveRiotMatchIdFromReplayName(file.name);
 
     summary.value = parsedSummary;
     browserModel.value = buildReplayBrowserModel(bytes, parsedSummary);
     riotBundle.value = null;
+    setDuration(parsedSummary.gameLengthMillis);
+    seek(0);
 
     let killStatus = "Kill timeline unavailable.";
     status.value = `Parsed metadata for ${file.name}. Decoding replay kill events...`;
     try {
-      replayKills.value = await extractReplayKillsWithWasm(buffer);
+      const decodedKills = await extractReplayKillsWithWasm(buffer);
+      if (!isCurrentRequest()) return;
+      replayKills.value = decodedKills;
       killStatus = `Decoded ${replayKills.value.events.length} replay-only kill events.`;
     } catch (killError) {
+      if (!isCurrentRequest()) return;
       replayKills.value = null;
       replayKillsError.value = killError instanceof Error ? killError.message : String(killError);
     } finally {
-      isLoadingReplayKills.value = false;
+      if (isCurrentRequest()) isLoadingReplayKills.value = false;
     }
 
     let objectiveStatus = "Objective timeline unavailable.";
     status.value = `Decoded replay kills for ${file.name}. Decoding objective events...`;
     try {
-      replayObjectives.value = await extractReplayObjectivesWithWasm(buffer);
+      const decodedObjectives = await extractReplayObjectivesWithWasm(buffer);
+      if (!isCurrentRequest()) return;
+      replayObjectives.value = decodedObjectives;
       objectiveStatus = `Decoded ${replayObjectives.value.events.length} replay-only objective events.`;
     } catch (objectiveError) {
+      if (!isCurrentRequest()) return;
       replayObjectives.value = null;
       replayObjectivesError.value =
         objectiveError instanceof Error ? objectiveError.message : String(objectiveError);
     } finally {
-      isLoadingReplayObjectives.value = false;
+      if (isCurrentRequest()) isLoadingReplayObjectives.value = false;
     }
 
     let wardStatus = "Ward timeline unavailable.";
     status.value = `Decoded replay objectives for ${file.name}. Decoding ward events...`;
     try {
-      replayWards.value = await extractReplayWardsWithWasm(buffer);
+      const decodedWards = await extractReplayWardsWithWasm(buffer);
+      if (!isCurrentRequest()) return;
+      replayWards.value = decodedWards;
       const wardPlacements = replayWards.value.events.filter(
         (event) => event.type === "WARD_PLACED",
       ).length;
@@ -699,45 +732,50 @@ async function loadReplay(file: File): Promise<void> {
       ).length;
       wardStatus = `Decoded ${wardPlacements} exact standard-ward placements and ${wardKills} conservative replay-only ward kills.`;
     } catch (wardError) {
+      if (!isCurrentRequest()) return;
       replayWards.value = null;
       replayWardsError.value = wardError instanceof Error ? wardError.message : String(wardError);
     } finally {
-      isLoadingReplayWards.value = false;
+      if (isCurrentRequest()) isLoadingReplayWards.value = false;
     }
 
-    let wardPositionResearchStatus = "Ward position hypotheses unavailable.";
-    status.value = `Decoded replay wards for ${file.name}. Building replay-only ward position hypotheses...`;
+    let purchaseUpdateStatus = "Kaufverknüpftes Ergebnis-Item-Update-Subset nicht verfügbar.";
+    status.value = `Decoded replay wards for ${file.name}. Decoding purchase-linked resulting-item updates...`;
     try {
-      replayWardPositionCandidates.value =
-        await extractReplayWardPositionCandidatesWithWasm(buffer);
-      wardPositionResearchStatus = `Built ${replayWardPositionCandidates.value.hypotheses?.length ?? 0} experimental replay-only ward position hypotheses.`;
-    } catch (wardPositionResearchError) {
-      replayWardPositionCandidates.value = null;
-      replayWardPositionCandidatesError.value =
-        wardPositionResearchError instanceof Error
-          ? wardPositionResearchError.message
-          : String(wardPositionResearchError);
+      const decodedPurchaseLinkedItemUpdates =
+        await extractReplayPurchaseLinkedItemUpdatesWithWasm(buffer);
+      if (!isCurrentRequest()) return;
+      replayPurchaseLinkedItemUpdates.value = decodedPurchaseLinkedItemUpdates;
+      purchaseUpdateStatus = `Decoded ${replayPurchaseLinkedItemUpdates.value.events.length} purchase-linked resulting-item updates (strict subset; no purchase or inventory timeline).`;
+    } catch (purchaseUpdateError) {
+      if (!isCurrentRequest()) return;
+      replayPurchaseLinkedItemUpdates.value = null;
+      replayPurchaseLinkedItemUpdatesError.value =
+        purchaseUpdateError instanceof Error ? purchaseUpdateError.message : String(purchaseUpdateError);
     } finally {
-      isLoadingReplayWardPositionCandidates.value = false;
+      if (isCurrentRequest()) isLoadingReplayPurchaseLinkedItemUpdates.value = false;
     }
 
     if (derivedMatchId) {
       try {
-        riotBundle.value = await loadRiotFixtureBundle(derivedMatchId);
+        const loadedRiotBundle = await loadRiotFixtureBundle(derivedMatchId);
+        if (!isCurrentRequest()) return;
+        riotBundle.value = loadedRiotBundle;
         riotFixtureStatus.value = riotBundle.value
           ? `Loaded Riot fixture bundle for ${derivedMatchId}.`
           : `No published Riot fixture bundle found for ${derivedMatchId}.`;
       } catch (fixtureError) {
+        if (!isCurrentRequest()) return;
         riotFixtureStatus.value =
           fixtureError instanceof Error ? fixtureError.message : String(fixtureError);
       }
     }
 
-    setDuration(parsedSummary.gameLengthMillis);
-    seek(0);
-    const movementStatus = await loadMovementData(derivedMatchId);
-    status.value = `Parsed ${file.name} successfully. ${killStatus} ${objectiveStatus} ${wardStatus} ${wardPositionResearchStatus} ${movementStatus}`;
+    const movementStatus = await loadMovementData(derivedMatchId, requestId);
+    if (!isCurrentRequest()) return;
+    status.value = `Parsed ${file.name} successfully. ${killStatus} ${objectiveStatus} ${wardStatus} ${purchaseUpdateStatus} ${movementStatus}`;
   } catch (error) {
+    if (!isCurrentRequest()) return;
     summary.value = null;
     browserModel.value = null;
     riotBundle.value = null;
@@ -747,17 +785,19 @@ async function loadReplay(file: File): Promise<void> {
     replayObjectivesError.value = "";
     replayWards.value = null;
     replayWardsError.value = "";
-    replayWardPositionCandidates.value = null;
-    replayWardPositionCandidatesError.value = "";
+    replayPurchaseLinkedItemUpdates.value = null;
+    replayPurchaseLinkedItemUpdatesError.value = "";
     replayBuffer.value = null;
     errorMessage.value = error instanceof Error ? error.message : String(error);
     status.value = "Replay parsing failed.";
   } finally {
-    isLoading.value = false;
-    isLoadingReplayKills.value = false;
-    isLoadingReplayObjectives.value = false;
-    isLoadingReplayWards.value = false;
-    isLoadingReplayWardPositionCandidates.value = false;
+    if (isCurrentRequest()) {
+      isLoading.value = false;
+      isLoadingReplayKills.value = false;
+      isLoadingReplayObjectives.value = false;
+      isLoadingReplayWards.value = false;
+      isLoadingReplayPurchaseLinkedItemUpdates.value = false;
+    }
   }
 }
 
@@ -791,9 +831,6 @@ function onFileChange(event: Event): void {
           </p>
         </div>
         <div class="d-flex gap-2 align-items-center">
-          <span class="badge bg-secondary opacity-75 d-none d-md-inline-block">{{
-            parserEngine
-          }}</span>
           <label class="btn btn-primary btn-sm px-3">
             <i class="bi bi-file-earmark-arrow-up me-1"></i>
             Load Replay
@@ -811,15 +848,15 @@ function onFileChange(event: Event): void {
           :kills="replayKills"
           :objectives="replayObjectives"
           :wards="replayWards"
-          :ward-position-candidates="replayWardPositionCandidates"
+          :purchase-linked-item-updates="replayPurchaseLinkedItemUpdates"
           :kills-loading="isLoadingReplayKills"
           :objectives-loading="isLoadingReplayObjectives"
           :wards-loading="isLoadingReplayWards"
-          :ward-position-candidates-loading="isLoadingReplayWardPositionCandidates"
+          :purchase-linked-item-updates-loading="isLoadingReplayPurchaseLinkedItemUpdates"
           :kills-error="replayKillsError"
           :objectives-error="replayObjectivesError"
           :wards-error="replayWardsError"
-          :ward-position-candidates-error="replayWardPositionCandidatesError"
+          :purchase-linked-item-updates-error="replayPurchaseLinkedItemUpdatesError"
         />
 
         <!-- Summary View -->

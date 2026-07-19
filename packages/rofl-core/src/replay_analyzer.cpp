@@ -4980,6 +4980,315 @@ std::string extract_replay_ward_position_candidates_file_json(
     );
 }
 
+namespace {
+
+struct InventoryPurchaseRelevantBlock {
+    PacketBlock block;
+    long long timestamp_millis = 0;
+    int participant_id = 0;
+    InventoryPurchaseBundleFamily family = InventoryPurchaseBundleFamily::add;
+    std::vector<std::uint8_t> payload;
+};
+
+[[nodiscard]] std::string_view inventory_purchase_family_name(InventoryPurchaseBundleFamily family) {
+    switch (family) {
+        case InventoryPurchaseBundleFamily::add: return "add";
+        case InventoryPurchaseBundleFamily::removal: return "removal";
+        case InventoryPurchaseBundleFamily::removal_context: return "removalContext";
+        case InventoryPurchaseBundleFamily::undo_component: return "undoComponent";
+    }
+    return "unknown";
+}
+
+[[nodiscard]] bool inventory_purchase_length_is_profiled(
+    std::size_t value, const ContentLengthConstraint& constraint
+) {
+    return std::find(constraint.exact_values.begin(), constraint.exact_values.end(), value) !=
+        constraint.exact_values.end();
+}
+
+[[nodiscard]] int inventory_purchase_owner_to_participant_id(
+    std::uint32_t owner, const InventoryPurchaseSubsetDecoderProfile& profile
+) {
+    if (owner <= profile.champion_network_id_base) return 0;
+    const std::uint32_t participant_id = owner - profile.champion_network_id_base;
+    return participant_id <= 10 ? static_cast<int>(participant_id) : 0;
+}
+
+[[nodiscard]] std::optional<InventoryPurchaseBundleFamily> classify_inventory_purchase_block(
+    const PacketBlock& block, const InventoryPurchaseSubsetDecoderProfile& profile
+) {
+    if (block.packet_type == profile.add.packet_type &&
+        inventory_purchase_length_is_profiled(block.content_length, profile.add.content_lengths)) {
+        return InventoryPurchaseBundleFamily::add;
+    }
+    if (block.packet_type == profile.removal.packet_type &&
+        inventory_purchase_length_is_profiled(block.content_length, profile.removal.content_lengths)) {
+        return InventoryPurchaseBundleFamily::removal;
+    }
+    if (block.packet_type == profile.removal_context.packet_type &&
+        inventory_purchase_length_is_profiled(block.content_length, profile.removal_context.content_lengths)) {
+        return InventoryPurchaseBundleFamily::removal_context;
+    }
+    if (block.packet_type == profile.undo_component_packet_type) {
+        return InventoryPurchaseBundleFamily::undo_component;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] bool inventory_purchase_template_matches(
+    const std::vector<InventoryPurchaseRelevantBlock>& group,
+    const InventoryPurchaseTemplate& template_value
+) {
+    if (group.size() != template_value.tokens.size()) return false;
+    for (std::size_t index = 0; index < group.size(); ++index) {
+        if (group[index].family != template_value.tokens[index].family ||
+            group[index].block.content_length != template_value.tokens[index].content_length) return false;
+    }
+    return true;
+}
+
+[[nodiscard]] std::string inventory_purchase_signature(
+    const std::vector<InventoryPurchaseRelevantBlock>& group
+) {
+    std::ostringstream output;
+    for (std::size_t index = 0; index < group.size(); ++index) {
+        if (index > 0) output << '>';
+        output << inventory_purchase_family_name(group[index].family) << ':' << group[index].block.content_length;
+    }
+    return output.str();
+}
+
+[[nodiscard]] std::uint8_t inventory_payload_bit(
+    std::span<const std::uint8_t> payload, std::size_t bit
+) {
+    return static_cast<std::uint8_t>((payload[bit >> 3U] >> (bit & 7U)) & 1U);
+}
+
+[[nodiscard]] std::uint8_t inventory_input_code(
+    std::span<const std::uint8_t> payload, std::initializer_list<std::size_t> bits
+) {
+    std::uint8_t code = 0;
+    std::size_t index = 0;
+    for (const std::size_t bit : bits) code |= static_cast<std::uint8_t>(inventory_payload_bit(payload, bit) << index++);
+    return code;
+}
+
+// The two unseen input codes deliberately return unavailable rather than a
+// Boolean extrapolation. This is the validated patch-16.14 grammar only.
+[[nodiscard]] std::optional<std::uint16_t> decode_inventory_item_id_16_14(
+    std::span<const std::uint8_t> payload
+) {
+    if (payload.size() < 10 || inventory_input_code(payload, {72, 73, 79}) == 0 ||
+        inventory_input_code(payload, {73, 75, 76}) == 4) return std::nullopt;
+    const auto bit = [&](std::size_t index) { return inventory_payload_bit(payload, index); };
+    const std::array<std::uint8_t, 13> values{{
+        bit(71), static_cast<std::uint8_t>(bit(66) ^ bit(71) ^ 1U),
+        static_cast<std::uint8_t>(bit(65) ^ (bit(66) & bit(71))),
+        static_cast<std::uint8_t>(1U ^ bit(65) ^ bit(68) ^ (bit(66) & bit(71)) ^ (bit(65) & bit(66) & bit(71))),
+        static_cast<std::uint8_t>(1U ^ bit(67) ^ bit(68) ^ (bit(65) & bit(68)) ^ (bit(66) & bit(68) & bit(71)) ^ (bit(65) & bit(66) & bit(68) & bit(71))),
+        static_cast<std::uint8_t>(bit(70) ^ 1U), static_cast<std::uint8_t>(bit(69) ^ bit(70) ^ 1U),
+        static_cast<std::uint8_t>(bit(78) ^ bit(79)),
+        static_cast<std::uint8_t>(1U ^ bit(74) ^ bit(79) ^ (bit(72) & bit(79))),
+        static_cast<std::uint8_t>(bit(73) ^ (bit(73) & bit(79)) ^ (bit(72) & bit(73) & bit(79))),
+        static_cast<std::uint8_t>(bit(73) ^ bit(76) ^ 1U),
+        static_cast<std::uint8_t>(1U ^ bit(75) ^ bit(76) ^ (bit(73) & bit(76))),
+        static_cast<std::uint8_t>(bit(78) ^ 1U),
+    }};
+    std::uint16_t item_id = 0;
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        item_id |= static_cast<std::uint16_t>(values[index] << index);
+    }
+    return item_id;
+}
+
+void write_inventory_purchase_block_json(
+    std::ostringstream& output, const InventoryPurchaseRelevantBlock& relevant
+) {
+    output << "{\"family\":\"" << inventory_purchase_family_name(relevant.family) << "\"";
+    output << ",\"packetType\":" << relevant.block.packet_type;
+    output << ",\"packetTypeHex\":\"" << fixed_hex(relevant.block.packet_type, 4) << "\"";
+    output << ",\"contentLength\":" << relevant.block.content_length << ",\"provenance\":";
+    write_objective_block_provenance_json(output, relevant.block);
+    output << '}';
+}
+
+[[nodiscard]] std::string extract_replay_purchase_linked_item_updates_impl(
+    const std::vector<std::uint8_t>& bytes, const KillSourceInfo& source,
+    const DecoderProfileRegistry& decoder_profiles
+) {
+    const ReplaySummary summary = parse_replay_bytes(bytes, decoder_profiles);
+    if (summary.game_version != "16.14.794.5912") {
+        throw std::runtime_error("Inventory purchase subset decoder is restricted to exact build 16.14.794.5912.");
+    }
+    const DecoderVersionProfile* selected = find_decoder_profile(decoder_profiles, summary.game_version);
+    if (selected == nullptr || !selected->inventory_purchase_subset.has_value()) {
+        throw std::runtime_error("Unsupported replay version " + summary.game_version +
+            ": external decoder registry has no inventory purchase subset profile.");
+    }
+    const InventoryPurchaseSubsetDecoderProfile& profile = *selected->inventory_purchase_subset;
+    std::map<std::pair<int, long long>, std::vector<InventoryPurchaseRelevantBlock>> groups;
+    std::size_t profiled_add_packet_count = 0;
+    const PacketFileScan scan = scan_packet_segments(bytes, summary, profile.segment_type,
+        [&](const ReplaySegmentSummary&, const std::vector<std::uint8_t>& decompressed,
+            const PacketBlockParseResult& result) {
+            for (const PacketBlock& block : result.blocks) {
+                if (block.channel != profile.channel) continue;
+                const int participant_id = inventory_purchase_owner_to_participant_id(block.block_param, profile);
+                if (participant_id == 0) continue;
+                const auto family = classify_inventory_purchase_block(block, profile);
+                if (!family.has_value()) continue;
+                InventoryPurchaseRelevantBlock relevant{block, packet_timestamp_millis(block.timestamp_seconds), participant_id, *family, {}};
+                if (*family == InventoryPurchaseBundleFamily::add) {
+                    ++profiled_add_packet_count;
+                    relevant.payload.assign(decompressed.begin() + static_cast<std::ptrdiff_t>(block.content_offset),
+                        decompressed.begin() + static_cast<std::ptrdiff_t>(block.end_offset));
+                }
+                groups[{participant_id, relevant.timestamp_millis}].push_back(std::move(relevant));
+            }
+        });
+    if (scan.selected_segment_count == 0) throw std::runtime_error("Replay contains no footer-style chunk records.");
+    if (scan.exact_segment_count != scan.selected_segment_count || !scan.errors.empty()) {
+        const std::string detail = scan.errors.empty() ? "one or more chunks were not exactly consumed"
+            : scan.errors.front().code + ": " + scan.errors.front().message;
+        throw std::runtime_error("Replay chunk packet framing failed: " + detail);
+    }
+
+    struct EmittedEvent {
+        long long timestamp_millis = 0;
+        int participant_id = 0;
+        std::uint16_t resulting_item_id = 0;
+        std::size_t template_index = 0;
+        std::string signature;
+        std::vector<InventoryPurchaseRelevantBlock> group;
+        std::size_t add_index = 0;
+    };
+    std::vector<EmittedEvent> events;
+    std::size_t matched_template_group_count = 0;
+    std::size_t rejected_nonmatching_group_count = 0;
+    std::size_t rejected_missing_item_id_symbol_group_count = 0;
+    for (auto& [key, group] : groups) {
+        std::stable_sort(group.begin(), group.end(), [](const auto& left, const auto& right) {
+            if (left.block.provenance.segment_payload_offset != right.block.provenance.segment_payload_offset) {
+                return left.block.provenance.segment_payload_offset < right.block.provenance.segment_payload_offset;
+            }
+            if (left.block.header_offset != right.block.header_offset) return left.block.header_offset < right.block.header_offset;
+            return left.block.block_index < right.block.block_index;
+        });
+        const auto matched = std::find_if(profile.templates.begin(), profile.templates.end(),
+            [&](const InventoryPurchaseTemplate& template_value) { return inventory_purchase_template_matches(group, template_value); });
+        if (matched == profile.templates.end()) {
+            ++rejected_nonmatching_group_count;
+            continue;
+        }
+        ++matched_template_group_count;
+        const auto add = std::find_if(group.begin(), group.end(), [](const auto& block) {
+            return block.family == InventoryPurchaseBundleFamily::add;
+        });
+        if (add == group.end()) throw std::runtime_error("Inventory purchase template invariant failed: matched group has no add block.");
+        const auto item_id = decode_inventory_item_id_16_14(add->payload);
+        if (!item_id.has_value()) {
+            ++rejected_missing_item_id_symbol_group_count;
+            continue;
+        }
+        events.push_back({key.second, key.first, *item_id,
+            static_cast<std::size_t>(std::distance(profile.templates.begin(), matched)),
+            inventory_purchase_signature(group), group,
+            static_cast<std::size_t>(std::distance(group.begin(), add))});
+    }
+    std::sort(events.begin(), events.end(), [](const EmittedEvent& left, const EmittedEvent& right) {
+        if (left.timestamp_millis != right.timestamp_millis) return left.timestamp_millis < right.timestamp_millis;
+        if (left.participant_id != right.participant_id) return left.participant_id < right.participant_id;
+        const PacketBlock& left_add = left.group[left.add_index].block;
+        const PacketBlock& right_add = right.group[right.add_index].block;
+        if (left_add.provenance.segment_payload_offset != right_add.provenance.segment_payload_offset) {
+            return left_add.provenance.segment_payload_offset < right_add.provenance.segment_payload_offset;
+        }
+        if (left_add.header_offset != right_add.header_offset) return left_add.header_offset < right_add.header_offset;
+        return left_add.block_index < right_add.block_index;
+    });
+
+    std::ostringstream output;
+    output << "{\"schema\":\"rofl-replay-purchase-linked-item-updates/v1\",\"generatedAtUtc\":\"" << current_utc_iso8601() << "\",";
+    output << "\"source\":{\"replayPath\":";
+    if (source.has_file) output << '"' << json_escape(source.replay_path) << '"'; else output << "null";
+    output << ",\"replayId\":";
+    if (source.has_file) output << '"' << json_escape(source.replay_id) << '"'; else output << "null";
+    output << ",\"matchId\":";
+    if (source.has_file) output << '"' << json_escape(source.match_id) << '"'; else output << "null";
+    output << ",\"runtimeInput\":\"rofl-only\",\"riotApiInput\":false},";
+    output << "\"gameVersion\":\"" << json_escape(summary.game_version) << "\",\"versionGroup\":\"" << packet_version_group(summary.game_version) << "\",";
+    output << "\"profile\":{\"segmentType\":\"" << profile.segment_type << "\",\"channel\":" << static_cast<unsigned int>(profile.channel)
+           << ",\"championNetworkIdBase\":" << profile.champion_network_id_base << ",\"championNetworkIdBaseHex\":\"" << fixed_hex(profile.champion_network_id_base, 8) << "\""
+           << ",\"addUpdatePacketType\":" << profile.add.packet_type << ",\"addUpdatePacketTypeHex\":\"" << fixed_hex(profile.add.packet_type, 4) << "\",\"contentLengths\":";
+    write_size_array_json(output, profile.add.content_lengths);
+    output << ",\"removalPacketType\":" << profile.removal.packet_type << ",\"removalPacketTypeHex\":\"" << fixed_hex(profile.removal.packet_type, 4) << "\",\"removalContentLengths\":";
+    write_size_array_json(output, profile.removal.content_lengths);
+    output << ",\"removalContextPacketType\":" << profile.removal_context.packet_type << ",\"removalContextPacketTypeHex\":\"" << fixed_hex(profile.removal_context.packet_type, 4) << "\",\"removalContextContentLengths\":";
+    write_size_array_json(output, profile.removal_context.content_lengths);
+    output << ",\"undoComponentPacketType\":" << profile.undo_component_packet_type << ",\"undoComponentPacketTypeHex\":\"" << fixed_hex(profile.undo_component_packet_type, 4) << "\",\"templateCount\":" << profile.templates.size();
+    write_decoder_profile_provenance_fields(output, &decoder_profiles);
+    output << "},\"events\":[";
+    for (std::size_t index = 0; index < events.size(); ++index) {
+        if (index > 0) output << ',';
+        const EmittedEvent& event = events[index];
+        output << "{\"type\":\"PURCHASE_LINKED_RESULTING_ITEM_UPDATE\",\"timestampMillis\":" << event.timestamp_millis
+               << ",\"participantId\":" << event.participant_id << ",\"participantNetworkId\":"
+               << profile.champion_network_id_base + static_cast<std::uint32_t>(event.participant_id)
+               << ",\"participantNetworkIdHex\":\"" << fixed_hex(profile.champion_network_id_base + static_cast<std::uint32_t>(event.participant_id), 8)
+               << "\",\"resultingItemId\":" << event.resulting_item_id
+               << ",\"purchaseLinked\":true,\"matchedTemplateIndex\":" << event.template_index
+               << ",\"matchedTemplateSignature\":\"" << event.signature << "\",\"provenance\":{\"addBlock\":";
+        write_inventory_purchase_block_json(output, event.group[event.add_index]);
+        output << ",\"groupBlocks\":[";
+        for (std::size_t block_index = 0; block_index < event.group.size(); ++block_index) {
+            if (block_index > 0) output << ',';
+            write_inventory_purchase_block_json(output, event.group[block_index]);
+        }
+        output << "]}}";
+    }
+    output << "],\"diagnostics\":{\"footerRecordCount\":" << summary.container.segments.size()
+           << ",\"chunkRecordCount\":" << scan.selected_segment_count << ",\"decompressedChunkBytes\":" << scan.input_bytes
+           << ",\"packetBlockCount\":" << scan.packet_count << ",\"profiledAddUpdatePacketCount\":" << profiled_add_packet_count
+           << ",\"profiledOwnerTimeGroupCount\":" << groups.size() << ",\"matchedTemplateGroupCount\":" << matched_template_group_count
+           << ",\"rejectedNonmatchingGroupCount\":" << rejected_nonmatching_group_count
+           << ",\"rejectedUnavailableItemIdGroupCount\":" << rejected_missing_item_id_symbol_group_count
+           << ",\"emittedEventCount\":" << events.size()
+           << ",\"unavailableAddUpdatePacketCount\":" << profiled_add_packet_count - events.size()
+           << ",\"exactPacketFraming\":true,\"coverage\":\"strict-subset-not-complete\""
+           << ",\"generalPurchaseClassificationAvailable\":false,\"automaticStateUpdateClassificationAvailable\":false"
+           << ",\"consumedComponentIdentityAvailable\":false,\"removedItemIdentityAvailable\":false"
+           << ",\"slotAvailable\":false,\"itemInstanceAvailable\":false,\"countOrChargesAvailable\":false"
+           << ",\"priceAvailable\":false,\"goldStateAvailable\":false,\"undoAvailable\":false,\"inventoryStateAvailable\":false"
+           << ",\"completePurchaseTimelineAvailable\":false,\"inventoryTimelineAvailable\":false,\"currentInventoryAvailable\":false}}";
+    return output.str();
+}
+
+}  // namespace
+
+std::string extract_replay_purchase_linked_item_updates_json(
+    const std::vector<std::uint8_t>& bytes, const DecoderProfileRegistry& decoder_profiles
+) {
+    return extract_replay_purchase_linked_item_updates_impl(bytes, {}, decoder_profiles);
+}
+
+std::string extract_replay_purchase_linked_item_updates_file_json(
+    const std::string& path, const DecoderProfileRegistry& decoder_profiles
+) {
+    std::error_code error;
+    std::filesystem::path absolute = std::filesystem::absolute(path, error);
+    if (error) absolute = std::filesystem::path(path);
+    absolute = absolute.lexically_normal();
+    KillSourceInfo source;
+    source.has_file = true;
+    source.replay_path = absolute.string();
+    source.replay_id = absolute.stem().string();
+    source.match_id = source.replay_id;
+    const std::size_t separator = source.match_id.find('-');
+    if (separator != std::string::npos) source.match_id[separator] = '_';
+    return extract_replay_purchase_linked_item_updates_impl(read_file_bytes(source.replay_path), source, decoder_profiles);
+}
+
 std::string replay_summary_to_json(const ReplaySummary& summary) {
     std::ostringstream output;
     output << "{";

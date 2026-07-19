@@ -83,6 +83,40 @@ struct WardDecoderProfile {
     std::optional<WardResearchSpawnProfile> research_spawn;
 };
 
+enum class InventoryPurchaseBundleFamily : std::uint8_t {
+    add,
+    removal,
+    removal_context,
+    undo_component,
+};
+
+struct InventoryPurchasePacketFamilyProfile {
+    std::uint16_t packet_type = 0;
+    ContentLengthConstraint content_lengths;
+};
+
+struct InventoryPurchaseTemplateToken {
+    InventoryPurchaseBundleFamily family = InventoryPurchaseBundleFamily::add;
+    std::size_t content_length = 0;
+};
+
+struct InventoryPurchaseTemplate {
+    std::vector<InventoryPurchaseTemplateToken> tokens;
+};
+
+// A deliberately narrow, versioned discriminator for a strict subset of
+// purchase-linked resulting-item updates. It is not an inventory state model.
+struct InventoryPurchaseSubsetDecoderProfile {
+    std::string segment_type;
+    std::uint8_t channel = 0;
+    std::uint32_t champion_network_id_base = 0;
+    InventoryPurchasePacketFamilyProfile add;
+    InventoryPurchasePacketFamilyProfile removal;
+    InventoryPurchasePacketFamilyProfile removal_context;
+    std::uint16_t undo_component_packet_type = 0;
+    std::vector<InventoryPurchaseTemplate> templates;
+};
+
 struct DecoderVersionProfile {
     std::string version_group;
     std::vector<std::string> accepted_game_versions;
@@ -90,6 +124,7 @@ struct DecoderVersionProfile {
     std::optional<KillDecoderProfile> kill;
     std::optional<ObjectiveDecoderProfile> objective;
     std::optional<WardDecoderProfile> ward;
+    std::optional<InventoryPurchaseSubsetDecoderProfile> inventory_purchase_subset;
 };
 
 struct DecoderProfileProvenance {

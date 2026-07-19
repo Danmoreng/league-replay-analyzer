@@ -1,0 +1,91 @@
+{
+  "schema": "rofl-replay-purchase-linked-item-updates-corpus-expected/v1",
+  "exactReplayBuild": "16.14.794.5912",
+  "versionGroup": "16.14",
+  "fixtures": [
+    { "replayId": "EUW1-7919517389", "partition": "D7" },
+    { "replayId": "EUW1-7919624327", "partition": "D7" },
+    { "replayId": "EUW1-7920241664", "partition": "D7" },
+    { "replayId": "EUW1-7920292147", "partition": "D7" },
+    { "replayId": "EUW1-7920341366", "partition": "D7" },
+    { "replayId": "EUW1-7920364492", "partition": "D7" },
+    { "replayId": "EUW1-7920550565", "partition": "D7" },
+    { "replayId": "EUW1-7921377760", "partition": "H3" },
+    { "replayId": "EUW1-7921482297", "partition": "H3" },
+    { "replayId": "EUW1-7921996430", "partition": "H3" }
+  ],
+  "profile": {
+    "path": "packages/rofl-core/profiles/replay-decoder-profiles.v1.json",
+    "origin": "external",
+    "schema": "rofl-replay-decoder-profiles/v1",
+    "registryId": "league-replay-analyzer-offline-validated",
+    "revision": "2026-07-19",
+    "sha256": "7d1acdfe60570444046008576ee5e87bdf0469571d34b08047ad750e9016d9dc",
+    "fingerprint": "fnv1a64:83ab2d53ad236fbf"
+  },
+  "runtime": {
+    "schema": "rofl-replay-purchase-linked-item-updates/v1",
+    "eventType": "PURCHASE_LINKED_RESULTING_ITEM_UPDATE",
+    "source": { "runtimeInput": "rofl-only", "riotApiInput": false },
+    "coverage": "strict-subset-not-complete",
+    "timestampToleranceMillis": 1,
+    "unavailableAddUpdatePacketCount": 2326
+  },
+  "expected": {
+    "D7": {
+      "profiledAddUpdatePacketCount": 1575,
+      "profiledOwnerTimeGroupCount": 4645,
+      "matchedTemplateGroupCount": 130,
+      "emittedEventCount": 130,
+      "rejectedNonmatchingGroupCount": 4515,
+      "rejectedUnavailableItemIdGroupCount": 0,
+      "unavailableAddUpdatePacketCount": 1445,
+      "offlineMatchedEventCount": 130,
+      "extraRuntimeEventCount": 0,
+      "wrongItemIdEventCount": 0
+    },
+    "H3": {
+      "profiledAddUpdatePacketCount": 944,
+      "profiledOwnerTimeGroupCount": 2273,
+      "matchedTemplateGroupCount": 63,
+      "emittedEventCount": 63,
+      "rejectedNonmatchingGroupCount": 2210,
+      "rejectedUnavailableItemIdGroupCount": 0,
+      "unavailableAddUpdatePacketCount": 881,
+      "offlineMatchedEventCount": 63,
+      "extraRuntimeEventCount": 0,
+      "wrongItemIdEventCount": 0,
+      "unseenResultingItemIds": [2520, 3053, 3087, 3181, 3803, 6657],
+      "unseenResultingItemEventCount": 7
+    },
+    "combined": {
+      "profiledAddUpdatePacketCount": 2519,
+      "profiledOwnerTimeGroupCount": 6918,
+      "matchedTemplateGroupCount": 193,
+      "emittedEventCount": 193,
+      "rejectedNonmatchingGroupCount": 6725,
+      "rejectedUnavailableItemIdGroupCount": 0,
+      "unavailableAddUpdatePacketCount": 2326,
+      "offlineMatchedEventCount": 193,
+      "extraRuntimeEventCount": 0,
+      "wrongItemIdEventCount": 0
+    }
+  },
+  "frozenResearchEvidence": {
+    "templateCount": 10,
+    "runtimeTemplateSignatures": [
+      "removal:6>removal:6>add:14",
+      "removal:7>removal:6>add:14",
+      "removal:7>add:14",
+      "removal:6>removal:7>removal:7>add:14",
+      "removal:6>removal:6>removal:7>add:14",
+      "removal:7>removal:6>removal:7>add:14",
+      "removal:7>removal:7>add:14",
+      "removal:7>removal:7>removal:6>add:14",
+      "removal:7>removal:7>removal:7>add:14",
+      "removal:6>removal:6>removal:7>removal:7>add:14"
+    ],
+    "runtimeTemplateSignatureSha256": "ea3e1ef5be5d28c7526c7bebb8905717970104f50b91c73f5f3f1cfbc3e81455",
+    "semanticBoundary": "Only a strict subset of purchase-linked resulting-item updates is emitted. No complete purchase stream, removed component identity, slot, item instance, stack, undo, inventory state, price, or gold delta is claimed."
+  }
+}

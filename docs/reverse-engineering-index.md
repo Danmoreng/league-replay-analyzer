@@ -1,6 +1,6 @@
 # Reverse Engineering Docs Index
 
-Updated: 2026-07-18
+Updated: 2026-07-19
 
 This file consolidates the replay reverse-engineering documentation into a smaller set of active references.
 
@@ -42,7 +42,9 @@ are outside scope even when described by historical community work.
 - `docs/packet-ward-semantic-findings.md`
 - `docs/ward-position-spawn-packet-research.md` (eight replay-only patch-16.9
   visual hypotheses, all explicitly `NOT DECODED`)
-- `docs/replay-inventory-packet-research.md`
+- `docs/replay-inventory-packet-research.md` (including the productive,
+  exact-build external-profile-only purchase-linked resulting-item subset and
+  its explicit inventory/research boundaries)
 - `docs/keyframe-champion-state-discovery.md`
 - `docs/replay-movement-packet-research.md`
 - `docs/rofl-api-parity.md`

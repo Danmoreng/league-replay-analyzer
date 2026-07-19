@@ -1,6 +1,6 @@
 # Replay Decoder Status
 
-Updated: 2026-07-18
+Updated: 2026-07-19
 Baseline commit: `fe39e13`
 
 This is the canonical handoff for the current decoder state. Read it before
@@ -67,33 +67,37 @@ Wasm, and consumed by the Vue application unless noted otherwise.
 | Champion kills | Timestamp, victim, killer or execution, ordered assists, network IDs, and source provenance in `rofl-replay-kills/v1` | Historical corpus: 2,796/2,796 kills over 47 replays, maximum 1 ms delta. External profile build `16.14.794.5912`: 684/684. Victim, killer, ordered assists, final K/D/A, and participant identity all validate exactly. Kill position, damage source, and gold/bounty are unresolved. |
 | Elite objectives | Timestamp, broad monster class, discriminator, and source provenance in `rofl-replay-objectives/v1` | Historical corpus: 425/425. External profile build `16.14.794.5912`: 99/99. Supports Dragon, Baron, Rift Herald, Horde/Void Grubs, and Atakhan where present. Killer/team, elemental dragon subtype, and position are unresolved. |
 | Ward lifecycle | Standard-ward placement timestamp, ward entity ID, owner participant, conservative ward-kill timestamp, linked ward entity ID, killer participant, and source provenance in `rofl-replay-wards/v1` | Historical corpus: 6,168/6,168 placements; 1,882/1,883 removals with zero extras. External profile build `16.14.794.5912`: 1,477/1,477 placements and 484/484 removals. Ward subtype, position, vision radius, and removal reason are unavailable. |
+| Purchase-linked resulting-item updates | Timestamp, participant, resulting item ID, matched strict bundle template, and packet provenance in `rofl-replay-purchase-linked-item-updates/v1` | External-profile-only, exact build `16.14.794.5912`: 193/193 offline-validated updates (D7 130, H3 63), zero extras/wrong IDs, maximum 1 ms delta. Strict subset only: 2,326/2,519 profiled add/update packets remain unavailable; no slot, instance, removal/component identity, count, complete inventory, price/gold, or undo state. |
 
 The historical built-in coverage includes patch groups `15.22`, `15.23`,
 `15.24`, `16.1`, `16.5`, `16.6`, `16.7`, and `16.9`. The externally supplied
 profile additionally validates exact build `16.14.794.5912`: 684/684 kills,
 99/99 objectives, 1,477/1,477 ward placements, 484/484 ward removals, and
-1,300/1,300 final player-stat values.
+1,300/1,300 final player-stat values. The same exact external profile also
+enables the strict 193/193 purchase-linked resulting-item-update subset; it is
+not available through built-in fallback profiles.
 
 The browser currently renders the real Wasm participant summary, kill timeline,
-objective timeline, and ward lifecycle for the locally loaded replay.
+objective timeline, ward lifecycle, and the exact-build strict purchase-linked
+resulting-item-update subset for the locally loaded replay.
 
-The default browser landing page is now a dedicated product replay view. It
-combines replay-native kills, elite objectives, ward placements, and conservative
-ward kills on one scrubber. Team rosters show exact final level, XP, lane and
-neutral CS, seven item slots, and ward aggregates alongside the existing final
-summary fields. It reserves explicit unavailable states for movement, inventory
-history, health, resources, ward positions, and other dynamic streams that have
-not passed promotion. The previous summary, data browser, and decoder inspector
-remain available as Research & Debug views.
+The default browser landing page is now a timeline-first product replay view.
+Its full-width scrubber prioritizes replay-native kills, elite objectives, and
+the strict purchase-linked item updates; Ward lifecycle is summarized in a
+lower-emphasis density lane instead of thousands of competing markers. Roster
+K/D/A and recognized item-update icons follow the scrub time. Validated level,
+CS, Ward aggregates, and earned gold remain visible only with explicit final
+labels. Seven-slot final inventories, fake health/resource bars, the minimap,
+and ward-position research controls are not shown on the product landing page.
 
-The product view additionally has a visually isolated ward-position research
-layer. For patch 16.9 it computes the experimental
-`P16-FLOAT32-BE-API-FIT-COARSE` markers live from spawn-packet bytes in the
-loaded replay. The byte-symbol lookup was fitted offline from saved Riot
-Timeline kill anchors and is always labelled API-offline-fit / not promoted.
-No API file is read at runtime. This layer is not the productive ward position
-field and does not change `rofl-replay-wards/v1`, where `position` and
-`visionRadius` remain unavailable.
+Item IDs are resolved only for presentation through official static Data Dragon
+data. The productive replay build `16.14.794.5912` is explicitly pinned to Data
+Dragon `16.14.1`; the browser never discovers a moving `latest` revision. The
+presentation layer supplies localized names and icon URLs, fails softly back to
+the numeric ID, and has no Match-V5 or Timeline input. It cannot turn the strict
+item-update subset into slots, removals, transactions, or current inventory
+state. Summary, fixture views, decoder tools, and position hypotheses remain
+Research & Debug concerns.
 
 The 16.14 external profile does not alter that boundary: its ward-position
 research has zero valid coordinate candidates, so ward position remains
@@ -114,7 +118,9 @@ the entire API-shaped object as universally exact. See
 
 ## Browser Truth Boundary
 
-The current minimap is not a productive replay decoder output.
+The product landing page intentionally has no minimap until replay-native
+Champion positions pass promotion. Minimap surfaces elsewhere are not
+productive replay decoder output.
 
 - The "Riot API" side uses local Riot fixtures when present.
 - The former fixed `api-positions.json` fallback generated from replay
@@ -128,15 +134,15 @@ The current minimap is not a productive replay decoder output.
   was disproven against Riot positions and plausible issued destinations.
 
 Until a movement profile passes the replay-only promotion gate, the product
-viewer says that movement is unavailable for the loaded replay.
+viewer remains timeline-only rather than drawing fixture or guessed positions.
 
-Ward markers shown by the optional research layer are a narrower exception to
-the empty-map presentation, not to the truth boundary. They are emitted through
-the separate `rofl-ward-position-candidates-research/v1` schema with
+Ward candidates remain available through the separate
+`rofl-ward-position-candidates-research/v1` schema with
 `researchOnly: true`, `promotionGate: false`, `positionAvailable: false`, and
-`source.clientBinaryInput: false`. The UI rejects a replay/patch mismatch,
-discards coordinates outside 0-15,000 instead of clamping them, and does not
-draw a vision radius. A plausible-looking marker cannot promote a hypothesis.
+`source.clientBinaryInput: false`, but they are not mounted on the product
+landing page. Research consumers reject a replay/patch mismatch, discard
+coordinates outside 0-15,000 instead of clamping them, and must not draw a
+vision radius. A plausible-looking marker cannot promote a hypothesis.
 
 The packet inspector is also a research surface. It can expose replay-native
 packet families through Wasm, but heuristic candidates are not normalized game
@@ -163,8 +169,9 @@ position label. Productive ward position therefore remains unavailable. See
 [`ward-position-spawn-packet-research.md`](ward-position-spawn-packet-research.md).
 
 For patch 16.9, the eight earlier raw-coordinate hypotheses were visually
-falsified and are no longer offered in the product UI. The replacement research
-model interprets primary lanes `p[8..10]` and `p[12..14]` as the first three
+falsified and are no longer offered. The remaining research model is not
+mounted on the product landing page; it interprets primary lanes `p[8..10]`
+and `p[12..14]` as the first three
 bytes of big-endian Float32 values and forces the unresolved low byte to zero.
 Its symbol lookup was fitted offline from 95 saved exact-time kill anchors.
 
@@ -172,7 +179,7 @@ The coarse model produces 48/2,625 in-bounds ward candidates across 19/20 patch
 16.9 replays; the stricter full-integer-LSB variant produces 45, while a
 holdout-pure model requiring evidence from at least two independent replays
 produces zero. Runtime candidate bytes still come only from the loaded `.rofl`.
-The active UI warning therefore says API-offline-fit, research-only, and not
+The research schema/output therefore remains API-offline-fit, research-only, and not
 promoted.
 
 Coverage is low because every X/Y candidate requires six successful symbol
@@ -227,6 +234,17 @@ unknown symbol and every packet produces a structural 13-bit value. Exact
 owner/timestamp purchase-ID multisets semantically link 1,973 packets; the
 remaining 546 are explicitly transaction-unresolved and must not be emitted as
 purchases, slots, instances, transforms, or undo operations.
+
+The productive decoder deliberately narrows that evidence to ten frozen
+replay-native owner/time bundle templates and exposes only 193/193 exact
+purchase-linked resulting-item updates through the external-profile-only
+`rofl-replay-purchase-linked-item-updates/v1` surface (D7 130, H3 63). It has
+zero extras and wrong IDs and a maximum one-millisecond offline validation
+delta. Every other profiled add/update packet—2,326/2,519 in the ten fixtures—
+is unavailable. A direct recipe/removal-ordinal alternative covers only
+113/193 exact events; an Arity gate yields 139 candidates but 26 false
+positives. Neither failed offline-oracle rule is a runtime input, profile
+grammar, or basis for widening the productive stream.
 
 An exhaustive all-segment scan now confirms that the two fail-closed symbols
 cannot be learned from the current fixtures: all 3,266 `0x0369` blocks in the
@@ -324,7 +342,9 @@ An add/update packet is not necessarily a purchase. Automatic transforms and
 unlabelled state updates exist. The sold/removed item, slot, item instance,
 count/charges, component consumption, upgrades, undos, and swaps remain
 unresolved. The full-inventory promotion gate is 0/20 because all 3,550 removal
-packets lack a decoded item target. No C++/Wasm inventory API exists yet. See
+packets lack a decoded item target. The strict 16.14 purchase-linked subset is
+the sole productive inventory-adjacent C++/Wasm surface; no general inventory
+API or reconstruction exists yet. See
 [`replay-inventory-packet-research.md`](replay-inventory-packet-research.md).
 
 There is also exact replay-native evidence for a variable inventory-component

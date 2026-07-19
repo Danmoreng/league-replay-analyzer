@@ -6,12 +6,17 @@ Patch 16.9 has a reproducible, exact decoder for the item ID carried by the
 14/15-byte inventory add/update packet family. This is a real replay-native
 field, but it is not yet a complete inventory transaction decoder.
 
-Runtime promotion is intentionally blocked because the 6/7-byte removal
-family still has no decoded slot or item-instance reference. Consequently, a
-removal cannot yet be mapped to the item that left a champion's inventory
-without using an offline Riot label.
+For exact build `16.14.794.5912`, the shared C++ core, Wasm boundary, and Vue
+client productively expose the narrow, external-profile-only schema
+`rofl-replay-purchase-linked-item-updates/v1`. It emits only strict
+purchase-linked resulting-item updates from the loaded `.rofl`; saved Riot
+fixtures remain offline discovery/validation oracles and are never runtime
+inputs or fallbacks.
 
-No C++ runtime inventory API was added from this research.
+Runtime promotion remains blocked for complete inventory reconstruction because
+the 6/7-byte removal family still has no decoded slot or item-instance
+reference. Consequently, a removal cannot yet be mapped to the item that left
+a champion's inventory without using an offline Riot label.
 
 ## Reproducing the result
 
@@ -164,7 +169,10 @@ node .\scripts\research_inventory_item_id_bits_16_14.mjs
 
 The output is explicitly `researchOnly: true`, `promotionGate: false`, and
 `runtimeInput: false`. Slot, instance, removal linkage, undo, and full inventory
-state are still missing, and no C++/Wasm inventory field exists yet.
+state are still missing. This bit-grammar research artifact itself adds no
+general C++/Wasm inventory field; the separately promoted strict
+purchase-linked resulting-item-update subset below does not change those
+unavailable fields.
 
 For a single-removal/no-add transaction group at the same replay-native
 participant and timestamp, the following operation-class predicate is exact
@@ -346,13 +354,42 @@ packets carry six item IDs never seen in D7 (`2520`, `3053`, `3087`, `3181`,
 produce zero false positives, including nine selected packets whose item ID is
 unseen in that fold's training replays.
 
-This is deliberately a small exact subset: 2,326/2,519 profiled add/update
-packets remain unavailable, and the result is not a complete purchase stream.
-It does not identify consumed or removed components, slot, item instance,
-count/charges, price, gold state, undo, or current inventory. The maintained
-artifact therefore remains `researchOnly`, with `promotionGate:false` and no
-C++/Wasm/UI output until a separate runtime promotion implements those limits
-verbatim.
+This exact frozen result is now promoted as the strict, external-profile-only
+productive schema `rofl-replay-purchase-linked-item-updates/v1` for exact build
+`16.14.794.5912`. The shared C++ core, its Wasm wrapper, and the local Vue
+client consume only loaded `.rofl` bytes plus the canonical local external
+profile. The runtime event contains the replay-native participant, timestamp,
+resulting item ID, matched template, and packet provenance; it does not read
+Match-V5, Timeline, Data Dragon, a network service, or client/game data.
+
+Reproduce the productive corpus gate with:
+
+```powershell
+node .\scripts\validate_replay_purchase_linked_item_updates_corpus.mjs
+```
+
+Across the fixed ten saved replay/API fixture pairs, it emits and
+offline-validates 193/193 events (D7 130, H3 63), with zero extras, zero wrong
+resulting item IDs, and a maximum one-millisecond timestamp delta. The
+external-profile boundary is mandatory and exact-build only: a missing,
+invalid, non-external, ambiguous, or non-`16.14.794.5912` profile is
+unavailable rather than falling back to a built-in decoder.
+
+This remains deliberately a small exact subset: 2,326/2,519 profiled
+add/update packets remain unavailable, and the result is not a complete
+purchase stream. It does not identify consumed or removed components, slot,
+item instance, count/charges, price, gold state, undo, or current inventory.
+
+### Negative promotion controls for direct recipe/removal rules
+
+Two compact alternatives do not meet the zero-false-positive promotion gate.
+The direct Recipe-/Removal-Ordinal grammar covers only 113 of the 193 exact
+purchase-linked resulting-item updates. The Arity gate reaches 139 candidates
+but produces 26 false positives. These are offline-oracle evaluation results,
+not runtime inputs, and neither rule is included in the profile or decoder.
+They must not be used to widen the 193-event stream, classify the remaining
+2,326 add/update packets, or infer removed components, slots, instances,
+inventory, price/gold, or undo state.
 
 ### Patch-16.14 static recipe constraint
 

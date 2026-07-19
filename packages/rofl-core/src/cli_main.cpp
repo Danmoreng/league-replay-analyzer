@@ -244,6 +244,24 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (first_arg == "--extract-replay-purchase-linked-item-updates-json" && argc > 2) {
+        try {
+            const auto decoder_profiles = load_optional_decoder_profile_registry(argc, argv, 3);
+            if (!decoder_profiles.has_value()) {
+                throw std::invalid_argument(
+                    "--extract-replay-purchase-linked-item-updates-json requires --decoder-profiles"
+                );
+            }
+            std::cout << rofl::core::extract_replay_purchase_linked_item_updates_file_json(
+                argv[2], *decoder_profiles
+            );
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
     if (first_arg == "--extract-replay-ward-position-candidates-json" &&
         argc > 2) {
         try {
@@ -1246,6 +1264,7 @@ int main(int argc, char** argv) {
     std::cout << "Use --extract-replay-kills-json <path-to-rofl> [--decoder-profiles <json-path>] to emit ROFL-only normalized champion kill events with participant and packet provenance.\n";
     std::cout << "Use --extract-replay-objectives-json <path-to-rofl> [--decoder-profiles <json-path>] to emit ROFL-only elite-monster objective events with monster class and packet provenance.\n";
     std::cout << "Use --extract-replay-wards-json <path-to-rofl> [--decoder-profiles <json-path>] to emit ROFL-only standard ward placement and conservative ward-kill events with entity and participant provenance.\n";
+    std::cout << "Use --extract-replay-purchase-linked-item-updates-json <path-to-rofl> --decoder-profiles <json-path> to emit the strict replay-only 16.14 purchase-linked resulting-item subset; it is not a complete purchase or inventory timeline.\n";
     std::cout << "Use --extract-replay-ward-position-candidates-json <path-to-rofl> [--decoder-profiles <json-path>] to emit strictly research-only replay-byte ward marker hypotheses without promoting decoded positions.\n";
     std::cout << "Use --dump-chunk-subrecords <path-to-rofl> --chunk-id <id> to dump subrecords for a chunk.\n";
     std::cout << "Use --summarize-subrecord-families <path-to-rofl> [--min-length <n>] [--min-records <n>] [--top-families <n>] to rank recurring subrecord families across the replay.\n";

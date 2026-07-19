@@ -1,7 +1,13 @@
+<!-- Timeline-first product surface. -->
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 
 import { usePlayback } from "../composables/usePlayback";
+import {
+  loadReplayItemCatalog,
+  resolveReplayItem,
+  type ReplayItemCatalog,
+} from "../replayItemCatalog";
 import type { PlayerSummary, ReplaySummary } from "../replayParser";
 import type { ReplayKillEvent, ReplayKillResult } from "../replayKills";
 import {
@@ -9,18 +15,10 @@ import {
   type ReplayObjectiveEvent,
   type ReplayObjectiveResult,
 } from "../replayObjectives";
-import {
-  buildReplayWardPositionResearchMarkers,
-  buildReplayWardPositionReviews,
-  filterReplayWardPositionReviews,
-  listReplayWardPositionHypotheses,
-  replayWardPositionResearchCompatibility,
-  wardFloatApiFitHypothesisId,
-  type ReplayWardPositionResearchMarker,
-  type ReplayWardPositionResearchResult,
-  type ReplayWardPositionReview,
-  type ReplayWardPositionReviewFilter,
-} from "../replayWardPositionResearch";
+import type {
+  ReplayPurchaseLinkedItemUpdatesResult,
+  ReplayPurchaseLinkedResultingItemUpdateEvent,
+} from "../replayPurchaseLinkedItemUpdates";
 import type { ReplayWardEvent, ReplayWardResult } from "../replayWards";
 
 const props = defineProps<{
@@ -29,15 +27,15 @@ const props = defineProps<{
   kills: ReplayKillResult | null;
   objectives: ReplayObjectiveResult | null;
   wards: ReplayWardResult | null;
-  wardPositionCandidates: ReplayWardPositionResearchResult | null;
+  purchaseLinkedItemUpdates: ReplayPurchaseLinkedItemUpdatesResult | null;
   killsLoading: boolean;
   objectivesLoading: boolean;
   wardsLoading: boolean;
-  wardPositionCandidatesLoading: boolean;
+  purchaseLinkedItemUpdatesLoading: boolean;
   killsError?: string;
   objectivesError?: string;
   wardsError?: string;
-  wardPositionCandidatesError?: string;
+  purchaseLinkedItemUpdatesError?: string;
 }>();
 
 type ProductEvent =
@@ -48,18 +46,33 @@ type ProductEvent =
       kind: "ward-placement" | "ward-kill";
       timestampMillis: number;
       event: ReplayWardEvent;
+    }
+  | {
+      id: string;
+      kind: "purchase-update";
+      timestampMillis: number;
+      event: ReplayPurchaseLinkedResultingItemUpdateEvent;
     };
+
+interface TimelineKda {
+  kills: number;
+  deaths: number;
+  assists: number;
+}
+
+interface WardBucket {
+  timestampMillis: number;
+  placements: number;
+  kills: number;
+}
 
 const { currentTime, duration, isPlaying, playbackSpeed, togglePlayback, seek } = usePlayback();
 const selectedParticipantId = ref<number | null>(null);
-const wardResearchEnabled = ref(true);
-const wardResearchVisibility = ref<"all-placements" | "timeline">("all-placements");
-const wardResearchShowActive = ref(true);
-const wardResearchShowPulses = ref(true);
-const selectedWardHypothesisId = ref("");
-const wardReviewFilter = ref<ReplayWardPositionReviewFilter>("all");
+const itemCatalog = ref<ReplayItemCatalog | null>(null);
+const itemCatalogLoading = ref(false);
+const itemCatalogError = ref("");
 const speeds = [1, 2, 4, 8];
-const wardReviewFilters = ["all", "mapped", "unresolved"] as const;
+let catalogRequest = 0;
 
 const participantsById = computed(
   () => new Map(props.summary.players.map((player, index) => [index + 1, player])),
@@ -68,110 +81,94 @@ const participantsById = computed(
 const events = computed<ProductEvent[]>(() =>
   [
     ...(props.kills?.events ?? []).map((event, index) => ({
-      id: `kill-${index}-${event.timestampMillis}`,
+      id: "kill-" + index + "-" + event.timestampMillis,
       kind: "kill" as const,
       timestampMillis: event.timestampMillis,
       event,
     })),
     ...(props.objectives?.events ?? []).map((event, index) => ({
-      id: `objective-${index}-${event.timestampMillis}`,
+      id: "objective-" + index + "-" + event.timestampMillis,
       kind: "objective" as const,
       timestampMillis: event.timestampMillis,
       event,
     })),
     ...(props.wards?.events ?? []).map((event, index) => ({
-      id: `ward-${index}-${event.timestampMillis}-${event.wardEntityNetworkId}`,
+      id: "ward-" + index + "-" + event.timestampMillis + "-" + event.wardEntityNetworkId,
       kind: event.type === "WARD_PLACED" ? ("ward-placement" as const) : ("ward-kill" as const),
+      timestampMillis: event.timestampMillis,
+      event,
+    })),
+    ...(props.purchaseLinkedItemUpdates?.events ?? []).map((event, index) => ({
+      id:
+        "purchase-" +
+        index +
+        "-" +
+        event.timestampMillis +
+        "-" +
+        event.participantId +
+        "-" +
+        event.resultingItemId,
+      kind: "purchase-update" as const,
       timestampMillis: event.timestampMillis,
       event,
     })),
   ].sort((left, right) => left.timestampMillis - right.timestampMillis),
 );
 
-const wardCounts = computed(() => ({
-  placements: props.wards?.events.filter((event) => event.type === "WARD_PLACED").length ?? 0,
-  kills: props.wards?.events.filter((event) => event.type === "WARD_KILL").length ?? 0,
+const primaryEvents = computed(() =>
+  events.value.filter(
+    (event) => event.kind !== "ward-placement" && event.kind !== "ward-kill",
+  ),
+);
+
+const counts = computed(() => ({
+  kills: props.kills?.events.length ?? 0,
+  objectives: props.objectives?.events.length ?? 0,
+  purchases: props.purchaseLinkedItemUpdates?.events.length ?? 0,
+  wards: props.wards?.events.length ?? 0,
 }));
-const wardResearchBinding = computed(() => {
-  if (!props.wards || !props.wardPositionCandidates) return null;
-  return replayWardPositionResearchCompatibility(props.wards, props.wardPositionCandidates);
+
+const wardBuckets = computed<WardBucket[]>(() => {
+  const bucketSize = Math.max(30_000, Math.ceil(Math.max(1, duration.value) / 100));
+  const buckets = new Map<number, WardBucket>();
+  for (const event of props.wards?.events ?? []) {
+    const timestampMillis = Math.floor(event.timestampMillis / bucketSize) * bucketSize;
+    const bucket = buckets.get(timestampMillis) ?? { timestampMillis, placements: 0, kills: 0 };
+    if (event.type === "WARD_PLACED") bucket.placements += 1;
+    else bucket.kills += 1;
+    buckets.set(timestampMillis, bucket);
+  }
+  return [...buckets.values()].sort((left, right) => left.timestampMillis - right.timestampMillis);
 });
-const wardHypotheses = computed(() => {
-  if (!props.wards || !props.wardPositionCandidates) return [];
-  return listReplayWardPositionHypotheses(props.wards, props.wardPositionCandidates);
-});
-const selectedWardHypothesis = computed(
-  () =>
-    wardHypotheses.value.find((hypothesis) => hypothesis.id === selectedWardHypothesisId.value) ??
-    null,
-);
-const wardPositionReviews = computed(() => {
-  if (!props.wards || !props.wardPositionCandidates) return [];
-  return buildReplayWardPositionReviews(
-    props.wards,
-    props.wardPositionCandidates,
-    selectedWardHypothesisId.value || wardFloatApiFitHypothesisId,
-  );
-});
-const wardReviewCounts = computed(() => {
-  const mapped = wardPositionReviews.value.filter((review) => review.status === "mapped").length;
-  return {
-    all: wardPositionReviews.value.length,
-    mapped,
-    unresolved: wardPositionReviews.value.length - mapped,
+
+const kdaByParticipant = computed(() => {
+  const rows = new Map<number, TimelineKda>();
+  const row = (participantId: number): TimelineKda => {
+    const existing = rows.get(participantId);
+    if (existing) return existing;
+    const created = { kills: 0, deaths: 0, assists: 0 };
+    rows.set(participantId, created);
+    return created;
   };
-});
-const filteredWardPositionReviews = computed(() =>
-  filterReplayWardPositionReviews(wardPositionReviews.value, wardReviewFilter.value),
-);
-const wardResearchMarkers = computed(() => {
-  if (
-    !wardResearchEnabled.value ||
-    !props.wards ||
-    !props.wardPositionCandidates ||
-    !selectedWardHypothesisId.value
-  ) {
-    return [];
+  for (const event of props.kills?.events ?? []) {
+    if (event.timestampMillis > currentTime.value) break;
+    row(event.victimParticipantId).deaths += 1;
+    if (event.killerParticipantId > 0) row(event.killerParticipantId).kills += 1;
+    for (const assistant of event.assistingParticipantIds) row(assistant).assists += 1;
   }
-
-  return buildReplayWardPositionResearchMarkers(
-    props.wards,
-    props.wardPositionCandidates,
-    selectedWardHypothesisId.value,
-    currentTime.value,
-    {
-      visibilityMode: wardResearchVisibility.value,
-      showActiveLinkedWards: wardResearchShowActive.value,
-      showEventPulses: wardResearchShowPulses.value,
-    },
-  );
-});
-const wardResearchStatus = computed(() => {
-  if (props.wardPositionCandidatesLoading) return "Replay-Pakete werden ausgewertet …";
-  if (props.wardPositionCandidatesError) return props.wardPositionCandidatesError;
-  if (!props.wards) return "Produktiver Ward-Lifecycle ist nicht verfügbar.";
-  if (!props.wardPositionCandidates) return "Keine Positionshypothesen für dieses Replay.";
-  if (wardResearchBinding.value && !wardResearchBinding.value.compatible) {
-    return wardResearchBinding.value.reason ?? "Research-Daten passen nicht zum Replay.";
-  }
-  if (!wardPositionReviews.value.length) return "Keine Ward-Platzierungen in diesem Replay.";
-  return `${wardReviewCounts.value.mapped}/${wardReviewCounts.value.all} Platzierungen mit experimentellem Koordinatenkandidaten · ${wardResearchMarkers.value.length} sichtbar`;
+  return rows;
 });
 
-watch(
-  wardHypotheses,
-  (hypotheses) => {
-    if (hypotheses.some((hypothesis) => hypothesis.id === selectedWardHypothesisId.value)) return;
-    selectedWardHypothesisId.value =
-      hypotheses.find((hypothesis) => hypothesis.id === wardFloatApiFitHypothesisId)?.id ??
-      hypotheses[0]?.id ??
-      "";
-  },
-  { immediate: true },
-);
-const finalPlayerStatsAvailable = computed(
-  () => props.summary.capabilities.validatedFinalPlayerStatsAvailable === true,
-);
+const purchasesByParticipant = computed(() => {
+  const rows = new Map<number, ReplayPurchaseLinkedResultingItemUpdateEvent[]>();
+  for (const event of props.purchaseLinkedItemUpdates?.events ?? []) {
+    if (event.timestampMillis > currentTime.value) continue;
+    const participantEvents = rows.get(event.participantId) ?? [];
+    participantEvents.push(event);
+    rows.set(event.participantId, participantEvents);
+  }
+  return rows;
+});
 
 const teams = computed(() =>
   [100, 200].map((teamId) => {
@@ -181,42 +178,99 @@ const teams = computed(() =>
       .sort(
         (left, right) => roleRank(left.player.teamPosition) - roleRank(right.player.teamPosition),
       );
-
     return {
       id: teamId,
       label: teamId === 100 ? "Blue Team" : "Red Team",
       players,
       winner: players.some(({ player }) => player.win === "Win"),
-      kills: players.reduce((sum, { player }) => sum + player.kills, 0),
-      gold: players.reduce((sum, { player }) => sum + player.goldEarned, 0),
+      timelineKills: players.reduce(
+        (sum, player) => sum + timelineKda(player.participantId).kills,
+        0,
+      ),
+      finalKills: players.reduce((sum, player) => sum + player.player.kills, 0),
     };
   }),
 );
 
 const nearbyEvents = computed(() => {
-  if (events.value.length === 0) return [];
-  const firstFuture = events.value.findIndex((event) => event.timestampMillis >= currentTime.value);
-  const center = firstFuture < 0 ? events.value.length - 1 : firstFuture;
-  return events.value.slice(Math.max(0, center - 2), Math.min(events.value.length, center + 4));
+  let source = events.value;
+  if (selectedParticipantId.value !== null) {
+    source = source.filter((event) => eventInvolves(event, selectedParticipantId.value!));
+  }
+  if (source.length === 0) return [];
+  const local = source.filter(
+    (event) => Math.abs(event.timestampMillis - currentTime.value) <= 90_000,
+  );
+  return (local.length ? local : source)
+    .map((event) => ({
+      event,
+      distance: Math.abs(event.timestampMillis - currentTime.value),
+      priority:
+        event.kind === "kill"
+          ? 0
+          : event.kind === "objective"
+            ? 1
+            : event.kind === "purchase-update"
+              ? 2
+              : 3,
+    }))
+    .sort((left, right) => left.distance - right.distance || left.priority - right.priority)
+    .slice(0, 8)
+    .map((entry) => entry.event)
+    .sort((left, right) => left.timestampMillis - right.timestampMillis);
 });
 
-const decoderState = computed(() => {
-  if (props.killsLoading || props.objectivesLoading || props.wardsLoading)
-    return "Replay-Ereignisse werden dekodiert …";
-  if (props.killsError || props.objectivesError || props.wardsError)
-    return "Ein Teil der Ereignisse ist für dieses Replay nicht verfügbar.";
-  return `${props.kills?.events.length ?? 0} Kills · ${props.objectives?.events.length ?? 0} Objectives · ${wardCounts.value.placements} exakte Standard-Ward-Platzierungen · ${wardCounts.value.kills} konservative Ward-Kills`;
+const finalStatsAvailable = computed(
+  () => props.summary.capabilities.validatedFinalPlayerStatsAvailable === true,
+);
+const purchaseStreamUnavailable = computed(() => Boolean(props.purchaseLinkedItemUpdatesError));
+
+const loadState = computed(() => {
+  if (
+    props.killsLoading ||
+    props.objectivesLoading ||
+    props.wardsLoading ||
+    props.purchaseLinkedItemUpdatesLoading
+  ) {
+    return "Replay-Ereignisse werden lokal dekodiert …";
+  }
+  if (
+    props.killsError ||
+    props.objectivesError ||
+    props.wardsError ||
+    props.purchaseLinkedItemUpdatesError
+  ) {
+    return "Ein Teil der Replay-Ereignisse ist für diesen Patch nicht verfügbar.";
+  }
+  return "";
 });
 
-function formatTime(ms: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
+watch(
+  () => props.summary.gameVersion,
+  async (gameVersion) => {
+    const request = ++catalogRequest;
+    itemCatalog.value = null;
+    itemCatalogError.value = "";
+    itemCatalogLoading.value = true;
+    const loaded = await loadReplayItemCatalog(gameVersion);
+    if (request !== catalogRequest) return;
+    itemCatalogLoading.value = false;
+    if (loaded.available) itemCatalog.value = loaded.catalog;
+    else itemCatalogError.value = loaded.error;
+  },
+  { immediate: true },
+);
+
+function formatTime(milliseconds: number): string {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1000));
+  return Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
 }
 
 function formatCompact(value: number): string {
-  return new Intl.NumberFormat("de-DE", { notation: "compact", maximumFractionDigits: 1 }).format(
-    value,
-  );
+  return new Intl.NumberFormat("de-DE", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
 }
 
 function roleRank(role: string): number {
@@ -237,74 +291,134 @@ function roleLabel(role: string): string {
 function playerName(player: PlayerSummary): string {
   if (!player.riotIdGameName) return "Unknown Player";
   return player.riotIdTagLine
-    ? `${player.riotIdGameName}#${player.riotIdTagLine}`
+    ? player.riotIdGameName + "#" + player.riotIdTagLine
     : player.riotIdGameName;
 }
 
 function ddragonVersion(): string {
+  if (itemCatalog.value) return itemCatalog.value.dataDragonVersion;
   const match = props.summary.gameVersion.match(/^(\d+)\.(\d+)/);
-  return match ? `${match[1]}.${match[2]}.1` : "16.9.1";
+  return match ? match[1] + "." + match[2] + ".1" : "16.14.1";
 }
 
 function championIcon(champion: string): string {
-  return `https://ddragon.leagueoflegends.com/cdn/${ddragonVersion()}/img/champion/${encodeURIComponent(champion)}.png`;
+  return (
+    "https://ddragon.leagueoflegends.com/cdn/" +
+    ddragonVersion() +
+    "/img/champion/" +
+    encodeURIComponent(champion) +
+    ".png"
+  );
+}
+
+function itemName(itemId: number): string {
+  return resolveReplayItem(itemCatalog.value, itemId)?.name ?? "Item #" + itemId;
 }
 
 function itemIcon(itemId: number): string {
-  return `https://ddragon.leagueoflegends.com/cdn/${ddragonVersion()}/img/item/${itemId}.png`;
+  return (
+    resolveReplayItem(itemCatalog.value, itemId)?.iconUrl ??
+    "https://ddragon.leagueoflegends.com/cdn/" +
+      ddragonVersion() +
+      "/img/item/" +
+      itemId +
+      ".png"
+  );
 }
 
-function finalItems(player: PlayerSummary): number[] {
-  return [...player.items, 0, 0, 0, 0, 0, 0, 0].slice(0, 7);
+function participantChampion(participantId: number): string {
+  return participantsById.value.get(participantId)?.champion ?? "P" + participantId;
+}
+
+function timelineKda(participantId: number): TimelineKda {
+  return kdaByParticipant.value.get(participantId) ?? { kills: 0, deaths: 0, assists: 0 };
 }
 
 function totalCs(player: PlayerSummary): number {
   return player.laneMinionsKilled + player.neutralMinionsKilled;
 }
 
-function participantChampion(participantId: number): string {
-  return participantsById.value.get(participantId)?.champion ?? `P${participantId}`;
+function visiblePurchases(participantId: number) {
+  return (purchasesByParticipant.value.get(participantId) ?? []).slice(-5);
 }
 
-function participantTeamClass(participantId: number): "blue" | "red" | "unknown" {
-  const team = Number(participantsById.value.get(participantId)?.team);
-  if (team === 100) return "blue";
-  if (team === 200) return "red";
-  return "unknown";
+function hiddenPurchaseCount(participantId: number): number {
+  return Math.max(0, (purchasesByParticipant.value.get(participantId)?.length ?? 0) - 5);
 }
 
-function wardResearchMarkerTitle(marker: ReplayWardPositionResearchMarker): string {
-  const removal = marker.removalTimestampMillis
-    ? ` · entfernt ${formatTime(marker.removalTimestampMillis)}`
-    : " · Entfernung nicht sicher dekodiert";
-  return `EXPERIMENTELL / API-OFFLINE-FIT / NICHT PROMOTET · ${participantChampion(marker.ownerParticipantId)} · platziert ${formatTime(marker.placementTimestampMillis)}${removal} · X ${marker.x.toFixed(1)} / Y ${marker.y.toFixed(1)} · ${marker.xSource} + ${marker.ySource}`;
-}
-
-function wardReviewEvidence(review: ReplayWardPositionReview): string {
-  if (review.candidate) {
-    return `X ${review.candidate.x.toFixed(1)} · Y ${review.candidate.y.toFixed(1)}`;
-  }
-  return review.missingEvidence[0] ?? "Koordinatenevidenz fehlt.";
+function purchaseTitle(event: ReplayPurchaseLinkedResultingItemUpdateEvent): string {
+  return (
+    formatTime(event.timestampMillis) +
+    " · " +
+    itemName(event.resultingItemId) +
+    " · erkannter Kauf im verifizierten Teilstrom; kein Slot- oder Inventarstand"
+  );
 }
 
 function markerLeft(timestampMillis: number): string {
-  return `${Math.max(0, Math.min(100, (timestampMillis / Math.max(1, duration.value)) * 100))}%`;
+  const percentage = (timestampMillis / Math.max(1, duration.value)) * 100;
+  return Math.max(0, Math.min(100, percentage)) + "%";
+}
+
+function wardHeight(bucket: WardBucket): string {
+  return Math.min(14, 3 + bucket.placements + bucket.kills * 2) + "px";
+}
+
+function wardTitle(bucket: WardBucket): string {
+  return (
+    formatTime(bucket.timestampMillis) +
+    " · " +
+    bucket.placements +
+    " Ward-Platzierungen · " +
+    bucket.kills +
+    " Ward-Kills"
+  );
+}
+
+function eventInvolves(event: ProductEvent, participantId: number): boolean {
+  if (event.kind === "purchase-update") return event.event.participantId === participantId;
+  if (event.kind === "kill") {
+    return (
+      event.event.victimParticipantId === participantId ||
+      event.event.killerParticipantId === participantId ||
+      event.event.assistingParticipantIds.includes(participantId)
+    );
+  }
+  if (event.kind === "ward-placement" && event.event.type === "WARD_PLACED") {
+    return event.event.ownerParticipantId === participantId;
+  }
+  if (event.kind === "ward-kill" && event.event.type === "WARD_KILL") {
+    return event.event.killerParticipantId === participantId;
+  }
+  return true;
 }
 
 function eventLabel(event: ProductEvent): string {
   if (event.kind === "objective") return replayObjectiveMonsterLabel(event.event.monsterType);
+  if (event.kind === "purchase-update") {
+    return participantChampion(event.event.participantId) + " · " + itemName(event.event.resultingItemId);
+  }
   if (event.kind === "ward-placement" && event.event.type === "WARD_PLACED") {
-    return `${participantChampion(event.event.ownerParticipantId)} platziert Ward`;
+    return participantChampion(event.event.ownerParticipantId) + " platziert Ward";
   }
   if (event.kind === "ward-kill" && event.event.type === "WARD_KILL") {
-    return `${participantChampion(event.event.killerParticipantId)} zerstört Ward`;
+    return participantChampion(event.event.killerParticipantId) + " zerstört Ward";
   }
   if (event.kind !== "kill") return "Ward-Ereignis";
   const killer =
     event.event.killerParticipantId > 0
       ? participantChampion(event.event.killerParticipantId)
       : "Execution";
-  return `${killer} → ${participantChampion(event.event.victimParticipantId)}`;
+  return killer + " → " + participantChampion(event.event.victimParticipantId);
+}
+
+function eventDetail(event: ProductEvent): string {
+  if (event.kind === "purchase-update") {
+    return "Erkannter Kauf · verifizierter Teilstrom, noch kein vollständiger Inventarstand";
+  }
+  if (event.kind === "kill") return "Champion-Kill";
+  if (event.kind === "objective") return "Elite-Objective";
+  return event.kind === "ward-placement" ? "Ward platziert" : "Ward zerstört";
 }
 
 function eventIcon(event: ProductEvent): string {
@@ -325,11 +439,11 @@ function onScrub(event: Event): void {
         <span class="score-result" :class="{ winner: teams[0].winner }">{{
           teams[0].winner ? "VICTORY" : "DEFEAT"
         }}</span>
-        <strong>{{ teams[0].kills }}</strong>
-        <small>{{ formatCompact(teams[0].gold) }} Gold verdient · final</small>
+        <strong>{{ teams[0].timelineKills }}</strong>
+        <small>{{ teams[0].finalKills }} Kills final</small>
       </div>
       <div class="match-identity">
-        <span class="eyebrow">REPLAY-ONLY VIEWER</span>
+        <span class="eyebrow">REPLAY TIMELINE</span>
         <h2>{{ replayName }}</h2>
         <div class="match-meta">
           <span>Patch {{ summary.gameVersion }}</span>
@@ -338,26 +452,128 @@ function onScrub(event: Event): void {
         </div>
       </div>
       <div class="score-team score-team-red">
-        <strong>{{ teams[1].kills }}</strong>
+        <strong>{{ teams[1].timelineKills }}</strong>
         <span class="score-result" :class="{ winner: teams[1].winner }">{{
           teams[1].winner ? "VICTORY" : "DEFEAT"
         }}</span>
-        <small>{{ formatCompact(teams[1].gold) }} Gold verdient · final</small>
+        <small>{{ teams[1].finalKills }} Kills final</small>
       </div>
     </header>
 
+    <section class="timeline-card" aria-label="Match timeline">
+      <header class="timeline-heading">
+        <div>
+          <span class="eyebrow">MATCH TIMELINE</span>
+          <strong>Alle sicher dekodierten Ereignisse</strong>
+        </div>
+        <div class="timeline-legend" aria-label="Timeline legend">
+          <span class="kill"><i></i>{{ counts.kills }} Kills</span>
+          <span class="objective"><i></i>{{ counts.objectives }} Objectives</span>
+          <span class="purchase">
+            <i></i>
+            <template v-if="purchaseLinkedItemUpdatesLoading">Item-Käufe werden dekodiert</template>
+            <template v-else-if="purchaseStreamUnavailable">Item-Käufe nicht verfügbar</template>
+            <template v-else>{{ counts.purchases }} erkannte Käufe</template>
+          </span>
+          <span class="ward"><i></i>{{ counts.wards }} Ward-Ereignisse</span>
+        </div>
+      </header>
+
+      <div class="timeline-layout">
+        <div class="timeline-controls">
+          <button
+            class="play-control"
+            :aria-label="isPlaying ? 'Pause' : 'Play'"
+            @click="togglePlayback"
+          >
+            <i class="bi" :class="isPlaying ? 'bi-pause-fill' : 'bi-play-fill'"></i>
+          </button>
+          <div class="timecode">
+            <strong>{{ formatTime(currentTime) }}</strong>
+            <span>/ {{ formatTime(duration) }}</span>
+          </div>
+        </div>
+
+        <div class="timeline-main">
+          <div class="timeline-track">
+            <div class="timeline-progress" :style="{ width: markerLeft(currentTime) }"></div>
+            <span
+              v-for="bucket in wardBuckets"
+              :key="bucket.timestampMillis"
+              class="ward-density"
+              :style="{ left: markerLeft(bucket.timestampMillis), height: wardHeight(bucket) }"
+              :title="wardTitle(bucket)"
+            ></span>
+            <button
+              v-for="event in primaryEvents"
+              :key="event.id"
+              class="event-marker"
+              :class="event.kind"
+              :style="{ left: markerLeft(event.timestampMillis) }"
+              :title="formatTime(event.timestampMillis) + ' · ' + eventLabel(event)"
+              @click="seek(event.timestampMillis)"
+            >
+              <img
+                v-if="event.kind === 'purchase-update'"
+                :src="itemIcon(event.event.resultingItemId)"
+                :alt="itemName(event.event.resultingItemId)"
+              />
+              <i v-else class="bi" :class="eventIcon(event)"></i>
+            </button>
+            <input
+              type="range"
+              :min="0"
+              :max="duration"
+              :value="currentTime"
+              :step="100"
+              aria-label="Replay timeline"
+              @input="onScrub"
+            />
+          </div>
+          <div class="timeline-ticks">
+            <span>0:00</span>
+            <span>{{ formatTime(duration * 0.25) }}</span>
+            <span>{{ formatTime(duration * 0.5) }}</span>
+            <span>{{ formatTime(duration * 0.75) }}</span>
+            <span>{{ formatTime(duration) }}</span>
+          </div>
+        </div>
+
+        <div class="speed-controls">
+          <button
+            v-for="speed in speeds"
+            :key="speed"
+            :class="{ active: playbackSpeed === speed }"
+            @click="playbackSpeed = speed"
+          >
+            {{ speed }}×
+          </button>
+        </div>
+      </div>
+      <p v-if="loadState" class="timeline-status">{{ loadState }}</p>
+    </section>
+
     <div class="viewer-grid">
-      <aside class="roster roster-blue" aria-label="Blue team roster">
+      <aside
+        v-for="team in teams"
+        :key="team.id"
+        class="roster"
+        :class="team.id === 100 ? 'roster-blue' : 'roster-red'"
+        :aria-label="team.label + ' roster'"
+      >
         <div class="roster-title">
           <span class="team-pip"></span>
-          <span>BLUE TEAM</span>
-          <small>Finale Werte</small>
+          <span>{{ team.label }}</span>
+          <small>Stand {{ formatTime(currentTime) }}</small>
         </div>
         <button
-          v-for="entry in teams[0].players"
+          v-for="entry in team.players"
           :key="entry.participantId"
           class="player-card"
-          :class="{ selected: selectedParticipantId === entry.participantId }"
+          :class="[
+            { selected: selectedParticipantId === entry.participantId },
+            team.id === 200 ? 'player-card-red' : '',
+          ]"
           @click="
             selectedParticipantId =
               selectedParticipantId === entry.participantId ? null : entry.participantId
@@ -366,230 +582,75 @@ function onScrub(event: Event): void {
           <img :src="championIcon(entry.player.champion)" :alt="entry.player.champion" />
           <span class="player-main">
             <span class="player-heading">
-              <span
-                ><b>{{ entry.player.champion }}</b
-                ><small>{{ playerName(entry.player) }}</small></span
-              >
-              <em>{{ entry.player.kills }}/{{ entry.player.deaths }}/{{ entry.player.assists }}</em>
+              <span>
+                <b>{{ entry.player.champion }}</b>
+                <small>{{ playerName(entry.player) }}</small>
+              </span>
+              <em :title="'K/D/A bis ' + formatTime(currentTime)">
+                {{ timelineKda(entry.participantId).kills }}/{{
+                  timelineKda(entry.participantId).deaths
+                }}/{{ timelineKda(entry.participantId).assists }}
+              </em>
             </span>
-            <span class="state-bars">
-              <span class="unknown-bar health"><i></i><small>Leben nicht dekodiert</small></span>
-              <span class="unknown-bar mana"><i></i><small>Ressource nicht dekodiert</small></span>
+
+            <span v-if="finalStatsAvailable" class="final-stats">
+              <small>FINAL</small>
+              <span><i class="bi bi-star-fill"></i> Lv {{ entry.player.level }}</span>
+              <span><i class="bi bi-stack"></i> {{ totalCs(entry.player) }} CS</span>
+              <span><i class="bi bi-eye-fill"></i> {{ entry.player.wardsPlaced }}/{{ entry.player.wardsKilled }}</span>
+              <span class="final-gold">{{ formatCompact(entry.player.goldEarned) }}g</span>
             </span>
-            <span v-if="finalPlayerStatsAvailable" class="final-stats">
-              <span :title="`${entry.player.experience.toLocaleString('de-DE')} XP · final`"
-                ><i class="bi bi-star-fill"></i> Lv {{ entry.player.level }}</span
-              >
-              <span
-                :title="`${entry.player.laneMinionsKilled} Lane + ${entry.player.neutralMinionsKilled} Neutral · final`"
-                ><i class="bi bi-stack"></i> {{ totalCs(entry.player) }} CS</span
-              >
-              <span
-                :title="`${entry.player.wardsPlaced} platziert / ${entry.player.wardsKilled} zerstört · exakter finaler Replay-Wert`"
-                ><i class="bi bi-eye-fill"></i> {{ entry.player.wardsPlaced }}/{{
-                  entry.player.wardsKilled
-                }}</span
-              >
+            <span v-else class="final-stats unavailable">
+              <small>FINAL</small>
+              <span>Für diesen Patch nicht validiert</span>
             </span>
-            <span v-else class="final-stats unavailable"
-              ><i class="bi bi-slash-circle"></i> Finaldaten für diesen Patch nicht validiert</span
+
+            <span
+              v-if="visiblePurchases(entry.participantId).length"
+              class="purchase-strip"
+              title="Erkannte Kaufereignisse bis zum gewählten Zeitpunkt; kein vollständiger Inventarstand"
             >
+              <small>KÄUFE</small>
+              <span v-if="hiddenPurchaseCount(entry.participantId)" class="hidden-count">
+                +{{ hiddenPurchaseCount(entry.participantId) }}
+              </span>
+              <span
+                v-for="itemEvent in visiblePurchases(entry.participantId)"
+                :key="itemEvent.timestampMillis + '-' + itemEvent.resultingItemId"
+                class="purchase-chip"
+                :title="purchaseTitle(itemEvent)"
+              >
+                <img
+                  :src="itemIcon(itemEvent.resultingItemId)"
+                  :alt="itemName(itemEvent.resultingItemId)"
+                />
+              </span>
+            </span>
+
             <span class="player-footer">
               <small>{{ roleLabel(entry.player.teamPosition) }}</small>
-              <span
-                v-if="finalPlayerStatsAvailable"
-                class="inventory-slots"
-                title="Exaktes finales Inventar; kein Inventarverlauf"
-              >
-                <span
-                  v-for="(itemId, slot) in finalItems(entry.player)"
-                  :key="slot"
-                  class="inventory-slot"
-                  :class="{ empty: itemId === 0 }"
-                >
-                  <img v-if="itemId > 0" :src="itemIcon(itemId)" :alt="`Item ${itemId}`" />
-                </span>
-              </span>
-              <span
-                v-else
-                class="inventory-slots unavailable"
-                title="Finaldaten für diesen Patch nicht validiert"
-              >
-                <span v-for="slot in 7" :key="slot" class="inventory-slot empty"></span>
-              </span>
-              <b
-                >{{ entry.player.goldEarned.toLocaleString("de-DE") }}g
-                <small>verdient · final</small></b
-              >
+              <small>K/D/A und Käufe folgen der Timeline</small>
             </span>
           </span>
         </button>
       </aside>
 
-      <main class="map-stage">
-        <section class="ward-research-controls" aria-label="Experimentelle Live-Ward-Positionen">
-          <div class="ward-research-heading">
-            <span>EXPERIMENTELL · ROFL-LIVE / API-OFFLINE-FIT</span>
-            <strong>Live-Ward-Kandidaten</strong>
-            <small>{{ wardResearchStatus }}</small>
-          </div>
-          <label class="ward-hypothesis-select">
-            <span>Modell</span>
-            <select
-              v-model="selectedWardHypothesisId"
-              :disabled="!wardHypotheses.length || !wardResearchEnabled"
-            >
-              <option
-                v-for="hypothesis in wardHypotheses"
-                :key="hypothesis.id"
-                :value="hypothesis.id"
-              >
-                {{ hypothesis.label }} · {{ Math.round(hypothesis.coverage * 100) }}%
-              </option>
-            </select>
-          </label>
-          <div class="ward-research-modes" aria-label="Ward marker visibility">
-            <button
-              :class="{ active: wardResearchVisibility === 'all-placements' }"
-              :disabled="!wardResearchEnabled"
-              @click="wardResearchVisibility = 'all-placements'"
-            >
-              Alle mappbaren Kandidaten
-            </button>
-            <button
-              :class="{ active: wardResearchVisibility === 'timeline' }"
-              :disabled="!wardResearchEnabled"
-              @click="wardResearchVisibility = 'timeline'"
-            >
-              Timeline / Lifecycle
-            </button>
+      <main class="event-focus">
+        <header class="event-window-header">
+          <div>
+            <span class="eyebrow">EREIGNISSE</span>
+            <strong>Rund um {{ formatTime(currentTime) }}</strong>
           </div>
           <button
-            class="ward-layer-toggle"
-            :class="{ active: wardResearchEnabled }"
-            :aria-pressed="wardResearchEnabled"
-            @click="wardResearchEnabled = !wardResearchEnabled"
+            v-if="selectedParticipantId !== null"
+            class="clear-filter"
+            @click="selectedParticipantId = null"
           >
-            <i class="bi" :class="wardResearchEnabled ? 'bi-eye-fill' : 'bi-eye-slash'"></i>
-            {{ wardResearchEnabled ? "Layer an" : "Layer aus" }}
+            {{ participantChampion(selectedParticipantId) }} ×
           </button>
-          <div
-            v-if="wardResearchVisibility === 'timeline' && wardResearchEnabled"
-            class="ward-timeline-options"
-          >
-            <label>
-              <input v-model="wardResearchShowActive" type="checkbox" />
-              verknüpfte aktive Wards
-            </label>
-            <label>
-              <input v-model="wardResearchShowPulses" type="checkbox" />
-              5-Sekunden-Ereignispulse
-            </label>
-          </div>
-          <p v-if="selectedWardHypothesis" class="ward-hypothesis-description">
-            <b>{{ selectedWardHypothesis.id }}</b>
-            <span v-if="selectedWardHypothesis.description">
-              · {{ selectedWardHypothesis.description }}
-            </span>
-            <small>
-              X: {{ selectedWardHypothesis.xSource }} · Y: {{ selectedWardHypothesis.ySource }}
-            </small>
-            <small>
-              Lifecycle-Invariant: 701/745 verknüpfte Removals besitzen denselben vollständigen
-              Primary+Companion-Spawn-Fingerprint wie ihre Platzierung.
-            </small>
-          </p>
-        </section>
+        </header>
 
-        <div class="map-frame" :class="{ 'research-layer-visible': wardResearchMarkers.length }">
-          <img src="/summoners-rift-minimap.png" alt="Summoner's Rift" />
-          <div class="map-shade"></div>
-          <div v-if="wardResearchMarkers.length" class="ward-research-layer">
-            <button
-              v-for="marker in wardResearchMarkers"
-              :key="`${marker.hypothesisId}-${marker.wardEntityNetworkId}`"
-              class="ward-research-marker"
-              :class="[
-                `team-${participantTeamClass(marker.ownerParticipantId)}`,
-                `state-${marker.state}`,
-              ]"
-              :style="{ left: `${marker.leftPercent}%`, top: `${marker.topPercent}%` }"
-              :title="wardResearchMarkerTitle(marker)"
-              :aria-label="wardResearchMarkerTitle(marker)"
-              @click="seek(marker.placementTimestampMillis)"
-            >
-              <i class="bi" :class="marker.state === 'kill-pulse' ? 'bi-x-lg' : 'bi-eye-fill'"></i>
-            </button>
-          </div>
-          <div v-else class="map-unavailable">
-            <i class="bi bi-crosshair"></i>
-            <strong>Keine experimentellen Marker sichtbar</strong>
-            <span>{{ wardResearchStatus }}</span>
-          </div>
-          <div class="ward-research-warning">
-            <strong>NICHT PROMOTET · VISUELL PRÜFEN</strong>
-            <span
-              >Die Marker werden live aus den Spawn-Paketbytes des geladenen .rofl berechnet. Die
-              Symbol→Float-Tabelle wurde offline an 95 gespeicherten Riot-Timeline-Killankern
-              gefittet; zur Laufzeit fließen keine API-, Client- oder Vanguard-Daten ein. Nur
-              48/2.625 Corpus-Platzierungen sind abgedeckt.</span
-            >
-          </div>
-          <div class="map-badge"><span></span> Replay source · lokal</div>
-        </div>
-        <section class="ward-review-panel" aria-label="Ward position research review">
-          <header class="ward-review-header">
-            <span>
-              <strong>WARD-PLACEMENT-PRÜFLISTE</strong>
-              <small>
-                {{ wardReviewCounts.mapped }}/{{ wardReviewCounts.all }} mit Kandidat ·
-                {{ wardReviewCounts.unresolved }} ohne Koordinate
-              </small>
-            </span>
-            <span class="ward-review-method">
-              Methode: {{ selectedWardHypothesisId || wardFloatApiFitHypothesisId }} · Confidence:
-              experimentell / API-offline-fit
-            </span>
-            <span class="ward-review-filters" aria-label="Ward review filter">
-              <button
-                v-for="filter in wardReviewFilters"
-                :key="filter"
-                :class="{ active: wardReviewFilter === filter }"
-                @click="wardReviewFilter = filter"
-              >
-                {{ filter === "all" ? "Alle" : filter === "mapped" ? "Mit Kandidat" : "Offen" }}
-                ({{ wardReviewCounts[filter] }})
-              </button>
-            </span>
-          </header>
-          <div v-if="filteredWardPositionReviews.length" class="ward-review-list">
-            <button
-              v-for="review in filteredWardPositionReviews"
-              :key="`${review.timestampMillis}-${review.wardEntityNetworkId}`"
-              class="ward-review-row"
-              :class="review.status"
-              :title="review.missingEvidence.join(' ') || wardReviewEvidence(review)"
-              @click="seek(review.timestampMillis)"
-            >
-              <time>{{ formatTime(review.timestampMillis) }}</time>
-              <span class="ward-review-owner">{{
-                participantChampion(review.ownerParticipantId)
-              }}</span>
-              <code>{{ review.wardEntityNetworkIdHex }}</code>
-              <b>{{ review.status === "mapped" ? "KANDIDAT" : "OFFEN" }}</b>
-              <small>{{ wardReviewEvidence(review) }}</small>
-            </button>
-          </div>
-          <p v-else class="ward-review-empty">
-            Keine Platzierungen für diesen Filter. Ohne passenden Research-Datensatz werden keine
-            Koordinaten geraten.
-          </p>
-        </section>
-        <div class="event-window">
-          <div class="event-window-header">
-            <span>EREIGNISSE UM {{ formatTime(currentTime) }}</span>
-            <small>{{ decoderState }}</small>
-          </div>
+        <div class="event-list">
           <button
             v-for="event in nearbyEvents"
             :key="event.id"
@@ -598,157 +659,54 @@ function onScrub(event: Event): void {
             @click="seek(event.timestampMillis)"
           >
             <time>{{ formatTime(event.timestampMillis) }}</time>
-            <i class="bi" :class="eventIcon(event)"></i>
-            <span>{{ eventLabel(event) }}</span>
+            <span class="event-symbol" :class="event.kind">
+              <img
+                v-if="event.kind === 'purchase-update'"
+                :src="itemIcon(event.event.resultingItemId)"
+                :alt="itemName(event.event.resultingItemId)"
+              />
+              <i v-else class="bi" :class="eventIcon(event)"></i>
+            </span>
+            <span class="event-copy">
+              <b>{{ eventLabel(event) }}</b>
+              <small>{{ eventDetail(event) }}</small>
+            </span>
           </button>
           <div v-if="!nearbyEvents.length" class="event-empty">
-            Keine dekodierten Ereignisse vorhanden.
+            Keine dekodierten Ereignisse in diesem Ausschnitt.
           </div>
         </div>
-      </main>
 
-      <aside class="roster roster-red" aria-label="Red team roster">
-        <div class="roster-title">
-          <span class="team-pip"></span>
-          <span>RED TEAM</span>
-          <small>Finale Werte</small>
-        </div>
-        <button
-          v-for="entry in teams[1].players"
-          :key="entry.participantId"
-          class="player-card player-card-red"
-          :class="{ selected: selectedParticipantId === entry.participantId }"
-          @click="
-            selectedParticipantId =
-              selectedParticipantId === entry.participantId ? null : entry.participantId
-          "
+        <p
+          class="purchase-boundary"
+          :class="{ unavailable: purchaseStreamUnavailable }"
+          :title="purchaseLinkedItemUpdatesError"
         >
-          <img :src="championIcon(entry.player.champion)" :alt="entry.player.champion" />
-          <span class="player-main">
-            <span class="player-heading">
-              <span
-                ><b>{{ entry.player.champion }}</b
-                ><small>{{ playerName(entry.player) }}</small></span
-              >
-              <em>{{ entry.player.kills }}/{{ entry.player.deaths }}/{{ entry.player.assists }}</em>
-            </span>
-            <span class="state-bars">
-              <span class="unknown-bar health"><i></i><small>Leben nicht dekodiert</small></span>
-              <span class="unknown-bar mana"><i></i><small>Ressource nicht dekodiert</small></span>
-            </span>
-            <span v-if="finalPlayerStatsAvailable" class="final-stats">
-              <span :title="`${entry.player.experience.toLocaleString('de-DE')} XP · final`"
-                ><i class="bi bi-star-fill"></i> Lv {{ entry.player.level }}</span
-              >
-              <span
-                :title="`${entry.player.laneMinionsKilled} Lane + ${entry.player.neutralMinionsKilled} Neutral · final`"
-                ><i class="bi bi-stack"></i> {{ totalCs(entry.player) }} CS</span
-              >
-              <span
-                :title="`${entry.player.wardsPlaced} platziert / ${entry.player.wardsKilled} zerstört · exakter finaler Replay-Wert`"
-                ><i class="bi bi-eye-fill"></i> {{ entry.player.wardsPlaced }}/{{
-                  entry.player.wardsKilled
-                }}</span
-              >
-            </span>
-            <span v-else class="final-stats unavailable"
-              ><i class="bi bi-slash-circle"></i> Finaldaten für diesen Patch nicht validiert</span
-            >
-            <span class="player-footer">
-              <small>{{ roleLabel(entry.player.teamPosition) }}</small>
-              <span
-                v-if="finalPlayerStatsAvailable"
-                class="inventory-slots"
-                title="Exaktes finales Inventar; kein Inventarverlauf"
-              >
-                <span
-                  v-for="(itemId, slot) in finalItems(entry.player)"
-                  :key="slot"
-                  class="inventory-slot"
-                  :class="{ empty: itemId === 0 }"
-                >
-                  <img v-if="itemId > 0" :src="itemIcon(itemId)" :alt="`Item ${itemId}`" />
-                </span>
-              </span>
-              <span
-                v-else
-                class="inventory-slots unavailable"
-                title="Finaldaten für diesen Patch nicht validiert"
-              >
-                <span v-for="slot in 7" :key="slot" class="inventory-slot empty"></span>
-              </span>
-              <b
-                >{{ entry.player.goldEarned.toLocaleString("de-DE") }}g
-                <small>verdient · final</small></b
-              >
-            </span>
+          <i
+            class="bi"
+            :class="purchaseStreamUnavailable ? 'bi-bag-x-fill' : 'bi-bag-check-fill'"
+          ></i>
+          <span>
+            <template v-if="purchaseStreamUnavailable">
+              <b>Item-Kaufstrom für diesen Patch nicht verfügbar</b>
+              <small>Es werden keine null Käufe behauptet und keine Inventardaten geschätzt.</small>
+            </template>
+            <template v-else>
+              <b>{{ counts.purchases }} erkannte Item-Kaufereignisse</b>
+              <small>
+                Name und Icon: Data Dragon {{ itemCatalog?.dataDragonVersion ?? "patchgebunden" }}.
+                Verkäufe, Slots, verbrauchte Komponenten und Undo fehlen noch; deshalb wird kein
+                erfundener Inventarstand angezeigt.
+                <template v-if="itemCatalogLoading"> Itemdaten werden geladen …</template>
+                <template v-else-if="itemCatalogError">
+                  Unbekannte Items bleiben als ID sichtbar.
+                </template>
+              </small>
+            </template>
           </span>
-        </button>
-      </aside>
+        </p>
+      </main>
     </div>
-
-    <footer class="unified-timeline">
-      <div class="timeline-controls">
-        <button
-          class="play-control"
-          :aria-label="isPlaying ? 'Pause' : 'Play'"
-          @click="togglePlayback"
-        >
-          <i class="bi" :class="isPlaying ? 'bi-pause-fill' : 'bi-play-fill'"></i>
-        </button>
-        <div class="timecode">
-          <strong>{{ formatTime(currentTime) }}</strong
-          ><span>/ {{ formatTime(duration) }}</span>
-        </div>
-      </div>
-      <div class="timeline-main">
-        <div class="timeline-labels">
-          <span>ALLE EREIGNISSE</span
-          ><small
-            >Kills · Elite-Objectives · Standard-Ward platziert · Ward zerstört (konservativ)</small
-          >
-        </div>
-        <div class="timeline-track">
-          <div class="timeline-progress" :style="{ width: markerLeft(currentTime) }"></div>
-          <button
-            v-for="event in events"
-            :key="event.id"
-            class="event-marker"
-            :class="event.kind"
-            :style="{ left: markerLeft(event.timestampMillis) }"
-            :title="`${formatTime(event.timestampMillis)} · ${eventLabel(event)}`"
-            @click="seek(event.timestampMillis)"
-          >
-            <i class="bi" :class="eventIcon(event)"></i>
-          </button>
-          <input
-            type="range"
-            :min="0"
-            :max="duration"
-            :value="currentTime"
-            :step="100"
-            aria-label="Replay timeline"
-            @input="onScrub"
-          />
-        </div>
-        <div class="timeline-ticks">
-          <span>0:00</span><span>{{ formatTime(duration * 0.25) }}</span
-          ><span>{{ formatTime(duration * 0.5) }}</span
-          ><span>{{ formatTime(duration * 0.75) }}</span
-          ><span>{{ formatTime(duration) }}</span>
-        </div>
-      </div>
-      <div class="speed-controls">
-        <button
-          v-for="speed in speeds"
-          :key="speed"
-          :class="{ active: playbackSpeed === speed }"
-          @click="playbackSpeed = speed"
-        >
-          {{ speed }}×
-        </button>
-      </div>
-    </footer>
   </section>
 </template>
 
@@ -757,941 +715,318 @@ function onScrub(event: Event): void {
   --blue: #26a7ff;
   --red: #ff5964;
   --gold: #d6af58;
+  display: flex;
   min-width: 0;
+  flex-direction: column;
+  gap: 10px;
   color: #edf4ff;
 }
+
+.match-scoreboard,
+.timeline-card,
+.roster,
+.event-focus {
+  border: 1px solid rgba(143, 171, 202, 0.16);
+  border-radius: 12px;
+  background: #080d14;
+}
+
 .match-scoreboard {
-  min-height: 92px;
+  min-height: 82px;
   display: grid;
   grid-template-columns: 1fr minmax(260px, 1.35fr) 1fr;
   align-items: center;
   gap: 20px;
-  padding: 14px 22px;
-  border: 1px solid rgba(143, 171, 202, 0.16);
-  border-radius: 12px;
-  background: linear-gradient(
-    100deg,
-    rgba(18, 62, 93, 0.52),
-    rgba(7, 12, 20, 0.96) 43%,
-    rgba(7, 12, 20, 0.96) 57%,
-    rgba(95, 24, 35, 0.48)
-  );
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+  padding: 12px 22px;
+  background: linear-gradient(100deg, rgba(18, 62, 93, 0.52), #070c14 43%, #070c14 57%, rgba(95, 24, 35, 0.48));
 }
+
 .match-identity {
-  text-align: center;
   min-width: 0;
+  text-align: center;
 }
+
 .match-identity h2 {
   margin: 3px 0 5px;
   overflow: hidden;
   color: #fff;
-  font-size: 1rem;
+  font-size: 0.96rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .eyebrow,
-.roster-title,
-.timeline-labels span {
+.roster-title {
   color: #8292a8;
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   font-weight: 800;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.15em;
 }
+
 .match-meta {
   display: flex;
   justify-content: center;
   gap: 12px;
   color: #7f8b9d;
-  font-size: 0.7rem;
+  font-size: 0.66rem;
 }
+
 .match-meta span + span::before {
   content: "·";
   margin-right: 12px;
 }
+
 .score-team {
   display: grid;
   align-items: center;
   gap: 3px 12px;
 }
+
 .score-team-blue {
   grid-template-columns: auto auto 1fr;
 }
+
 .score-team-red {
   grid-template-columns: 1fr auto auto;
   text-align: right;
 }
+
 .score-team strong {
   grid-row: span 2;
-  color: #fff;
+  color: var(--blue);
   font-family: "Cascadia Code", monospace;
-  font-size: 2.15rem;
+  font-size: 2rem;
   line-height: 1;
 }
-.score-team-blue strong {
-  color: var(--blue);
-}
+
 .score-team-red strong {
-  color: var(--red);
   order: -1;
+  color: var(--red);
 }
+
 .score-team small {
   color: #8190a4;
-  font-size: 0.65rem;
+  font-size: 0.62rem;
 }
+
 .score-result {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 900;
   letter-spacing: 0.12em;
-  opacity: 0.66;
+  opacity: 0.64;
 }
+
 .score-result.winner {
   color: #f1ce73;
   opacity: 1;
 }
 
-.viewer-grid {
-  display: grid;
-  grid-template-columns: minmax(245px, 305px) minmax(420px, 1fr) minmax(245px, 305px);
-  gap: 10px;
-  margin-top: 10px;
+.timeline-card {
+  padding: 16px 18px 13px;
+  border-color: rgba(77, 185, 247, 0.3);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.24);
 }
-.roster,
-.map-stage {
-  border: 1px solid rgba(143, 171, 202, 0.14);
-  border-radius: 12px;
-  background: rgba(8, 13, 21, 0.94);
-}
-.roster {
-  overflow: hidden;
-}
-.roster-title {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 8px;
-  min-height: 38px;
-  padding: 0 13px;
-  border-bottom: 1px solid rgba(143, 171, 202, 0.12);
-}
-.roster-title small {
-  color: #657388;
-  font-size: 0.6rem;
-  letter-spacing: 0;
-  text-transform: none;
-}
-.team-pip {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--blue);
-  box-shadow: 0 0 10px var(--blue);
-}
-.roster-red .team-pip {
-  background: var(--red);
-  box-shadow: 0 0 10px var(--red);
-}
-.player-card {
-  width: 100%;
-  min-height: 112px;
+
+.timeline-heading,
+.timeline-layout,
+.timeline-controls,
+.timeline-legend,
+.player-heading,
+.player-footer,
+.final-stats,
+.purchase-strip,
+.event-window-header {
   display: flex;
-  gap: 10px;
-  padding: 10px;
-  border: 0;
-  border-bottom: 1px solid rgba(143, 171, 202, 0.09);
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  transition: 0.16s ease;
+  align-items: center;
 }
-.player-card:last-child {
-  border-bottom: 0;
+
+.timeline-heading,
+.event-window-header {
+  justify-content: space-between;
 }
-.player-card:hover,
-.player-card.selected {
-  background: linear-gradient(90deg, rgba(38, 167, 255, 0.12), transparent);
+
+.timeline-heading {
+  align-items: flex-start;
+  gap: 18px;
+  margin-bottom: 15px;
 }
-.player-card-red:hover,
-.player-card-red.selected {
-  background: linear-gradient(90deg, rgba(255, 89, 100, 0.12), transparent);
+
+.timeline-heading > div:first-child,
+.event-window-header > div,
+.event-copy,
+.purchase-boundary span {
+  display: flex;
+  flex-direction: column;
 }
-.player-card > img {
+
+.timeline-heading strong,
+.event-window-header strong {
+  color: #f4f8fd;
+  font-size: 0.9rem;
+}
+
+.timeline-legend {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px 13px;
+  color: #8392a6;
+  font-size: 0.61rem;
+}
+
+.timeline-legend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.timeline-legend i {
+  width: 7px;
+  height: 7px;
+  display: block;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.timeline-legend .kill { color: var(--red); }
+.timeline-legend .objective { color: var(--gold); }
+.timeline-legend .purchase { color: #c49aff; }
+.timeline-legend .ward { color: #56d6c2; }
+
+.timeline-layout {
+  display: grid;
+  grid-template-columns: auto minmax(300px, 1fr) auto;
+  gap: 18px;
+}
+
+.timeline-controls {
+  gap: 11px;
+}
+
+.play-control {
   width: 42px;
   height: 42px;
-  flex: 0 0 42px;
-  border: 2px solid rgba(38, 167, 255, 0.72);
-  border-radius: 9px;
-  object-fit: cover;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(70, 182, 255, 0.46);
+  border-radius: 50%;
+  background: rgba(30, 140, 212, 0.14);
+  color: #7bcbff;
+  font-size: 1.15rem;
 }
-.player-card-red > img {
-  border-color: rgba(255, 89, 100, 0.72);
-}
-.player-main {
-  min-width: 0;
-  flex: 1;
+
+.timecode {
   display: flex;
+  min-width: 90px;
   flex-direction: column;
-  gap: 7px;
-}
-.player-heading,
-.player-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 7px;
-}
-.player-heading > span {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-.player-heading b {
-  overflow: hidden;
-  color: #f6f8fc;
-  font-size: 0.78rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.player-heading small,
-.player-footer > small {
-  overflow: hidden;
-  color: #6f7c90;
-  font-size: 0.58rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.player-heading em {
-  color: #d9e3f0;
   font-family: "Cascadia Code", monospace;
-  font-size: 0.69rem;
-  font-style: normal;
-  font-weight: 700;
 }
-.state-bars {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+
+.timecode strong {
+  color: #f3f7fc;
+  font-size: 0.96rem;
 }
-.unknown-bar {
+
+.timecode span {
+  color: #627086;
+  font-size: 0.58rem;
+}
+
+.timeline-main {
+  min-width: 0;
+}
+
+.timeline-track {
   position: relative;
-  height: 8px;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.045);
+  height: 34px;
+  border: 1px solid rgba(143, 171, 202, 0.08);
+  border-radius: 7px;
+  background: linear-gradient(to bottom, #1a2330 0 8px, transparent 8px 20px, rgba(86, 214, 194, 0.05) 20px), #0a1018;
 }
-.unknown-bar i {
+
+.timeline-track input {
   position: absolute;
-  inset: 0;
-  background: repeating-linear-gradient(
-    135deg,
-    transparent 0 6px,
-    rgba(255, 255, 255, 0.035) 6px 9px
-  );
+  z-index: 4;
+  inset: -6px 0;
+  width: 100%;
+  height: 44px;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
 }
-.unknown-bar small {
+
+.timeline-progress {
   position: absolute;
-  inset: -1px 4px auto auto;
-  color: rgba(210, 220, 234, 0.42);
-  font-size: 0.43rem;
-  line-height: 8px;
+  z-index: 1;
+  inset: 0 auto 25px 0;
+  border-radius: 6px 0 0 0;
+  background: linear-gradient(90deg, #297eb6, #4db9f7);
 }
-.health {
-  box-shadow: inset 2px 0 #397f5c;
-}
-.mana {
-  box-shadow: inset 2px 0 #315f93;
-}
-.final-stats {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #8c9bb0;
-  font-size: 0.53rem;
-  font-weight: 700;
-}
-.final-stats span {
-  white-space: nowrap;
-}
-.final-stats i {
-  margin-right: 2px;
-  color: #8094ad;
-  font-size: 0.5rem;
-}
-.final-stats.unavailable {
-  color: #6f7c90;
-  font-weight: 600;
-}
-.player-footer b {
-  margin-left: auto;
-  color: #d7bd78;
-  font-size: 0.62rem;
-  white-space: nowrap;
-}
-.player-footer b small {
-  color: #71684f;
-  font-size: 0.48rem;
-  font-weight: 500;
-}
-.inventory-slots {
-  display: flex;
-  gap: 2px;
-}
-.inventory-slot {
-  width: 15px;
-  height: 15px;
+
+.event-marker {
+  position: absolute;
+  z-index: 5;
+  top: 4px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  padding: 0;
   overflow: hidden;
-  border: 1px solid rgba(151, 163, 180, 0.24);
-  border-radius: 2px;
-  background: rgba(0, 0, 0, 0.3);
+  transform: translate(-50%, -50%);
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: #0a111a;
+  color: #dce8f5;
+  font-size: 0.54rem;
+  cursor: pointer;
 }
-.inventory-slot.empty {
-  opacity: 0.42;
+
+.event-marker.kill { color: var(--red); }
+.event-marker.objective { color: var(--gold); }
+.event-marker.purchase-update {
+  border-color: #c49aff;
+  color: #c49aff;
 }
-.inventory-slots.unavailable {
-  filter: saturate(0);
-  opacity: 0.62;
-}
-.inventory-slot img {
+
+.event-marker img,
+.purchase-chip img,
+.event-symbol img {
   width: 100%;
   height: 100%;
   display: block;
   object-fit: cover;
 }
 
-.map-stage {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  padding: 10px;
-}
-.ward-research-controls {
-  display: grid;
-  grid-template-columns: minmax(150px, 0.8fr) minmax(170px, 1.2fr) auto auto;
-  align-items: end;
-  gap: 8px;
-  margin-bottom: 8px;
-  padding: 9px;
-  border: 1px solid rgba(255, 178, 72, 0.24);
-  border-radius: 8px;
-  background: linear-gradient(100deg, rgba(88, 48, 12, 0.22), rgba(8, 13, 20, 0.98));
-}
-.ward-research-heading {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-.ward-research-heading > span {
-  color: #ffb348;
-  font-size: 0.52rem;
-  font-weight: 900;
-  letter-spacing: 0.13em;
-}
-.ward-research-heading strong {
-  color: #f2f5fa;
-  font-size: 0.75rem;
-}
-.ward-research-heading small {
-  overflow: hidden;
-  color: #8e9caf;
-  font-size: 0.54rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ward-hypothesis-select {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 3px;
-  color: #8190a4;
-  font-size: 0.52rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.ward-hypothesis-select select {
-  width: 100%;
-  min-height: 29px;
-  border: 1px solid rgba(255, 181, 73, 0.25);
-  border-radius: 5px;
-  background: #0d141e;
-  color: #dce7f3;
-  font-size: 0.61rem;
-}
-.ward-research-modes {
-  display: flex;
-  padding: 3px;
-  border: 1px solid rgba(143, 171, 202, 0.12);
-  border-radius: 6px;
-  background: #080d14;
-}
-.ward-research-modes button,
-.ward-layer-toggle {
-  min-height: 27px;
-  padding: 4px 7px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: #738197;
-  font-size: 0.55rem;
-  font-weight: 700;
-  white-space: nowrap;
-}
-.ward-research-modes button.active,
-.ward-layer-toggle.active {
-  background: rgba(236, 155, 51, 0.18);
-  color: #ffc46f;
-}
-.ward-layer-toggle {
-  border: 1px solid rgba(143, 171, 202, 0.12);
-  background: #080d14;
-}
-.ward-timeline-options,
-.ward-hypothesis-description {
-  grid-column: 1 / -1;
-}
-.ward-timeline-options {
-  display: flex;
-  gap: 18px;
-  color: #8a99ad;
-  font-size: 0.57rem;
-}
-.ward-timeline-options label {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-.ward-hypothesis-description {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 4px;
-  margin: 0;
-  color: #9eabbc;
-  font-size: 0.55rem;
-}
-.ward-hypothesis-description b {
-  color: #d7e0eb;
-}
-.ward-hypothesis-description small {
-  margin-left: auto;
-  overflow: hidden;
-  color: #66758a;
-  font-family: "Cascadia Code", monospace;
-  font-size: 0.5rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.map-frame {
-  position: relative;
-  width: 100%;
-  max-width: min(100%, 820px);
-  min-height: 0;
-  aspect-ratio: 1 / 1;
-  align-self: center;
-  flex: none;
-  overflow: hidden;
-  border: 1px solid rgba(151, 174, 201, 0.16);
-  border-radius: 9px;
-  background: #070b10;
-}
-.map-frame > img {
-  width: 100%;
-  height: 100%;
-  position: absolute;
-  inset: 0;
-  object-fit: contain;
-  filter: saturate(0.72) brightness(0.55) contrast(1.08);
-}
-.map-frame.research-layer-visible > img {
-  filter: saturate(0.9) brightness(0.67) contrast(1.08);
-}
-.map-shade {
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(
-    circle at center,
-    transparent 15%,
-    rgba(3, 7, 12, 0.24) 70%,
-    rgba(3, 7, 12, 0.62)
-  );
-}
-.ward-research-layer {
-  position: absolute;
-  z-index: 3;
-  inset: 0;
-}
-.ward-research-marker {
-  --marker-color: #e3eaf2;
-  position: absolute;
-  width: 16px;
-  height: 16px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  transform: translate(-50%, -50%);
-  border: 1px solid rgba(255, 255, 255, 0.84);
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--marker-color) 78%, #06101a);
-  color: #fff;
-  font-size: 0.56rem;
-  box-shadow:
-    0 0 0 2px rgba(4, 9, 15, 0.72),
-    0 0 11px var(--marker-color);
-  cursor: pointer;
-}
-.ward-research-marker:hover,
-.ward-research-marker:focus-visible {
-  z-index: 5;
-  transform: translate(-50%, -50%) scale(1.42);
-  outline: 2px solid #fff;
-}
-.ward-research-marker.team-blue {
-  --marker-color: #23a9ff;
-}
-.ward-research-marker.team-red {
-  --marker-color: #ff5964;
-}
-.ward-research-marker.state-all-placement {
-  opacity: 0.76;
-}
-.ward-research-marker.state-active-linked {
-  opacity: 1;
-}
-.ward-research-marker.state-placement-pulse {
-  animation: ward-placement-pulse 1.2s ease-out infinite;
-}
-.ward-research-marker.state-kill-pulse {
-  --marker-color: #c49aff;
-  animation: ward-kill-pulse 0.8s ease-in-out infinite alternate;
-}
-.ward-research-warning {
-  position: absolute;
-  z-index: 4;
-  right: 10px;
-  bottom: 10px;
-  max-width: min(72%, 440px);
-  padding: 7px 9px;
-  border: 1px solid rgba(255, 178, 72, 0.35);
-  border-radius: 6px;
-  background: rgba(20, 14, 7, 0.88);
-  color: #ac9c88;
-  font-size: 0.52rem;
-  line-height: 1.4;
-  pointer-events: none;
-}
-.ward-research-warning strong {
-  margin-right: 6px;
-  color: #ffb348;
-  font-size: 0.54rem;
-  letter-spacing: 0.08em;
-}
-.ward-review-panel {
-  margin-top: 8px;
-  overflow: hidden;
-  border: 1px solid rgba(255, 178, 72, 0.2);
-  border-radius: 8px;
-  background: #080d14;
-}
-.ward-review-header {
-  display: grid;
-  grid-template-columns: minmax(150px, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 9px;
-  border-bottom: 1px solid rgba(143, 171, 202, 0.1);
-}
-.ward-review-header > span:first-child {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-.ward-review-header strong {
-  color: #ffc46f;
-  font-size: 0.56rem;
-  letter-spacing: 0.1em;
-}
-.ward-review-header small,
-.ward-review-method {
-  color: #7e8ca0;
-  font-size: 0.52rem;
-}
-.ward-review-method {
-  grid-column: 1 / -1;
-  grid-row: 2;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ward-review-filters {
-  display: flex;
-  gap: 3px;
-}
-.ward-review-filters button {
-  min-height: 25px;
-  padding: 3px 6px;
-  border: 1px solid rgba(143, 171, 202, 0.12);
-  border-radius: 4px;
-  background: #0c131d;
-  color: #77869a;
-  font-size: 0.51rem;
-  font-weight: 700;
-}
-.ward-review-filters button.active {
-  border-color: rgba(255, 178, 72, 0.3);
-  background: rgba(236, 155, 51, 0.16);
-  color: #ffc46f;
-}
-.ward-review-list {
-  max-height: 184px;
-  overflow-y: auto;
-}
-.ward-review-row {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 38px minmax(72px, 1fr) 78px 52px;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 9px;
-  border: 0;
-  border-bottom: 1px solid rgba(143, 171, 202, 0.07);
-  border-left: 2px solid #b47c3d;
-  background: transparent;
-  color: #9baabd;
-  text-align: left;
-  font-size: 0.56rem;
-}
-.ward-review-row.mapped {
-  border-left-color: #4fe093;
-}
-.ward-review-row:hover,
-.ward-review-row:focus-visible {
-  background: rgba(255, 255, 255, 0.045);
-  outline: none;
-}
-.ward-review-row time,
-.ward-review-row code {
-  color: #78879a;
-  font-family: "Cascadia Code", monospace;
-}
-.ward-review-owner {
-  overflow: hidden;
-  color: #c2cfde;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ward-review-row b {
-  color: #dca55f;
-  font-size: 0.49rem;
-  letter-spacing: 0.06em;
-}
-.ward-review-row.mapped b {
-  color: #65dda1;
-}
-.ward-review-row small {
-  grid-column: 1 / -1;
-  overflow: hidden;
-  color: #77869a;
-  font-size: 0.52rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ward-review-empty {
-  margin: 0;
-  padding: 14px;
-  color: #69778b;
-  font-size: 0.58rem;
-  text-align: center;
-}
-.map-unavailable {
+.ward-density {
   position: absolute;
   z-index: 2;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  padding: 28px;
-  text-align: center;
-}
-.map-unavailable i {
-  width: 58px;
-  height: 58px;
-  display: grid;
-  place-items: center;
-  margin-bottom: 13px;
-  border: 1px solid rgba(166, 190, 220, 0.22);
-  border-radius: 50%;
-  background: rgba(5, 10, 16, 0.66);
-  color: #8ba4c0;
-  font-size: 1.5rem;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
-}
-.map-unavailable strong {
-  color: #dce7f5;
-  font-size: 0.86rem;
-}
-.map-unavailable span {
-  max-width: 46ch;
-  margin-top: 5px;
-  color: #8392a6;
-  font-size: 0.66rem;
-  line-height: 1.55;
-}
-.map-badge {
-  position: absolute;
-  z-index: 4;
-  top: 12px;
-  left: 12px;
-  padding: 5px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 5px;
-  background: rgba(4, 8, 13, 0.76);
-  color: #9cabbf;
-  font-size: 0.55rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.map-badge span {
-  width: 5px;
-  height: 5px;
-  display: inline-block;
-  margin-right: 5px;
-  border-radius: 50%;
-  background: #4fe093;
-  box-shadow: 0 0 7px #4fe093;
-}
-@keyframes ward-placement-pulse {
-  0% {
-    box-shadow:
-      0 0 0 2px rgba(4, 9, 15, 0.72),
-      0 0 0 0 var(--marker-color);
-  }
-  100% {
-    box-shadow:
-      0 0 0 2px rgba(4, 9, 15, 0.72),
-      0 0 0 12px transparent;
-  }
-}
-@keyframes ward-kill-pulse {
-  from {
-    opacity: 0.52;
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1.24);
-  }
-}
-.event-window {
-  margin-top: 8px;
-  border: 1px solid rgba(143, 171, 202, 0.12);
-  border-radius: 8px;
-  background: #080d14;
-}
-.event-window-header {
-  min-height: 31px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 0 9px;
-  border-bottom: 1px solid rgba(143, 171, 202, 0.1);
-  color: #8393a8;
-  font-size: 0.56rem;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-}
-.event-window-header small {
-  color: #5f6e82;
-  font-size: 0.52rem;
-  font-weight: 500;
-  letter-spacing: 0;
-}
-.event-row {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 38px 16px 1fr;
-  gap: 5px;
-  padding: 5px 9px;
-  border: 0;
-  border-bottom: 1px solid rgba(143, 171, 202, 0.07);
-  background: transparent;
-  color: #aab8ca;
-  text-align: left;
-  font-size: 0.62rem;
-}
-.event-row:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-.event-row.past {
-  opacity: 0.56;
-}
-.event-row time {
-  color: #6f7d91;
-  font-family: monospace;
-}
-.event-row.kill i {
-  color: var(--red);
-}
-.event-row.objective i {
-  color: var(--gold);
-}
-.event-row.ward-placement i {
-  color: #56d6c2;
-}
-.event-row.ward-kill i {
-  color: #b596ee;
-}
-.event-empty {
-  padding: 16px;
-  color: #69778b;
-  font-size: 0.65rem;
-  text-align: center;
+  bottom: 2px;
+  width: 3px;
+  transform: translateX(-50%);
+  border-radius: 2px 2px 0 0;
+  background: linear-gradient(#b596ee, #56d6c2);
+  opacity: 0.68;
 }
 
-.unified-timeline {
-  display: grid;
-  grid-template-columns: auto minmax(300px, 1fr) auto;
-  align-items: center;
-  gap: 18px;
-  min-height: 104px;
-  margin-top: 10px;
-  padding: 12px 18px;
-  border: 1px solid rgba(143, 171, 202, 0.16);
-  border-radius: 12px;
-  background: #080d14;
-}
-.timeline-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.play-control {
-  width: 40px;
-  height: 40px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(70, 182, 255, 0.42);
-  border-radius: 50%;
-  background: rgba(30, 140, 212, 0.14);
-  color: #7bcbff;
-  font-size: 1.1rem;
-}
-.timecode {
-  display: flex;
-  min-width: 88px;
-  flex-direction: column;
-  font-family: "Cascadia Code", monospace;
-}
-.timecode strong {
-  color: #f3f7fc;
-  font-size: 0.92rem;
-}
-.timecode span {
-  color: #627086;
-  font-size: 0.58rem;
-}
-.timeline-main {
-  min-width: 0;
-}
-.timeline-labels {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 11px;
-}
-.timeline-labels small {
-  color: #627086;
-  font-size: 0.56rem;
-}
-.timeline-track {
-  position: relative;
-  height: 8px;
-  border-radius: 4px;
-  background: #1a2330;
-}
-.timeline-track input {
-  position: absolute;
-  z-index: 4;
-  inset: -7px 0;
-  width: 100%;
-  height: 22px;
-  margin: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-.timeline-progress {
-  position: absolute;
-  inset: 0 auto 0 0;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #297eb6, #4db9f7);
-}
-.event-marker {
-  position: absolute;
-  z-index: 5;
-  top: 50%;
-  width: 18px;
-  height: 18px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  transform: translate(-50%, -50%);
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  background: #0a111a;
-  font-size: 0.52rem;
-  cursor: pointer;
-}
-.event-marker.kill {
-  color: var(--red);
-}
-.event-marker.objective {
-  color: var(--gold);
-}
-.event-marker.ward-placement,
-.event-marker.ward-kill {
-  z-index: 5;
-  top: calc(100% + 5px);
-  width: 8px;
-  height: 8px;
-  border-width: 0;
-  background: currentColor;
-  font-size: 0;
-  opacity: 0.72;
-}
-.event-marker.ward-placement {
-  color: #56d6c2;
-}
-.event-marker.ward-kill {
-  color: #b596ee;
-}
-.event-marker.ward-placement:hover,
-.event-marker.ward-kill:hover {
-  z-index: 6;
-  width: 12px;
-  height: 12px;
-  opacity: 1;
-}
 .timeline-ticks {
   display: flex;
   justify-content: space-between;
-  margin-top: 10px;
+  margin-top: 5px;
   color: #536176;
   font-family: monospace;
-  font-size: 0.5rem;
+  font-size: 0.51rem;
 }
+
 .speed-controls {
   display: flex;
   gap: 3px;
   padding: 3px;
   border: 1px solid rgba(143, 171, 202, 0.1);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.025);
 }
-.speed-controls button {
-  padding: 4px 7px;
+
+.speed-controls button,
+.clear-filter {
   border: 0;
   border-radius: 4px;
   background: transparent;
@@ -1699,47 +1034,335 @@ function onScrub(event: Event): void {
   font-size: 0.6rem;
   font-weight: 700;
 }
+
+.speed-controls button {
+  padding: 4px 7px;
+}
+
 .speed-controls button.active {
   background: #1b5b82;
   color: #d9f1ff;
 }
 
-@media (max-width: 1280px) {
+.timeline-status {
+  margin: 8px 0 0 71px;
+  color: #7f8fa4;
+  font-size: 0.6rem;
+}
+
+.viewer-grid {
+  display: grid;
+  grid-template-columns: minmax(250px, 310px) minmax(360px, 1fr) minmax(250px, 310px);
+  grid-template-areas: "blue events red";
+  gap: 10px;
+  align-items: start;
+}
+
+.roster {
+  overflow: hidden;
+}
+
+.roster-blue { grid-area: blue; }
+.roster-red { grid-area: red; }
+
+.roster-title {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  gap: 7px;
+  padding: 0 10px;
+  border-bottom: 1px solid rgba(143, 171, 202, 0.1);
+}
+
+.roster-title small {
+  margin-left: auto;
+  color: #637186;
+  font-size: 0.52rem;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.final-stats.unavailable {
+  color: #6f7c90;
+  font-weight: 600;
+}
+
+.team-pip {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--blue);
+  box-shadow: 0 0 8px var(--blue);
+}
+
+.roster-red .team-pip {
+  background: var(--red);
+  box-shadow: 0 0 8px var(--red);
+}
+
+.player-card {
+  width: 100%;
+  min-height: 92px;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px;
+  border: 0;
+  border-bottom: 1px solid rgba(143, 171, 202, 0.08);
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.player-card:hover,
+.player-card.selected {
+  background: rgba(45, 154, 221, 0.08);
+}
+
+.player-card.selected {
+  border-left-color: var(--blue);
+}
+
+.player-card-red.selected {
+  border-left-color: var(--red);
+  background: rgba(221, 62, 79, 0.08);
+}
+
+.player-card > img {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  border: 1px solid rgba(38, 167, 255, 0.62);
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.player-card-red > img {
+  border-color: rgba(255, 89, 100, 0.64);
+}
+
+.player-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.player-heading,
+.player-footer {
+  justify-content: space-between;
+}
+
+.player-heading > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.player-heading b,
+.event-copy b {
+  overflow: hidden;
+  color: #f6f8fc;
+  font-size: 0.74rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-heading small,
+.player-footer small {
+  overflow: hidden;
+  color: #6f7c90;
+  font-size: 0.53rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-heading em {
+  color: #d9e3f0;
+  font-family: "Cascadia Code", monospace;
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.final-stats {
+  flex-wrap: wrap;
+  gap: 6px;
+  color: #8c9bb0;
+  font-size: 0.52rem;
+  font-weight: 700;
+}
+
+.final-stats > small,
+.purchase-strip > small {
+  color: #5f6c7f;
+  font-size: 0.46rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.final-stats i {
+  margin-right: 2px;
+  color: #8094ad;
+  font-size: 0.48rem;
+}
+
+.final-gold {
+  margin-left: auto;
+  color: #d7bd78;
+}
+
+.purchase-strip {
+  min-height: 23px;
+  gap: 5px;
+}
+
+.hidden-count {
+  color: #8978b1;
+  font-size: 0.48rem;
+}
+
+.purchase-chip {
+  width: 22px;
+  height: 22px;
+  display: block;
+  overflow: hidden;
+  border: 1px solid rgba(196, 154, 255, 0.4);
+  border-radius: 4px;
+  background: #0b1119;
+}
+
+.event-focus {
+  grid-area: events;
+  min-height: 100%;
+  overflow: hidden;
+}
+
+.event-window-header {
+  min-height: 49px;
+  gap: 10px;
+  padding: 8px 11px;
+  border-bottom: 1px solid rgba(143, 171, 202, 0.1);
+}
+
+.clear-filter {
+  padding: 4px 7px;
+  border: 1px solid rgba(77, 185, 247, 0.22);
+  background: rgba(41, 126, 182, 0.12);
+  color: #9edcff;
+}
+
+.event-list {
+  min-height: 250px;
+}
+
+.event-row {
+  width: 100%;
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: 42px 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border: 0;
+  border-bottom: 1px solid rgba(143, 171, 202, 0.07);
+  background: transparent;
+  color: #aab8ca;
+  text-align: left;
+}
+
+.event-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.event-row.past {
+  opacity: 0.62;
+}
+
+.event-row time {
+  color: #6f7d91;
+  font-family: monospace;
+  font-size: 0.61rem;
+}
+
+.event-symbol {
+  width: 27px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(143, 171, 202, 0.14);
+  border-radius: 6px;
+  background: #0b121b;
+  font-size: 0.72rem;
+}
+
+.event-symbol.kill { color: var(--red); }
+.event-symbol.objective { color: var(--gold); }
+.event-symbol.purchase-update { border-color: rgba(196, 154, 255, 0.4); }
+.event-symbol.ward-placement { color: #56d6c2; }
+.event-symbol.ward-kill { color: #b596ee; }
+
+.event-copy {
+  min-width: 0;
+  gap: 2px;
+}
+
+.event-copy small {
+  overflow: hidden;
+  color: #69788c;
+  font-size: 0.54rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-empty {
+  padding: 24px;
+  color: #69778b;
+  font-size: 0.65rem;
+  text-align: center;
+}
+
+.purchase-boundary {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0;
+  padding: 11px;
+  border-top: 1px solid rgba(196, 154, 255, 0.14);
+  background: rgba(93, 59, 126, 0.08);
+  color: #8d9bae;
+}
+
+.purchase-boundary > i {
+  color: #c49aff;
+}
+
+.purchase-boundary span {
+  gap: 2px;
+}
+
+.purchase-boundary b {
+  color: #c9b3ec;
+  font-size: 0.61rem;
+}
+
+.purchase-boundary small {
+  color: #77869a;
+  font-size: 0.55rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 1180px) {
   .viewer-grid {
-    grid-template-columns: 240px minmax(380px, 1fr) 240px;
-  }
-  .player-card {
-    min-height: 105px;
-    padding: 8px;
-  }
-  .player-card > img {
-    width: 36px;
-    height: 36px;
-    flex-basis: 36px;
-  }
-  .inventory-slot {
-    width: 11px;
-    height: 11px;
-  }
-  .ward-research-controls {
     grid-template-columns: 1fr 1fr;
+    grid-template-areas: "events events" "blue red";
   }
 }
 
-@media (max-width: 980px) {
-  .viewer-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-  .map-stage {
-    grid-column: 1 / -1;
-    grid-row: 1;
-  }
-  .roster {
-    grid-row: 2;
-  }
-}
-
-@media (max-width: 680px) {
+@media (max-width: 820px) {
   .match-scoreboard {
     grid-template-columns: 1fr 1fr;
   }
@@ -1747,41 +1370,27 @@ function onScrub(event: Event): void {
     grid-column: 1 / -1;
     grid-row: 1;
   }
-  .viewer-grid {
-    grid-template-columns: 1fr;
+  .timeline-heading {
+    flex-direction: column;
   }
-  .map-stage,
-  .roster {
-    grid-column: auto;
-    grid-row: auto;
+  .timeline-legend {
+    justify-content: flex-start;
   }
-  .unified-timeline {
+  .timeline-layout {
     grid-template-columns: 1fr;
   }
   .speed-controls {
     justify-self: start;
   }
-  .ward-research-controls {
-    grid-template-columns: 1fr;
-  }
-  .ward-research-heading,
-  .ward-hypothesis-select,
-  .ward-research-modes,
-  .ward-layer-toggle,
-  .ward-timeline-options,
-  .ward-hypothesis-description {
-    grid-column: 1;
-  }
-  .ward-hypothesis-description {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-  .ward-hypothesis-description small {
-    max-width: 100%;
+  .timeline-status {
     margin-left: 0;
   }
-  .ward-research-warning {
-    max-width: calc(100% - 20px);
+}
+
+@media (max-width: 620px) {
+  .viewer-grid {
+    grid-template-columns: 1fr;
+    grid-template-areas: "events" "blue" "red";
   }
 }
 </style>
