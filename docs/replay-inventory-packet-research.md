@@ -65,11 +65,11 @@ millisecond timing delta. The older
 `artifacts/inventory-packet-research-16.14.json` remains research-only evidence
 and is not a runtime input.
 
-| Candidate family | Channel | Packet type | Content lengths | Owner formula | Corpus count |
-|---|---:|---:|---:|---|---:|
-| inventory add/update | 1 | `0x0369` | 14/15 | `blockParam - 0x400000AD` | 2,519 |
-| inventory removal | 1 | `0x03F9` | 6/7 | `blockParam - 0x400000AD` | 2,074 |
-| unresolved removal-context companion | 1 | `0x0146` | 2/3/4 | `blockParam - 0x400000AD` | 4,214 |
+| Candidate family                     | Channel | Packet type | Content lengths | Owner formula             | Corpus count |
+| ------------------------------------ | ------: | ----------: | --------------: | ------------------------- | -----------: |
+| inventory add/update                 |       1 |    `0x0369` |           14/15 | `blockParam - 0x400000AD` |        2,519 |
+| inventory removal                    |       1 |    `0x03F9` |             6/7 | `blockParam - 0x400000AD` |        2,074 |
+| unresolved removal-context companion |       1 |    `0x0146` |           2/3/4 | `blockParam - 0x400000AD` |        4,214 |
 
 The external profile freezes the productive sale predicate: exactly zero
 profiled `0x0369` adds of length 14/15 and exactly one `0x03F9` removal of
@@ -89,26 +89,26 @@ of the 16.14 item-ID lane across those same 1,971 labels. Seven formulas were
 found during the earlier full-corpus exploration:
 
 | Item-ID bit | Replay-native formula (little-endian payload-bit numbering) |
-|---:|---|
-| 0 | `payloadBit(71)` |
-| 1 | `payloadBit(66) XOR payloadBit(71) XOR 1` |
-| 5 | `payloadBit(70) XOR 1` |
-| 6 | `payloadBit(69) XOR payloadBit(70) XOR 1` |
-| 7 | `payloadBit(78) XOR payloadBit(79)` |
-| 10 | `payloadBit(73) XOR payloadBit(76) XOR 1` |
-| 12 | `payloadBit(78) XOR 1` |
+| ----------: | ----------------------------------------------------------- |
+|           0 | `payloadBit(71)`                                            |
+|           1 | `payloadBit(66) XOR payloadBit(71) XOR 1`                   |
+|           5 | `payloadBit(70) XOR 1`                                      |
+|           6 | `payloadBit(69) XOR payloadBit(70) XOR 1`                   |
+|           7 | `payloadBit(78) XOR payloadBit(79)`                         |
+|          10 | `payloadBit(73) XOR payloadBit(76) XOR 1`                   |
+|          12 | `payloadBit(78) XOR 1`                                      |
 
 The remaining six formulas were then selected only on seven fixed Discovery
 replays. With `qN = payloadBit(N)`, they are:
 
-| Item-ID bit | Formula |
-|---:|---|
-| 2 | `q65 XOR (q66 AND q71)` |
-| 3 | `1 XOR q65 XOR q68 XOR (q66 AND q71) XOR (q65 AND q66 AND q71)` |
-| 4 | `1 XOR q67 XOR q68 XOR (q65 AND q68) XOR (q66 AND q68 AND q71) XOR (q65 AND q66 AND q68 AND q71)` |
-| 8 | `1 XOR q74 XOR q79 XOR (q72 AND q79)` |
-| 9 | `q73 XOR (q73 AND q79) XOR (q72 AND q73 AND q79)` |
-| 11 | `1 XOR q75 XOR q76 XOR (q73 AND q76)` |
+| Item-ID bit | Formula                                                                                           |
+| ----------: | ------------------------------------------------------------------------------------------------- |
+|           2 | `q65 XOR (q66 AND q71)`                                                                           |
+|           3 | `1 XOR q65 XOR q68 XOR (q66 AND q71) XOR (q65 AND q66 AND q71)`                                   |
+|           4 | `1 XOR q67 XOR q68 XOR (q65 AND q68) XOR (q66 AND q68 AND q71) XOR (q65 AND q66 AND q68 AND q71)` |
+|           8 | `1 XOR q74 XOR q79 XOR (q72 AND q79)`                                                             |
+|           9 | `q73 XOR (q73 AND q79) XOR (q72 AND q73 AND q79)`                                                 |
+|          11 | `1 XOR q75 XOR q76 XOR (q73 AND q76)`                                                             |
 
 All 1,320 Discovery labels decode exactly. The three fixed Holdouts then decode
 all `651/651` complete IDs, including `19/19` label samples whose item ID never
@@ -302,7 +302,7 @@ slot, instance, or removal operation exactly.
 ### Patch-16.14 same-time operation-bundle checkpoint
 
 A separate maintained, replay-only checkpoint records a narrow structural
-result for the *complete relevant profiled owner/time-group population*,
+result for the _complete relevant profiled owner/time-group population_,
 without interpreting any individual packet payload. Reproduce it with:
 
 ```powershell
@@ -472,12 +472,12 @@ node .\scripts\research_inventory_recipe_constraints_16_14.mjs `
 from
 `https://ddragon.leagueoflegends.com/cdn/16.14.1/data/en_US/item.json`:
 
-| Fixture property | Required value |
-|---|---|
-| Data Dragon version | `16.14.1` |
-| Catalog entries | 706 |
-| Byte length | 583,139 |
-| SHA-256 | `0094f848489371da9e86b9f210f70b6ce0a3982c9063c7c734099cd5a88ddb75` |
+| Fixture property    | Required value                                                     |
+| ------------------- | ------------------------------------------------------------------ |
+| Data Dragon version | `16.14.1`                                                          |
+| Catalog entries     | 706                                                                |
+| Byte length         | 583,139                                                            |
+| SHA-256             | `0094f848489371da9e86b9f210f70b6ce0a3982c9063c7c734099cd5a88ddb75` |
 
 The 583 KiB catalog fixture is deliberately not tracked in this repository.
 The file supplies item validity and `from`/`into` recipe edges only. Match state
@@ -525,11 +525,11 @@ multi-operation, missing-recipe, or transform shape fails closed.
 In each maintained run, the historically D7-designed rule and expected-count
 gate pass before the harness opens the three H3 replays:
 
-| Split | Real uniquely labelled removals | Recipe truth in candidate set | Mean candidates before / after | Exact singleton after | Still ambiguous |
-|---|---:|---:|---:|---:|---:|
-| Discovery (D7) | 209 | 209/209 | 10.27 / 1.50 | 138/209 | 71 |
-| Holdout (H3) | 83 | 83/83 | 11.61 / 1.60 | 56/83 | 27 |
-| Combined | 292 | 292/292 | — | 194/292 | 98 |
+| Split          | Real uniquely labelled removals | Recipe truth in candidate set | Mean candidates before / after | Exact singleton after | Still ambiguous |
+| -------------- | ------------------------------: | ----------------------------: | -----------------------------: | --------------------: | --------------: |
+| Discovery (D7) |                             209 |                       209/209 |                   10.27 / 1.50 |               138/209 |              71 |
+| Holdout (H3)   |                              83 |                         83/83 |                   11.61 / 1.60 |                 56/83 |              27 |
+| Combined       |                             292 |                       292/292 |                              — |               194/292 |              98 |
 
 All 292 truths also occur among the historically observed replay-native
 structural add/update item IDs under that physical-order rule. There are zero
@@ -611,9 +611,9 @@ partial relationship to `ITEM_UNDO`. They are replay-native change signals,
 not complete undo or inventory decoders:
 
 | Version | Packet type | Segment/channel | Exact matched Undo labels | Extras | Recall |
-|---|---:|---|---:|---:|---:|
-| `16.9` | `0x0165` | chunk / 1 | 78/147 | 0 | 53.06% |
-| `16.14` | `0x0081` | chunk / 1 | 31/62 | 0 | 50.00% |
+| ------- | ----------: | --------------- | ------------------------: | -----: | -----: |
+| `16.9`  |    `0x0165` | chunk / 1       |                    78/147 |      0 | 53.06% |
+| `16.14` |    `0x0081` | chunk / 1       |                     31/62 |      0 | 50.00% |
 
 Both profiles use `participantId = blockParam - 0x400000AD` and a maximum
 one-millisecond offline label tolerance. Leave-one-replay-out preserves 1.0
@@ -662,6 +662,43 @@ prefix, or common aligned XOR edit. Even same-segment pairs do not copy a
 record, and owner-local ordinals are not stable. The shared packet type is
 component-family evidence only, not a before/after serialization link.
 
+### Keyframe `0x0081` current-inventory falsification (patch 16.14)
+
+The maintained harness
+[`research_keyframe_inventory_slots_16_14.mjs`](../scripts/research_keyframe_inventory_slots_16_14.mjs)
+tests the tempting interpretation that the champion-owned keyframe `0x0081`
+component is a six-slot current inventory. Saved Match and Timeline files are
+offline validation oracles only; all candidate structure and values come from
+the loaded replay.
+
+There is real, exact structure here. Every one of the 3,200 champion/keyframe
+payloads contains six trailing records selected without labels by the marker
+`(0xC0|0xC3) · ?? · ?? · 0xE6`. The exact patch-16.14 item-ID Boolean grammar
+reused from `0x0369` decodes plausible item symbols at stable record-relative
+offsets. On final participant tracks with no later labelled item operation,
+404/438 expected occupied-item labels occur somewhere in the payload and
+392/438 occur in the hypothesized corresponding record.
+
+That evidence does **not** describe current inventory. After aligning each
+keyframe component with the preceding keyframe time and reducing saved
+Timeline item operations only as an offline oracle, only 1,732/3,200 candidate
+multisets are exact. More importantly, 1,049/3,200 snapshots contain a decoded
+item that the oracle inventory has already removed. The failure reproduces in
+the frozen split: 675/2,170 D7 and 374/1,030 H3 snapshots have false-extra
+items. Components and sold/destroyed items can persist, which is consistent
+with the prior shop/Undo component evidence rather than physical champion
+slots.
+
+The current-inventory and slot-ordinal hypotheses are therefore rejected.
+Record boundaries and reused item symbols remain useful structural evidence,
+but they do not authorize a C++/Wasm/product inventory field.
+
+```bash
+node scripts/research_keyframe_inventory_slots_16_14.mjs \
+  --cli build-linux/packages/rofl-core/rofl_core_cli \
+  --output tmp/keyframe-inventory-slots-research-16.14.json
+```
+
 The repeated `BE C7 1F 76` / `BE C9 1F 76` markers are likewise not a record
 grammar. Splitting on them is byte-lossless for all 5,798 surveyed patch-16.9
 payloads, but no bounded byte, `u16`, LEB128, or mask field encodes each body's
@@ -672,10 +709,10 @@ evidence rather than runtime framing or instance identity.
 
 ## Patch-16.9 profile
 
-| Semantic candidate | Channel | Packet type | Content lengths | Champion ID base |
-|---|---:|---:|---:|---:|
-| inventory add/update | 1 | `0x0132` | 14/15 | `0x400000AD` |
-| inventory removal/update | 1 | `0x0415` | 6/7 | `0x400000AD` |
+| Semantic candidate       | Channel | Packet type | Content lengths | Champion ID base |
+| ------------------------ | ------: | ----------: | --------------: | ---------------: |
+| inventory add/update     |       1 |    `0x0132` |           14/15 |     `0x400000AD` |
+| inventory removal/update |       1 |    `0x0415` |             6/7 |     `0x400000AD` |
 
 `participantId = blockParam - 0x400000AD` is exact for the champion-owned
 samples used below. Packet type, owner, and timestamp alone are not sufficient
@@ -701,21 +738,21 @@ itemId         = (high << 7) | low7
 Validation uses only samples where one champion has exactly one add/update
 packet and one Riot `ITEM_PURCHASED` label within 1 ms.
 
-| Result | Count |
-|---|---:|
+| Result                               | Count |
+| ------------------------------------ | ----: |
 | uniquely labelled add/update packets | 3,716 |
-| distinct labelled API item IDs | 171 |
-| direct item-ID matches | 3,714 |
-| explained automatic transforms | 2 |
-| unexplained mismatches | 0 |
+| distinct labelled API item IDs       |   171 |
+| direct item-ID matches               | 3,714 |
+| explained automatic transforms       |     2 |
+| unexplained mismatches               |     0 |
 
 The two non-identical labels are semantically correct resulting inventory
 items rather than decoder errors:
 
-| Replay | Participant | API purchase | Same-time API destroy | Replay-decoded result |
-|---|---:|---:|---:|---:|
-| `EUW1-7838031220` | 6 | 3119 | 3119 | 3121 (Fimbulwinter) |
-| `EUW1-7838099746` | 8 | 3003 | 3003 | 3040 (Seraph's Embrace) |
+| Replay            | Participant | API purchase | Same-time API destroy |   Replay-decoded result |
+| ----------------- | ----------: | -----------: | --------------------: | ----------------------: |
+| `EUW1-7838031220` |           6 |         3119 |                  3119 |     3121 (Fimbulwinter) |
+| `EUW1-7838099746` |           8 |         3003 |                  3003 | 3040 (Seraph's Embrace) |
 
 This establishes that `0x0132` represents resulting inventory add/update
 state. It must not be renamed to `ITEM_PURCHASED`: automatic transforms and
@@ -725,15 +762,15 @@ stack/state updates use the same family.
 
 The 20-replay corpus contains:
 
-| Evidence | Count |
-|---|---:|
+| Evidence                                | Count |
+| --------------------------------------- | ----: |
 | Riot item events used as offline labels | 8,874 |
-| `ITEM_PURCHASED` | 4,488 |
-| `ITEM_DESTROYED` | 4,050 |
-| `ITEM_SOLD` | 189 |
-| `ITEM_UNDO` | 147 |
-| replay add/update packets | 4,454 |
-| replay removal packets | 3,550 |
+| `ITEM_PURCHASED`                        | 4,488 |
+| `ITEM_DESTROYED`                        | 4,050 |
+| `ITEM_SOLD`                             |   189 |
+| `ITEM_UNDO`                             |   147 |
+| replay add/update packets               | 4,454 |
+| replay removal packets                  | 3,550 |
 
 All 189 sale labels have exactly one correct-owner removal packet within 1 ms.
 Shape alone is not a safe sale decoder: 266 destroy-only groups have the same
@@ -790,11 +827,11 @@ slot decoder.
 
 Three further cross-checks also failed the exact promotion gate:
 
-| Cross-check | Samples | Best result |
-|---|---:|---:|
-| same-item replacement removal field | 151 | 72/151 (47.68%) |
-| offline-labelled add/removal lifecycle link, slot-sized field | 882 | 675/882 (76.53%) |
-| candidate-state removal slot field | 733 | 420/733 (57.30%) |
+| Cross-check                                                   | Samples |      Best result |
+| ------------------------------------------------------------- | ------: | ---------------: |
+| same-item replacement removal field                           |     151 |  72/151 (47.68%) |
+| offline-labelled add/removal lifecycle link, slot-sized field |     882 | 675/882 (76.53%) |
+| candidate-state removal slot field                            |     733 | 420/733 (57.30%) |
 
 The lifecycle scan's strongest unrestricted relationship is 880/882, but it
 has only three values and is another low-cardinality state/length correlation.

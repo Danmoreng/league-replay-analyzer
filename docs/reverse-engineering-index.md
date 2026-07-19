@@ -60,6 +60,11 @@ are outside scope even when described by historical community work.
 - `scripts/validate_replay_participant_stat_snapshots_corpus.mjs` and
   `scripts/manifests/replay-participant-stat-snapshots-16.14.expected.json`
   reproduce its compact D7/H3 promotion gate.
+- `scripts/research_keyframe_current_gold_16_14.mjs` reproduces the exact-build
+  spent-gold-like lane and the negative current-gold correction searches.
+- `scripts/research_keyframe_inventory_slots_16_14.mjs` reproduces the exact
+  six-record keyframe `0x0081` structure and falsifies its interpretation as
+  current champion inventory on D7 and frozen H3.
 - `docs/replay-movement-packet-research.md`
 - `docs/rofl-api-parity.md`
 - `docs/keyframe-api-parity.md`

@@ -28,21 +28,21 @@ The Riot timeline files are validation labels only. Runtime ownership comes from
 
 ## Exact packet-family evidence
 
-| Packet family | Replay 7840220945 | Replay 7840267452 | Content length | Exact conclusion |
-| --- | ---: | ---: | --- | --- |
-| `0x0442` | 290 blocks / 29 keyframes | 320 blocks / 32 keyframes | always 1451 bytes | exactly one block for each of 10 champions in every keyframe |
-| `0x0165` | 290 / 29 | 320 / 32 | 79–272 / 79–278 bytes | exactly one block for each champion; variable-length serialization |
-| `0x01F0` | 290 / 29 | 320 / 32 | 73–90 / 73–87 bytes | exactly one block for each champion; participant-specific fixed lengths within a replay |
+| Packet family |         Replay 7840220945 |         Replay 7840267452 | Content length        | Exact conclusion                                                                        |
+| ------------- | ------------------------: | ------------------------: | --------------------- | --------------------------------------------------------------------------------------- |
+| `0x0442`      | 290 blocks / 29 keyframes | 320 blocks / 32 keyframes | always 1451 bytes     | exactly one block for each of 10 champions in every keyframe                            |
+| `0x0165`      |                  290 / 29 |                  320 / 32 | 79–272 / 79–278 bytes | exactly one block for each champion; variable-length serialization                      |
+| `0x01F0`      |                  290 / 29 |                  320 / 32 | 73–90 / 73–87 bytes   | exactly one block for each champion; participant-specific fixed lengths within a replay |
 
 All six packet dumps pass exact framing. All `1,830` selected blocks have full, untruncated payloads. Timeline alignment is at most `1 ms` in both games. There are no missing owners, duplicate champion owners, or non-champion blocks in these families.
 
 Every participant payload changes at every consecutive keyframe. The amount of change differs substantially by family:
 
 | Packet family | Replay 7840220945 changed bytes per transition | Replay 7840267452 changed bytes per transition |
-| --- | ---: | ---: |
-| `0x0442` | average 58.9, range 4–97 | average 63.2, range 6–106 |
-| `0x0165` | average 78.3, range 11–260 | average 79.1, range 12–264 |
-| `0x01F0` | average 8.3, range 1–16 | average 7.5, range 1–18 |
+| ------------- | ---------------------------------------------: | ---------------------------------------------: |
+| `0x0442`      |                       average 58.9, range 4–97 |                      average 63.2, range 6–106 |
+| `0x0165`      |                     average 78.3, range 11–260 |                     average 79.1, range 12–264 |
+| `0x01F0`      |                        average 8.3, range 1–16 |                        average 7.5, range 1–18 |
 
 This confirms that the blocks carry changing keyframe state. It does not establish what serialization grammar or semantic component each packet represents.
 
@@ -72,14 +72,14 @@ No candidate survives that promotion rule.
 
 The strongest-looking `0x0442` candidates demonstrate why first differences matter:
 
-| Proposed label | Candidate | Global r | Within-participant r | First-difference r | Within-participant time r | Direct RMSE | Assessment |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| max health | `start+364b`, little `u11` | -0.814 | -0.829 | 0.006 | -0.849 | 603.6 | progression proxy |
-| total gold | `start+3875b`, little `u20` | -0.760 | -0.768 | -0.021 | -0.757 | 2996.1 | progression proxy |
-| level | `start+369b`, little `u6` | -0.875 | -0.871 | -0.037 | -0.850 | 2.7 | progression proxy |
-| lane CS | `start+529b`, big `u10` | -0.904 | -0.842 | -0.153 | -0.690 | 40.5 | progression proxy |
-| jungle CS | `start+623b`, little `u6` | 0.934 | 0.879 | 0.235 | 0.415 | 22.4 | progression proxy |
-| cumulative kills | `start+760b`, little `u5` | 0.819 | 0.789 | 0.341 | 0.640 | 2.4 | closest change signal, still neither direct nor sufficiently stable |
+| Proposed label   | Candidate                   | Global r | Within-participant r | First-difference r | Within-participant time r | Direct RMSE | Assessment                                                          |
+| ---------------- | --------------------------- | -------: | -------------------: | -----------------: | ------------------------: | ----------: | ------------------------------------------------------------------- |
+| max health       | `start+364b`, little `u11`  |   -0.814 |               -0.829 |              0.006 |                    -0.849 |       603.6 | progression proxy                                                   |
+| total gold       | `start+3875b`, little `u20` |   -0.760 |               -0.768 |             -0.021 |                    -0.757 |      2996.1 | progression proxy                                                   |
+| level            | `start+369b`, little `u6`   |   -0.875 |               -0.871 |             -0.037 |                    -0.850 |         2.7 | progression proxy                                                   |
+| lane CS          | `start+529b`, big `u10`     |   -0.904 |               -0.842 |             -0.153 |                    -0.690 |        40.5 | progression proxy                                                   |
+| jungle CS        | `start+623b`, little `u6`   |    0.934 |                0.879 |              0.235 |                     0.415 |        22.4 | progression proxy                                                   |
+| cumulative kills | `start+760b`, little `u5`   |    0.819 |                0.789 |              0.341 |                     0.640 |         2.4 | closest change signal, still neither direct nor sufficiently stable |
 
 The requested high-value state remains unresolved:
 
@@ -105,7 +105,7 @@ The next useful step is to reverse-engineer that inner grammar, beginning with `
 
 The exact family coverage makes that work tractable: participant identity and keyframe timing no longer need to be inferred while decoding the payload interior.
 
-## Narrow inventory-component research anchors (patches 16.9 and 16.14)
+## Narrow inventory-component research anchor (patch 16.9)
 
 `0x0442` now has one reproducible **research-only** anchor for the inventory
 component boundary. This is not an inventory decoder and must not be surfaced in
@@ -147,7 +147,7 @@ node .\scripts\research_keyframe_inventory_anchor.mjs `
   --output .\tmp\keyframe-inventory-anchor-16.9.json
 ```
 
-The separately profiled `16.14` anchor uses exact `0x02EB` keyframe blocks with
+The separately profiled `16.14` historical gate uses exact `0x02EB` keyframe blocks with
 1,479-byte payloads and byte offset `111`. Its two fixed discovery replays are
 `EUW1-7919517389` and `EUW1-7919624327`; `EUW1-7921996430` was fixed as the
 holdout before the offset was selected. It applies the same exact owner and
@@ -157,6 +157,12 @@ is `132/132` with zero false positives across 158 negatives. The XOR masks vary
 (for example `0x76`, `0x35`, and `0x44`), so this is a change-presence anchor,
 not a raw value or bit-field decoder.
 
+That 16.14 interpretation is now superseded. Offset 111 is one byte of the
+decoded `[107,109,111,113]` spent-gold-like Float32LE lane documented below.
+Its purchase/Undo change correlation is economy evidence, not an inventory
+component boundary. The reproduction command is retained for provenance, but
+must not be cited as inventory-state evidence.
+
 ```powershell
 node .\scripts\research_keyframe_inventory_anchor.mjs `
   --profile 16.14 `
@@ -165,8 +171,9 @@ node .\scripts\research_keyframe_inventory_anchor.mjs `
 
 There is no automatic candidate-offset selection and no custom-case override:
 the fixed discovery/holdout split is part of each profile's evidence boundary.
-Both profiles remain research-only until a deterministic replay-native inventory
-grammar and semantic validation establish item identities and transitions.
+The 16.9 profile remains research-only until a deterministic replay-native
+inventory grammar and semantic validation establish item identities and
+transitions.
 
 ## Patch-16.14 physical `0x01EB` record directory
 
@@ -345,10 +352,10 @@ component boundary: its artifact records `fieldBoundaryAvailable: false`,
 or `119` identifies every saved Timeline `totalGold` change and no unchanged
 transition:
 
-| Split | Changed / true change | Changed / no change | Unchanged / true change | Unchanged / no change |
-|---|---:|---:|---:|---:|
-| discovery | 2,043 | 0 | 0 | 57 |
-| holdout | 981 | 0 | 0 | 19 |
+| Split     | Changed / true change | Changed / no change | Unchanged / true change | Unchanged / no change |
+| --------- | --------------------: | ------------------: | ----------------------: | --------------------: |
+| discovery |                 2,043 |                   0 |                       0 |                    57 |
+| holdout   |                   981 |                   0 |                       0 |                    19 |
 
 That is an exact `3,024`-positive / `76`-negative correlation, not a gold-value
 decoder or field boundary. The post-hoc pair has Discovery `2,043/0/0/57` and
@@ -368,10 +375,10 @@ The nearby lane-CS change envelope is also exact, but it remains strictly
 non-numeric. Any changed byte at offsets `125`, `127`, or `129` marks
 every saved Timeline `minionsKilled` change and no unchanged transition:
 
-| Split | Changed / true change | Changed / no change | Unchanged / true change | Unchanged / no change |
-|---|---:|---:|---:|---:|
-| discovery | 1,458 | 0 | 0 | 642 |
-| holdout | 697 | 0 | 0 | 303 |
+| Split     | Changed / true change | Changed / no change | Unchanged / true change | Unchanged / no change |
+| --------- | --------------------: | ------------------: | ----------------------: | --------------------: |
+| discovery |                 1,458 |                   0 |                       0 |                   642 |
+| holdout   |                   697 |                   0 |                       0 |                   303 |
 
 The original `127..129` range missed one discovery and two holdout changes.
 All three are the same adjacent-component form: byte `125` alone changes
@@ -460,3 +467,36 @@ are neither explicit create/delete operations nor uniquely attributable to a
 champion or camp. This does not rule out monster-owned state; it establishes
 that a real operation/record grammar with parent or owner references must come
 before using these values as entity identities.
+
+## Current-gold derivation checkpoint (patch 16.14)
+
+The maintained replay-byte-only harness
+[`research_keyframe_current_gold_16_14.mjs`](../scripts/research_keyframe_current_gold_16_14.mjs)
+tests direct and derived spendable-gold candidates in the exact 1,479-byte
+`0x02EB` keyframe payload. Saved Timeline `currentGold` values are validation
+labels only. The canonical external-profile byte permutation is fixed before
+the seven D7 Discovery replays are ranked; the three H3 replays are a frozen
+evaluation split.
+
+The interleaved Float32LE lane `[107,109,111,113]` is a strong cumulative
+spent-gold-like field: all 2,170 D7 and 1,030 H3 values are finite,
+nonnegative, and integral, and all 100 participant tracks start at zero. Its
+last snapshot equals Match `goldSpent` for 55/70 D7 and 27/30 H3 tracks; the
+remaining differences are consistent with purchases after the last keyframe.
+It is not spendable gold. `trunc(totalGold - spentLike)` reproduces only
+967/2,170 D7 and 354/1,030 H3 `currentGold` labels. Potion sale/refund examples
+show why a gross-spend relation is insufficient, while initial shop grants and
+other special transactions add further residuals.
+
+The harness also searches every interleaved Float32LE correction lane, every
+interleaved UInt32LE correction lane with both signs, and independently chosen
+Float32LE/UInt32LE byte lanes. None closes Discovery and Holdout. The result
+remains `researchOnly: true`, `runtimeInput: false`, and
+`promotionGate: false`; current gold is not exposed through C++, Wasm, or the
+product UI.
+
+```bash
+node scripts/research_keyframe_current_gold_16_14.mjs \
+  --cli build-linux/packages/rofl-core/rofl_core_cli \
+  --output tmp/keyframe-current-gold-research-16.14.json
+```
