@@ -94,10 +94,10 @@ while ($true) {
 
     $iteration += 1
     $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-    $iterationArtifactRootRelative = "tmp/autoresearch/$Tag/artifacts/iteration-$iteration-$stamp"
+    $iterationArtifactRootRelative = "tmp/autoresearch/$Tag/scores/iteration-$iteration-$stamp"
     $iterationArtifactRoot = Join-Path $repositoryRoot $iterationArtifactRootRelative
     if (Test-Path -LiteralPath $iterationArtifactRoot) {
-        throw "Autoresearch artifact root already exists: $iterationArtifactRoot"
+        throw "Autoresearch score root already exists: $iterationArtifactRoot"
     }
 
     $prompt = @"
@@ -106,23 +106,23 @@ Continue the autonomous decoder research loop in this repository.
 
 Use this run tag: $Tag
 Use this ledger file: tmp/autoresearch/$Tag/results.tsv
-Use this fresh artifact root for this iteration only: $iterationArtifactRootRelative
+Use this fresh ScoreOnly corpus root for this iteration only: $iterationArtifactRootRelative
 
 Do exactly one bounded iteration:
 1. inspect the latest kept result and current repo state
 2. choose one decoder hypothesis
 3. implement the change
 4. run fast checks on touched files
-5. rerun the full decoder corpus exactly with:
-   pwsh -File .\scripts\run_decoder_corpus.ps1 -Configuration Debug -ArtifactRoot '$iterationArtifactRootRelative' -RequireEmptyArtifactRoot -Force -CleanReplayArtifacts
-6. summarize exactly that artifact root with:
+5. rerun the complete 57-replay decoder corpus in ScoreOnly mode exactly with:
+   pwsh -File .\scripts\run_decoder_corpus.ps1 -Configuration Debug -ScoreOnly -ArtifactRoot '$iterationArtifactRootRelative' -RequireEmptyArtifactRoot -Force -CleanReplayArtifacts
+6. summarize exactly that ScoreOnly root with:
    node .\scripts\summarize_decoder_corpus.mjs --artifact-root '$iterationArtifactRootRelative' --json
-7. append exactly one row to tmp/autoresearch/$Tag/results.tsv and include the artifact-root path in its description
+7. append exactly one row to tmp/autoresearch/$Tag/results.tsv and include the score-root path in its description
 8. keep or revert based on the scorecard in program.md
 9. update docs only if the finding is actually stable and worth recording
 10. stop after this single iteration
 
-Do not use the shared artifacts root. Do not ask the user to continue. Complete one full iteration and exit.
+Do not use the shared artifacts root. Full debug artifacts are permitted only for an explicit research question, never as the default keep/revert gate. Do not ask the user to continue. Complete one full iteration and exit.
 "@
     $prompt | Set-Content -LiteralPath $promptFile -Encoding utf8
 

@@ -110,7 +110,14 @@ Once we have enough records like that, automatic extraction can emit normalized 
 
 ## Recommended Development Loop
 
-### Phase 1: Replay-level artifact generation
+### Phase 1: Explicit research/debug artifact generation
+
+This phase is for a concrete decoder investigation, not the default
+keep/revert gate. The normal full-corpus decision run uses
+`run_decoder_corpus.ps1 -ScoreOnly`: it still processes all 57 replays but
+writes only the manifest/schema/validation evidence required by the scorecard.
+Run the detailed artifact generation below only when the hypothesis actually
+needs raw family, slab, schema, extraction, or movement evidence.
 
 For each replay under investigation:
 
@@ -281,7 +288,7 @@ This is the practical loop to use in day-to-day work.
 
 ### Session end
 
-1. save generated artifact examples if they are useful
+1. retain generated debug-artifact examples only if they remain useful evidence
 2. update `docs/decoder-status.md` with any changed decoder conclusions
 3. keep the UI secondary unless it exposed a genuinely new insight
 
@@ -318,7 +325,11 @@ Current file:
 
 ### 3. Extraction runner
 
-Use `scripts/run_decoder_corpus.ps1` for the current end-to-end corpus pass. It now:
+Use `scripts/run_decoder_corpus.ps1 -ScoreOnly` for the standard complete
+57-replay keep/revert corpus pass. It writes the strict scorecard inputs while
+suppressing the bulky replay-level debug products. Use the same script without
+`-ScoreOnly` only for an explicit research/debug investigation. In full-debug
+mode it now:
 
 - regenerates replay artifacts
 - rebuilds replay-local provisional schemas
@@ -359,6 +370,16 @@ Current outputs:
 - `artifacts/movement-identity-priors.json`
 - `artifacts/<replay-id>/participant-movement.json`
 - `artifacts/<replay-id>/assigned-movement-validation-report.json`
+
+Full-debug corpus roots are materially larger than score-only roots (the
+verified ScoreOnly reference is about 408 MiB / 0.398 GiB versus roughly 4.1
+GiB for the older full-debug run). The durable evidence is the ledger row,
+compact summary, and kept commit—not every ScoreOnly root. Retain at most the
+current baseline root and any root needed by an active investigation. Once a
+completed ScoreOnly run has a recorded score, its root is reproducible and may
+be deleted manually. Retain debug roots only while they support active research
+or a documented result. No automatic deletion is promised. Use a fast local
+SSD and verify available space before starting full-debug work.
 
 Current manifest-based 57-replay reference at commit `57b79b3`:
 

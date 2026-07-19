@@ -51,7 +51,7 @@ Recommended files in that directory:
 - `results.tsv`
 - one `run-<timestamp>.log` per corpus rerun
 - one `summary-<timestamp>.json` per corpus summary
-- one fresh `artifacts/iteration-<n>-<timestamp>/` corpus root per iteration
+- one fresh `scores/iteration-<n>-<timestamp>/` ScoreOnly corpus root per iteration
 
 Do not commit anything under `tmp/autoresearch/`.
 
@@ -114,18 +114,39 @@ Before a full corpus rerun:
 
 Before keeping any change:
 
-1. choose a fresh per-iteration artifact root and rerun the full corpus:
-   `& 'C:\Program Files\PowerShell\7\pwsh.exe' -File .\scripts\run_decoder_corpus.ps1 -Configuration Debug -ArtifactRoot <fresh-root> -RequireEmptyArtifactRoot -Force -CleanReplayArtifacts`
+1. choose a fresh per-iteration score root and rerun the complete corpus in
+   ScoreOnly mode:
+   `& 'C:\Program Files\PowerShell\7\pwsh.exe' -File .\scripts\run_decoder_corpus.ps1 -Configuration Debug -ScoreOnly -ArtifactRoot <fresh-root> -RequireEmptyArtifactRoot -Force -CleanReplayArtifacts`
 2. summarize the results:
    `node .\scripts\summarize_decoder_corpus.mjs --artifact-root <fresh-root> --json`
 
-If the full corpus did not run, the experiment is not complete and should not be kept as an overnight winner.
+ScoreOnly still processes the complete 57-replay corpus; it is not a partial
+corpus shortcut. If that full score run did not complete, the experiment is not
+complete and should not be kept as an overnight winner.
 
 The summarizer is strict and manifest-based by default. It fails if a
 manifested scalar or assigned-movement report is missing, if schema/manifest
 provenance points at another root, or if an unmanifested directory contains a
 score report. `--allow-legacy-directory-scan` exists only for old diagnostic
 artifacts and must not be used to decide keep/revert.
+
+## Artifact discipline and retention
+
+The standard autonomous gate is `-ScoreOnly`. Its verified 57-replay output is
+427,731,245 bytes (about 408 MiB / 0.398 GiB), while the previous full-debug
+workflow used roughly 4.1 GiB per corpus root. ScoreOnly retains the strict
+manifest/schema/validation evidence needed by the scorecard but avoids bulky
+per-replay discovery artifacts.
+
+Run a full-debug corpus only for an explicit research question that needs raw
+family, slab, schema, extraction, or movement outputs. It is not required for
+ordinary keep/revert decisions. The durable evidence is the ledger row, compact
+summary, and kept commit—not every ScoreOnly root. Retain at most the current
+baseline root and any root needed by an active investigation. After a completed
+ScoreOnly run has a recorded score, its root is reproducible and may be deleted
+manually. Retain debug roots only while they are active research evidence or
+support a documented finding. There is no automatic deletion promise. Use a
+fast local SSD for debug work and check available disk space before starting it.
 
 ## Scorecard
 

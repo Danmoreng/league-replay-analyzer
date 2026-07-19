@@ -269,9 +269,11 @@ This repo now also has a root [program.md](/C:/Development/league-replay-analyze
 If the user wants autonomous decoder iteration, read that file and [docs/autonomous-decoder-research.md](/C:/Development/league-replay-analyzer/docs/autonomous-decoder-research.md) before starting. The loop is intentionally narrower than general repo work:
 
 - prefer decoder scripts and decoder docs
-- require a full corpus rerun before keeping changes
+- require a complete 57-replay corpus rerun in `-ScoreOnly` mode before keeping changes; ScoreOnly is the default gate, not a partial corpus
 - use [scripts/summarize_decoder_corpus.mjs](/C:/Development/league-replay-analyzer/scripts/summarize_decoder_corpus.mjs) as the machine-readable scorecard
 - use [scripts/run_autoresearch.ps1](/C:/Development/league-replay-analyzer/scripts/run_autoresearch.ps1) as the recommended supervisor and [scripts/stop_autoresearch.ps1](/C:/Development/league-replay-analyzer/scripts/stop_autoresearch.ps1) to stop it cleanly
+- generate full debug artifacts only for an explicit research question; durable evidence is the ledger row, compact summary, and kept commit, so retain at most the current baseline/active ScoreOnly root and manually delete completed reproducible score roots after their score is recorded; retain debug roots only while they remain useful evidence
+- full-debug corpus roots are large (roughly 4.1 GiB versus the verified 408 MiB ScoreOnly reference); use a fast local SSD, check free space, and do not promise automatic deletion
 - do not commit replay movement fixtures or scratch artifacts during the loop
 
 If you make an important project-level decision, leave a short written record near the code instead of relying on conversation history alone.

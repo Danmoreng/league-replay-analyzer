@@ -23,8 +23,8 @@ Work with the user once to set up a run:
 3. create `tmp/autoresearch/<tag>/`
 4. initialize `tmp/autoresearch/<tag>/results.tsv` with the documented header
 5. establish the baseline:
-   - choose one fresh root such as `tmp/autoresearch/<tag>/artifacts/baseline-<timestamp>`
-   - run the full decoder corpus with `-ArtifactRoot <fresh-root> -RequireEmptyArtifactRoot`
+   - choose one fresh score root such as `tmp/autoresearch/<tag>/scores/baseline-<timestamp>`
+   - run the complete decoder corpus with `-ScoreOnly -ArtifactRoot <fresh-root> -RequireEmptyArtifactRoot`
    - run `node .\scripts\summarize_decoder_corpus.mjs --artifact-root <fresh-root> --json`
    - log the baseline row as `keep`
 
@@ -63,7 +63,7 @@ Do not drift into unrelated frontend work, Wasm work, or broad refactors unless 
 - Do not commit generated replay movement fixtures.
 - Do not commit scratch scripts unless they are promoted into real maintained tooling.
 - Do not keep changes that rely on averaging or median-based movement transforms for final extraction.
-- Do not keep a change without a full corpus rerun.
+- Do not keep a change without a complete 57-replay corpus rerun in ScoreOnly mode.
 
 ## Experiment loop
 
@@ -76,9 +76,9 @@ Loop forever:
    - `node --check` on edited files
    - targeted replay extraction or validation when useful
 5. commit the experiment
-6. choose a new per-iteration root under
-   `tmp/autoresearch/<tag>/artifacts/iteration-<n>-<timestamp>` and run the full corpus:
-   - `& 'C:\Program Files\PowerShell\7\pwsh.exe' -File .\scripts\run_decoder_corpus.ps1 -Configuration Debug -ArtifactRoot <fresh-root> -RequireEmptyArtifactRoot -Force -CleanReplayArtifacts`
+6. choose a new per-iteration score root under
+   `tmp/autoresearch/<tag>/scores/iteration-<n>-<timestamp>` and run the complete corpus:
+   - `& 'C:\Program Files\PowerShell\7\pwsh.exe' -File .\scripts\run_decoder_corpus.ps1 -Configuration Debug -ScoreOnly -ArtifactRoot <fresh-root> -RequireEmptyArtifactRoot -Force -CleanReplayArtifacts`
 7. summarize the run:
    - `node .\scripts\summarize_decoder_corpus.mjs --artifact-root <fresh-root> --json`
 8. append a row to `tmp/autoresearch/<tag>/results.tsv`
@@ -93,6 +93,25 @@ The scorecard is strict and manifest-based by default. It requires both scalar
 and assigned-movement reports for every manifested replay and rejects stale
 unmanifested score-report directories. `--allow-legacy-directory-scan` is a
 diagnostic compatibility escape hatch, never a valid autonomous scorecard.
+
+## Artifact discipline and retention
+
+`-ScoreOnly` is the default keep/revert gate. It still processes the complete
+57-replay corpus and produces the manifest, schema, validation reports, and
+scorecard needed for the decision, but suppresses bulky per-replay research
+artifacts. The verified reference run is 427,731,245 bytes (about 408 MiB /
+0.398 GiB), compared with roughly 4.1 GiB for the older full-debug run.
+
+Use full debug output only when a concrete research question needs raw family,
+slab, schema, extraction, or movement artifacts; it is not the automatic
+follow-up to every experiment. The durable evidence is the ledger row, compact
+summary, and kept commit—not every 408 MiB ScoreOnly root. Retain at most the
+current baseline root and any root needed by an active investigation. Once its
+score is recorded, a completed ScoreOnly root is reproducible and may be
+deleted manually. Keep debug roots only while they remain useful evidence for
+an active investigation or a documented finding. Do not promise automatic
+deletion: manage temporary retention deliberately. Run full debug work on a
+fast local SSD and check free space first.
 
 ## Scorecard
 
