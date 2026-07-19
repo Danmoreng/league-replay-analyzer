@@ -28,10 +28,11 @@ Known working assumptions:
 
 ## Common Commands
 
-Install JavaScript dependencies from the repo root:
+Install JavaScript dependencies from the repo root through Vite+ so the pinned
+npm version and Vite+/Vitest aliases are respected:
 
 ```powershell
-npm install
+vp install --frozen-lockfile
 ```
 
 Run the web app from the repo root:

@@ -1,6 +1,7 @@
 node_modules/
 dist/
 build/
+build-linux*/
 build-wasm/
 artifacts/
 artifacts-keyframes/

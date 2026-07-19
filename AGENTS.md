@@ -72,6 +72,9 @@ Current state:
   autonomously discover semantics
 - `scripts/build-native.ps1` builds the native target.
 - `scripts/build-wasm.ps1` builds the Wasm target and publishes generated artifacts into `apps/web/src/generated/wasm`.
+- Linux equivalents are `scripts/build-native.sh`, `scripts/test-native.sh`,
+  and `scripts/build-wasm.sh`; `scripts/import-replays.sh` safely imports a
+  locally staged replay corpus without silent overwrites.
 - `replays/` contains local replay samples for manual testing.
 - the parser extracts embedded replay metadata and per-player final `statsJson`
 - the shared C++ core implements exact packet-block framing with timestamps, channels, packet types, signed compact block parameters, payload boundaries, and source provenance
@@ -156,7 +159,9 @@ Exact timing, in-bounds values, or champion ownership prove provenance but do
 not by themselves prove semantic meaning. Do not expose heuristic coordinates,
 state fields, or event classifications as decoded facts.
 
-## Windows and Shell Assumptions
+## Host and Shell Assumptions
+
+### Windows
 
 - OS: Windows
 - shell: PowerShell 7
@@ -175,6 +180,23 @@ Because of that, follow these rules:
 - Assume Visual Studio C++ tools and CMake are the primary native toolchain on this machine.
 - Ninja is available and is the practical default generator here.
 - Prefer build scripts that bootstrap the MSVC environment through `vswhere.exe` + `vcvars64.bat` when needed.
+
+### Linux
+
+- OS: Ubuntu Linux
+- shell: Bash
+- repo path on the current Linux research host:
+  `/home/sebastian/league-replay-analyzer`
+- use `scripts/build-native.sh` and `scripts/test-native.sh` with Ninja for the
+  native build and tests
+- use `scripts/build-wasm.sh` for the Emscripten build; it automatically loads
+  a repo-local `tools/emsdk/emsdk_env.sh` when present
+- emsdk 6.0.3 is the currently verified Linux Wasm toolchain version
+- install JavaScript dependencies with `vp install --frozen-lockfile`; Vite+
+  manages the Node.js and npm versions pinned by the project
+- run Vite+ commands from `apps/web` or use the root `npm run *:web` wrappers
+- local replay files remain ignored under `replays/`; use
+  `scripts/import-replays.sh` when importing a staged Windows corpus
 
 ## Build Script Expectations
 
@@ -204,6 +226,14 @@ When authoring scripts here:
 - fail early on missing prerequisites
 - print concise status messages
 
+For Linux shell build scripts, keep the equivalent properties:
+
+- Bash strict mode with `set -Eeuo pipefail`
+- explicit configuration, build directory, generator, target, and clean options
+- early prerequisite checks and guarded build-directory cleanup
+- direct `cmake -S/-B` configuration followed by `cmake --build`
+- concise status output and optional smoke validation
+
 ## Engineering Priorities
 
 Bias implementation work toward these foundations first:
@@ -224,7 +254,7 @@ The current repo already follows this layout:
 - `apps/web` for the Vue frontend
 - `packages/rofl-core` for the C++ parser and analytics core
 - `packages/rofl-wasm` for Wasm exposure
-- `scripts` for PowerShell automation
+- `scripts` for PowerShell and Linux shell automation
 - `docs` for format notes, reverse-engineering notes, and architecture decisions
 - `replays` for local replay samples
 

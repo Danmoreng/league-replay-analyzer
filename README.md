@@ -16,16 +16,17 @@ The frontend is a Vue 3 + TypeScript app in `apps/web`, and that folder owns the
 - `apps/web` - Vue frontend and current replay dashboard
 - `packages/rofl-core` - native C++ container, packet-block, and normalized event parser
 - `packages/rofl-wasm` - browser Wasm bridge target for the C++ parser
-- `scripts` - Windows/PowerShell automation
+- `scripts` - Windows/PowerShell and Linux shell automation
 - `docs` - project notes, setup instructions, and captured direction
 - `replays` - local replay samples for testing
 
 ## Quick Start
 
-Install dependencies from the repo root:
+Install dependencies from the repo root with Vite+ so the pinned Node.js/npm
+toolchain and package aliases are respected:
 
 ```powershell
-npm install
+vp install --frozen-lockfile
 ```
 
 Run the web app from the repo root:
@@ -61,10 +62,22 @@ Build the native parser:
 pwsh -File .\scripts\build-native.ps1 -UseNinja -RunSmokeTest
 ```
 
+On Linux:
+
+```bash
+./scripts/build-native.sh --run-smoke-test
+```
+
 Run the native tests:
 
 ```powershell
 pwsh -File .\scripts\test-native.ps1 -UseNinja
+```
+
+On Linux:
+
+```bash
+./scripts/test-native.sh
 ```
 
 Print a replay summary from the native parser:
@@ -77,6 +90,12 @@ Build and publish Wasm into the frontend source tree:
 
 ```powershell
 pwsh -File .\scripts\build-wasm.ps1 -Configuration Release
+```
+
+On Linux with emsdk installed under `tools/emsdk`:
+
+```bash
+./scripts/build-wasm.sh --configuration Release
 ```
 
 ## Current MVP
@@ -160,6 +179,7 @@ The movement audit is a negative gate. `npm run audit:movement-position-goal -- 
 ## Setup Notes
 
 - Read [docs/setup/windows.md](docs/setup/windows.md) for this machine's current setup.
+- Read [docs/setup/linux.md](docs/setup/linux.md) for Linux builds and safe local replay transfer.
 - Read [docs/decoder-status.md](docs/decoder-status.md) first for the canonical productive/research status and next work.
 - Read [docs/reverse-engineering-index.md](docs/reverse-engineering-index.md) for focused evidence and reproduction docs.
 - Read [docs/chat.md](docs/chat.md) only for the historical product and architecture discussion.
