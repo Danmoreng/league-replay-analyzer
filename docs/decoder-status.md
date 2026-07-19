@@ -471,6 +471,21 @@ ID or appears as a raw LE/BE `u32` in its payload; owner/champion identity,
 entity class outside the ward subset, coordinates, paths, and waypoints remain
 unavailable.
 
+A separate exact-build `16.14.794.5912` research-only global handle audit
+extends beyond that pair cohort. It uses existing replay-only decoded
+`WARD_PLACED` IDs as an offline label oracle and scans every exact-framed chunk
+block with nonzero `blockParam`; no Timeline, Match-V5, client binary, process,
+or runtime product input is used. D7 fully loads before H3: 7,343,781 D7
+blocks / 108,063 handle instances / 998 labelled wards, then 3,269,376 H3
+blocks / 45,283 handle instances / 479 wards. The single channel-1
+`0x03E8`, length-3 family covers all wards but has 218 D7 and 86 H3 extras.
+Within the eight family/length tokens frozen from the preceding pair-cohort
+research (not an exhaustive search over every packet family), the smallest D7
+zero-extra structural subset is a first occurrence of `0x03E8/3` followed by
+`0x0023/9`; frozen H3 reproduces 479/479 with zero extras. This is not a Ward
+spawn/removal, owner, payload, position, vision, or movement decoder, and stays
+research-only with no C++/Wasm/UI output.
+
 The provisional expressions based on little-endian `u16` values at payload
 offsets 0 and 8 were disproven. Exact framing, in-bounds values, and exact owner
 only establish provenance; they do not establish coordinate semantics. A strict

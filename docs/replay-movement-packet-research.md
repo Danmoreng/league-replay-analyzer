@@ -62,7 +62,37 @@ teleports, path counts, or waypoints. It produces a deterministic
 `rofl-movement-entity-handles-research/v1` report with `researchOnly:true`,
 `promotionGate:false`, and `runtimeInput:false`; no C++/Wasm/UI decoder follows.
 
-Reproduce it after building `rofl_core_cli`:
+### Global ward-token classifier boundary
+
+`scripts/research_ward_entity_token_classifier_16_14.mjs` is a separate,
+research-only exact-build `16.14.794.5912` checkpoint. It scans the complete
+chunk-packet population with a nonzero framing `blockParam`, not just the
+`0x0328`/`0x0170` pair cohort. Existing replay-only `WARD_PLACED` output is an
+offline semantic oracle for the handle labels; the script reads no Timeline,
+Match-V5, client binary, process, or product runtime input. The seven D7
+replays contain 7,343,781 framed nonzero-param blocks, 108,063 per-replay
+handle instances, and 998 labelled wards; D7 is fully processed before H3 is
+opened. A one-token `channel 1 / 0x03E8 / length 3` negative control covers all
+998 wards but has 218 false positives. Within the eight packet-family/length
+tokens frozen from the preceding pair-cohort research, the smallest D7
+zero-extra subset is the ordered first occurrence `0x03E8/3` then `0x0023/9`:
+998/998 with zero extras. This is not an exhaustive search over every possible
+framed family/length token. The frozen three-replay H3 scan contains 3,269,376 blocks, 45,283
+handle instances, and 479 labelled wards; it reproduces 479/479 with zero
+extras, while the one-token control has 86 extras.
+
+This is only a structural handle-classification signal. It does not identify a
+Ward spawn or removal operation, owner, payload field, coordinate, vision
+property, or waypoint, and it remains `researchOnly:true`,
+`promotionGate:false`, and `runtimeInput:false`.
+
+Reproduce the global ward-token classifier after building `rofl_core_cli`:
+
+```powershell
+node .\scripts\research_ward_entity_token_classifier_16_14.mjs
+```
+
+Reproduce the earlier `0x0328`/`0x0170` companion-handle harness separately:
 
 ```powershell
 node .\scripts\research_movement_entity_handles_16_14.mjs `
