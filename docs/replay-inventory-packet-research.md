@@ -102,6 +102,29 @@ unavailable for either symbol instead of applying the Boolean extrapolation.
 Thus it is a complete ID only on the explicitly observed/fail-closed symbol
 domain, not an unrestricted future-packet decoder.
 
+The separate replay-only underidentification gate strengthens that boundary
+without Timeline, Match, or Data Dragon input. It scans every exact-build
+`16.14.794.5912` `0x0369` block and proves that the physical `all` scan is the
+exact `chunk + keyframe + startup` union. D7 contains 2,091 packets, of which
+2,040 are long enough to carry the input bits; the two missing-code counts are
+both zero, while all seven non-target codes occur. Only after those D7 counts
+and two alternative decoders are frozen does H3 open. H3 contains 1,175
+packets (1,152 input-capable) and again has zero target-code occurrences.
+
+Across all 3,266 packets (3,192 input-capable), each maintained Boolean formula
+has an equally compatible alternate: XOR bit 9 with
+`(1 XOR q72) AND (1 XOR q73) AND (1 XOR q79)`, or XOR bit 11 with
+`(1 XOR q73) AND (1 XOR q75) AND q76`. Each term is one only on its missing
+code, so the alternate agrees on every stored packet but changes that missing
+output from zero to one. The corpus therefore cannot numerically choose between
+item-ID differences of `2^9` and `2^11`; fail-closed behavior is required until
+a new replay supplies an independently anchored occurrence. Reproduce the
+deterministic research-only result with:
+
+```powershell
+node .\scripts\research_inventory_item_id_missing_symbols_16_14.mjs
+```
+
 The evidence covers 1,971 unambiguous one-purchase/one-packet joins; 236 saved
 Timeline purchases have no matching profiled packet group and remain outside
 the validation. Every label is gated to `0..8191`.
