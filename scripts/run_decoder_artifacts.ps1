@@ -20,6 +20,7 @@ param (
     [ValidateSet("chunk", "keyframe", "startup", "all")]
     [string]$RecordType = "chunk",
     [switch]$SkipScalar,
+    [switch]$ScoreOnly,
     [switch]$Clean,
     [switch]$Force
 )
@@ -330,6 +331,7 @@ if (-not (Test-Path $replayArtifactDir)) {
 
 $resolvedAnalyzerExe = Resolve-AnalyzerExecutable -ExplicitPath $AnalyzerExe -RepoRoot $repoRoot -BuildDir $BuildDir -Configuration $Configuration
 $runManifestPath = Join-Path $replayArtifactDir "run-manifest.json"
+$effectiveSkipScalar = [bool]($SkipScalar -or $ScoreOnly)
 $parameterManifest = [ordered]@{
     configuration = $Configuration
     minLength = $MinLength
@@ -343,7 +345,8 @@ $parameterManifest = [ordered]@{
     topWindows = $TopWindows
     topFields = $TopFields
     recordType = $RecordType
-    skipScalar = [bool]$SkipScalar
+    skipScalar = $effectiveSkipScalar
+    scoreOnly = [bool]$ScoreOnly
 }
 $inputManifest = [ordered]@{
     replay = Get-FileFingerprint -Path $resolvedReplayPath
@@ -383,7 +386,7 @@ try {
         "--top-fields", "$TopFields",
         "--record-type", $RecordType
     )
-    if ($SkipScalar) {
+    if ($effectiveSkipScalar) {
         $batchArguments += "--skip-scalar"
     }
 
@@ -402,11 +405,13 @@ try {
         $familyDir = Join-Path (Join-Path $replayArtifactDir "families") $familyKey
         New-Item -ItemType Directory -Path $familyDir -Force | Out-Null
 
-        Write-Utf8File -Path (Join-Path $familyDir "entity-slab.json") -Content (($family.entitySlab | ConvertTo-Json -Depth 100))
-        if (-not $SkipScalar -and $null -ne $family.scalar) {
+        if (-not $ScoreOnly) {
+            Write-Utf8File -Path (Join-Path $familyDir "entity-slab.json") -Content (($family.entitySlab | ConvertTo-Json -Depth 100))
+        }
+        if (-not $effectiveSkipScalar -and $null -ne $family.scalar) {
             Write-Utf8File -Path (Join-Path $familyDir "scalar.json") -Content (($family.scalar | ConvertTo-Json -Depth 100))
         }
-        if ($null -ne $family.schema) {
+        if (-not $ScoreOnly -and $null -ne $family.schema) {
             Write-Utf8File -Path (Join-Path $familyDir "schema.json") -Content (($family.schema | ConvertTo-Json -Depth 100))
         }
         if ($null -ne $family.cleaned) {
@@ -428,14 +433,16 @@ try {
             mixedSlots = @($family.mixedSlots | ForEach-Object { [int]$_ })
             handleSlots = @($family.handleSlots | ForEach-Object { [int]$_ })
             files = [ordered]@{
-                entitySlab = "entity-slab.json"
-                scalar = if ($SkipScalar -or $null -eq $family.scalar) { $null } else { "scalar.json" }
-                schema = if ($null -eq $family.schema) { $null } else { "schema.json" }
+                entitySlab = if ($ScoreOnly) { $null } else { "entity-slab.json" }
+                scalar = if ($effectiveSkipScalar -or $null -eq $family.scalar) { $null } else { "scalar.json" }
+                schema = if ($ScoreOnly -or $null -eq $family.schema) { $null } else { "schema.json" }
                 cleaned = if ($null -eq $family.cleaned) { $null } else { "cleaned.json" }
             }
         }
 
-        Write-Utf8File -Path (Join-Path $familyDir "analysis-plan.json") -Content ($familyManifest | ConvertTo-Json -Depth 8)
+        if (-not $ScoreOnly) {
+            Write-Utf8File -Path (Join-Path $familyDir "analysis-plan.json") -Content ($familyManifest | ConvertTo-Json -Depth 8)
+        }
         $familyManifests += $familyManifest
     }
 
@@ -458,6 +465,9 @@ try {
     Write-Host "Wrote decoder artifacts to $replayArtifactDir using native batch mode" -ForegroundColor Green
     $usedNativeBatch = $true
 } catch {
+    if ($ScoreOnly) {
+        throw "Score-only artifact generation requires the native batch path and will not fall back to the write-heavy legacy path: $($_.Exception.Message)"
+    }
     Write-Host "Native batch artifact analysis unavailable, falling back to legacy per-command mode: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
@@ -510,7 +520,7 @@ if (-not $usedNativeBatch) {
         )
         Write-Utf8File -Path (Join-Path $familyDir "entity-slab.json") -Content $entityResult.Raw
 
-        if (-not $SkipScalar) {
+        if (-not $effectiveSkipScalar) {
             $scalarResult = Invoke-DecoderJson -Executable $resolvedAnalyzerExe -Arguments @(
                 "--analyze-scalar-family-json",
                 $resolvedReplayPath,
@@ -542,7 +552,7 @@ if (-not $usedNativeBatch) {
             handleSlots = @($slotSelection.HandleSlots)
             files = [ordered]@{
                 entitySlab = "entity-slab.json"
-                scalar = if ($SkipScalar) { $null } else { "scalar.json" }
+                scalar = if ($effectiveSkipScalar) { $null } else { "scalar.json" }
                 schema = if ($selectedSlots.Count -gt 0) { "schema.json" } else { $null }
                 cleaned = if ($selectedSlots.Count -gt 0) { "cleaned.json" } else { $null }
             }

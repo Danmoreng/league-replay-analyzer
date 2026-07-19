@@ -18,7 +18,8 @@ param (
     [switch]$SkipCorpusSchema,
     [switch]$SkipExtraction,
     [switch]$SkipValidation,
-    [switch]$SkipMovement
+    [switch]$SkipMovement,
+    [switch]$ScoreOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -260,6 +261,7 @@ foreach ($replayFile in $replayFiles) {
         -TopFamilies $TopFamilies `
         -TopWindows $TopWindows `
         -TopFields $TopFields `
+        -ScoreOnly:$ScoreOnly `
         -Force:$Force `
         -Clean:$CleanReplayArtifacts
 
@@ -283,7 +285,11 @@ foreach ($replayFile in $replayFiles) {
             Write-Host "Reusing provisional schema for $($replayFile.Name)" -ForegroundColor Green
         } else {
             Write-Host "Building provisional schema for $($replayFile.Name)" -ForegroundColor Cyan
-            node $schemaScript --artifact-dir $artifactDir --fixture-dir $fixtureDir
+            if ($ScoreOnly) {
+                node $schemaScript --artifact-dir $artifactDir --fixture-dir $fixtureDir --score-only
+            } else {
+                node $schemaScript --artifact-dir $artifactDir --fixture-dir $fixtureDir
+            }
             if ($LASTEXITCODE -ne 0) {
                 throw "Provisional schema generation failed for $($replayFile.FullName)"
             }
@@ -303,6 +309,7 @@ $manifest = [ordered]@{
     replayRoot = $resolvedReplayRoot
     apiRoot = $resolvedApiRoot
     artifactRoot = $resolvedArtifactRoot
+    scoreOnly = [bool]$ScoreOnly
     processed = $processed
 }
 
@@ -475,7 +482,8 @@ if (-not $SkipMovement) {
         $movementExtractedPath = Join-Path $entry.artifactDir "extracted-movement.json"
         $movementValidationPath = Join-Path $entry.artifactDir "movement-validation-report.json"
 
-        if (Test-OutputsFresh -OutputPaths @($movementCandidatePath, $movementSchemaPath) -InputPaths @(
+        $movementDiscoveryOutputs = if ($ScoreOnly) { @($movementSchemaPath) } else { @($movementCandidatePath, $movementSchemaPath) }
+        if (Test-OutputsFresh -OutputPaths $movementDiscoveryOutputs -InputPaths @(
                 $discoverMovementScript,
                 (Join-Path $entry.artifactDir "run-manifest.json"),
                 (Join-Path $entry.fixtureDir "match.json"),
@@ -484,7 +492,11 @@ if (-not $SkipMovement) {
             Write-Host "Reusing movement candidates for $($entry.replayName)" -ForegroundColor Green
         } else {
             Write-Host "Discovering movement candidates for $($entry.replayName)" -ForegroundColor Cyan
-            if (Test-Path $movementCoordinateModelPath) {
+            if ($ScoreOnly -and (Test-Path $movementCoordinateModelPath)) {
+                node $discoverMovementScript --artifact-dir $entry.artifactDir --fixture-dir $entry.fixtureDir --coordinate-model-path $movementCoordinateModelPath --compact-score-only
+            } elseif ($ScoreOnly) {
+                node $discoverMovementScript --artifact-dir $entry.artifactDir --fixture-dir $entry.fixtureDir --compact-score-only
+            } elseif (Test-Path $movementCoordinateModelPath) {
                 node $discoverMovementScript --artifact-dir $entry.artifactDir --fixture-dir $entry.fixtureDir --coordinate-model-path $movementCoordinateModelPath
             } else {
                 node $discoverMovementScript --artifact-dir $entry.artifactDir --fixture-dir $entry.fixtureDir
@@ -507,35 +519,46 @@ if (-not $SkipMovement) {
             }
         }
 
-        if (Test-OutputsFresh -OutputPaths @($movementValidationPath) -InputPaths @(
-                $validateMovementScript,
-                $movementCandidatePath,
-                $movementSchemaPath,
-                (Join-Path $entry.fixtureDir "timeline.json"))) {
-            Write-Host "Reusing movement validation for $($entry.replayName)" -ForegroundColor Green
-        } else {
-            Write-Host "Validating movement candidates for $($entry.replayName)" -ForegroundColor Cyan
-            node $validateMovementScript --candidate-matches-path $movementCandidatePath --provisional-schema-path $movementSchemaPath --output-path $movementValidationPath
-            if ($LASTEXITCODE -ne 0) {
-                throw "Movement validation failed for $($entry.replayName)"
+        if (-not $ScoreOnly) {
+            if (Test-OutputsFresh -OutputPaths @($movementValidationPath) -InputPaths @(
+                    $validateMovementScript,
+                    $movementCandidatePath,
+                    $movementSchemaPath,
+                    (Join-Path $entry.fixtureDir "timeline.json"))) {
+                Write-Host "Reusing movement validation for $($entry.replayName)" -ForegroundColor Green
+            } else {
+                Write-Host "Validating movement candidates for $($entry.replayName)" -ForegroundColor Cyan
+                node $validateMovementScript --candidate-matches-path $movementCandidatePath --provisional-schema-path $movementSchemaPath --output-path $movementValidationPath
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Movement validation failed for $($entry.replayName)"
+                }
             }
         }
 
-        $entry["movementCandidatePath"] = $movementCandidatePath
         $entry["movementSchemaPath"] = $movementSchemaPath
         $entry["movementExtractedPath"] = $movementExtractedPath
-        $entry["movementValidationPath"] = $movementValidationPath
+        if (-not $ScoreOnly) {
+            $entry["movementCandidatePath"] = $movementCandidatePath
+            $entry["movementValidationPath"] = $movementValidationPath
+        }
     }
 
     $movementIdentityPriorsPath = Join-Path $resolvedArtifactRoot "movement-identity-priors.json"
     $movementPriorsInputs = @($movementIdentityPriorsScript)
     foreach ($entry in $processed) {
-        $movementPriorsInputs += @(
-            $entry.movementCandidatePath,
-            $entry.movementSchemaPath,
-            $entry.movementExtractedPath,
-            $entry.movementValidationPath
-        )
+        if ($ScoreOnly) {
+            $movementPriorsInputs += @(
+                (Join-Path $entry.artifactDir "summary.json"),
+                $entry.movementSchemaPath
+            )
+        } else {
+            $movementPriorsInputs += @(
+                $entry.movementCandidatePath,
+                $entry.movementSchemaPath,
+                $entry.movementExtractedPath,
+                $entry.movementValidationPath
+            )
+        }
     }
     if (Test-OutputsFresh -OutputPaths @($movementIdentityPriorsPath) -InputPaths $movementPriorsInputs) {
         Write-Host "Reusing movement identity priors" -ForegroundColor Green
@@ -583,23 +606,27 @@ if (-not $SkipMovement) {
         $entry["assignedMovementValidationPath"] = $assignedMovementValidationPath
     }
 
-    $movementModelInputs = @($movementCoordinateModelScript)
-    foreach ($entry in $processed) {
-        $movementModelInputs += @(
-            $entry.movementValidationPath,
-            $entry.assignedMovementValidationPath
-        )
-    }
-    if (Test-OutputsFresh -OutputPaths @($movementCoordinateModelPath) -InputPaths $movementModelInputs) {
-        Write-Host "Reusing movement coordinate model" -ForegroundColor Green
+    if ($ScoreOnly) {
+        Write-Host "Skipping diagnostic movement coordinate model in score-only mode" -ForegroundColor DarkGray
     } else {
-        Write-Host "Building movement coordinate model" -ForegroundColor Cyan
-        node $movementCoordinateModelScript --artifact-root $resolvedArtifactRoot --corpus-manifest $manifestPath --output-path $movementCoordinateModelPath
-        if ($LASTEXITCODE -ne 0) {
-            throw "Movement coordinate model generation failed."
+        $movementModelInputs = @($movementCoordinateModelScript)
+        foreach ($entry in $processed) {
+            $movementModelInputs += @(
+                $entry.movementValidationPath,
+                $entry.assignedMovementValidationPath
+            )
         }
+        if (Test-OutputsFresh -OutputPaths @($movementCoordinateModelPath) -InputPaths $movementModelInputs) {
+            Write-Host "Reusing movement coordinate model" -ForegroundColor Green
+        } else {
+            Write-Host "Building movement coordinate model" -ForegroundColor Cyan
+            node $movementCoordinateModelScript --artifact-root $resolvedArtifactRoot --corpus-manifest $manifestPath --output-path $movementCoordinateModelPath
+            if ($LASTEXITCODE -ne 0) {
+                throw "Movement coordinate model generation failed."
+            }
+        }
+        $manifest["movementCoordinateModelPath"] = $movementCoordinateModelPath
     }
-    $manifest["movementCoordinateModelPath"] = $movementCoordinateModelPath
 }
 
 $manifest.generatedAtUtc = (Get-Date).ToUniversalTime().ToString("o")

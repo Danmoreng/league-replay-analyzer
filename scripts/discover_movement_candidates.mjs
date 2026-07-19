@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 
 import {
   buildPositionSeries,
@@ -27,6 +28,7 @@ function parseArgs(argv) {
     minOverlap: 6,
     topMatches: 256,
     maxPairsPerSlot: 120,
+    compactScoreOnly: false,
   };
 
   for (let index = 2; index < argv.length; index += 1) {
@@ -45,6 +47,8 @@ function parseArgs(argv) {
       args.topMatches = Number.parseInt(argv[++index], 10);
     } else if (arg === "--max-pairs-per-slot" && index + 1 < argv.length) {
       args.maxPairsPerSlot = Number.parseInt(argv[++index], 10);
+    } else if (arg === "--compact-score-only") {
+      args.compactScoreOnly = true;
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -61,7 +65,8 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log("Usage: node ./scripts/discover_movement_candidates.mjs --artifact-dir <path> [--fixture-dir <path>] [--output-dir <path>] [--coordinate-model-path <path>]");
+  console.log("Usage: node ./scripts/discover_movement_candidates.mjs --artifact-dir <path> [--fixture-dir <path>] [--output-dir <path>] [--coordinate-model-path <path>] [--compact-score-only]");
+  console.log("  --compact-score-only  Write a bounded, explicitly marked replay/topMatches projection instead of the full raw-pair debug report; cap ranked movement patterns at 32. This is for corpus scoring/storage experiments, not full movement research.");
 }
 
 function buildFieldCandidate(familySummary, slotSummary, field) {
@@ -858,6 +863,72 @@ function buildPatternSummary(patternKey, candidates) {
   };
 }
 
+export function buildMovementOutputDocuments({
+  replayId,
+  artifactDir,
+  fixtureDir,
+  familyCount,
+  coordinateModelPath,
+  allMatches,
+  rawPairCandidates,
+  rankedPatterns,
+  promotedPatterns,
+  topMatches,
+  compactScoreOnly,
+}) {
+  const summary = {
+    totalMatches: allMatches.length,
+    rawPairCount: rawPairCandidates.length,
+    patternCount: rankedPatterns.length,
+    promotedPatternCount: promotedPatterns.length,
+  };
+  const candidateMatchesReport = compactScoreOnly
+    ? {
+      schema: "rofl-movement-candidate-matches-compact/v1",
+      outputMode: "compact-score-only",
+      rawPairCandidatesAvailable: false,
+      replayId,
+      generatedAtUtc: new Date().toISOString(),
+      artifactDir,
+      fixtureDir,
+      summary,
+      topMatches: allMatches.slice(0, topMatches),
+    }
+    : {
+      replayId,
+      generatedAtUtc: new Date().toISOString(),
+      artifactDir,
+      fixtureDir,
+      summary,
+      rawPairCandidates,
+      topMatches: allMatches.slice(0, topMatches),
+    };
+
+  const provisionalSchema = {
+    replayId,
+    generatedAtUtc: new Date().toISOString(),
+    source: {
+      artifactDir,
+      fixtureDir,
+      familyCount,
+      coordinateModelPath,
+      ...(compactScoreOnly ? { outputMode: "compact-score-only" } : {}),
+    },
+    thresholds: {
+      minRows: 2,
+      minParticipants: 4,
+      minAverageAxisCorrelation: 0.45,
+      minAverageMinAxisCorrelation: 0.18,
+      maxAverageNormalizedDistanceRmse: 0.2,
+      minAverageRangeRatio: 0.35,
+      minAverageValidatorScore: 0.55,
+    },
+    promotedPatterns,
+    rankedPatterns: rankedPatterns.slice(0, compactScoreOnly ? 32 : 128),
+  };
+  return { candidateMatchesReport, provisionalSchema };
+}
+
 function main() {
   const repoRoot = process.cwd();
   const args = parseArgs(process.argv);
@@ -986,49 +1057,28 @@ function main() {
     pattern.support.avgValidatorScore >= 0.55,
   );
 
-  const candidateMatchesReport = {
+  const { candidateMatchesReport, provisionalSchema } = buildMovementOutputDocuments({
     replayId,
-    generatedAtUtc: new Date().toISOString(),
     artifactDir,
     fixtureDir,
-    summary: {
-      totalMatches: allMatches.length,
-      rawPairCount: rawPairCandidates.length,
-      patternCount: rankedPatterns.length,
-      promotedPatternCount: promotedPatterns.length,
-    },
+    familyCount: familySummaries.length,
+    coordinateModelPath: fs.existsSync(coordinateModelPath) ? coordinateModelPath : null,
+    allMatches,
     rawPairCandidates,
-    topMatches: allMatches.slice(0, args.topMatches),
-  };
-
-  const provisionalSchema = {
-    replayId,
-    generatedAtUtc: new Date().toISOString(),
-    source: {
-      artifactDir,
-      fixtureDir,
-      familyCount: familySummaries.length,
-      coordinateModelPath: fs.existsSync(coordinateModelPath) ? coordinateModelPath : null,
-    },
-    thresholds: {
-      minRows: 2,
-      minParticipants: 4,
-      minAverageAxisCorrelation: 0.45,
-      minAverageMinAxisCorrelation: 0.18,
-      maxAverageNormalizedDistanceRmse: 0.2,
-      minAverageRangeRatio: 0.35,
-      minAverageValidatorScore: 0.55,
-    },
+    rankedPatterns,
     promotedPatterns,
-    rankedPatterns: rankedPatterns.slice(0, 128),
-  };
+    topMatches: args.topMatches,
+    compactScoreOnly: args.compactScoreOnly,
+  });
 
   writeJson(path.join(outputDir, "movement-candidate-matches.json"), candidateMatchesReport);
   writeJson(path.join(outputDir, "movement-provisional-schema.json"), provisionalSchema);
 
-  console.log(`Wrote movement candidate matches to ${path.join(outputDir, "movement-candidate-matches.json")}`);
+  console.log(`Wrote ${args.compactScoreOnly ? "compact score-only " : ""}movement candidate matches to ${path.join(outputDir, "movement-candidate-matches.json")}`);
   console.log(`Wrote movement provisional schema to ${path.join(outputDir, "movement-provisional-schema.json")}`);
   console.log(`Promoted ${promotedPatterns.length} movement patterns from ${rankedPatterns.length} ranked patterns.`);
 }
 
-main();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}

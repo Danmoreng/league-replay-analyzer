@@ -1,5 +1,7 @@
 import fs from "fs";
 import path from "path";
+import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
 
 import {
   average,
@@ -759,7 +761,7 @@ function promoteBundleGroup(group) {
   );
 }
 
-function buildComparableSchema(schema) {
+export function buildComparableSchema(schema) {
   return {
     ...schema,
     generatedAtUtc: null,
@@ -768,6 +770,12 @@ function buildComparableSchema(schema) {
     rankedPatterns: null,
     bundleRankedPatterns: null,
   };
+}
+
+export function buildSchemaFingerprint(schema) {
+  const comparableSchema = JSON.stringify(buildComparableSchema(schema));
+  const digest = createHash("sha256").update(comparableSchema, "utf8").digest("hex");
+  return `sha256:${digest}`;
 }
 
 function main() {
@@ -907,14 +915,14 @@ function main() {
     bundlePromotedPatterns,
     bundleRankedPatterns: bundleRankedPatterns.slice(0, 64),
   };
-  corpusSchema.schemaFingerprint = JSON.stringify(buildComparableSchema(corpusSchema));
+  corpusSchema.schemaFingerprint = buildSchemaFingerprint(corpusSchema);
 
   const nextComparable = corpusSchema.schemaFingerprint;
   let wroteSchema = true;
   if (fs.existsSync(outputPath)) {
     const existingSchema = readJson(outputPath);
-    const existingComparable = JSON.stringify(buildComparableSchema(existingSchema));
-    if (existingComparable === nextComparable) {
+    const existingComparable = buildSchemaFingerprint(existingSchema);
+    if (existingComparable === nextComparable && existingSchema.schemaFingerprint === nextComparable) {
       wroteSchema = false;
     }
   }
@@ -929,4 +937,6 @@ function main() {
   console.log(`Promoted ${bundlePromotedPatterns.length} bundle-backed patterns from ${bundleRankedPatterns.length} ranked bundle patterns.`);
 }
 
-main();
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  main();
+}

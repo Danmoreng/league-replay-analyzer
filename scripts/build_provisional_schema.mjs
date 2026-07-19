@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "node:url";
 
 const metricDefinitions = [
   { key: "level", label: "Level", monotonic: true, minCorrelation: 0.45, maxNormalizedRmse: 0.9, minOverlap: 6, read: (frame) => frame.level ?? null },
@@ -23,6 +24,7 @@ function parseArgs(argv) {
     minPatternRows: 2,
     minPatternParticipants: 2,
     topMatches: 256,
+    scoreOnly: false,
   };
 
   for (let index = 2; index < argv.length; index += 1) {
@@ -39,6 +41,8 @@ function parseArgs(argv) {
       args.minPatternParticipants = Number.parseInt(argv[++index], 10);
     } else if (arg === "--top-matches" && index + 1 < argv.length) {
       args.topMatches = Number.parseInt(argv[++index], 10);
+    } else if (arg === "--score-only" || arg === "--compact") {
+      args.scoreOnly = true;
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -55,7 +59,8 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log("Usage: node ./scripts/build_provisional_schema.mjs --artifact-dir <path> [--fixture-dir <path>] [--output-dir <path>]");
+  console.log("Usage: node ./scripts/build_provisional_schema.mjs --artifact-dir <path> [--fixture-dir <path>] [--output-dir <path>] [--score-only]");
+  console.log("  --score-only, --compact  Write a compact candidate-matches.json without rawWindowCandidates; provisional-schema.json remains complete.");
 }
 
 function resolveAbsolute(root, targetPath) {
@@ -582,6 +587,20 @@ function buildPatternSummary(patternKey, candidates) {
   };
 }
 
+/**
+ * The corpus score path needs the ranked scalar evidence, not the potentially
+ * large raw-window diagnostic dump. Keep every ordinary candidate-report field
+ * intact so score consumers remain compatible, while making this output mode
+ * explicit for tooling that wants to detect a compact artifact.
+ */
+function projectCandidateMatchesForScoreOnly(candidateMatchesReport) {
+  const { rawWindowCandidates: _rawWindowCandidates, ...compactReport } = candidateMatchesReport;
+  return {
+    ...compactReport,
+    outputMode: "score-only",
+  };
+}
+
 function main() {
   const repoRoot = process.cwd();
   const args = parseArgs(process.argv);
@@ -754,7 +773,10 @@ function main() {
     rankedPatterns: rankedPatterns.slice(0, 128),
   };
 
-  writeJson(path.join(outputDir, "candidate-matches.json"), candidateMatchesReport);
+  const candidateMatchesOutput = args.scoreOnly
+    ? projectCandidateMatchesForScoreOnly(candidateMatchesReport)
+    : candidateMatchesReport;
+  writeJson(path.join(outputDir, "candidate-matches.json"), candidateMatchesOutput);
   writeJson(path.join(outputDir, "provisional-schema.json"), provisionalSchema);
 
   console.log(`Wrote candidate matches to ${path.join(outputDir, "candidate-matches.json")}`);
@@ -762,4 +784,9 @@ function main() {
   console.log(`Promoted ${promotedPatterns.length} patterns from ${rankedPatterns.length} ranked patterns.`);
 }
 
-main();
+const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
+if (invokedPath === fileURLToPath(import.meta.url)) {
+  main();
+}
+
+export { parseArgs, projectCandidateMatchesForScoreOnly };
