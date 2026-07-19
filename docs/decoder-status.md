@@ -228,6 +228,13 @@ owner/timestamp purchase-ID multisets semantically link 1,973 packets; the
 remaining 546 are explicitly transaction-unresolved and must not be emitted as
 purchases, slots, instances, transforms, or undo operations.
 
+An exhaustive all-segment scan now confirms that the two fail-closed symbols
+cannot be learned from the current fixtures: all 3,266 `0x0369` blocks in the
+ten replays were framed and inspected, and bit-9 input code `0` plus bit-11
+input code `4` each occur zero times. No keyframe or startup copy supplies
+them. The decoder must therefore keep those codes unavailable until a new
+saved replay contains independent coverage.
+
 The same fixed ten-fixture, 7/3 Discovery/Holdout research gate isolates a
 second, still unresolved removal-context family: champion-owned channel-1
 `0x0146` packets of length 2/3/4. There are 4,214 packets. A strictly
@@ -246,6 +253,72 @@ only the number outside the single-Destroy shape; it includes the 25
 double-Destroy companions. This is
 not an `0x0146` semantic decoder: its item, slot, instance, payload grammar,
 and operation class remain unavailable, and it emits no C++/Wasm/UI output.
+
+Pinned Data Dragon classification also shows that the timing-associated labels
+are semantically mixed, not a clean system-item class: the single-Destroy shape
+contains ordinary Health Potions, Control Wards, Biscuits, and elixirs as well
+as system items, while every double-Destroy group combines a Control Ward with
+a support-quest item. Full-payload, prefix, and bounded Boolean classifiers all
+collide with the other 3,755 packets, so `0x0146` cannot yet be normalized as
+use, consume, removal, or charge state.
+
+Owner-local stateful context does not resolve it either. Most profiled `0x0146`
+packets are standalone relative to same-time profiled add/removal operations;
+neighbour families vary widely, identical payloads collide across several item
+labels or no label, and a zero-extra D7 payload rule covers only 187/290 nearby
+labels before producing two H3 extras. No item, charge, slot, instance, or
+operation class survives the frozen split.
+
+A maintained, research-only patch-16.14 static-recipe constraint now uses an
+explicit locally saved and SHA-256-pinned Data Dragon `16.14.1` item catalog.
+It intersects each result item's transitive `from` closure with distinct
+historically observed same-owner `0x0369` item IDs. Those historical IDs are
+not current inventory, surviving instances, slots, or counts. On the fixed D7
+set the recipe constraint reduces the mean candidate set from 10.27 to 1.50
+and yields 138 exact singletons out of 209 evaluated real-item removals; the
+frozen H3 result is 11.61 to 1.60 and 56/83. All 292 labelled truths remain in
+the constrained sets, 194 are singleton and 98 remain ambiguous. The harness
+does not attempt complete inventory reconstruction and emits no runtime data.
+
+A stronger direct-recipe shortcut is explicitly rejected: inferring every
+direct `from` component for a one-add/matching-removal group finds all 291
+labelled groups but also emits 60 extra groups (82.9% precision). Bounded
+packet-order, recipe, prefix/bit, and local-neighbour discriminators do not
+remove those extras without losing truths. Likewise, 194 recipe-singleton
+removals provide no direct 6/7-byte `0x03F9` item-ID slice or compact Boolean
+codec. A stateful operation/inventory grammar is still required.
+
+A conservative online multiset reducer confirms that this missing grammar is
+not merely an implementation detail. Starting empty and stopping each owner at
+the first unresolved profiled operation accepts 15/15 exact Discovery prefix
+events, all pure starting-item adds and zero recipes. Under the frozen rule,
+Holdout accepts eight exact local adds but misses one additional Timeline event
+inside a continuous prefix. No owner reaches the end of the profiled stream,
+so no final inventory comparison is valid. This scratch reducer is therefore
+neither a partial runtime decoder nor a complete-state path.
+
+Even conservative unique-source lifecycles do not expose the link directly:
+15 D7 and 9 H3 add-to-removal pairs are available after offline state
+disambiguation, but an exhaustive one-to-eight-bit contiguous slice/XOR search
+between their `0x0369` and `0x03F9` payloads has zero exact D7 candidate. Slot,
+instance, and removal identity remain unresolved.
+
+Owner-local ordinal/count lookups likewise leave zero exact H3 hypothesis;
+non-contiguous XOR rules are massively non-unique, and most nearby keyframe
+inventory anchors contain multiple item operations. Neither state order nor
+keyframe proximity supplies an individual slot/instance link.
+
+Nor do pinned static prices reveal a gold field: 710 strict D7 purchase-cost
+labels and 77 sale-gain labels have zero exact direct integer, varint, bitfield,
+successive-packet-delta, or nearest-owner-keyframe `i32` candidate. H3 remains
+unopened because Discovery has no codec. Purchase/sale gold deltas and current
+gold are therefore still unavailable.
+
+An expanded exact-framing pass over all 9,908,848 D7 chunk blocks likewise
+finds no co-timestamp companion: 5,606 non-operation blocks across 1,284
+type/channel/length/prefix families are tested as direct scalars, varints,
+bitfields, direction-aware amounts, and stateful deltas; the best direct hit is
+15/787. With no D7 candidate, H3 remains closed.
 
 An add/update packet is not necessarily a purchase. Automatic transforms and
 unlabelled state updates exist. The sold/removed item, slot, item instance,
@@ -268,16 +341,34 @@ out a second single-family constant-prefix classifier through 16 prefix bytes,
 not a stateful multi-packet grammar. H3 remains unopened because Discovery has
 no exact candidate.
 
+Within the 31 exact `0x0081` anchors, there is no same-owner/time/chunk
+`0x0369`, `0x03F9`, or `0x0146` companion. Nearest-operation and 60-second
+lookback links recover at most 6/23 D7 and 2/8 H3 offline `beforeId` labels, and
+no payload byte maps exactly to Undo `beforeId`, `afterId`, or `goldGain`.
+These anchors therefore still cannot update replay-native inventory state.
+Nearest same-owner keyframe components provide no full equality, chunk
+subsequence, shared four-byte prefix, common aligned XOR edit, or stable
+ordinal either.
+
+The repeated `BE C7 1F 76` / `BE C9 1F 76` marker partition is byte-lossless
+over all 5,798 patch-16.9 `0x0165` payloads, but it is not a proven record
+splitter. No bounded byte, `u16`, LEB128, or mask field encodes body length,
+ordinal, or remaining-record count exactly; prefix/suffix clusters conflict in
+Holdout, and Undo-to-near-keyframe full-body matches are sparse and
+ordinal-unstable. Marker occurrence alone must not become framing or instance
+identity.
+
 An expanded full-payload and offline-oracle scan falsified the strongest simple
 slot candidate: it matches 155/196 deterministic initial adds but only 108/239
 terminal final-item labels. Across 882 offline-linked add/removal lifecycles,
 the best slot-sized relationship reaches 675/882 and the best instance-sized
 relationship 505/882; a separately labelled removal-slot scan reaches 420/733.
 These correlations are useful search constraints but are not runtime fields.
-The next inventory lead is a lossless record splitter for the repeated
-`0x0165` component tags (`BE C7 1F 76` and `BE C9 1F 76`), followed by a
-same-owner keyframe/chunk structural comparison. The separate swap family and
-the patch-specific add/update symbol codec remain parallel leads.
+The next inventory lead is a stateful operation and slot/instance grammar that
+can reject automatic transforms and resolve removals against an actually
+maintained inventory. The separate swap/use families and conservative prefix
+reducers remain parallel leads; marker partitioning and static recipe lookup
+alone are insufficient.
 
 ### Keyframe champion state
 
@@ -337,14 +428,25 @@ current or earned gold, numeric lane CS, delta, or last-hit event is decoded.
 Jungle-CS offsets 134..137 remain an imperfect negative control with ten false
 positives.
 
+Schema `rofl-keyframe-economy-anchors-research/v4` adds structural-only gates
+without promoting fields. D7 has 229 ever-non-default offsets and H3 has 221,
+with no H3-only offset. A D7-only selector freezes two maximal non-constant
+exact mirrors—`154..162` to `1289..1297` and `1066..1073` to
+`1074..1081`—which reproduce byte-for-byte in H3. Uniform alternating
+`[value,0x0E]` / `[0x0E,value]` cells and a one-bit adjacent mask-header model
+are both falsified. These are serialization diagnostics, not records or field
+boundaries.
+
 A separately bounded stride-two scalar audit checks 1,126 integer, Float32,
 Float64, raw-delta, constant-XOR, and constant-add candidates over starts
 `90..160` and logical widths `2..8`. None is D7-exact; adding `p121`, `p131`,
 or `p141` to the apparent gold/lane/jungle lanes yields zero direct matches and
 no viable changing-delta decoder in D7 or frozen H3. Bounded discrete packet
 searches likewise find no exact champion-owner lane-CS or jungle-CS event-count
-family. The next keyframe step is therefore a stateful replication/record
-grammar, not a wider static scalar packing.
+family. The best lane-CS burst candidate covers just 149/1,482 positive D7
+intervals and adds 361 unchanged-interval events; the only zero-extra prefix
+candidate covers zero positive deltas. The next keyframe step is therefore a
+stateful replication/record grammar, not a wider static scalar packing.
 
 Position, health, resources, numeric gold, XP, level, numeric CS, damage, KDA,
 and alive state are not decoded. Older supervised keyframe assignments are
@@ -355,6 +457,19 @@ replication/component serialization grammar. See
 ### Movement
 
 There is no valid replay-native position, path target, or waypoint decoder.
+
+An exact-build patch-16.14 maintained gate proves one bounded entity relation.
+All 6,314 channel-1 chunk type `0x0170` (368) blocks are consecutive after a
+type `0x0328` (808) block in the same chunk with the same timestamp,
+`blockParam`, and payload length; 1,494 type-808 blocks are unpaired. Within
+that set, 759 pair `blockParam` values exactly equal replay-decoded ward entity
+IDs and occur strictly after placement. All 29 links with an available
+conservative removal occur before it, and every ward-linked pair has a 17-byte
+payload. This establishes a generic entity-handle relation for that subset,
+not the operation or payload grammar. No paired handle is a champion network
+ID or appears as a raw LE/BE `u32` in its payload; owner/champion identity,
+entity class outside the ward subset, coordinates, paths, and waypoints remain
+unavailable.
 
 The provisional expressions based on little-endian `u16` values at payload
 offsets 0 and 8 were disproven. Exact framing, in-bounds values, and exact owner
@@ -415,16 +530,19 @@ it does not prove what those bytes mean.
 
 ## Recommended Next Work
 
-1. Obtain independent coverage for the two fail-closed patch-16.14 item-ID
-   symbols, then complete slot/instance/removal decoding and reconstruct
-   inventory state; expose item events and a scrubber-synchronized inventory
-   panel only after the Native/Wasm promotion gate.
+1. Preserve fail-closed handling for the two absent patch-16.14 item-ID symbols
+   until new replay coverage exists. In parallel, decode the stateful
+   operation/slot/instance/removal grammar, reject automatic transforms, and
+   reconstruct inventory state; expose item events and a synchronized panel
+   only after the Native/Wasm promotion gate.
 2. Decode the inner keyframe replication/component grammar using the exact but
    non-semantic `totalGold` and lane-CS change correlations only as search
    constraints. Use final `statsJson` values plus controlled transitions as
    replay-only constraints for numeric gold, XP, level, CS, health, and
    resources.
-3. Decode the real movement/waypoint protocol and entity identity. Validate raw
+3. Use the exact ward-linked generic handle subset to decode the
+   `0x0328`/`0x0170` operation and payload grammar, expand replay-native entity
+   identity, then decode the real movement/waypoint protocol. Validate raw
    waypoints before considering interpolation, pathfinding, or movement-speed
    reconstruction.
 4. Decode the isolated versioned ward spawn/companion grammar into X/Y, then

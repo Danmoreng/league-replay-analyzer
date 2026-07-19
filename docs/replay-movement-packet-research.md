@@ -26,6 +26,49 @@ These expressions describe only stable, in-range packet values. They must not
 be called positions, path targets, endpoints, or waypoints. Exact packet
 framing and exact champion ownership validate provenance, not semantics.
 
+## Patch-16.14 entity-handle checkpoint
+
+The maintained replay-only harness
+`scripts/research_movement_entity_handles_16_14.mjs` keeps one narrower
+structural result. It reads only the ten saved exact-build `16.14.794.5912`
+`.rofl` files and uses the existing replay-only ward decoder solely as an
+entity-ID oracle. The
+oracle is bound to the checked-in external profile provenance fingerprint
+`fnv1a64:6d28e6357df7d878`; profile drift fails closed. It does not read
+Timeline, Match-V5, client binaries, or runtime inputs.
+
+The fixed seven-replay D7 split is completely loaded, selected, and asserted
+before the three-replay H3 split is opened. In D7, all 3,668 channel-1 chunk
+`0x0170` blocks immediately follow a `0x0328` block with the same segment,
+timestamp, `blockParam`, and payload length; 984 `0x0328` blocks are unpaired.
+H3 independently reproduces 2,646/2,646 companion blocks with 510 unpaired
+`0x0328` blocks.
+
+A strict subset gives a replay-native generic entity-handle relation: 534 D7
+and 225 H3 pair `blockParam` values exactly equal a decoded `WARD_PLACED`
+`wardEntityNetworkId`. Each matching pair occurs after that replay-only ward
+placement (D7 60,002--127,173 ms; H3 60,081--127,243 ms); all matched pairs
+with an available conservative `WARD_KILL` occur before it (22/22 D7, 7/7 H3).
+All known ward-linked pairs have 17-byte payloads. This is exact ID equality
+and ordering evidence for the matched ward subset, not an explanation of the
+operation or payload.
+
+The harness also rejects two tempting overclaims for this profile: no paired
+`blockParam` is a champion network ID, and no pair contains a raw little- or
+big-endian 32-bit copy of its own `blockParam` in either payload. It therefore
+does **not** establish owner/champion identity, broader entity classification,
+entity creation, a handle codec, a lifecycle operation, coordinates, speed,
+teleports, path counts, or waypoints. It produces a deterministic
+`rofl-movement-entity-handles-research/v1` report with `researchOnly:true`,
+`promotionGate:false`, and `runtimeInput:false`; no C++/Wasm/UI decoder follows.
+
+Reproduce it after building `rofl_core_cli`:
+
+```powershell
+node .\scripts\research_movement_entity_handles_16_14.mjs `
+  --output .\tmp\movement-entity-handles-16.14.json
+```
+
 ## Stronger structural lead
 
 The next decoder should start from the actual movement message grammar instead

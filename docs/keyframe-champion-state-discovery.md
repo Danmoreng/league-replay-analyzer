@@ -174,9 +174,74 @@ The maintained harness
 [research_keyframe_economy_anchors_16_14.mjs](../scripts/research_keyframe_economy_anchors_16_14.mjs)
 adds bounded replay/Timeline **change-correlation** research inside
 champion-owned `0x02EB` keyframes. It
-uses the ten fixed patch-16.14 replay/timeline pairs, exact 1,479-byte payloads,
-exact replay-native champion ownership, exactly ten owners per keyframe, and a
+uses the ten fixed exact-build `16.14.794.5912` replay/timeline pairs, exact
+1,479-byte payloads, exact replay-native champion ownership, exactly ten owners
+per keyframe, and a
 predeclared seven-replay discovery / three-replay holdout split.
+
+The harness loads and fully asserts the seven Discovery fixtures before it
+opens any of the three Holdout fixtures. Its all-corpus leave-one-replay-out
+view runs only afterwards as a stability diagnostic, never as a fixed-split
+selector.
+
+Schema `rofl-keyframe-economy-anchors-research/v4` also preserves a separate
+non-semantic structural diagnostic. All 2,170 D7 and 1,030 H3 snapshots have
+the exact 1,479-byte form. With `0x0E` only as a structural default-byte
+observation, D7 has 229 ever-non-default offsets and H3 has 221; H3 is a
+strict subset of the D7 set (zero H3-only offsets). The artifact deliberately
+emits counts, not an active-offset decoder envelope. Before H3 is read, a
+D7-only bounded selector groups exact non-constant eight-byte window
+signatures, maximally extends fixed-distance adjacent windows, deduplicates
+them, and asserts that its frozen output is exactly two ranges. Only then are
+those selected ranges evaluated on H3: `154..162` ↔ `1289..1297` (nine bytes)
+and `1066..1073` ↔ `1074..1081` (eight bytes). Both reproduce byte-for-byte
+in every snapshot. The companion counts are equal **dirty-byte predicates**
+(whether the byte changed between consecutive owner snapshots), not bit
+counts: 18,900/18,900 and 16,800/16,800 in D7, then 9,000/9,000 and
+8,000/8,000 in H3. These duplicate regions prove only serialization
+structure.
+
+The same D7-then-H3 audit explicitly rejects the simplest alternating-cell
+explanation: neither `[value, 0x0E]` nor `[0x0E, value]` is exact, and no one
+bit adjacent header predicts its paired byte's non-default predicate exactly.
+The check is intentionally limited to that two-byte form; it does not claim
+that more complex masks, records, or replication grammar are impossible.
+None of these structural diagnostics is a decoded field boundary, value,
+record, or runtime API.
+
+### Quarantined one-off lane probes
+
+The following observations came from temporary exploratory scripts and are
+deliberately **not** emitted or asserted by the maintained v4 harness. They are
+retained only as leads for a future reproducible grammar tool; a clean checkout
+must not treat them as a promotion gate or canonical decoder evidence.
+
+One such negative probe finds the same complete local payload tuple
+`p120..p132` beside saved lane-CS values 91 and 92 in D7. Compact Boolean, ANF,
+the established item-ID codec, initial-seed, XOR/add, and track-permutation
+hypotheses therefore do not decode numeric CS under that one-off search. This
+collision is not emitted by v4 and must be rebuilt in maintained tooling before
+it can become a canonical gate.
+
+A follow-up D7-only local selector provides a narrower structural lead without
+contradicting that global falsification: it finds 18 maximal runs of at least
+four two-byte cells whose first byte is always `0x0E` and whose second-byte
+lane is non-constant. All 18 frozen first-byte predicates reproduce in H3; 16
+also exercise every D7-dynamic second-byte position in H3. The two mirror
+ranges are instances of this layout. Raw values and change predicates from
+these lanes still fail exact gold, CS, XP, level, health/resource, and position
+labels. Thus `0x0E` may be a prefix, fixed high byte, padding, or another
+serialization component—it is not yet a proven header, mask, or record marker.
+
+Within those value lanes, four research-only zero/nonzero predicates survive
+the frozen split: `p89 != 0x0E` tracks saved `xp != 0`, `p945 != 0x0E` tracks
+`totalDamageDone != 0`, and both `p1009` and `p1057` track
+`totalDamageTaken != 0`. Each is exact in D7 and H3, but behaves only as an
+irreversible once-per-owner latch (70 Discovery and 30 Holdout rises, no fall
+or re-rise). The duplicate damage-taken predicates and lack of any numeric,
+delta, varint, ZigZag, or ordinal decode prevent treating these bytes as unique
+fields or record boundaries. They are localization constraints only and emit
+no runtime state.
 
 The `totalGold` result is explicitly post-hoc and non-unique, not a semantic or
 component boundary: its artifact records `fieldBoundaryAvailable: false`,
@@ -245,7 +310,7 @@ node .\scripts\research_keyframe_economy_anchors_16_14.mjs
 ```
 
 The artifact remains `researchOnly: true`, `promotionGate: false`, and
-`runtimeInput: false` (`rofl-keyframe-economy-anchors-research/v3`). No gold
+`runtimeInput: false` (`rofl-keyframe-economy-anchors-research/v4`). No gold
 or CS state reaches C++, Wasm, or the browser.
 
 ### Bounded scalar and discrete-event falsifications
@@ -283,6 +348,14 @@ and it has only 20, below the frozen minimum support of 50. For jungle CS,
 champion-owner-safe families produce no exact D7 candidate. The best frozen
 comparison (`type 210`, length 22, `count * 4`) matches only `192/367` positive
 D7 intervals and adds 491 no-change false positives; H3 is likewise non-viable.
+
+The lane-CS pass also freezes zero-, 250-, 500-, and 1,000-millisecond burst
+windows before H3. Its strongest structural candidate (`0x0217`, payload byte
+1 equal to `0x88`) covers only 149/1,482 positive D7 intervals while firing
+361 times in CS-unchanged intervals. A zero-extra `0x0351` prefix candidate
+covers 0/1,482 positive deltas. Compound increments and the unchanged H3 rule
+do not rescue either family, so there is no last-hit event grammar outside the
+non-numeric `0x02EB` change envelope.
 
 An initial non-champion-owner audit covers 5,760 distinct `blockParam` values
 across 14 structurally selected short packet families. Repeated packet shapes

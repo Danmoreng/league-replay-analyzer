@@ -195,20 +195,25 @@ Status should be one of:
 
 Current high-value targets:
 
-1. split ambiguous replay-local exact `16.6 | 61894-0x00-h6` patterns before participant assignment and extraction tie-breaking
-2. stabilize `16.6 | 6912-0xC6-h0 | power` around `s14`
-3. strengthen rejection of weak latest-patch movement candidates without hurting validated scalar extraction
+1. decode the stateful patch-16.14 `0x02EB` replication/record grammar without
+   treating its exact change correlations as numeric fields
+2. derive replay-native inventory slot/instance/removal linkage and a complete
+   reducer from the proven versioned transaction families
+3. use the exact ward-linked `0x0328`/`0x0170` handle subset to recover its
+   operation/payload grammar, expand explicit entity identity, and only then
+   interpret coordinate-like payload values
 
-Current stable reference score after the recovered 2026-03-22 branch win:
+Current stable reference score from the fresh 57-replay run at commit
+`57b79b3`:
 
-- `scalarPasses = 40`
-- `movementPasses = 64`
-- `promotedPatterns = 349`
-- `promotedBundlePatterns = 3`
+- `scalarPasses = 62`
+- `movementPasses = 294`
+- `promotedPatterns = 1421`
+- `promotedBundlePatterns = 0`
 
-Known caveat:
-
-- one overnight run reached `40 / 68 / 349 / 3`, but that movement-side result has not yet been reproduced deterministically from a clean rerun
+This reference includes ten exact-build patch-16.14 fixtures. It supersedes the
+old 18-replay March score for keep/revert decisions; the two corpus shapes and
+their promotion counts are not directly interchangeable.
 
 Current poor overnight targets:
 

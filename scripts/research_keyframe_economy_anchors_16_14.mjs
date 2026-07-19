@@ -8,6 +8,7 @@ import path from "node:path";
 
 const PROFILE = Object.freeze({
   versionGroup: "16.14",
+  exactReplayBuild: "16.14.794.5912",
   packetType: 0x02eb,
   payloadLength: 1479,
   championOwnerBase: 0x400000ad,
@@ -36,6 +37,16 @@ const PROFILE = Object.freeze({
   laneCsOffsets: Object.freeze([125, 127, 129]),
   laneCsLoroCandidateOffsets: Object.freeze(Array.from({ length: 21 }, (_, index) => 120 + index)),
   jungleCsOffsets: Object.freeze([134, 135, 136, 137]),
+  // Structural-only diagnostics. Discovery selects exact, non-constant
+  // mirrored windows from this bounded rule before H3 is inspected; the
+  // expected output below is the freeze gate, not the selector input.
+  // They do not locate a semantic field or authorize an offset envelope.
+  structuralDefaultByte: 0x0e,
+  structuralMirrorSelector: Object.freeze({ minimumWindowLength: 8 }),
+  structuralMirrorExpectedRanges: Object.freeze([
+    Object.freeze({ id: "mirror-154-162-to-1289-1297", leftStart: 154, rightStart: 1289, length: 9 }),
+    Object.freeze({ id: "mirror-1066-1073-to-1074-1081", leftStart: 1066, rightStart: 1074, length: 8 }),
+  ]),
 });
 
 // Fixed-corpus drift gates. The all-corpus LORO rows intentionally retain the
@@ -56,6 +67,7 @@ function expectedGoldLoro() {
   }]));
 }
 const EXPECTED = Object.freeze({
+  schema: "rofl-keyframe-economy-anchors-research/v4",
   counts: { snapshots: 3200, transitions: 3100, discoveryTransitions: 2100, holdoutTransitions: 1000 },
   totalGold: {
     fieldBoundaryAvailable: false, nonUnique: true, postHoc: true,
@@ -107,6 +119,64 @@ const EXPECTED = Object.freeze({
     discovery: { tp: 367, fp: 8, fn: 0, tn: 1725, directMatches: 0, directMisses: 2100, deltaMatches: 1725, deltaMisses: 375, exactChangeAnchor: false },
     holdout: { tp: 183, fp: 2, fn: 0, tn: 815, directMatches: 0, directMisses: 1000, deltaMatches: 815, deltaMisses: 185, exactChangeAnchor: false },
   },
+  structureDiagnostics: {
+    structuralOnly: true,
+    semanticFieldAvailable: false,
+    runtimeUse: false,
+    payloadForm: {
+      discovery: { payloadLength: 1479, snapshotCount: 2170, exactPayloadCount: 2170, nonConformingPayloadCount: 0, exact: true },
+      holdout: { payloadLength: 1479, snapshotCount: 1030, exactPayloadCount: 1030, nonConformingPayloadCount: 0, exact: true },
+    },
+    activeOffsets: {
+      defaultByte: "0x0e",
+      discoveryEverNonDefaultCount: 229,
+      discoveryAlwaysDefaultCount: 1250,
+      holdoutEverNonDefaultCount: 221,
+      holdoutAlwaysDefaultCount: 1258,
+      holdoutSubsetOfDiscovery: true,
+      holdoutOutsideDiscoveryCount: 0,
+    },
+    mirrorSelection: {
+      sourceSplit: "D7",
+      minimumWindowLength: 8,
+      selectedMaximalRangeCount: 2,
+      exactFrozenExpectedRangeMatch: true,
+      selectedRanges: [
+        { leftStart: 154, rightStart: 1289, length: 9 },
+        { leftStart: 1066, rightStart: 1074, length: 8 },
+      ],
+    },
+    exactMirrorRanges: [
+      {
+        discovery: { id: "mirror-154-162-to-1289-1297", left: { start: 154, end: 162 }, right: { start: 1289, end: 1297 }, length: 9, snapshotCount: 2170, exactSnapshotEqualityCount: 2170, equalDirtyBytePredicateCount: 18900, totalDirtyBytePredicates: 18900, exactDirtyBytePredicateEquality: true, canExtendLeft: false, canExtendRight: false, maximalExactRange: true },
+        holdout: { id: "mirror-154-162-to-1289-1297", left: { start: 154, end: 162 }, right: { start: 1289, end: 1297 }, length: 9, snapshotCount: 1030, exactSnapshotEqualityCount: 1030, equalDirtyBytePredicateCount: 9000, totalDirtyBytePredicates: 9000, exactDirtyBytePredicateEquality: true, canExtendLeft: false, canExtendRight: false, maximalExactRange: true },
+      },
+      {
+        discovery: { id: "mirror-1066-1073-to-1074-1081", left: { start: 1066, end: 1073 }, right: { start: 1074, end: 1081 }, length: 8, snapshotCount: 2170, exactSnapshotEqualityCount: 2170, equalDirtyBytePredicateCount: 16800, totalDirtyBytePredicates: 16800, exactDirtyBytePredicateEquality: true, canExtendLeft: false, canExtendRight: false, maximalExactRange: true },
+        holdout: { id: "mirror-1066-1073-to-1074-1081", left: { start: 1066, end: 1073 }, right: { start: 1074, end: 1081 }, length: 8, snapshotCount: 1030, exactSnapshotEqualityCount: 1030, equalDirtyBytePredicateCount: 8000, totalDirtyBytePredicates: 8000, exactDirtyBytePredicateEquality: true, canExtendLeft: false, canExtendRight: false, maximalExactRange: true },
+      },
+    ],
+    simpleTwoByteCellFalsification: {
+      discovery: {
+        observations: 1603630,
+        valueThenDefault: { requiredDefaultSecondByteCount: 1603630, observedDefaultSecondByteCount: 1332039, violations: 271591, exact: false },
+        defaultThenValue: { requiredDefaultFirstByteCount: 1603630, observedDefaultFirstByteCount: 1570693, violations: 32937, exact: false },
+        adjacentMaskHeaderChecks: [
+          { headerByteIndex: 0, valueByteIndex: 1, candidatesExamined: 16, exactCandidateCount: 0, bestCandidate: { bit: 5, inverted: false, matches: 1331341, mismatches: 272289 } },
+          { headerByteIndex: 1, valueByteIndex: 0, candidatesExamined: 16, exactCandidateCount: 0, bestCandidate: { bit: 5, inverted: false, matches: 1474242, mismatches: 129388 } },
+        ],
+      },
+      holdout: {
+        observations: 761170,
+        valueThenDefault: { requiredDefaultSecondByteCount: 761170, observedDefaultSecondByteCount: 629266, violations: 131904, exact: false },
+        defaultThenValue: { requiredDefaultFirstByteCount: 761170, observedDefaultFirstByteCount: 744878, violations: 16292, exact: false },
+        adjacentMaskHeaderChecks: [
+          { headerByteIndex: 0, valueByteIndex: 1, candidatesExamined: 16, exactCandidateCount: 0, bestCandidate: { bit: 5, inverted: false, matches: 628903, mismatches: 132267 } },
+          { headerByteIndex: 1, valueByteIndex: 0, candidatesExamined: 16, exactCandidateCount: 0, bestCandidate: { bit: 5, inverted: false, matches: 698596, mismatches: 62574 } },
+        ],
+      },
+    },
+  },
 });
 
 function parseArgs(argv) {
@@ -138,7 +208,6 @@ function fail(message, detail = undefined) {
 }
 
 function readJson(filePath) { return JSON.parse(fs.readFileSync(filePath, "utf8")); }
-function gameVersionGroup(version) { return String(version ?? "").split(".").slice(0, 2).join("."); }
 
 function dumpKeyframes(args, replayPath) {
   const run = spawnSync(args.cliPath, [
@@ -151,21 +220,21 @@ function dumpKeyframes(args, replayPath) {
   if (!dump.valid || dump.errors?.length || dump.truncated || dump.emittedBlockCount !== dump.matchingBlockCount) {
     fail("Exact keyframe packet framing gate failed.", { replayPath, dump });
   }
-  if (dump.packetType !== PROFILE.packetType || dump.segmentType !== "keyframe" || gameVersionGroup(dump.gameVersion) !== PROFILE.versionGroup) {
+  if (dump.packetType !== PROFILE.packetType || dump.segmentType !== "keyframe" || dump.gameVersion !== PROFILE.exactReplayBuild) {
     fail("Packet profile/version gate failed.", { replayPath, packetType: dump.packetType, segmentType: dump.segmentType, gameVersion: dump.gameVersion });
   }
   return dump.blocks ?? [];
 }
 
-function collectRows(args) {
+function collectRows(args, replayIds) {
   const rows = [];
-  for (const replayId of PROFILE.fixtures) {
+  for (const replayId of replayIds) {
     const replayPath = path.resolve(args.replayDir, `${replayId}.rofl`);
     const fixtureDir = path.resolve(args.apiRoot, replayId.replaceAll("-", "_"));
     const matchPath = path.join(fixtureDir, "match.json");
     const timelinePath = path.join(fixtureDir, "timeline.json");
     if (!fs.existsSync(replayPath) || !fs.existsSync(matchPath) || !fs.existsSync(timelinePath)) fail("Fixed fixture is missing.", { replayId, replayPath, matchPath, timelinePath });
-    if (gameVersionGroup(readJson(matchPath).info?.gameVersion) !== PROFILE.versionGroup) fail("Offline fixture version drift.", { replayId });
+    if (readJson(matchPath).info?.gameVersion !== PROFILE.exactReplayBuild) fail("Offline fixture version drift.", { replayId });
     const frames = readJson(timelinePath).info?.frames;
     if (!Array.isArray(frames) || frames.length === 0) fail("Timeline has no frames.", { replayId });
     const blocks = dumpKeyframes(args, replayPath);
@@ -254,6 +323,207 @@ function inertOffsetChangedTransitionCount(rows, offset) {
   return transitions(rows).filter((transition) => changed(transition.next, transition.previous, [offset])).length;
 }
 
+function activeOffsetSet(rows, defaultByte) {
+  const active = new Set();
+  for (const row of rows) for (let offset = 0; offset < row.payload.length; offset += 1) {
+    if (row.payload[offset] !== defaultByte) active.add(offset);
+  }
+  return active;
+}
+
+function payloadFormDiagnostics(rows) {
+  const exactPayloadCount = rows.filter((row) => row.payload.length === PROFILE.payloadLength).length;
+  return {
+    payloadLength: PROFILE.payloadLength,
+    snapshotCount: rows.length,
+    exactPayloadCount,
+    nonConformingPayloadCount: rows.length - exactPayloadCount,
+    exact: exactPayloadCount === rows.length,
+  };
+}
+
+// Discovery-only structural selector. It groups fixed-width windows by their
+// complete snapshot signature, excludes windows that are entirely constant,
+// and coalesces adjacent equal-signature pairs into maximal fixed-distance
+// ranges. The frozen expected ranges are compared after selection; H3 never
+// participates. Window-level non-constancy deliberately permits a mixed
+// constant/dynamic mirror such as [0x0e, dynamic, 0x0e, ...].
+function selectExactMirrorRanges(rows, minimumWindowLength) {
+  const windowStartsBySignature = new Map();
+  for (let start = 0; start <= PROFILE.payloadLength - minimumWindowLength; start += 1) {
+    const signature = Buffer.allocUnsafe(rows.length * minimumWindowLength);
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+      rows[rowIndex].payload.copy(signature, rowIndex * minimumWindowLength, start, start + minimumWindowLength);
+    }
+    const firstWindow = signature.subarray(0, minimumWindowLength);
+    const nonConstant = rows.slice(1).some((_, rowIndex) => !signature.subarray((rowIndex + 1) * minimumWindowLength, (rowIndex + 2) * minimumWindowLength).equals(firstWindow));
+    if (!nonConstant) continue;
+    const key = signature.toString("base64");
+    const starts = windowStartsBySignature.get(key) ?? [];
+    starts.push(start);
+    windowStartsBySignature.set(key, starts);
+  }
+  const leftOffsetsByDistance = new Map();
+  for (const starts of windowStartsBySignature.values()) for (let leftIndex = 0; leftIndex < starts.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < starts.length; rightIndex += 1) {
+      const leftStart = starts[leftIndex];
+      const distance = starts[rightIndex] - leftStart;
+      const leftOffsets = leftOffsetsByDistance.get(distance) ?? [];
+      leftOffsets.push(leftStart);
+      leftOffsetsByDistance.set(distance, leftOffsets);
+    }
+  }
+  const selected = [];
+  for (const [distance, leftOffsets] of leftOffsetsByDistance) {
+    leftOffsets.sort((left, right) => left - right);
+    let runStart = leftOffsets[0];
+    let previous = leftOffsets[0];
+    const keepRun = () => {
+      const length = previous - runStart + minimumWindowLength;
+      if (length >= minimumWindowLength) selected.push({ leftStart: runStart, rightStart: runStart + distance, length });
+    };
+    for (let index = 1; index < leftOffsets.length; index += 1) {
+      if (leftOffsets[index] === previous + 1) previous = leftOffsets[index];
+      else { keepRun(); runStart = leftOffsets[index]; previous = leftOffsets[index]; }
+    }
+    keepRun();
+  }
+  return selected.sort((left, right) => left.leftStart - right.leftStart || left.rightStart - right.rightStart || left.length - right.length);
+}
+
+function freezeMirrorSelection(discoveryRows) {
+  const selected = selectExactMirrorRanges(discoveryRows, PROFILE.structuralMirrorSelector.minimumWindowLength);
+  const expected = PROFILE.structuralMirrorExpectedRanges.map(({ leftStart, rightStart, length }) => ({ leftStart, rightStart, length }));
+  if (JSON.stringify(selected) !== JSON.stringify(expected)) fail("Discovery-only structural mirror selector drifted.", { expected, selected });
+  return {
+    sourceSplit: "D7",
+    minimumWindowLength: PROFILE.structuralMirrorSelector.minimumWindowLength,
+    selectedMaximalRangeCount: selected.length,
+    exactFrozenExpectedRangeMatch: true,
+    selectedRanges: selected,
+    ranges: PROFILE.structuralMirrorExpectedRanges,
+  };
+}
+
+function mirrorRangeDiagnostics(rows, range) {
+  const transitionsForRows = transitions(rows);
+  const equalInEverySnapshot = rows.every((row) => row.payload.subarray(range.leftStart, range.leftStart + range.length)
+    .equals(row.payload.subarray(range.rightStart, range.rightStart + range.length)));
+  const equalDirtyBytePredicates = transitionsForRows.reduce((count, transition) => count + Array.from({ length: range.length }, (_, index) =>
+    Number((transition.previous.payload[range.leftStart + index] !== transition.next.payload[range.leftStart + index])
+      === (transition.previous.payload[range.rightStart + index] !== transition.next.payload[range.rightStart + index])))
+      .reduce((sum, value) => sum + value, 0), 0);
+  const canExtendLeft = range.leftStart > 0 && range.rightStart > 0 && rows.every((row) =>
+    row.payload[range.leftStart - 1] === row.payload[range.rightStart - 1]);
+  const canExtendRight = range.leftStart + range.length < PROFILE.payloadLength
+    && range.rightStart + range.length < PROFILE.payloadLength && rows.every((row) =>
+      row.payload[range.leftStart + range.length] === row.payload[range.rightStart + range.length]);
+  return {
+    id: range.id,
+    left: { start: range.leftStart, end: range.leftStart + range.length - 1 },
+    right: { start: range.rightStart, end: range.rightStart + range.length - 1 },
+    length: range.length,
+    snapshotCount: rows.length,
+    exactSnapshotEqualityCount: rows.filter((row) => row.payload.subarray(range.leftStart, range.leftStart + range.length)
+      .equals(row.payload.subarray(range.rightStart, range.rightStart + range.length))).length,
+    equalDirtyBytePredicateCount: equalDirtyBytePredicates,
+    totalDirtyBytePredicates: transitionsForRows.length * range.length,
+    exactDirtyBytePredicateEquality: equalDirtyBytePredicates === transitionsForRows.length * range.length,
+    canExtendLeft,
+    canExtendRight,
+    maximalExactRange: equalInEverySnapshot && !canExtendLeft && !canExtendRight,
+  };
+}
+
+function twoByteCellDiagnostics(rows, defaultByte) {
+  const cellCount = Math.floor(PROFILE.payloadLength / 2);
+  const observations = rows.length * cellCount;
+  const defaultSecondByteCount = rows.reduce((count, row) => count + Array.from({ length: cellCount }, (_, index) =>
+    Number(row.payload[index * 2 + 1] === defaultByte)).reduce((sum, value) => sum + value, 0), 0);
+  const defaultFirstByteCount = rows.reduce((count, row) => count + Array.from({ length: cellCount }, (_, index) =>
+    Number(row.payload[index * 2] === defaultByte)).reduce((sum, value) => sum + value, 0), 0);
+  const maskHeaderCheck = (headerIndex, valueIndex) => {
+    const candidates = [];
+    for (let bit = 0; bit < 8; bit += 1) for (const inverted of [false, true]) {
+      let matches = 0;
+      for (const row of rows) for (let cell = 0; cell < cellCount; cell += 1) {
+        const headerBit = (row.payload[cell * 2 + headerIndex] & (1 << bit)) !== 0;
+        const predictedActive = inverted ? !headerBit : headerBit;
+        if (predictedActive === (row.payload[cell * 2 + valueIndex] !== defaultByte)) matches += 1;
+      }
+      candidates.push({ bit, inverted, matches, mismatches: observations - matches });
+    }
+    candidates.sort((left, right) => right.matches - left.matches || left.bit - right.bit || Number(left.inverted) - Number(right.inverted));
+    return {
+      headerByteIndex: headerIndex,
+      valueByteIndex: valueIndex,
+      candidatesExamined: candidates.length,
+      exactCandidateCount: candidates.filter((candidate) => candidate.mismatches === 0).length,
+      bestCandidate: candidates[0],
+    };
+  };
+  return {
+    defaultByte: `0x${defaultByte.toString(16).padStart(2, "0")}`,
+    cellWidthBytes: 2,
+    cellsPerPayload: cellCount,
+    trailingBytesOutsideCells: PROFILE.payloadLength - cellCount * 2,
+    observations,
+    valueThenDefault: {
+      requiredDefaultSecondByteCount: observations,
+      observedDefaultSecondByteCount: defaultSecondByteCount,
+      violations: observations - defaultSecondByteCount,
+      exact: defaultSecondByteCount === observations,
+    },
+    defaultThenValue: {
+      requiredDefaultFirstByteCount: observations,
+      observedDefaultFirstByteCount: defaultFirstByteCount,
+      violations: observations - defaultFirstByteCount,
+      exact: defaultFirstByteCount === observations,
+    },
+    adjacentMaskHeaderChecks: [maskHeaderCheck(0, 1), maskHeaderCheck(1, 0)],
+  };
+}
+
+function structureDiagnostics(discoveryRows, holdoutRows) {
+  const defaultByte = PROFILE.structuralDefaultByte;
+  const discoveryActive = activeOffsetSet(discoveryRows, defaultByte);
+  const holdoutActive = activeOffsetSet(holdoutRows, defaultByte);
+  const holdoutOutsideDiscoveryCount = [...holdoutActive].filter((offset) => !discoveryActive.has(offset)).length;
+  const mirrorSelection = freezeMirrorSelection(discoveryRows);
+  return {
+    structuralOnly: true,
+    semanticFieldAvailable: false,
+    runtimeUse: false,
+    methodology: "D7 selects non-constant, exact fixed-distance mirror windows of at least eight bytes, freezes the expected maximal ranges, then evaluates only those selected ranges on H3. D7 also freezes fixed payload-form, active-count, and simple two-byte-cell falsification checks. Active offsets are counts only; no decoder offset envelope is emitted.",
+    payloadForm: { discovery: payloadFormDiagnostics(discoveryRows), holdout: payloadFormDiagnostics(holdoutRows) },
+    activeOffsets: {
+      defaultByte: `0x${defaultByte.toString(16).padStart(2, "0")}`,
+      discoveryEverNonDefaultCount: discoveryActive.size,
+      discoveryAlwaysDefaultCount: PROFILE.payloadLength - discoveryActive.size,
+      holdoutEverNonDefaultCount: holdoutActive.size,
+      holdoutAlwaysDefaultCount: PROFILE.payloadLength - holdoutActive.size,
+      holdoutSubsetOfDiscovery: holdoutOutsideDiscoveryCount === 0,
+      holdoutOutsideDiscoveryCount,
+    },
+    mirrorSelection: {
+      sourceSplit: mirrorSelection.sourceSplit,
+      minimumWindowLength: mirrorSelection.minimumWindowLength,
+      selectedMaximalRangeCount: mirrorSelection.selectedMaximalRangeCount,
+      exactFrozenExpectedRangeMatch: mirrorSelection.exactFrozenExpectedRangeMatch,
+      selectedRanges: mirrorSelection.selectedRanges,
+    },
+    exactMirrorRanges: mirrorSelection.ranges.map((range) => ({
+      discovery: mirrorRangeDiagnostics(discoveryRows, range),
+      holdout: mirrorRangeDiagnostics(holdoutRows, range),
+    })),
+    simpleTwoByteCellFalsification: {
+      conclusion: "Neither alternating [value, 0x0E] / [0x0E, value] cells nor a one-byte adjacent presence-mask header is exact; this rejects only those simple layouts, not a broader replication grammar.",
+      discovery: twoByteCellDiagnostics(discoveryRows, defaultByte),
+      holdout: twoByteCellDiagnostics(holdoutRows, defaultByte),
+    },
+  };
+}
+
 function combinations(values, count, start = 0, prefix = [], output = []) {
   if (prefix.length === count) { output.push(prefix); return output; }
   for (let index = start; index <= values.length - (count - prefix.length); index += 1) {
@@ -322,6 +592,7 @@ function selectMinimumExactLaneCsUnions(rows) {
 function evaluate(rows) {
   const discoveryRows = rows.filter((row) => PROFILE.discovery.includes(row.replayId));
   const holdoutRows = rows.filter((row) => PROFILE.holdout.includes(row.replayId));
+  const structure = structureDiagnostics(discoveryRows, holdoutRows);
   const boundedDiscoverySearch = selectMinimumExactTotalGoldUnions(discoveryRows);
   // Freeze the Discovery-selected alternatives before measuring the Holdout.
   const totalGold = {
@@ -385,27 +656,113 @@ function evaluate(rows) {
     laneCs.allCorpusLoro[replayId] = { selectedOffsets: selectedLaneCsOffsets, heldout: metrics(held, "laneCs", selectedLaneCsOffsets) };
   }
   return {
-    schema: "rofl-keyframe-economy-anchors-research/v3",
+    schema: "rofl-keyframe-economy-anchors-research/v4",
     researchOnly: true,
     promotionGate: false,
     runtimeInput: false,
-    profile: { versionGroup: PROFILE.versionGroup, packetType: "0x02EB", payloadLength: PROFILE.payloadLength, championOwnerBase: "0x400000AD" },
+    profile: { versionGroup: PROFILE.versionGroup, exactReplayBuild: PROFILE.exactReplayBuild, packetType: "0x02EB", payloadLength: PROFILE.payloadLength, championOwnerBase: "0x400000AD" },
     offlineOracle: { input: "Saved Riot Timeline participantFrames labels only", alignment: "ROFL keyframe segmentId - 1", runtimeUse: false },
-    evidenceBoundary: "The totalGold [109,119] correlation was identified post-hoc, so its frozen 7/3 Holdout result is not historical unseen-selection evidence. The totalGold minimum-union search is bounded to offsets 96..128, permits at most three offsets, selects exact unions from Discovery only, and measures H3 only after selection. The lane selector is bounded to 120..140 and likewise selects from Discovery only, but p125 was originally identified by a full-corpus mismatch audit. All leave-one-replay-out views select bounded candidate offsets on nine replays and check the tenth; they are stability diagnostics, not additional independent holdouts.",
+    evidenceBoundary: "The totalGold [109,119] correlation was identified post-hoc, so its frozen 7/3 Holdout result is not historical unseen-selection evidence. The seven Discovery fixtures are loaded, all D7 structural/anchor gates are selected and asserted, and only then are the three H3 fixtures loaded. The totalGold minimum-union search is bounded to offsets 96..128, permits at most three offsets, and selects exact unions from Discovery only. The lane selector is bounded to 120..140 and likewise selects from Discovery only, but p125 was originally identified by a full-corpus mismatch audit. All leave-one-replay-out views select bounded candidate offsets on nine replays and check the tenth; they run after the fixed-split evaluation as stability diagnostics, not additional independent holdouts.",
     split: { discovery: PROFILE.discovery, holdout: PROFILE.holdout },
     counts: { snapshots: rows.length, transitions: transitions(rows).length, discoveryTransitions: transitions(discoveryRows).length, holdoutTransitions: transitions(holdoutRows).length },
+    structureDiagnostics: structure,
     totalGoldChangeCorrelations: totalGold,
     laneCsChangeEnvelope: laneCs,
     negativeControls: {
       jungleCs: { offsets: PROFILE.jungleCsOffsets, discovery: metrics(discoveryRows, "jungleCs", PROFILE.jungleCsOffsets), holdout: metrics(holdoutRows, "jungleCs", PROFILE.jungleCsOffsets) },
     },
-    nonPromotionReason: "The post-hoc, non-unique totalGold byte-change correlations and lane-CS byte ranges reveal when their saved oracle values change, but neither direct packed values nor packed deltas decode a numeric state. Jungle-CS remains an imperfect negative control. No numeric economy value, delta, event, or field boundary is available.",
+    nonPromotionReason: "The post-hoc, non-unique totalGold byte-change correlations and lane-CS byte ranges reveal when their saved oracle values change, but neither direct packed values nor packed deltas decode a numeric state. The structural diagnostics only establish fixed payload form, active-count containment, exact mirrored bytes, and falsification of simple two-byte layouts. Jungle-CS remains an imperfect negative control. No numeric economy value, delta, event, record, field boundary, or runtime schema is available.",
   };
+}
+
+function assertFrozenDiscovery(label, actual, expected) {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) fail(`Discovery freeze drifted: ${label}`, { expected, actual });
+}
+
+// This runs while only the seven Discovery fixtures are resident. It freezes
+// every D7-selected structural/anchor result that the later H3 evaluation may
+// consume; LORO remains a post-H3 stability diagnostic, not a selector.
+function assertDiscoveryFreeze(discoveryRows) {
+  const selectAnchorConfusion = (value) => ({ tp: value.tp, fp: value.fp, fn: value.fn, tn: value.tn, exactChangeAnchor: value.exactChangeAnchor });
+  const structure = structureDiagnostics(discoveryRows, []);
+  assertFrozenDiscovery("counts", { snapshots: discoveryRows.length, transitions: transitions(discoveryRows).length }, { snapshots: 2170, transitions: EXPECTED.counts.discoveryTransitions });
+  assertFrozenDiscovery("structure payload form", structure.payloadForm.discovery, EXPECTED.structureDiagnostics.payloadForm.discovery);
+  assertFrozenDiscovery("structure active offsets", {
+    defaultByte: structure.activeOffsets.defaultByte,
+    discoveryEverNonDefaultCount: structure.activeOffsets.discoveryEverNonDefaultCount,
+    discoveryAlwaysDefaultCount: structure.activeOffsets.discoveryAlwaysDefaultCount,
+  }, {
+    defaultByte: EXPECTED.structureDiagnostics.activeOffsets.defaultByte,
+    discoveryEverNonDefaultCount: EXPECTED.structureDiagnostics.activeOffsets.discoveryEverNonDefaultCount,
+    discoveryAlwaysDefaultCount: EXPECTED.structureDiagnostics.activeOffsets.discoveryAlwaysDefaultCount,
+  });
+  assertFrozenDiscovery("structure mirror selection", structure.mirrorSelection, EXPECTED.structureDiagnostics.mirrorSelection);
+  assertFrozenDiscovery("structure mirror ranges", structure.exactMirrorRanges.map((entry) => entry.discovery), EXPECTED.structureDiagnostics.exactMirrorRanges.map((entry) => entry.discovery));
+  assertFrozenDiscovery("structure two-byte falsification", {
+    observations: structure.simpleTwoByteCellFalsification.discovery.observations,
+    valueThenDefault: structure.simpleTwoByteCellFalsification.discovery.valueThenDefault,
+    defaultThenValue: structure.simpleTwoByteCellFalsification.discovery.defaultThenValue,
+    adjacentMaskHeaderChecks: structure.simpleTwoByteCellFalsification.discovery.adjacentMaskHeaderChecks,
+  }, EXPECTED.structureDiagnostics.simpleTwoByteCellFalsification.discovery);
+
+  const totalGoldSearch = selectMinimumExactTotalGoldUnions(discoveryRows);
+  assertFrozenDiscovery("totalGold post-hoc correlations", [
+    { id: "post-hoc-109-119", offsets: PROFILE.totalGoldPostHocOffsets, discovery: metrics(discoveryRows, "totalGold", PROFILE.totalGoldPostHocOffsets) },
+    { id: "prior-115-117-119", offsets: PROFILE.totalGoldPriorCorrelationOffsets, discovery: metrics(discoveryRows, "totalGold", PROFILE.totalGoldPriorCorrelationOffsets) },
+  ], EXPECTED.totalGold.postHocCorrelations.map(({ id, offsets, discovery }) => ({ id, offsets, discovery })));
+  assertFrozenDiscovery("totalGold bounded selector", {
+    candidateOffsets: totalGoldSearch.candidateOffsets,
+    maximumUnionSize: 3,
+    minimumUnionSize: totalGoldSearch.minimumUnionSize,
+    exactDiscoveryUnions: totalGoldSearch.exactDiscoveryUnions.map(({ offsets, metrics: discovery }) => ({ offsets, discovery })),
+  }, {
+    candidateOffsets: EXPECTED.totalGold.boundedDiscoverySearch.candidateOffsets,
+    maximumUnionSize: EXPECTED.totalGold.boundedDiscoverySearch.maximumUnionSize,
+    minimumUnionSize: EXPECTED.totalGold.boundedDiscoverySearch.minimumUnionSize,
+    exactDiscoveryUnions: EXPECTED.totalGold.boundedDiscoverySearch.exactDiscoveryUnions.map(({ offsets, discovery }) => ({ offsets, discovery })),
+  });
+
+  const laneCsSearch = selectMinimumExactLaneCsUnions(discoveryRows);
+  const selectedLaneCsOffsets = selectLaneCsOffsets(discoveryRows);
+  assertFrozenDiscovery("lane-CS anchors", {
+    discovery: metrics(discoveryRows, "laneCs", PROFILE.laneCsOffsets),
+    p125AlternativeComponent: laneCsAlternativeComponentMetrics(discoveryRows),
+    inertOffset128: inertOffsetChangedTransitionCount(discoveryRows, 128),
+    discoverySelector: { selectedOffsets: selectedLaneCsOffsets, discovery: selectAnchorConfusion(metrics(discoveryRows, "laneCs", selectedLaneCsOffsets)) },
+    boundedDiscoverySearch: {
+      candidateOffsets: laneCsSearch.candidateOffsets,
+      maximumUnionSize: 3,
+      minimumUnionSize: laneCsSearch.minimumUnionSize,
+      exactDiscoveryUnions: laneCsSearch.exactDiscoveryUnions.map(({ offsets, metrics: discovery }) => ({ offsets, discovery })),
+    },
+  }, {
+    discovery: EXPECTED.laneCs.discovery,
+    p125AlternativeComponent: EXPECTED.laneCs.p125AlternativeComponent.discovery,
+    inertOffset128: EXPECTED.laneCs.inertOffset128.discoveryChangedTransitionCount,
+    discoverySelector: { selectedOffsets: EXPECTED.laneCs.discoverySelector.selectedOffsets, discovery: EXPECTED.laneCs.discoverySelector.discovery },
+    boundedDiscoverySearch: {
+      candidateOffsets: EXPECTED.laneCs.boundedDiscoverySearch.candidateOffsets,
+      maximumUnionSize: EXPECTED.laneCs.boundedDiscoverySearch.maximumUnionSize,
+      minimumUnionSize: EXPECTED.laneCs.boundedDiscoverySearch.minimumUnionSize,
+      exactDiscoveryUnions: EXPECTED.laneCs.boundedDiscoverySearch.exactDiscoveryUnions.map(({ offsets, discovery }) => ({ offsets, discovery })),
+    },
+  });
+  assertFrozenDiscovery("jungle-CS negative control", metrics(discoveryRows, "jungleCs", PROFILE.jungleCsOffsets), EXPECTED.jungleCs.discovery);
 }
 
 function assertionShape(result) {
   const select = (value) => ({ tp: value.tp, fp: value.fp, fn: value.fn, tn: value.tn, directMatches: value.directMatches, directMisses: value.directMisses, deltaMatches: value.deltaMatches, deltaMisses: value.deltaMisses, exactChangeAnchor: value.exactChangeAnchor });
+  const structure = result.structureDiagnostics;
+  const selectPayloadForm = (value) => ({ payloadLength: value.payloadLength, snapshotCount: value.snapshotCount, exactPayloadCount: value.exactPayloadCount, nonConformingPayloadCount: value.nonConformingPayloadCount, exact: value.exact });
+  const selectMirror = (value) => ({ id: value.id, left: value.left, right: value.right, length: value.length, snapshotCount: value.snapshotCount, exactSnapshotEqualityCount: value.exactSnapshotEqualityCount, equalDirtyBytePredicateCount: value.equalDirtyBytePredicateCount, totalDirtyBytePredicates: value.totalDirtyBytePredicates, exactDirtyBytePredicateEquality: value.exactDirtyBytePredicateEquality, canExtendLeft: value.canExtendLeft, canExtendRight: value.canExtendRight, maximalExactRange: value.maximalExactRange });
+  const selectCell = (value) => ({
+    observations: value.observations,
+    valueThenDefault: value.valueThenDefault,
+    defaultThenValue: value.defaultThenValue,
+    adjacentMaskHeaderChecks: value.adjacentMaskHeaderChecks,
+  });
   return {
+    schema: result.schema,
     counts: result.counts,
     totalGold: {
       fieldBoundaryAvailable: result.totalGoldChangeCorrelations.fieldBoundaryAvailable,
@@ -442,11 +799,24 @@ function assertionShape(result) {
       allCorpusLoro: Object.fromEntries(Object.entries(result.laneCsChangeEnvelope.allCorpusLoro).map(([id, value]) => [id, { selectedOffsets: value.selectedOffsets, heldout: { tp: value.heldout.tp, fp: value.heldout.fp, fn: value.heldout.fn, tn: value.heldout.tn, exactChangeAnchor: value.heldout.exactChangeAnchor } }])),
     },
     jungleCs: { discovery: select(result.negativeControls.jungleCs.discovery), holdout: select(result.negativeControls.jungleCs.holdout) },
+    structureDiagnostics: {
+      structuralOnly: structure.structuralOnly,
+      semanticFieldAvailable: structure.semanticFieldAvailable,
+      runtimeUse: structure.runtimeUse,
+      payloadForm: { discovery: selectPayloadForm(structure.payloadForm.discovery), holdout: selectPayloadForm(structure.payloadForm.holdout) },
+      activeOffsets: structure.activeOffsets,
+      mirrorSelection: structure.mirrorSelection,
+      exactMirrorRanges: structure.exactMirrorRanges.map((value) => ({ discovery: selectMirror(value.discovery), holdout: selectMirror(value.holdout) })),
+      simpleTwoByteCellFalsification: { discovery: selectCell(structure.simpleTwoByteCellFalsification.discovery), holdout: selectCell(structure.simpleTwoByteCellFalsification.holdout) },
+    },
   };
 }
 
 const args = parseArgs(process.argv);
-const result = evaluate(collectRows(args));
+const discoveryRows = collectRows(args, PROFILE.discovery);
+assertDiscoveryFreeze(discoveryRows);
+const holdoutRows = collectRows(args, PROFILE.holdout);
+const result = evaluate([...discoveryRows, ...holdoutRows]);
 const observed = assertionShape(result);
 if (args.printObserved) { console.log(JSON.stringify(observed, null, 2)); process.exit(0); }
 if (JSON.stringify(observed) !== JSON.stringify(EXPECTED)) fail("Keyframe economy research corpus drifted.", { expected: EXPECTED, observed });

@@ -231,6 +231,172 @@ operation semantics are unavailable. The artifact records
 `classifierAvailable: false`, zero runtime semantic claims, and zero runtime
 false claims precisely because it creates no runtime output.
 
+The pinned 16.14.1 catalog makes the timing association more specific but not
+more classifiable. Single-Destroy groups mix ordinary Health Potions, Control
+Wards, Biscuits, and elixirs with system items; every double-Destroy group
+mixes a Control Ward with a support-quest item. Full-payload symbols collide
+across labels and with 25 hard negatives in H3, while bounded prefix/bit/ANF
+rules match many of the other 3,755 packets. The family therefore cannot be
+emitted as use, consume, removal, count, or charge state.
+
+Stateful neighbourhoods do not supply the missing discriminator. Of 4,214
+profiled contexts, 2,820/2,847 D7 and 1,354/1,367 H3 packets occur without a
+same-time profiled add/removal triplet, and immediate owner-local predecessor
+and successor families vary widely. Only 290 D7 and 178 H3 packets have nearby
+offline item labels. The strongest zero-extra D7 payload rule covers 187/290,
+then produces two extras while covering only 104/178 H3 labels. Identical
+payloads also collide across several consumable IDs and unlabelled contexts.
+Neither sequence context nor payload therefore identifies an item, charge,
+slot, instance, or removal operation exactly.
+
+### Patch-16.14 static recipe constraint
+
+A separate maintained harness validates one bounded component-consumption
+constraint using Riot Data Dragon only as patch-pinned static item-schema
+metadata:
+
+```powershell
+node .\scripts\research_inventory_recipe_constraints_16_14.mjs `
+  --item-data C:\path\to\Data-Dragon-16.14.1-item.json
+```
+
+`--item-data` is required. The harness performs no network request and has no
+`latest` lookup. It accepts only the complete official `16.14.1` item catalog
+from
+`https://ddragon.leagueoflegends.com/cdn/16.14.1/data/en_US/item.json`:
+
+| Fixture property | Required value |
+|---|---|
+| Data Dragon version | `16.14.1` |
+| Catalog entries | 706 |
+| Byte length | 583,139 |
+| SHA-256 | `0094f848489371da9e86b9f210f70b6ce0a3982c9063c7c734099cd5a88ddb75` |
+
+The 583 KiB catalog fixture is deliberately not tracked in this repository.
+The file supplies item validity and `from`/`into` recipe edges only. Match state
+still comes from each saved replay; saved Timeline events remain offline labels
+loaded after packet extraction. The catalog is not a runtime dependency or a
+fallback for missing replay fields, and this research adds no C++, Wasm, or UI
+surface.
+
+Historical D7 research designed the classifier and recipe rule. The maintained
+harness reproduces that frozen result; it does not recreate the original
+selection process. It does enforce that the D7 expected-count gate passes
+before it opens any H3 file. The classifier defines a real inventory item as a
+catalog entry with Summoner's Rift map flag `maps[11] == true`,
+`gold.purchasable == true`, and positive total gold. This separates actual
+inventory/component labels from system events such as lane quests (`1200`,
+`1201`, `1222`), Recall (`2001`, `2002`), the zero-gold Stealth Ward trinket
+(`3340`), and Eye of the Herald (`3513`). Discovery has 1,118 real-item Destroy
+labels versus 380 non-purchasable, zero-gold, or map-invalid labels. The
+unchanged-rule Holdout classification has 724 versus 193.
+Both class maps are closed-world gates: their keys and counts must match
+exactly, so a new `catalog-missing` or other residual class fails the maintained
+run rather than disappearing behind the documented partition.
+
+The replay-only transaction shape is deliberately narrow:
+
+```text
+same owner within 1 ms:
+  exactly one profiled 0x0369 add/update
+  exactly one profiled 0x03F9 removal
+  zero profiled 0x0146 removal-context packets
+  resulting item has a non-empty Data Dragon `from` recipe
+```
+
+The candidate removed item must be an earlier historically observed same-owner
+structural `0x0369` item ID in the result item's transitive `from` closure.
+Historical order means an earlier packet timestamp, or the same timestamp in
+the same segment with a lower `sourceOffset` than the `0x03F9` removal. This is
+only a deduplicated set of previously observed add/update item IDs. It is not a
+current inventory, item instance, continuity proof, or ownership-at-removal
+claim. A static sibling alias is admitted only when both sorted `from` and
+sorted `into` lists are identical; this covers the catalog's `2420`/`2421`
+Armguard state boundary without a per-replay lookup. Any `0x0146`,
+multi-operation, missing-recipe, or transform shape fails closed.
+
+In each maintained run, the historically D7-designed rule and expected-count
+gate pass before the harness opens the three H3 replays:
+
+| Split | Real uniquely labelled removals | Recipe truth in candidate set | Mean candidates before / after | Exact singleton after | Still ambiguous |
+|---|---:|---:|---:|---:|---:|
+| Discovery (D7) | 209 | 209/209 | 10.27 / 1.50 | 138/209 | 71 |
+| Holdout (H3) | 83 | 83/83 | 11.61 / 1.60 | 56/83 | 27 |
+| Combined | 292 | 292/292 | — | 194/292 | 98 |
+
+All 292 truths also occur among the historically observed replay-native
+structural add/update item IDs under that physical-order rule. There are zero
+wrong singleton targets and zero missing truths in the constrained sets. This
+is exact evidence for a bounded recipe relation, not a full removal decoder:
+98 targets remain ambiguous, sales are outside this rule, and `0x0146`, slot,
+instance, undo, and transform semantics remain unavailable.
+
+The harness does not attempt complete inventory reconstruction and therefore
+does not report a synthetic participant success fraction. Its explicit boundary
+is `completeInventoryReconstructionAttempted: false` and
+`completeInventoryAvailable: false`.
+
+The catalog does not by itself turn this constraint into a semantic decoder.
+A replay-plus-static-metadata shortcut that infers every direct `from`
+component for one-add/matching-removal groups reaches all 291 labelled groups
+but also produces 60 extras (82.9% precision, 100% recall). Bounded packet
+order/length, recipe/gold, prefix/bit, neighbour, and decision-tree filters do
+not remove all extras without dropping real groups. Recipe-singleton labels
+also yield no direct `0x03F9` item-ID slice or compact Boolean codec. A
+stateful inventory/operation discriminator remains necessary.
+
+A stricter online multiset prefix experiment starts every owner empty, consumes
+events in exact replay source order, and stops permanently at the first
+unresolved profiled operation. It accepts only proven pure adds or a direct
+recipe whose complete component multiset is already present. Discovery reaches
+15 accepted events, all pure starting-item adds, with 15/15 exact Timeline
+labels and no extras. The frozen Holdout rule accepts eight locally exact adds
+but one participant has an additional Timeline purchase inside the claimed
+continuous prefix. No direct recipe is reached and no owner reaches the end of
+the profiled stream, so final inventory validation is unavailable. This
+falsifies promotion of the current prefix reducer; it does not falsify a future
+stateful grammar that can classify the intervening operations.
+
+A separate conservative slot/instance linkage audit pairs a removal with an
+earlier add only when saved Timeline state leaves exactly one live source item.
+This yields 15 D7 and 9 H3 pairs. An exhaustive one-to-eight-bit contiguous
+slice/XOR search between the paired `0x0369` and `0x03F9` payloads has zero
+exact D7 candidates; the best non-constant relation reaches only 13/15 before
+it can be frozen. Consequently there is still no replay-native slot, instance,
+or removal identity link, and H3 supplies evaluation evidence only rather than
+a selected codec.
+
+Stateful ordinals do not repair that link. Fifty D7 lookup hypotheses based on
+owner-local purchase/removal ordinal and live-item count yield zero exact H3
+mapping. Non-contiguous one-removal-bit versus one-to-three-add-bit XOR rules
+leave 637 mutually non-unique H3 candidates, while nearby `0x02EB` inventory
+anchors contain multiple item operations in 747 D7 and 352 H3 windows. These
+collisions prevent interpreting any such relation as a slot or instance field.
+
+Static item prices also fail to expose an operation gold scalar. A strict D7
+set contains 710 non-recipe `0x0369` purchase labels with an exact decoded item
+ID and 77 proven `0x03F9` sales, giving 787 pinned expected cost/gain values.
+Direct signed/unsigned integers, ULEB/ZigZag varints, one-to-sixteen-bit
+fields, successive same-owner packet deltas, and nearest owner `0x02EB` `i32`
+deltas all have zero exact candidate (best raw hit 3/787; best keyframe hit
+4/785). H3 remains unopened for this failed search. No purchase/sale gold
+delta or current-gold field is decoded.
+
+The same result holds outside the operation payloads. An exact D7 framing pass
+over 9,908,848 chunk blocks retains 5,606 non-`0x0369`/`0x03F9` blocks within
+one millisecond of those 787 labels, partitioned into 1,284
+type/channel/length/prefix families. Direct integers, ULEB/ZigZag, every
+little-endian one-to-sixteen-bit window, direction-aware amounts, and
+same-owner family deltas produce no exact candidate; the best direct accident
+matches only 15/787 labels. Since no D7 candidate reaches the false-positive
+gate, H3 is intentionally unopened. There is no hidden co-timestamp gold
+companion under this bound.
+
+If this static grammar is ever promoted, its catalog bytes must be shipped and
+fingerprinted beside the exact replay decoder profile. Selecting an unpinned
+Data Dragon version, fetching `latest`, or consulting Match/Timeline at runtime
+would violate the replay-only boundary.
+
 ## Cross-patch inventory-component / undo anchors
 
 Two variable-length, champion-owned component families have an exact but
@@ -273,6 +439,29 @@ With no exact Discovery candidate, H3 is deliberately unopened. This
 falsifies a second single-family constant-prefix classifier within that bound;
 it does not falsify a multi-packet, stateful record grammar or decode item,
 slot, instance, before/after identity, or operation ordering.
+
+For the 31 already exact `0x0081` anchors themselves (23 D7, 8 H3), the same
+owner/time/chunk context contains no profiled `0x0369`, `0x03F9`, or `0x0146`
+operation. The nearest preceding profiled operation agrees with the offline
+Undo `beforeId` only 5/23 and 1/8 times; even a 60-second lookback reaches just
+6/23 and 2/8. No payload byte maps exactly to `beforeId`, `afterId`, or
+`goldGain`. Thus the exact partial Undo timing anchor still cannot drive a
+state reducer or before/after inventory transition.
+
+Comparing those chunks with the nearest same-owner `0x0081` keyframe component
+also fails: D7 has 23 preceding and 7 following pairs, H3 has 8 and 2, but no
+full payload equality, complete chunk-as-keyframe subsequence, shared four-byte
+prefix, or common aligned XOR edit. Even same-segment pairs do not copy a
+record, and owner-local ordinals are not stable. The shared packet type is
+component-family evidence only, not a before/after serialization link.
+
+The repeated `BE C7 1F 76` / `BE C9 1F 76` markers are likewise not a record
+grammar. Splitting on them is byte-lossless for all 5,798 surveyed patch-16.9
+payloads, but no bounded byte, `u16`, LEB128, or mask field encodes each body's
+length, ordinal, or remaining count exactly. Prefix/suffix clusters conflict
+in Holdout, and Undo chunks have only sparse, ordinal-unstable full-body
+matches to nearby keyframes. Marker occurrence must remain structural scratch
+evidence rather than runtime framing or instance identity.
 
 ## Patch-16.9 profile
 

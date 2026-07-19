@@ -109,20 +109,26 @@ This project should still bias toward state decoding first. Scalar validation wi
 
 Current stable reference score:
 
-- `scalarPasses = 40`
-- `movementPasses = 64`
-- `promotedPatterns = 349`
-- `promotedBundlePatterns = 3`
+- `scalarPasses = 62`
+- `movementPasses = 294`
+- `promotedPatterns = 1421`
+- `promotedBundlePatterns = 0`
 
-Known caveat:
-
-- one overnight run reached `40 / 68 / 349 / 3`, but that movement-side result has not yet been reproduced deterministically from a clean rerun
+This is the fresh 57-replay scorecard at commit `57b79b3`, including the ten
+exact-build patch-16.14 fixtures. The bundle count is zero by the current strict
+manifest-based summarizer and must not be compared to the superseded 18-replay
+March baseline as if the corpus and promotion boundary were unchanged.
 
 Current priority order:
 
-1. split ambiguous exact `16.6 | 61894-0x00-h6` patterns before participant assignment and extraction tie-breaking
-2. stabilize `16.6 | 6912-0xC6-h0 | power` around `s14`
-3. improve latest-patch movement rejection without regressing validated scalar extraction
+1. decode the stateful patch-16.14 `0x02EB` replication/record grammar; use the
+   exact `totalGold` and lane-CS change correlations only as structural search
+   constraints, never as decoded fields
+2. derive replay-native inventory slot/instance/removal linkage and a complete
+   reducer from the proven patch-16.14 and patch-16.9 transaction families
+3. use the exact ward-linked `0x0328`/`0x0170` handle subset to recover its
+   operation/payload grammar, expand explicit entity identity, and only then
+   interpret movement coordinates or promote UI output
 
 ## Crash policy
 

@@ -360,7 +360,16 @@ Current outputs:
 - `artifacts/<replay-id>/participant-movement.json`
 - `artifacts/<replay-id>/assigned-movement-validation-report.json`
 
-Current 2026-03-22 recovered baseline from the 18-replay corpus:
+Current manifest-based 57-replay reference at commit `57b79b3`:
+
+- `scalarPasses = 62`
+- `movementPasses = 294`
+- `promotedPatterns = 1421`
+- `promotedBundlePatterns = 0`
+
+This is the keep/revert baseline for the current corpus. The following section
+is retained only as historical context for the recovered 2026-03-22
+18-replay branch and its older promotion boundary:
 
 - the corpus now includes an 11-replay `16.6` cohort
 - the final schema now contains `349` promoted exact corpus-backed scalar patterns and `128` remaining ranked exact patterns
@@ -376,7 +385,7 @@ Current 2026-03-22 recovered baseline from the 18-replay corpus:
   - `minionsKilled`: `1 / 1`
   - `jungleMinionsKilled`: `1 / 1`
   - `health`: `0 / 1`
-- the current stable scorecard is `40 / 64 / 349 / 3`
+- the then-current stable scorecard was `40 / 64 / 349 / 3`
 - one overnight autoresearch run reached `40 / 68 / 349 / 3`, but that movement-side improvement has not yet been reproduced deterministically from a clean rerun
 - the strongest stable latest-patch bundle-backed scalar is now `16.6 | 6912-0xC6-h0 | powerMax | s14`
 - `16.6 | 61894-0x00-h6` remains an important exploratory slab because it still carries replay-local evidence for `power`, `healthMax`, and `movementSpeed`

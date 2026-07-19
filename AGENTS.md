@@ -88,9 +88,10 @@ Current state:
 - primary/companion lanes form a conflict-free 256-symbol permutation across 2,625 placements, and 701/745 linked removals have an exact full primary+companion spawn fingerprint match, but these equality constraints do not reveal the numeric coordinate assigned to an unknown symbol
 - embedded final `statsJson` level, XP, lane CS, neutral CS, seven item slots, and ward-placement/kill aggregates validate exactly through the productive native summary for 6,110/6,110 fields across all 470 corpus participants; `validatedFinalPlayerStatsAvailable` restricts display to the eight validated patch groups with a complete valid field set, and the values are final state rather than timelines
 - the Wasm suite includes a real in-memory zstd ROFL contract test for the ward ABI and unsupported-version error boundary; Wasm C++ exception handling must remain enabled for those JSON error boundaries
-- patch-16.9 inventory research decodes add/update item IDs and a sale-operation class; patch 16.14 separately proves its add/update/removal families, 116/116 sale operations, and all 13 item-ID bits for 1,971 unambiguous labels with 651/651 complete IDs on three fixed Holdouts; all 2,519 profiled add/update packets yield a structural ID and 1,973 are exactly purchase-linked, while two unseen input symbols fail closed and 546 packets plus slot/instance/removal linkage, swaps, undo, and full inventory state remain unresolved; no inventory runtime API exists
-- keyframe outer framing and champion ownership are exact; patch 16.14 additionally has exact but non-semantic change correlations for `totalGold` and lane CS across 3,100 transitions, but the gold correlation is post-hoc and non-unique, neither result exposes a numeric value or field boundary, and a bounded 1,126-candidate stride-scalar audit plus discrete champion-owner CS event searches fail, so the inner stateful replication/component record grammar remains unresolved
-- there is no valid replay-native movement or position decoder; the provisional `0x00DC` raw-coordinate interpretation was disproven and removed from the runtime
+- patch-16.9 inventory research decodes add/update item IDs and a sale-operation class; patch 16.14 separately proves its add/update/removal families, 116/116 sale operations, and all 13 item-ID bits for 1,971 unambiguous labels with 651/651 complete IDs on three fixed Holdouts; all 2,519 profiled add/update packets yield a structural ID and 1,973 are exactly purchase-linked, while two unseen input symbols fail closed and 546 packets plus slot/instance/removal linkage, swaps, undo, and full inventory state remain unresolved; an all-segment scan of 3,266 `0x0369` blocks finds zero occurrences of either missing symbol, so the current corpus cannot fill them
+- a maintained patch-16.14 static-recipe research gate accepts only an explicitly saved, SHA-256-pinned Data Dragon 16.14.1 item catalog and never performs network/latest lookup; intersecting transitive recipes with historical replay-decoded add IDs yields 194 exact singleton candidates out of 292 evaluated real-item removals (98 remain ambiguous), but historical IDs are not current inventory/instances and no runtime API or full reconstruction follows
+- keyframe outer framing and champion ownership are exact; patch 16.14 additionally has exact but non-semantic change correlations for `totalGold` and lane CS across 3,100 transitions, but the gold correlation is post-hoc and non-unique, neither result exposes a numeric value or field boundary, and a bounded 1,126-candidate stride-scalar audit plus discrete champion-owner CS event searches fail; schema v4 now freezes two exact D7→H3 mirror ranges and falsifies simple two-byte cell/mask layouts, while one identical local tuple maps to both lane CS 91 and 92, so the inner stateful replication/component record grammar remains unresolved
+- there is no valid replay-native movement or position decoder; the provisional `0x00DC` raw-coordinate interpretation was disproven and removed from the runtime; a maintained exact-build patch-16.14 gate proves 6,314/6,314 consecutive `0x0328`→`0x0170` companion pairs plus 1,494 unpaired `0x0328` blocks, and 759 pair `blockParam` values exactly equal replay-decoded ward entity IDs after placement (all 29 links with known conservative removal precede it), but this bounded generic entity-handle relation exposes no operation, owner/champion, payload, waypoint, or coordinate grammar
 - building and turret-plate signatures are correlations with false positives, not runtime decoders
 - external profile build `16.14.794.5912` validates 684/684 kills, 99/99
   objectives, 1,477/1,477 ward placements, 484/484 ward removals, and
@@ -106,9 +107,9 @@ Important browser caveat:
 
 Near-term engineering focus should be:
 
-1. independently cover the two fail-closed patch-16.14 item-ID input symbols, then finish slot/instance/removal decoding and full inventory-state reconstruction
+1. preserve fail-closed handling for the two absent patch-16.14 item-ID symbols until new replay coverage exists, while prioritizing stateful operation/slot/instance/removal decoding and full inventory-state reconstruction
 2. decode the patch-16.14 keyframe replication/component value grammar using the exact but non-semantic `totalGold` and lane-CS change correlations only as search constraints, then reconstruct numeric gold, CS, XP, level, health, and resources
-3. decode the real movement/waypoint message grammar and replay-native entity identity
+3. use the exact ward-linked generic handle subset to decode `0x0328`/`0x0170` operation and payload grammar, expand replay-native entity identity, and only then decode movement/waypoints
 4. expand or structurally decode the patch-16.9 ward symbol-to-Float32 mapping, prioritizing the sparse `p[9]`, `p[10]`, `p[13]`, and `p[14]` lanes; use new replay-native spatial anchors plus the exact primary/companion permutation and placement/removal equality constraints, never interpolation or visual plausibility, then rerun holdout and full-corpus gates
 5. continue ward subtype/vision semantics and promote buildings/plates, damage, spell, combat-effect, and world-entity streams
 
@@ -134,6 +135,13 @@ Runtime match data must come only from the loaded replay. Riot Match-V5 and
 Timeline files are allowed as offline discovery and validation oracles, never as
 runtime inputs or silent fallback data. Every normalized field must carry a
 versioned decoder boundary and degrade to unavailable when not proven.
+
+Patch-pinned static game metadata may support a decoder grammar when it carries
+no match state. For example, an exact Data Dragon item catalog may provide
+versioned recipe edges only if its bytes are locally supplied, fingerprinted,
+and selected with the exact replay profile. Never fetch `latest` at runtime or
+use static metadata to fabricate a replay field that the loaded `.rofl` did not
+semantically identify.
 
 This replay-only contract also governs research tooling. Installed League/Riot
 client binaries, game processes, Vanguard, and Vanguard-managed data are outside
