@@ -5912,6 +5912,7 @@ struct ReplayParticipantStatSnapshot {
     int level = 1;
     float total_gold = 0.0F;
     float lane_minions_killed = 0.0F;
+    int neutral_minions_killed = 0;
     PacketBlock block;
 };
 
@@ -5937,7 +5938,17 @@ struct ReplayParticipantStatSnapshot {
     };
     return offsets_valid(profile.experience_offsets) &&
            offsets_valid(profile.total_gold_offsets) &&
-           offsets_valid(profile.lane_minions_killed_offsets);
+           offsets_valid(profile.lane_minions_killed_offsets) &&
+           offsets_valid(profile.neutral_minions_killed_offsets);
+}
+
+[[nodiscard]] int project_keyframe_neutral_minions_killed(float value) {
+    // D7 selected the common exact interval [3.814697265625e-6,
+    // 3.0517578125e-5). The frozen 1e-5 epsilon reproduced all 1,030 H3
+    // snapshots and remains far below the smallest observed semantic fraction
+    // (0.05). It corrects Float32 underflow at integer boundaries without
+    // rounding fractional neutral-CS weights up.
+    return static_cast<int>(std::floor(value + 0.00001F));
 }
 
 [[nodiscard]] int derive_keyframe_level(float experience, int final_level) {
@@ -6079,12 +6090,18 @@ void write_participant_stat_snapshot_block_json(
                     decompressed, block, profile.total_gold_offsets, profile);
                 const float lane_minions_killed = decode_keyframe_stat_float32_le(
                     decompressed, block, profile.lane_minions_killed_offsets, profile);
+                const float neutral_minions_killed_raw = decode_keyframe_stat_float32_le(
+                    decompressed, block, profile.neutral_minions_killed_offsets, profile);
+                const int neutral_minions_killed =
+                    project_keyframe_neutral_minions_killed(neutral_minions_killed_raw);
                 const int level = derive_keyframe_level(
                     experience, summary.players[static_cast<std::size_t>(participant_id - 1)].level);
                 const bool invalid_value = !std::isfinite(experience) || experience < 0.0F ||
                     !std::isfinite(total_gold) || total_gold < 0.0F ||
                     !std::isfinite(lane_minions_killed) || lane_minions_killed < 0.0F ||
-                    std::trunc(lane_minions_killed) != lane_minions_killed;
+                    std::trunc(lane_minions_killed) != lane_minions_killed ||
+                    !std::isfinite(neutral_minions_killed_raw) ||
+                    neutral_minions_killed_raw < 0.0F || neutral_minions_killed < 0;
                 if (invalid_value) {
                     ++rejected_invalid_value_packet_count;
                     continue;
@@ -6096,6 +6113,7 @@ void write_participant_stat_snapshot_block_json(
                     level,
                     total_gold,
                     lane_minions_killed,
+                    neutral_minions_killed,
                     block,
                 });
             }
@@ -6142,6 +6160,7 @@ void write_participant_stat_snapshot_block_json(
     }
     std::array<std::optional<float>, 10> previous_gold;
     std::array<std::optional<float>, 10> previous_lane_minions;
+    std::array<std::optional<int>, 10> previous_neutral_minions;
     std::array<std::optional<float>, 10> previous_experience;
     std::array<std::optional<int>, 10> previous_level;
     std::vector<ReplayParticipantStatSnapshot> monotonic_snapshots;
@@ -6156,7 +6175,9 @@ void write_participant_stat_snapshot_block_json(
             (previous_gold[participant_index].has_value() &&
                 snapshot.total_gold < *previous_gold[participant_index]) ||
             (previous_lane_minions[participant_index].has_value() &&
-                snapshot.lane_minions_killed < *previous_lane_minions[participant_index])) {
+                snapshot.lane_minions_killed < *previous_lane_minions[participant_index]) ||
+            (previous_neutral_minions[participant_index].has_value() &&
+                snapshot.neutral_minions_killed < *previous_neutral_minions[participant_index])) {
             ++rejected_invalid_value_packet_count;
             continue;
         }
@@ -6164,6 +6185,7 @@ void write_participant_stat_snapshot_block_json(
         previous_level[participant_index] = snapshot.level;
         previous_gold[participant_index] = snapshot.total_gold;
         previous_lane_minions[participant_index] = snapshot.lane_minions_killed;
+        previous_neutral_minions[participant_index] = snapshot.neutral_minions_killed;
         monotonic_snapshots.push_back(snapshot);
     }
     snapshots = std::move(monotonic_snapshots);
@@ -6200,7 +6222,7 @@ void write_participant_stat_snapshot_block_json(
     }
 
     std::ostringstream output;
-    output << "{\"schema\":\"rofl-replay-participant-stat-snapshots/v2\",\"source\":{\"replayPath\":";
+    output << "{\"schema\":\"rofl-replay-participant-stat-snapshots/v3\",\"source\":{\"replayPath\":";
     if (source.has_file) output << '\"' << json_escape(source.replay_path) << '\"';
     else output << "null";
     output << ",\"replayId\":";
@@ -6220,7 +6242,8 @@ void write_participant_stat_snapshot_block_json(
            << ",\"championNetworkIdBase\":" << profile.champion_network_id_base
            << ",\"championNetworkIdBaseHex\":\""
            << fixed_hex(profile.champion_network_id_base, 8) << "\""
-           << ",\"levelDerivation\":\"patch-16.14-xp-thresholds-with-replay-final-level-cap\"";
+           << ",\"levelDerivation\":\"patch-16.14-xp-thresholds-with-replay-final-level-cap\""
+           << ",\"neutralMinionsKilledProjection\":\"floor-plus-1e-5\"";
     write_decoder_profile_provenance_fields(output, &decoder_profiles);
     output << "},\"snapshots\":[";
     for (std::size_t index = 0; index < snapshots.size(); ++index) {
@@ -6234,6 +6257,7 @@ void write_participant_stat_snapshot_block_json(
                << ",\"totalGold\":" << std::setprecision(std::numeric_limits<float>::max_digits10)
                << snapshot.total_gold
                << ",\"laneMinionsKilled\":" << snapshot.lane_minions_killed
+               << ",\"neutralMinionsKilled\":" << snapshot.neutral_minions_killed
                << ",\"provenance\":{\"snapshotBlock\":";
         write_participant_stat_snapshot_block_json(output, snapshot.block);
         output << "}}";
@@ -14989,7 +15013,6 @@ std::string match_event_window(
 }
 
 }  // namespace rofl::core
-
 
 
 

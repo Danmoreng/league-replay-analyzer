@@ -59,7 +59,7 @@ ten saved replay/API fixture pairs as follows:
 | Purchase-linked resulting-item updates | strict `rofl-replay-purchase-linked-item-updates/v1` subset | 193 / 193 (D7 130, H3 63), zero extras or wrong IDs, maximum 1 ms delta |
 | Direct add-only item purchases | strict `rofl-replay-direct-item-purchases/v1` subset | 1,278 / 1,278 (D7 844, H3 434), including 1,043 / 1,043 buildable components (D7 710, H3 333), zero extras or wrong IDs, maximum 1 ms delta |
 | Item sale operations | operation-only `rofl-replay-item-sales/v1` stream | 116 / 116 (D7 77, H3 39), zero extras or misses, maximum 1 ms delta |
-| Keyframe participant stat snapshots | `rofl-replay-participant-stat-snapshots/v2` | exact build only: 2,170 D7 and 1,030 H3 champion-owned XP/level/total-gold/lane-CS snapshots, all finite/nonnegative/monotonic; level validates 3,200/3,200 and floored XP 3,198/3,200 with only frozen ordering-boundary differences |
+| Keyframe participant stat snapshots | `rofl-replay-participant-stat-snapshots/v3` | exact build only: 2,170 D7 and 1,030 H3 champion-owned XP/level/total-gold/lane-CS/neutral-CS snapshots; neutral CS uses the frozen `floor(value + 1e-5)` projection and validates 3,200/3,200 exactly |
 
 The purchase-linked resulting-item-update surface is available only through
 this exact-build external profile. It consumes the loaded replay and selected
@@ -113,13 +113,14 @@ with Timeline data. The normalized output is external-profile-only in Native
 and Wasm and fails closed if values are non-finite, negative, lane CS is not
 integral, ownership is invalid, a participant track decreases, a
 timestamp/participant pair is duplicated, or a keyframe does not contain the
-complete participant set 1 through 10. Neutral CS, current spendable gold,
-health, and resources are deliberately absent from this capability pending separate
+complete participant set 1 through 10. Neutral CS is projected with the
+D7-frozen `floor(value + 1e-5)` rule and reproduces 3,200/3,200 D7/H3 labels.
+Current spendable gold, health, and resources remain absent pending separate
 semantic/promotion gates.
 
-The canonical profile asset currently carries revision `2026-07-23`, SHA-256
-`47f20aae95740df4fb3b66417cabd146abe85c23b432c5fa1bd17d868995f9b0`, and
-fingerprint `fnv1a64:7eb24280c8b9ce1d`. All exact-build surfaces fail
+The canonical profile asset currently carries revision `2026-07-24`, SHA-256
+`ca5696864d60d9a7667cfbe3221be1303d3f248de10983b05389fc8275eeaf7a`, and
+fingerprint `fnv1a64:5d6e6dfe099ce86f`. All exact-build surfaces fail
 closed for a missing, invalid, non-external, ambiguous, or non-`16.14.794.5912`
 profile.
 

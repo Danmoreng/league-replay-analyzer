@@ -31,13 +31,14 @@ export interface ReplayParticipantStatSnapshot {
   level: number;
   totalGold: number;
   laneMinionsKilled: number;
+  neutralMinionsKilled: number;
   provenance: {
     snapshotBlock: ReplayParticipantStatSnapshotBlock;
   };
 }
 
 export interface ReplayParticipantStatSnapshotsResult {
-  schema: "rofl-replay-participant-stat-snapshots/v2";
+  schema: "rofl-replay-participant-stat-snapshots/v3";
   generatedAtUtc?: string;
   source: {
     replayPath: string | null;
@@ -57,6 +58,7 @@ export interface ReplayParticipantStatSnapshotsResult {
     championNetworkIdBase: number;
     championNetworkIdBaseHex: string;
     levelDerivation: "patch-16.14-xp-thresholds-with-replay-final-level-cap";
+    neutralMinionsKilledProjection: "floor-plus-1e-5";
     origin: "external";
     schema: "rofl-replay-decoder-profiles/v1";
     registryId: string;
@@ -169,6 +171,10 @@ function parseSnapshot(value: unknown): ReplayParticipantStatSnapshot {
     level: requiredInteger(record.level, "snapshot.level", 1),
     totalGold: requiredFiniteNumber(record.totalGold, "snapshot.totalGold"),
     laneMinionsKilled: requiredInteger(record.laneMinionsKilled, "snapshot.laneMinionsKilled"),
+    neutralMinionsKilled: requiredInteger(
+      record.neutralMinionsKilled,
+      "snapshot.neutralMinionsKilled",
+    ),
     provenance: {
       snapshotBlock: {
         channel: requiredLiteral(block.channel, 1, "snapshotBlock.channel"),
@@ -192,7 +198,7 @@ export function parseReplayParticipantStatSnapshotsResult(
   value: unknown,
 ): ReplayParticipantStatSnapshotsResult {
   const record = requiredRecord(value, "result");
-  requiredLiteral(record.schema, "rofl-replay-participant-stat-snapshots/v2", "schema");
+  requiredLiteral(record.schema, "rofl-replay-participant-stat-snapshots/v3", "schema");
   const source = requiredRecord(record.source, "source");
   const profile = requiredRecord(record.profile, "profile");
   const diagnostics = requiredRecord(record.diagnostics, "diagnostics");
@@ -256,7 +262,8 @@ export function parseReplayParticipantStatSnapshotsResult(
       (snapshot.experience < previous.experience ||
         snapshot.level < previous.level ||
         snapshot.totalGold < previous.totalGold ||
-        snapshot.laneMinionsKilled < previous.laneMinionsKilled)
+        snapshot.laneMinionsKilled < previous.laneMinionsKilled ||
+        snapshot.neutralMinionsKilled < previous.neutralMinionsKilled)
     ) {
       throw new Error(
         "Participant stat snapshots: participant values must be monotonic across keyframes.",
@@ -322,7 +329,7 @@ export function parseReplayParticipantStatSnapshotsResult(
   }
 
   return {
-    schema: "rofl-replay-participant-stat-snapshots/v2",
+    schema: "rofl-replay-participant-stat-snapshots/v3",
     ...(typeof record.generatedAtUtc === "string" ? { generatedAtUtc: record.generatedAtUtc } : {}),
     source: {
       replayPath: requiredNullableString(source.replayPath, "source.replayPath"),
@@ -363,6 +370,11 @@ export function parseReplayParticipantStatSnapshotsResult(
         profile.levelDerivation,
         "patch-16.14-xp-thresholds-with-replay-final-level-cap",
         "profile.levelDerivation",
+      ),
+      neutralMinionsKilledProjection: requiredLiteral(
+        profile.neutralMinionsKilledProjection,
+        "floor-plus-1e-5",
+        "profile.neutralMinionsKilledProjection",
       ),
       origin: requiredLiteral(profile.origin, "external", "profile.origin"),
       schema: requiredLiteral(profile.schema, "rofl-replay-decoder-profiles/v1", "profile.schema"),

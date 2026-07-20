@@ -58,6 +58,7 @@ interface CurrentParticipantStats {
   timestampMillis: number;
   level: number;
   laneCs: number;
+  jungleCs: number;
 }
 
 const { currentTime, duration, isPlaying, playbackSpeed, togglePlayback, seek } = usePlayback();
@@ -117,7 +118,8 @@ const participantStatSnapshotRows = computed<CurrentParticipantStats[]>(() => {
       !Number.isInteger(snapshot.participantId) ||
       !Number.isFinite(snapshot.timestampMillis) ||
       !Number.isInteger(snapshot.level) ||
-      !Number.isFinite(snapshot.laneMinionsKilled)
+      !Number.isFinite(snapshot.laneMinionsKilled) ||
+      !Number.isInteger(snapshot.neutralMinionsKilled)
     ) {
       continue;
     }
@@ -126,6 +128,7 @@ const participantStatSnapshotRows = computed<CurrentParticipantStats[]>(() => {
       timestampMillis: snapshot.timestampMillis,
       level: snapshot.level,
       laneCs: snapshot.laneMinionsKilled,
+      jungleCs: snapshot.neutralMinionsKilled,
     });
   }
   return rows.sort(
@@ -417,8 +420,11 @@ function onScrub(event: Event): void {
             </span>
             <span class="player-stats">
               <span>{{ roleLabel(entry.player.teamPosition) }}</span>
-              <span v-if="currentParticipantStats(entry.participantId)">
-                {{ Math.trunc(currentParticipantStats(entry.participantId)!.laneCs) }} CS
+              <span v-if="currentParticipantStats(entry.participantId)" class="participant-cs">
+                <span>
+                  {{ Math.trunc(currentParticipantStats(entry.participantId)!.laneCs) }} Lane
+                </span>
+                <span>{{ currentParticipantStats(entry.participantId)!.jungleCs }} Jungle</span>
               </span>
             </span>
           </span>
@@ -870,6 +876,13 @@ function onScrub(event: Event): void {
 .player-stats {
   color: #6f7c90;
   font-size: 0.52rem;
+}
+
+.participant-cs {
+  display: flex;
+  gap: 7px;
+  color: #8ba5bd;
+  font-family: "Cascadia Code", monospace;
 }
 
 .player-heading em {

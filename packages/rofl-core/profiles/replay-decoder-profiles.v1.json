@@ -1,7 +1,7 @@
 {
   "schema": "rofl-replay-decoder-profiles/v1",
   "registryId": "league-replay-analyzer-offline-validated",
-  "revision": "2026-07-23",
+  "revision": "2026-07-24",
   "profiles": [
     {
       "versionGroup": "15.22",
@@ -540,7 +540,9 @@
         ],
         "experienceOffsets": [83, 85, 87, 89],
         "totalGoldOffsets": [115, 117, 119, 121],
-        "laneMinionsKilledOffsets": [123, 125, 127, 129]
+        "laneMinionsKilledOffsets": [123, 125, 127, 129],
+        "neutralMinionsKilledOffsets": [131, 133, 135, 137],
+        "neutralMinionsKilledProjection": "floor-plus-1e-5"
       }
     }
   ]

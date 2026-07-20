@@ -175,6 +175,8 @@ struct KeyframeParticipantStatsDecoderProfile {
     std::array<std::size_t, 4> experience_offsets{};
     std::array<std::size_t, 4> total_gold_offsets{};
     std::array<std::size_t, 4> lane_minions_killed_offsets{};
+    std::array<std::size_t, 4> neutral_minions_killed_offsets{};
+    std::string neutral_minions_killed_projection;
 };
 
 struct DecoderVersionProfile {

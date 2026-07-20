@@ -1,6 +1,6 @@
 # Reverse Engineering Docs Index
 
-Updated: 2026-07-23
+Updated: 2026-07-24
 
 This file consolidates the replay reverse-engineering documentation into a smaller set of active references.
 
@@ -58,11 +58,17 @@ are outside scope even when described by historical community work.
   non-semantic boundary)
 - `docs/decoder-status.md` also records the promoted exact-build `0x02EB`
   participant-snapshot grammar: the profile-pinned 256-byte permutation and
-  interleaved XP/total-gold/lane-CS Float32LE stripes plus the replay-only
-  XP-threshold/final-level-cap derivation. Neutral CS remains research-only.
+  interleaved XP/total-gold/lane-CS/neutral-CS Float32LE stripes plus the
+  replay-only XP-threshold/final-level-cap derivation and D7-frozen
+  `floor(value + 1e-5)` neutral-CS projection.
 - `scripts/validate_replay_participant_stat_snapshots_corpus.mjs` and
   `scripts/manifests/replay-participant-stat-snapshots-16.14.expected.json`
   reproduce its compact D7/H3 promotion gate.
+- `scripts/research_keyframe_neutral_cs_16_14.mjs` reproduces the Discovery
+  projection selection and untouched Holdout validation for neutral CS.
+- `scripts/research_keyframe_champion_positions_16_14.mjs` rejects direct raw
+  or profile-permuted signed Int16/Float32 position scalars in the three
+  substantial exact one-per-champion/keyframe families.
 - `scripts/research_keyframe_current_gold_16_14.mjs` reproduces the exact-build
   spent-gold-like lane and the negative current-gold correction searches.
 - `scripts/research_keyframe_champion_current_gold_families_16_14.mjs` freezes

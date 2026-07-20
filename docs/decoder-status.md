@@ -1,6 +1,6 @@
 # Replay Decoder Status
 
-Updated: 2026-07-23
+Updated: 2026-07-24
 Baseline commit: `fe39e13`
 
 This is the canonical handoff for the current decoder state. Read it before
@@ -70,7 +70,7 @@ Wasm, and consumed by the Vue application unless noted otherwise.
 | Purchase-linked resulting-item updates | Timestamp, participant, resulting item ID, matched strict bundle template, and packet provenance in `rofl-replay-purchase-linked-item-updates/v1`                                                                                                                          | External-profile-only, exact build `16.14.794.5912`: 193/193 offline-validated updates (D7 130, H3 63), zero extras/wrong IDs, maximum 1 ms delta. Strict subset only: 2,326/2,519 profiled add/update packets remain unavailable; no slot, instance, removal/component identity, count, complete inventory, price/gold, or undo state.                                                                                                                                                                                                                                                          |
 | Direct add-only item purchases         | Timestamp, replay-native participant, structural 13-bit item ID, buildable-component flag, and add-block provenance in `rofl-replay-direct-item-purchases/v1`                                                                                                              | External-profile-only, exact build `16.14.794.5912`: 1,278/1,278 exact purchases (D7 844, H3 434), zero extras/wrong IDs, maximum 1 ms delta. This includes 1,043/1,043 buildable components (D7 710, H3 333). It accepts only an isolated champion-owned channel-1 `0x0369`, length 14/15 add, with no relevant `0x0369`/`0x03F9`/`0x0146`/`0x0081` family operation for that owner within +/-1 ms and a decoded ID in the profile-pinned static real-item catalog. It does not expose a general purchase classifier, slot, instance, quantity, price, gold, removal, undo, or inventory state. |
 | Item sale operations                   | Timestamp, replay-native participant, exact sale-operation classification, and removal-block provenance in `rofl-replay-item-sales/v1`                                                                                                                                     | External-profile-only, exact build `16.14.794.5912`: 116/116 offline-validated sale operations (D7 77, H3 39), zero extras/misses, maximum 1 ms delta. The event proves only the operation and its source block; sold item ID, slot, instance, count/charges, price, gold gain, undo, and inventory state are explicitly unavailable.                                                                                                                                                                                                                                                            |
-| Keyframe participant stat snapshots    | Timestamp, replay-native participant, Float32 XP, XP-derived level, Float32 total gold, and integer lane CS in `rofl-replay-participant-stat-snapshots/v2`                                                                                                                 | External-profile-only, exact build `16.14.794.5912`: champion-owned keyframe `0x02EB`, 1,479-byte payloads, a profile-pinned 256-byte cipher-to-plain permutation, and fixed interleaved Float32LE stripes. D7/H3: all 2,170/1,030 snapshots are finite and monotonic; level agrees with all 3,200 saved Timeline frames and floored XP agrees for 3,198/3,200, with only two already-frozen ordering-boundary differences. Lane CS remains integral in every snapshot. Timeline data is never a runtime input or fallback.                                                                      |
+| Keyframe participant stat snapshots    | Timestamp, replay-native participant, Float32 XP, XP-derived level, Float32 total gold, integer lane CS, and projected integer neutral/jungle CS in `rofl-replay-participant-stat-snapshots/v3`                                                                            | External-profile-only, exact build `16.14.794.5912`: champion-owned keyframe `0x02EB`, 1,479-byte payloads, a profile-pinned 256-byte cipher-to-plain permutation, and fixed interleaved Float32LE stripes. D7/H3: all 2,170/1,030 snapshots are finite and monotonic; level agrees with all 3,200 saved Timeline frames, floored XP agrees for 3,198/3,200 with only two frozen ordering boundaries, lane CS remains integral, and the D7-frozen neutral-CS projection agrees 3,200/3,200. Timeline data is never a runtime input or fallback. |
 
 The historical built-in coverage includes patch groups `15.22`, `15.23`,
 `15.24`, `16.1`, `16.5`, `16.6`, `16.7`, and `16.9`. The externally supplied
@@ -80,16 +80,16 @@ profile additionally validates exact build `16.14.794.5912`: 684/684 kills,
 enables the strict 193/193 purchase-linked resulting-item-update subset, the
 strict 1,278/1,278 direct-add-only purchase subset, and the exact 116/116
 item-sale-operation stream. It also enables the profile-backed keyframe XP,
-level, total-gold, and lane-CS snapshot surface; none of these exact-build
+level, total-gold, lane-CS, and neutral-CS snapshot surface; none of these exact-build
 surfaces is available through built-in fallback profiles. The profile revision
-is `2026-07-23`, its SHA-256 is
-`47f20aae95740df4fb3b66417cabd146abe85c23b432c5fa1bd17d868995f9b0`, and its
-provenance fingerprint is `fnv1a64:7eb24280c8b9ce1d`.
+is `2026-07-24`, its SHA-256 is
+`ca5696864d60d9a7667cfbe3221be1303d3f248de10983b05389fc8275eeaf7a`, and its
+provenance fingerprint is `fnv1a64:5d6e6dfe099ce86f`.
 
 The browser decoding layer exposes the real Wasm participant summary, kill
 timeline, objective timeline, ward lifecycle, both exact-build item-purchase
 subsets, the exact-build item-sale-operation stream, and exact-build
-replay-native keyframe XP/level/total-gold/lane-CS snapshots for the locally
+replay-native keyframe XP/level/total-gold/lane-CS/neutral-CS snapshots for the locally
 loaded replay. Not every decoded research stream is mounted in the product
 view.
 
@@ -99,7 +99,7 @@ and elite objectives. Ward lifecycle, purchase subsets, and sale operations
 remain available to research/debug tooling but are deliberately absent from the
 product timeline. Compact champion cards show the champion portrait, player,
 role, scrub-time K/D/A, and—where the exact-build external profile is
-present—derived level and lane CS. Cumulative total gold is not shown as
+present—derived level, lane CS, and neutral/jungle CS. Cumulative total gold is not shown as
 spendable current gold. Partial purchase and operation streams are not shown as
 inventory slots or current inventory. Final inventories, fake health/resource
 bars, the minimap, explanatory decoder copy, and ward-position research
@@ -611,7 +611,7 @@ complete, profile-validated replay-embedded final-stat record and uses only its
 final level to choose the participant's 18-or-20 cap. Saved Riot fixtures do
 not participate in this derivation.
 
-The normalized surface is `rofl-replay-participant-stat-snapshots/v2`. It is
+The normalized surface is `rofl-replay-participant-stat-snapshots/v3`. It is
 implemented in C++, exposed through the external-profile-only Wasm ABI, and
 consumed by the product roster at the current scrub time. Missing, invalid,
 non-bijective, built-in, ambiguous, or non-exact-build profiles fail closed;
@@ -628,12 +628,16 @@ node scripts/validate_replay_participant_stat_snapshots_corpus.mjs \
 The report is compact and retains only counts, hashes, diagnostics, and the five
 frozen ordering differences; it does not serialize the 3,200 snapshots again.
 
-Neutral CS `[131,133,135,137]` uses the same frozen cipher and exhibits strong
-D7/H3 finite/nonnegative/monotonic Float32 evidence, but fractional/epsilon and
-integer-projection ambiguity keep it research-only. It is not part of the
-profile, normalized schema, Wasm output, or browser state. Current spendable
-gold, health, max health, mana/resource, damage, alive state, and full inventory
-remain unresolved.
+Neutral CS `[131,133,135,137]` uses the same frozen cipher. The replay-native
+Float32 value is finite, nonnegative, and monotonic across every snapshot but
+contains real fractional neutral-CS weights. Discovery defines the exact
+`floor(value + epsilon)` interval as `[3.814697265625e-6,
+3.0517578125e-5)` and freezes `epsilon = 1e-5`; that rule reproduces all
+2,170 D7 and all 1,030 previously unopened H3 `jungleMinionsKilled` labels.
+The field is profile-backed, emitted as integer `neutralMinionsKilled`, exposed
+through Native/Wasm/TypeScript, and shown by the product roster at scrub time.
+Current spendable gold, health, max health, mana/resource, damage, alive state,
+and full inventory remain unresolved.
 
 Two July 2026 maintained gates narrow those gaps without adding product fields:
 
@@ -788,9 +792,9 @@ intervals and adds 361 unchanged-interval events; the only zero-extra prefix
 candidate covers zero positive deltas. The next keyframe step is therefore a
 stateful replication/record grammar, not a wider static scalar packing.
 
-Position, health, resources, current gold, XP, level, neutral CS, damage, KDA,
-and alive state are not decoded. Exact-build total gold and lane CS are the
-only productive keyframe state fields. Older supervised keyframe assignments
+Position, health, resources, current gold, damage, KDA, and alive state are not
+decoded. Exact-build XP, derived level, total gold, lane CS, and neutral/jungle
+CS are productive keyframe state fields. Older supervised keyframe assignments
 remain research artifacts, not replay-only runtime fields. The blocker for the
 remaining state is the inner replication/component serialization grammar. See
 [`keyframe-champion-state-discovery.md`](keyframe-champion-state-discovery.md).
@@ -798,6 +802,17 @@ remaining state is the inner replication/component serialization grammar. See
 ### Movement
 
 There is no valid replay-native position, path target, or waypoint decoder.
+
+A maintained exact-build direct-scalar gate now also rules out the simplest
+keyframe-state interpretation. Across 2,170 D7 and 1,030 H3 champion snapshots,
+the substantial exact one-per-champion/keyframe families `0x0081`, `0x02EB`,
+and `0x047A` were searched for raw and profile-permuted signed Int16 and
+Float32 LE/BE lanes with strides 1 through 8. D7 selected candidates before H3
+was opened. Neither axis survives: the best affine RMSE remains about 3,763 X
+and 3,622 Y map units, while the strongest D7 first-difference correlations are
+only `-0.0138` X and `0.0548` Y and remain weak or reverse sign in H3. Champion
+position is therefore not another direct scalar alongside the promoted
+`0x02EB` stats; research must decode the movement/component message grammar.
 
 The frequent champion-handle-associated `0x01AB` family has also failed the
 coordinate/waypoint promotion gate: neither its raw payload nor bounded

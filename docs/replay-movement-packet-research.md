@@ -34,7 +34,7 @@ structural result. It reads only the ten saved exact-build `16.14.794.5912`
 `.rofl` files and uses the existing replay-only ward decoder solely as an
 entity-ID oracle. The
 oracle is bound to the checked-in external profile provenance fingerprint
-`fnv1a64:10b2b8d2727009a0`; profile drift fails closed. It does not read
+`fnv1a64:5d6e6dfe099ce86f`; profile drift fails closed. It does not read
 Timeline, Match-V5, client binaries, or runtime inputs.
 
 The fixed seven-replay D7 split is completely loaded, selected, and asserted
@@ -100,6 +100,22 @@ node .\scripts\research_movement_entity_handles_16_14.mjs `
 ```
 
 ## Stronger structural lead
+
+### Champion-keyframe direct-scalar rejection
+
+The exact-build harness
+`scripts/research_keyframe_champion_positions_16_14.mjs` tests whether champion
+position is another direct scalar in the now-identified one-per-champion
+keyframe state. It scans `0x0081`, `0x02EB`, and `0x047A` over 2,170 D7 and
+1,030 H3 champion snapshots using raw/profile-permuted signed Int16 and
+Float32 LE/BE candidates with strides 1 through 8. D7 selects candidates before
+H3 is opened.
+
+No X or Y candidate reaches the deliberately permissive lead threshold. Best
+affine error remains about 3,763 X and 3,622 Y map units. First-difference
+correlations are near zero and do not strengthen in H3. This rejects a direct
+keyframe scalar interpretation; it does not reject a structured movement
+message elsewhere in the replay.
 
 The next decoder should start from the actual movement message grammar instead
 of fitting raw offsets. Format references indicate that a decoded movement

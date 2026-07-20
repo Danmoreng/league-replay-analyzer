@@ -738,7 +738,8 @@ parse_keyframe_participant_stats(const JsonValue& value) {
     }
     allow_only(value, {"segmentType", "channel", "packetType", "contentLength",
                        "championNetworkIdBase", "cipherToPlain", "experienceOffsets",
-                       "totalGoldOffsets", "laneMinionsKilledOffsets"});
+                       "totalGoldOffsets", "laneMinionsKilledOffsets",
+                       "neutralMinionsKilledOffsets", "neutralMinionsKilledProjection"});
     KeyframeParticipantStatsDecoderProfile profile;
     profile.segment_type = string_value(field(value, "segmentType"), "segmentType", 16);
     profile.channel = static_cast<std::uint8_t>(integer_value(
@@ -758,9 +759,16 @@ parse_keyframe_participant_stats(const JsonValue& value) {
     profile.lane_minions_killed_offsets = fixed_offsets<4>(
         field(value, "laneMinionsKilledOffsets"), "laneMinionsKilledOffsets",
         profile.content_length);
+    profile.neutral_minions_killed_offsets = fixed_offsets<4>(
+        field(value, "neutralMinionsKilledOffsets"), "neutralMinionsKilledOffsets",
+        profile.content_length);
+    profile.neutral_minions_killed_projection = string_value(
+        field(value, "neutralMinionsKilledProjection"),
+        "neutralMinionsKilledProjection", 32);
     if (profile.segment_type != "keyframe" || profile.channel != 1 ||
         profile.packet_type != 747 || profile.content_length != 1479 ||
-        profile.champion_network_id_base != 1073741997) {
+        profile.champion_network_id_base != 1073741997 ||
+        profile.neutral_minions_killed_projection != "floor-plus-1e-5") {
         throw std::runtime_error(
             "profile schema: invalid keyframe participant stats invariants");
     }
