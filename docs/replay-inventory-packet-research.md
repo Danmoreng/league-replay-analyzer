@@ -20,9 +20,9 @@ the 6/7-byte removal family still has no decoded slot or item-instance
 reference. Consequently, a removal cannot yet be mapped to the item that left
 a champion's inventory without using an offline Riot label.
 
-The canonical profile revision is `2026-07-24`, SHA-256
-`ca5696864d60d9a7667cfbe3221be1303d3f248de10983b05389fc8275eeaf7a`, with
-fingerprint `fnv1a64:5d6e6dfe099ce86f`.
+The canonical profile revision is `2026-07-25-cross-patch-cs`, SHA-256
+`a4ee89df1ff70e97fa97b9b64c632851584c110bc65af2301420a930e79307d3`, with
+fingerprint `fnv1a64:5cf4895f9e6d3f4c`.
 
 ## Reproducing the result
 

@@ -188,9 +188,9 @@ function snapshotProfileJson(): string {
     profiles: [
       {
         versionGroup: "16.14",
-        acceptedGameVersions: [gameVersion],
         finalStatsValidated: true,
         keyframeParticipantStats: {
+          acceptedGameVersions: [gameVersion],
           segmentType: "keyframe",
           channel: 1,
           packetType: snapshotPacketType,
@@ -224,6 +224,19 @@ function malformedSnapshotProfileJson(): string {
     profiles: Array<{ keyframeParticipantStats: { cipherToPlain: number[] } }>;
   };
   profile.profiles[0]?.keyframeParticipantStats.cipherToPlain.pop();
+  return JSON.stringify(profile);
+}
+
+function partialCsOnlySnapshotProfileJson(): string {
+  const profile = JSON.parse(snapshotProfileJson()) as {
+    profiles: Array<{ keyframeParticipantStats: Record<string, unknown> }>;
+  };
+  const codec = profile.profiles[0]!.keyframeParticipantStats;
+  const cipher = codec.cipherToPlain as Array<number | null>;
+  cipher[0] = null;
+  codec.ambiguousCipherMappings = [{ cipher: 0, plain: [0] }];
+  delete codec.experienceOffsets;
+  delete codec.totalGoldOffsets;
   return JSON.stringify(profile);
 }
 
@@ -322,7 +335,7 @@ describe("participant-stat-snapshot Wasm ABI contract", () => {
     const profileJson = snapshotProfileJson();
     const result = extractParticipantStatSnapshots(module, buildSnapshotReplay(), profileJson);
 
-    expect(result.schema).toBe("rofl-replay-participant-stat-snapshots/v3");
+    expect(result.schema).toBe("rofl-replay-participant-stat-snapshots/v4");
     expect(result.source).toMatchObject({ runtimeInput: "rofl-only", riotApiInput: false });
     expect(result.gameVersion).toBe(gameVersion);
     expect(result.versionGroup).toBe("16.14");
@@ -337,7 +350,9 @@ describe("participant-stat-snapshot Wasm ABI contract", () => {
       snapshotPacketType,
       snapshotContentLength,
       championNetworkIdBase,
-      levelDerivation: "patch-16.14-xp-thresholds-with-replay-final-level-cap",
+      experienceAvailable: true,
+      totalGoldAvailable: true,
+      levelDerivation: "xp-thresholds-with-replay-final-level-cap",
       neutralMinionsKilledProjection: "floor-plus-1e-5",
     });
     expect(result.snapshots).toHaveLength(10);
@@ -401,6 +416,31 @@ describe("participant-stat-snapshot Wasm ABI contract", () => {
     );
   });
 
+  it("emits invariant CS from a bounded partial cipher without fabricating other stats", () => {
+    const result = extractParticipantStatSnapshots(
+      module,
+      buildSnapshotReplay(),
+      partialCsOnlySnapshotProfileJson(),
+    );
+    expect(result.profile).toMatchObject({
+      experienceAvailable: false,
+      totalGoldAvailable: false,
+      levelDerivation: null,
+    });
+    expect(result.snapshots).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          participantId: 1,
+          experience: null,
+          level: null,
+          totalGold: null,
+          laneMinionsKilled: 55,
+          neutralMinionsKilled: 19,
+        }),
+      ]),
+    );
+  });
+
   it("fails closed for missing or malformed snapshot capabilities", () => {
     expect(() =>
       extractParticipantStatSnapshots(
@@ -425,6 +465,6 @@ describe("participant-stat-snapshot Wasm ABI contract", () => {
         buildSnapshotReplay("16.14.794.5913"),
         snapshotProfileJson(),
       ),
-    ).toThrow("restricted to exact build 16.14.794.5912");
+    ).toThrow("no exact-build grammar for 16.14.794.5913");
   });
 });

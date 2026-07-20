@@ -201,30 +201,35 @@ void allow_only(const JsonValue& object, std::initializer_list<std::string_view>
     if ((result.minimum && *result.minimum == 0) || std::find(result.exact_values.begin(), result.exact_values.end(), 0) != result.exact_values.end()) throw std::runtime_error("profile schema: '" + std::string(name) + "' cannot contain zero length");
     return result;
 }
-[[nodiscard]] std::vector<std::uint8_t> byte_array(const JsonValue& value, std::string_view name) {
-    if (value.kind != JsonValue::Kind::array || value.array.empty() || value.array.size() > 16) throw std::runtime_error("profile schema: '" + std::string(name) + "' must be a non-empty bounded array");
+[[nodiscard]] std::vector<std::uint8_t> byte_array(
+    const JsonValue& value,
+    std::string_view name,
+    std::size_t maximum_count = 16
+) {
+    if (value.kind != JsonValue::Kind::array || value.array.empty() || value.array.size() > maximum_count) throw std::runtime_error("profile schema: '" + std::string(name) + "' must be a non-empty bounded array");
     std::set<std::uint8_t> seen; std::vector<std::uint8_t> result;
     for (const JsonValue& element : value.array) { const auto item = static_cast<std::uint8_t>(integer_value(element, name, 255)); if (!seen.insert(item).second) throw std::runtime_error("profile schema: duplicate value in '" + std::string(name) + "'"); result.push_back(item); }
     return result;
 }
 
 template <std::size_t Count>
-[[nodiscard]] std::array<std::uint8_t, Count> fixed_byte_permutation(
+[[nodiscard]] std::array<std::optional<std::uint8_t>, Count> fixed_partial_byte_permutation(
     const JsonValue& value,
     std::string_view name
 ) {
     if (value.kind != JsonValue::Kind::array || value.array.size() != Count) {
         throw std::runtime_error("profile schema: '" + std::string(name) +
-            "' must contain exactly " + std::to_string(Count) + " bytes");
+            "' must contain exactly " + std::to_string(Count) + " byte values or nulls");
     }
-    std::array<std::uint8_t, Count> result{};
+    std::array<std::optional<std::uint8_t>, Count> result{};
     std::array<bool, Count> seen{};
     for (std::size_t index = 0; index < Count; ++index) {
+        if (value.array[index].kind == JsonValue::Kind::null_value) continue;
         const std::uint8_t item = static_cast<std::uint8_t>(
             integer_value(value.array[index], name, 255));
         if (seen[item]) {
             throw std::runtime_error("profile schema: '" + std::string(name) +
-                "' must be a complete byte permutation");
+                "' known values must be injective");
         }
         seen[item] = true;
         result[index] = item;
@@ -243,13 +248,13 @@ template <std::size_t Count>
             "' must contain exactly " + std::to_string(Count) + " offsets");
     }
     std::array<std::size_t, Count> result{};
+    std::set<std::size_t> seen;
     for (std::size_t index = 0; index < Count; ++index) {
         result[index] = static_cast<std::size_t>(
             integer_value(value.array[index], name, kMaximumContentLength));
-        if (result[index] >= content_length ||
-            (index > 0 && result[index - 1] >= result[index])) {
+        if (result[index] >= content_length || !seen.insert(result[index]).second) {
             throw std::runtime_error("profile schema: '" + std::string(name) +
-                "' offsets must be strictly ascending and in bounds");
+                "' offsets must be distinct and in bounds");
         }
     }
     return result;
@@ -731,16 +736,33 @@ parse_inventory_direct_purchase_subset(const JsonValue& value) {
 }
 
 [[nodiscard]] KeyframeParticipantStatsDecoderProfile
-parse_keyframe_participant_stats(const JsonValue& value) {
+parse_keyframe_participant_stats(const JsonValue& value, std::string_view profile_version_group) {
     if (value.kind != JsonValue::Kind::object) {
         throw std::runtime_error(
             "profile schema: 'keyframeParticipantStats' must be an object");
     }
-    allow_only(value, {"segmentType", "channel", "packetType", "contentLength",
-                       "championNetworkIdBase", "cipherToPlain", "experienceOffsets",
-                       "totalGoldOffsets", "laneMinionsKilledOffsets",
-                       "neutralMinionsKilledOffsets", "neutralMinionsKilledProjection"});
+    allow_only(value, {"acceptedGameVersions", "segmentType", "channel", "packetType",
+                       "contentLength", "championNetworkIdBase", "cipherToPlain",
+                       "ambiguousCipherMappings", "experienceOffsets", "totalGoldOffsets",
+                       "laneMinionsKilledOffsets", "neutralMinionsKilledOffsets",
+                       "neutralMinionsKilledProjection"});
     KeyframeParticipantStatsDecoderProfile profile;
+    const JsonValue& accepted = field(value, "acceptedGameVersions");
+    if (accepted.kind != JsonValue::Kind::array || accepted.array.empty() ||
+        accepted.array.size() > kMaximumRuleCount) {
+        throw std::runtime_error(
+            "profile schema: keyframe participant stats acceptedGameVersions must be a non-empty bounded array");
+    }
+    std::set<std::string> accepted_versions;
+    for (const JsonValue& entry : accepted.array) {
+        const std::string exact = string_value(entry, "acceptedGameVersions", 64);
+        if (!exact.starts_with(std::string(profile_version_group) + ".") ||
+            !accepted_versions.insert(exact).second) {
+            throw std::runtime_error(
+                "profile schema: keyframe participant stats exact versions must be unique and match versionGroup");
+        }
+        profile.accepted_game_versions.push_back(exact);
+    }
     profile.segment_type = string_value(field(value, "segmentType"), "segmentType", 16);
     profile.channel = static_cast<std::uint8_t>(integer_value(
         field(value, "channel"), "channel", 15));
@@ -750,12 +772,56 @@ parse_keyframe_participant_stats(const JsonValue& value) {
         field(value, "contentLength"), "contentLength", kMaximumContentLength));
     profile.champion_network_id_base = static_cast<std::uint32_t>(integer_value(
         field(value, "championNetworkIdBase"), "championNetworkIdBase", 0xffffffffULL));
-    profile.cipher_to_plain = fixed_byte_permutation<256>(
+    profile.cipher_to_plain = fixed_partial_byte_permutation<256>(
         field(value, "cipherToPlain"), "cipherToPlain");
-    profile.experience_offsets = fixed_offsets<4>(
-        field(value, "experienceOffsets"), "experienceOffsets", profile.content_length);
-    profile.total_gold_offsets = fixed_offsets<4>(
-        field(value, "totalGoldOffsets"), "totalGoldOffsets", profile.content_length);
+    std::set<std::uint8_t> known_plain_values;
+    for (const auto plain : profile.cipher_to_plain) {
+        if (plain.has_value()) known_plain_values.insert(*plain);
+    }
+    const JsonValue& ambiguous = field(value, "ambiguousCipherMappings", false);
+    if (ambiguous.kind != JsonValue::Kind::null_value) {
+        if (ambiguous.kind != JsonValue::Kind::array ||
+            ambiguous.array.size() > 256) {
+            throw std::runtime_error(
+                "profile schema: ambiguousCipherMappings must be a bounded array");
+        }
+        std::set<std::uint8_t> seen_cipher_values;
+        for (const JsonValue& mapping : ambiguous.array) {
+            if (mapping.kind != JsonValue::Kind::object) {
+                throw std::runtime_error(
+                    "profile schema: ambiguousCipherMappings entries must be objects");
+            }
+            allow_only(mapping, {"cipher", "plain"});
+            const auto cipher = static_cast<std::uint8_t>(integer_value(
+                field(mapping, "cipher"), "cipher", 255));
+            if (!seen_cipher_values.insert(cipher).second ||
+                profile.cipher_to_plain[cipher].has_value()) {
+                throw std::runtime_error(
+                    "profile schema: ambiguous cipher entry must be unique and unresolved");
+            }
+            auto domain = byte_array(field(mapping, "plain"), "plain", 256);
+            if (std::any_of(domain.begin(), domain.end(), [&](std::uint8_t plain) {
+                    return known_plain_values.contains(plain);
+                })) {
+                throw std::runtime_error(
+                    "profile schema: ambiguous cipher domain overlaps a known plain value");
+            }
+            profile.ambiguous_cipher_plain_domains[cipher] = std::move(domain);
+        }
+    }
+    const JsonValue& experience_offsets = field(value, "experienceOffsets", false);
+    const JsonValue& total_gold_offsets = field(value, "totalGoldOffsets", false);
+    if ((experience_offsets.kind == JsonValue::Kind::null_value) !=
+        (total_gold_offsets.kind == JsonValue::Kind::null_value)) {
+        throw std::runtime_error(
+            "profile schema: experienceOffsets and totalGoldOffsets must occur together");
+    }
+    if (experience_offsets.kind != JsonValue::Kind::null_value) {
+        profile.experience_offsets = fixed_offsets<4>(
+            experience_offsets, "experienceOffsets", profile.content_length);
+        profile.total_gold_offsets = fixed_offsets<4>(
+            total_gold_offsets, "totalGoldOffsets", profile.content_length);
+    }
     profile.lane_minions_killed_offsets = fixed_offsets<4>(
         field(value, "laneMinionsKilledOffsets"), "laneMinionsKilledOffsets",
         profile.content_length);
@@ -765,10 +831,15 @@ parse_keyframe_participant_stats(const JsonValue& value) {
     profile.neutral_minions_killed_projection = string_value(
         field(value, "neutralMinionsKilledProjection"),
         "neutralMinionsKilledProjection", 32);
+    const std::size_t known_cipher_count = static_cast<std::size_t>(std::count_if(
+        profile.cipher_to_plain.begin(), profile.cipher_to_plain.end(),
+        [](const auto& plain) { return plain.has_value(); }));
     if (profile.segment_type != "keyframe" || profile.channel != 1 ||
-        profile.packet_type != 747 || profile.content_length != 1479 ||
-        profile.champion_network_id_base != 1073741997 ||
-        profile.neutral_minions_killed_projection != "floor-plus-1e-5") {
+        profile.packet_type == 0 || profile.content_length < 1000 ||
+        profile.content_length > 4096 || profile.champion_network_id_base == 0 ||
+        known_cipher_count < 128 ||
+        (profile.neutral_minions_killed_projection != "floor-plus-1e-5" &&
+         profile.neutral_minions_killed_projection != "floor-plus-2e-5")) {
         throw std::runtime_error(
             "profile schema: invalid keyframe participant stats invariants");
     }
@@ -843,12 +914,11 @@ DecoderProfileLoadResult parse_decoder_profile_registry_json(std::string_view js
             const JsonValue& keyframe_participant_stats = field(item, "keyframeParticipantStats", false);
             if (keyframe_participant_stats.kind != JsonValue::Kind::null_value) {
                 profile.keyframe_participant_stats = parse_keyframe_participant_stats(
-                    keyframe_participant_stats);
+                    keyframe_participant_stats, profile.version_group);
             }
             if ((profile.inventory_purchase_subset.has_value() ||
                  profile.inventory_direct_purchase_subset.has_value() ||
-                 profile.inventory_sale_subset.has_value() ||
-                 profile.keyframe_participant_stats.has_value()) &&
+                 profile.inventory_sale_subset.has_value()) &&
                 (profile.version_group != "16.14" || profile.accepted_game_versions.size() != 1 ||
                  profile.accepted_game_versions.front() != "16.14.794.5912")) {
                 throw std::runtime_error("profile schema: exact-build decoder subsets are restricted to 16.14.794.5912");

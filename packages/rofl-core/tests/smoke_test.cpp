@@ -1501,7 +1501,7 @@ std::vector<std::uint8_t> build_footer_keyframe_participant_stats_fixture(
 
 std::string keyframe_participant_stats_profile_json() {
     std::ostringstream output;
-    output << R"json({"schema":"rofl-replay-decoder-profiles/v1","registryId":"keyframe-stats-smoke","revision":1,"profiles":[{"versionGroup":"16.14","acceptedGameVersions":["16.14.794.5912"],"finalStatsValidated":true,"keyframeParticipantStats":{"segmentType":"keyframe","channel":1,"packetType":747,"contentLength":1479,"championNetworkIdBase":1073741997,"cipherToPlain":[)json";
+    output << R"json({"schema":"rofl-replay-decoder-profiles/v1","registryId":"keyframe-stats-smoke","revision":1,"profiles":[{"versionGroup":"16.14","acceptedGameVersions":["16.14.794.5912"],"finalStatsValidated":true,"keyframeParticipantStats":{"acceptedGameVersions":["16.14.794.5912"],"segmentType":"keyframe","channel":1,"packetType":747,"contentLength":1479,"championNetworkIdBase":1073741997,"cipherToPlain":[)json";
     for (int value = 0; value < 256; ++value) {
         if (value > 0) output << ',';
         output << value;
@@ -1550,7 +1550,7 @@ bool test_replay_participant_stat_snapshots_fixture() {
         invalid_value_rejected = std::string_view(error.what()).find(
             "rejected invalid owner or value packets") != std::string_view::npos;
     }
-    return json.find("\"schema\":\"rofl-replay-participant-stat-snapshots/v3\"") != std::string::npos &&
+    return json.find("\"schema\":\"rofl-replay-participant-stat-snapshots/v4\"") != std::string::npos &&
            duplicate_rejected &&
            invalid_owner_rejected &&
            invalid_value_rejected &&
@@ -1654,6 +1654,7 @@ bool test_decoder_profile_registry_loader() {
                 "acceptedGameVersions":[")json" << build << R"json("],
                 "finalStatsValidated":true,
                 "keyframeParticipantStats":{
+                    "acceptedGameVersions":[")json" << build << R"json("],
                     "segmentType":"keyframe",
                     "channel":1,
                     "packetType":747,
@@ -1696,10 +1697,14 @@ bool test_decoder_profile_registry_loader() {
     if (keyframe_stats.segment_type != "keyframe" || keyframe_stats.channel != 1 ||
         keyframe_stats.packet_type != 747 || keyframe_stats.content_length != 1479 ||
         keyframe_stats.champion_network_id_base != 1073741997 ||
-        keyframe_stats.cipher_to_plain[0] != 0 ||
-        keyframe_stats.cipher_to_plain[255] != 255 ||
-        keyframe_stats.experience_offsets != std::array<std::size_t, 4>{83, 85, 87, 89} ||
-        keyframe_stats.total_gold_offsets != std::array<std::size_t, 4>{115, 117, 119, 121} ||
+        keyframe_stats.cipher_to_plain[0] != std::optional<std::uint8_t>{0} ||
+        keyframe_stats.cipher_to_plain[255] != std::optional<std::uint8_t>{255} ||
+        !keyframe_stats.experience_offsets.has_value() ||
+        *keyframe_stats.experience_offsets !=
+            std::array<std::size_t, 4>{83, 85, 87, 89} ||
+        !keyframe_stats.total_gold_offsets.has_value() ||
+        *keyframe_stats.total_gold_offsets !=
+            std::array<std::size_t, 4>{115, 117, 119, 121} ||
         keyframe_stats.lane_minions_killed_offsets !=
             std::array<std::size_t, 4>{123, 125, 127, 129} ||
         keyframe_stats.neutral_minions_killed_offsets !=
@@ -1764,7 +1769,7 @@ bool test_decoder_profile_registry_loader() {
         is_atomic_rejection(invalid_end_offset_profile) &&
         is_atomic_rejection(oversized_profile) &&
         is_atomic_rejection(duplicate_cipher_profile) &&
-        is_atomic_rejection(keyframe_participant_stats_profile_json("16.14.794.5913")) &&
+        !is_atomic_rejection(keyframe_participant_stats_profile_json("16.14.794.5913")) &&
         rofl::core::parse_decoder_profile_registry_json(minimal_profile).ok();
 }
 

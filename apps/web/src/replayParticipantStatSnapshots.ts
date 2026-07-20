@@ -27,9 +27,9 @@ export interface ReplayParticipantStatSnapshotBlock {
 export interface ReplayParticipantStatSnapshot {
   timestampMillis: number;
   participantId: number;
-  experience: number;
-  level: number;
-  totalGold: number;
+  experience: number | null;
+  level: number | null;
+  totalGold: number | null;
   laneMinionsKilled: number;
   neutralMinionsKilled: number;
   provenance: {
@@ -38,7 +38,7 @@ export interface ReplayParticipantStatSnapshot {
 }
 
 export interface ReplayParticipantStatSnapshotsResult {
-  schema: "rofl-replay-participant-stat-snapshots/v3";
+  schema: "rofl-replay-participant-stat-snapshots/v4";
   generatedAtUtc?: string;
   source: {
     replayPath: string | null;
@@ -48,7 +48,7 @@ export interface ReplayParticipantStatSnapshotsResult {
     riotApiInput: false;
   };
   gameVersion: string;
-  versionGroup: "16.14";
+  versionGroup: "15.22" | "15.23" | "15.24" | "16.1" | "16.5" | "16.6" | "16.7" | "16.9" | "16.14";
   profile: {
     segmentType: "keyframe";
     channel: 1;
@@ -57,8 +57,10 @@ export interface ReplayParticipantStatSnapshotsResult {
     snapshotContentLength: number;
     championNetworkIdBase: number;
     championNetworkIdBaseHex: string;
-    levelDerivation: "patch-16.14-xp-thresholds-with-replay-final-level-cap";
-    neutralMinionsKilledProjection: "floor-plus-1e-5";
+    experienceAvailable: boolean;
+    totalGoldAvailable: boolean;
+    levelDerivation: "xp-thresholds-with-replay-final-level-cap" | null;
+    neutralMinionsKilledProjection: "floor-plus-1e-5" | "floor-plus-2e-5";
     origin: "external";
     schema: "rofl-replay-decoder-profiles/v1";
     registryId: string;
@@ -115,6 +117,21 @@ function requiredFiniteNumber(value: unknown, name: string, minimum = 0): number
   return value;
 }
 
+function requiredNullableFiniteNumber(value: unknown, name: string): number | null {
+  return value === null ? null : requiredFiniteNumber(value, name);
+}
+
+function requiredNullableInteger(value: unknown, name: string, minimum = 0): number | null {
+  return value === null ? null : requiredInteger(value, name, minimum);
+}
+
+function requiredBoolean(value: unknown, name: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new Error(`Participant stat snapshots: '${name}' must be boolean.`);
+  }
+  return value;
+}
+
 function requiredLiteral<T extends string | number | boolean>(
   value: unknown,
   expected: T,
@@ -167,9 +184,9 @@ function parseSnapshot(value: unknown): ReplayParticipantStatSnapshot {
   return {
     timestampMillis: requiredInteger(record.timestampMillis, "snapshot.timestampMillis"),
     participantId: requiredInteger(record.participantId, "snapshot.participantId", 1),
-    experience: requiredFiniteNumber(record.experience, "snapshot.experience"),
-    level: requiredInteger(record.level, "snapshot.level", 1),
-    totalGold: requiredFiniteNumber(record.totalGold, "snapshot.totalGold"),
+    experience: requiredNullableFiniteNumber(record.experience, "snapshot.experience"),
+    level: requiredNullableInteger(record.level, "snapshot.level", 1),
+    totalGold: requiredNullableFiniteNumber(record.totalGold, "snapshot.totalGold"),
     laneMinionsKilled: requiredInteger(record.laneMinionsKilled, "snapshot.laneMinionsKilled"),
     neutralMinionsKilled: requiredInteger(
       record.neutralMinionsKilled,
@@ -198,7 +215,7 @@ export function parseReplayParticipantStatSnapshotsResult(
   value: unknown,
 ): ReplayParticipantStatSnapshotsResult {
   const record = requiredRecord(value, "result");
-  requiredLiteral(record.schema, "rofl-replay-participant-stat-snapshots/v3", "schema");
+  requiredLiteral(record.schema, "rofl-replay-participant-stat-snapshots/v4", "schema");
   const source = requiredRecord(record.source, "source");
   const profile = requiredRecord(record.profile, "profile");
   const diagnostics = requiredRecord(record.diagnostics, "diagnostics");
@@ -207,19 +224,80 @@ export function parseReplayParticipantStatSnapshotsResult(
   }
 
   const snapshots = record.snapshots.map(parseSnapshot);
-  if (record.gameVersion !== "16.14.794.5912") {
+  const supportedExactBuilds = new Set([
+    "15.22.724.5161",
+    "15.23.728.3286",
+    "15.24.733.6673",
+    "16.1.737.4870",
+    "16.5.752.7101",
+    "16.6.755.2788",
+    "16.6.756.0931",
+    "16.7.758.4427",
+    "16.7.760.9485",
+    "16.9.771.8383",
+    "16.9.772.1032",
+    "16.9.772.8292",
+    "16.14.794.5912",
+  ]);
+  const gameVersion = requiredString(record.gameVersion, "gameVersion");
+  if (!supportedExactBuilds.has(gameVersion)) {
     throw new Error(
-      "Participant stat snapshots: 'gameVersion' must be the exact supported 16.14 build.",
+      "Participant stat snapshots: 'gameVersion' has no promoted exact-build CS grammar.",
     );
   }
+  const versionGroup = gameVersion
+    .split(".")
+    .slice(0, 2)
+    .join(".") as ReplayParticipantStatSnapshotsResult["versionGroup"];
+  if (record.versionGroup !== versionGroup) {
+    throw new Error("Participant stat snapshots: 'versionGroup' does not match gameVersion.");
+  }
   if (
-    profile.snapshotPacketType !== 0x02eb ||
-    profile.snapshotContentLength !== 1479 ||
-    profile.championNetworkIdBase !== 0x400000ad
+    !Number.isInteger(profile.snapshotPacketType) ||
+    Number(profile.snapshotPacketType) <= 0 ||
+    !Number.isInteger(profile.snapshotContentLength) ||
+    Number(profile.snapshotContentLength) < 1000 ||
+    Number(profile.snapshotContentLength) > 4096 ||
+    !Number.isInteger(profile.championNetworkIdBase) ||
+    Number(profile.championNetworkIdBase) <= 0
   ) {
     throw new Error(
       "Participant stat snapshots: profile packet, length, or champion owner base is unsupported.",
     );
+  }
+  const snapshotPacketType = requiredInteger(
+    profile.snapshotPacketType,
+    "profile.snapshotPacketType",
+    1,
+  );
+  const snapshotContentLength = requiredInteger(
+    profile.snapshotContentLength,
+    "profile.snapshotContentLength",
+    1,
+  );
+  const championNetworkIdBase = requiredInteger(
+    profile.championNetworkIdBase,
+    "profile.championNetworkIdBase",
+    1,
+  );
+  const experienceAvailable = requiredBoolean(
+    profile.experienceAvailable,
+    "profile.experienceAvailable",
+  );
+  const totalGoldAvailable = requiredBoolean(
+    profile.totalGoldAvailable,
+    "profile.totalGoldAvailable",
+  );
+  if (experienceAvailable !== totalGoldAvailable) {
+    throw new Error(
+      "Participant stat snapshots: XP/level and total-gold availability must change together.",
+    );
+  }
+  if (
+    experienceAvailable !==
+    (profile.levelDerivation === "xp-thresholds-with-replay-final-level-cap")
+  ) {
+    throw new Error("Participant stat snapshots: level derivation does not match XP availability.");
   }
   for (let index = 1; index < snapshots.length; index += 1) {
     const previous = snapshots[index - 1];
@@ -247,10 +325,12 @@ export function parseReplayParticipantStatSnapshotsResult(
     const block = snapshot.provenance.snapshotBlock;
     if (
       snapshot.participantId > 10 ||
-      snapshot.level > 20 ||
-      block.packetType !== profile.snapshotPacketType ||
-      block.contentLength !== profile.snapshotContentLength ||
-      block.blockParam !== profile.championNetworkIdBase + snapshot.participantId
+      (snapshot.level !== null && snapshot.level > 20) ||
+      experienceAvailable !== (snapshot.experience !== null && snapshot.level !== null) ||
+      totalGoldAvailable !== (snapshot.totalGold !== null) ||
+      block.packetType !== snapshotPacketType ||
+      block.contentLength !== snapshotContentLength ||
+      block.blockParam !== championNetworkIdBase + snapshot.participantId
     ) {
       throw new Error(
         "Participant stat snapshots: snapshot provenance does not match the selected exact profile.",
@@ -259,9 +339,13 @@ export function parseReplayParticipantStatSnapshotsResult(
     const previous = previousByParticipant.get(snapshot.participantId);
     if (
       previous &&
-      (snapshot.experience < previous.experience ||
-        snapshot.level < previous.level ||
-        snapshot.totalGold < previous.totalGold ||
+      ((snapshot.experience !== null &&
+        previous.experience !== null &&
+        snapshot.experience < previous.experience) ||
+        (snapshot.level !== null && previous.level !== null && snapshot.level < previous.level) ||
+        (snapshot.totalGold !== null &&
+          previous.totalGold !== null &&
+          snapshot.totalGold < previous.totalGold) ||
         snapshot.laneMinionsKilled < previous.laneMinionsKilled ||
         snapshot.neutralMinionsKilled < previous.neutralMinionsKilled)
     ) {
@@ -329,7 +413,7 @@ export function parseReplayParticipantStatSnapshotsResult(
   }
 
   return {
-    schema: "rofl-replay-participant-stat-snapshots/v3",
+    schema: "rofl-replay-participant-stat-snapshots/v4",
     ...(typeof record.generatedAtUtc === "string" ? { generatedAtUtc: record.generatedAtUtc } : {}),
     source: {
       replayPath: requiredNullableString(source.replayPath, "source.replayPath"),
@@ -338,44 +422,40 @@ export function parseReplayParticipantStatSnapshotsResult(
       runtimeInput: requiredLiteral(source.runtimeInput, "rofl-only", "source.runtimeInput"),
       riotApiInput: requiredLiteral(source.riotApiInput, false, "source.riotApiInput"),
     },
-    gameVersion: requiredString(record.gameVersion, "gameVersion"),
-    versionGroup: requiredLiteral(record.versionGroup, "16.14", "versionGroup"),
+    gameVersion,
+    versionGroup,
     profile: {
       segmentType: requiredLiteral(profile.segmentType, "keyframe", "profile.segmentType"),
       channel: requiredLiteral(profile.channel, 1, "profile.channel"),
-      snapshotPacketType: requiredInteger(
-        profile.snapshotPacketType,
-        "profile.snapshotPacketType",
-        1,
-      ),
+      snapshotPacketType,
       snapshotPacketTypeHex: requiredString(
         profile.snapshotPacketTypeHex,
         "profile.snapshotPacketTypeHex",
       ),
-      snapshotContentLength: requiredInteger(
-        profile.snapshotContentLength,
-        "profile.snapshotContentLength",
-        1,
-      ),
-      championNetworkIdBase: requiredInteger(
-        profile.championNetworkIdBase,
-        "profile.championNetworkIdBase",
-        1,
-      ),
+      snapshotContentLength,
+      championNetworkIdBase,
       championNetworkIdBaseHex: requiredString(
         profile.championNetworkIdBaseHex,
         "profile.championNetworkIdBaseHex",
       ),
-      levelDerivation: requiredLiteral(
-        profile.levelDerivation,
-        "patch-16.14-xp-thresholds-with-replay-final-level-cap",
-        "profile.levelDerivation",
-      ),
-      neutralMinionsKilledProjection: requiredLiteral(
-        profile.neutralMinionsKilledProjection,
-        "floor-plus-1e-5",
-        "profile.neutralMinionsKilledProjection",
-      ),
+      experienceAvailable,
+      totalGoldAvailable,
+      levelDerivation:
+        profile.levelDerivation === null
+          ? null
+          : requiredLiteral(
+              profile.levelDerivation,
+              "xp-thresholds-with-replay-final-level-cap",
+              "profile.levelDerivation",
+            ),
+      neutralMinionsKilledProjection:
+        profile.neutralMinionsKilledProjection === "floor-plus-2e-5"
+          ? "floor-plus-2e-5"
+          : requiredLiteral(
+              profile.neutralMinionsKilledProjection,
+              "floor-plus-1e-5",
+              "profile.neutralMinionsKilledProjection",
+            ),
       origin: requiredLiteral(profile.origin, "external", "profile.origin"),
       schema: requiredLiteral(profile.schema, "rofl-replay-decoder-profiles/v1", "profile.schema"),
       registryId: requiredString(profile.registryId, "profile.registryId"),

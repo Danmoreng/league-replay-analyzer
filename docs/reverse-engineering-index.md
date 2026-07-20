@@ -66,6 +66,12 @@ are outside scope even when described by historical community work.
   reproduce its compact D7/H3 promotion gate.
 - `scripts/research_keyframe_neutral_cs_16_14.mjs` reproduces the Discovery
   projection selection and untouched Holdout validation for neutral CS.
+- `docs/keyframe-cs-cross-patch.md`,
+  `scripts/research_keyframe_cs_cross_patch.mjs`, and
+  `scripts/validate_replay_participant_cs_snapshots_corpus.mjs` reproduce the
+  nine-patch/13-build keyframe layout and cipher selection plus the productive
+  57-replay lane/jungle-CS gate. The bounded partial-cipher domain rule for
+  15.24, 16.1, and 16.5 is documented there.
 - `scripts/research_keyframe_champion_positions_16_14.mjs` rejects direct raw
   or profile-permuted signed Int16/Float32 position scalars in the three
   substantial exact one-per-champion/keyframe families.

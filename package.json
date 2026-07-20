@@ -123,6 +123,8 @@
     "extract:replay-kills": "node ./scripts/extract_replay_kills.mjs",
     "validate:replay-kills-corpus": "node ./scripts/validate_replay_kills_corpus.mjs",
     "validate:packet-kill-decoder": "node ./scripts/validate_packet_kill_decoder.mjs",
+    "research:keyframe-cs-cross-patch": "node ./scripts/research_keyframe_cs_cross_patch.mjs",
+    "validate:replay-participant-cs-corpus": "node ./scripts/validate_replay_participant_cs_snapshots_corpus.mjs",
     "discover:packet-movement": "node ./scripts/discover_packet_movement.mjs",
     "test:native": "pwsh -File ./scripts/test-native.ps1 -UseNinja",
     "test:native:linux": "bash ./scripts/test-native.sh",

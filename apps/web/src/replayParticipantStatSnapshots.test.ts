@@ -10,7 +10,7 @@ import {
 } from "./replayParticipantStatSnapshots";
 
 const result: ReplayParticipantStatSnapshotsResult = {
-  schema: "rofl-replay-participant-stat-snapshots/v3",
+  schema: "rofl-replay-participant-stat-snapshots/v4",
   source: {
     replayPath: null,
     replayId: null,
@@ -28,7 +28,9 @@ const result: ReplayParticipantStatSnapshotsResult = {
     snapshotContentLength: 1479,
     championNetworkIdBase: 0x400000ad,
     championNetworkIdBaseHex: "0x400000AD",
-    levelDerivation: "patch-16.14-xp-thresholds-with-replay-final-level-cap",
+    experienceAvailable: true,
+    totalGoldAvailable: true,
+    levelDerivation: "xp-thresholds-with-replay-final-level-cap",
     neutralMinionsKilledProjection: "floor-plus-1e-5",
     origin: "external",
     schema: "rofl-replay-decoder-profiles/v1",
@@ -86,6 +88,31 @@ const result: ReplayParticipantStatSnapshotsResult = {
 describe("participant stat snapshot contract", () => {
   it("accepts the exact replay-only, externally profiled snapshot schema", () => {
     expect(parseReplayParticipantStatSnapshotsResult(result)).toEqual(result);
+  });
+
+  it("accepts historical CS-only snapshots without fabricating XP, level, or gold", () => {
+    const historical = structuredClone(result);
+    historical.gameVersion = "15.24.733.6673";
+    historical.versionGroup = "15.24";
+    historical.profile.snapshotPacketType = 34;
+    historical.profile.snapshotPacketTypeHex = "0x0022";
+    historical.profile.snapshotContentLength = 1291;
+    historical.profile.championNetworkIdBase = 1073742151;
+    historical.profile.championNetworkIdBaseHex = "0x40000147";
+    historical.profile.experienceAvailable = false;
+    historical.profile.totalGoldAvailable = false;
+    historical.profile.levelDerivation = null;
+    for (const snapshot of historical.snapshots) {
+      snapshot.experience = null;
+      snapshot.level = null;
+      snapshot.totalGold = null;
+      snapshot.provenance.snapshotBlock.packetType = 34;
+      snapshot.provenance.snapshotBlock.packetTypeHex = "0x0022";
+      snapshot.provenance.snapshotBlock.contentLength = 1291;
+      snapshot.provenance.snapshotBlock.blockParam =
+        historical.profile.championNetworkIdBase + snapshot.participantId;
+    }
+    expect(parseReplayParticipantStatSnapshotsResult(historical)).toEqual(historical);
   });
 
   it("formats snapshot timestamps as a match clock", () => {

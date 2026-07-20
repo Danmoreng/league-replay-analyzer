@@ -56,7 +56,7 @@ interface TimelineKda {
 interface CurrentParticipantStats {
   participantId: number;
   timestampMillis: number;
-  level: number;
+  level: number | null;
   laneCs: number;
   jungleCs: number;
 }
@@ -117,7 +117,7 @@ const participantStatSnapshotRows = computed<CurrentParticipantStats[]>(() => {
     if (
       !Number.isInteger(snapshot.participantId) ||
       !Number.isFinite(snapshot.timestampMillis) ||
-      !Number.isInteger(snapshot.level) ||
+      (snapshot.level !== null && !Number.isInteger(snapshot.level)) ||
       !Number.isFinite(snapshot.laneMinionsKilled) ||
       !Number.isInteger(snapshot.neutralMinionsKilled)
     ) {
@@ -401,7 +401,7 @@ function onScrub(event: Event): void {
         >
           <span class="champion-portrait">
             <img :src="championIcon(entry.player.champion)" :alt="entry.player.champion" />
-            <small v-if="currentParticipantStats(entry.participantId)">
+            <small v-if="currentParticipantStats(entry.participantId)?.level != null">
               {{ currentParticipantStats(entry.participantId)!.level }}
             </small>
           </span>
