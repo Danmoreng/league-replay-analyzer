@@ -45,20 +45,47 @@ for (const result of report.versionGroups) {
     });
   }
   const finalized = result.corpusFinalization;
+  const existing = profile.keyframeParticipantStats;
   const substitution = new Map(
     Object.entries(finalized.substitution).map(([raw, plain]) => [Number(raw), plain]),
   );
+  for (const [raw, plain] of (existing?.cipherToPlain ?? []).entries()) {
+    if (plain === null) continue;
+    if (substitution.has(raw) && substitution.get(raw) !== plain) {
+      fail(`Existing cipher refinement conflicts with CS research for ${result.versionGroup}.`, {
+        raw,
+        research: substitution.get(raw),
+        existing: plain,
+      });
+    }
+    substitution.set(raw, plain);
+  }
   const cipherToPlain = Array.from(
     { length: 256 },
     (_, raw) => substitution.get(raw) ?? null,
   );
   const joint = finalized.jungleJointSolution;
-  const ambiguousCipherMappings = joint?.unknownSymbols?.length
+  const researchAmbiguousCipherMappings = joint?.unknownSymbols?.length
     ? joint.unknownSymbols.map((cipher) => ({
         cipher,
         plain: joint.domains[cipher],
       }))
     : [];
+  const existingAmbiguous = new Map(
+    (existing?.ambiguousCipherMappings ?? []).map((entry) => [entry.cipher, entry.plain]),
+  );
+  const knownPlain = new Set(substitution.values());
+  const ambiguousCipherMappings = [
+    ...new Set([
+      ...existingAmbiguous.keys(),
+      ...researchAmbiguousCipherMappings.map((entry) => entry.cipher),
+    ]),
+  ].filter((cipher) => !substitution.has(cipher)).map((cipher) => ({
+    cipher,
+    plain: (existingAmbiguous.get(cipher) ??
+      researchAmbiguousCipherMappings.find((entry) => entry.cipher === cipher)?.plain ?? [])
+      .filter((plain) => !knownPlain.has(plain)),
+  })).filter((entry) => entry.plain.length > 0);
   if (
     ambiguousCipherMappings.length > 0 &&
     (joint.truncated || joint.solutionCount < 1 ||
@@ -74,29 +101,22 @@ for (const result of report.versionGroups) {
     if (rawValues.size > 0) fail(`Lane-CS offsets are invalid for ${result.versionGroup}.`);
   }
   const epsilon = finalized.jungleProjectionEpsilon?.selected ?? 0.00001;
-  const existing = profile.keyframeParticipantStats;
-  profile.keyframeParticipantStats = {
-    acceptedGameVersions: result.exactBuilds,
-    segmentType: "keyframe",
-    channel: 1,
-    packetType: packetTypes[0],
-    contentLength: contentLengths[0],
-    championNetworkIdBase: championBases[0],
-    cipherToPlain,
-    ...(ambiguousCipherMappings.length > 0 ? { ambiguousCipherMappings } : {}),
-    ...(result.versionGroup === "16.14" && existing?.experienceOffsets
-      ? { experienceOffsets: existing.experienceOffsets }
-      : {}),
-    ...(result.versionGroup === "16.14" && existing?.totalGoldOffsets
-      ? { totalGoldOffsets: existing.totalGoldOffsets }
-      : {}),
-    laneMinionsKilledOffsets: result.laneCandidate.offsets,
-    neutralMinionsKilledOffsets: finalized.jungleCandidate.offsets,
-    neutralMinionsKilledProjection:
-      epsilon >= 0.000015 ? "floor-plus-2e-5" : "floor-plus-1e-5",
-  };
+  existing.acceptedGameVersions = result.exactBuilds;
+  existing.segmentType = "keyframe";
+  existing.channel = 1;
+  existing.packetType = packetTypes[0];
+  existing.contentLength = contentLengths[0];
+  existing.championNetworkIdBase = championBases[0];
+  existing.cipherToPlain = cipherToPlain;
+  if (ambiguousCipherMappings.length > 0) {
+    existing.ambiguousCipherMappings = ambiguousCipherMappings;
+  } else delete existing.ambiguousCipherMappings;
+  existing.laneMinionsKilledOffsets = result.laneCandidate.offsets;
+  existing.neutralMinionsKilledOffsets = finalized.jungleCandidate.offsets;
+  existing.neutralMinionsKilledProjection =
+    epsilon >= 0.000015 ? "floor-plus-2e-5" : "floor-plus-1e-5";
 }
 
-registry.revision = "2026-07-25-cross-patch-cs";
+registry.revision = "2026-07-26-cross-patch-xp";
 fs.writeFileSync(profilePath, `${JSON.stringify(registry, null, 2)}\n`);
 console.log(`Updated ${profilePath} from ${reportPath}.`);

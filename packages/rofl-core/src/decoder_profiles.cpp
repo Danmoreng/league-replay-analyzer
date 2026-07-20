@@ -743,7 +743,8 @@ parse_keyframe_participant_stats(const JsonValue& value, std::string_view profil
     }
     allow_only(value, {"acceptedGameVersions", "segmentType", "channel", "packetType",
                        "contentLength", "championNetworkIdBase", "cipherToPlain",
-                       "ambiguousCipherMappings", "experienceOffsets", "totalGoldOffsets",
+                       "ambiguousCipherMappings", "experienceOffsets", "experienceProjection",
+                       "totalGoldOffsets",
                        "laneMinionsKilledOffsets", "neutralMinionsKilledOffsets",
                        "neutralMinionsKilledProjection"});
     KeyframeParticipantStatsDecoderProfile profile;
@@ -810,15 +811,27 @@ parse_keyframe_participant_stats(const JsonValue& value, std::string_view profil
         }
     }
     const JsonValue& experience_offsets = field(value, "experienceOffsets", false);
+    const JsonValue& experience_projection = field(value, "experienceProjection", false);
     const JsonValue& total_gold_offsets = field(value, "totalGoldOffsets", false);
-    if ((experience_offsets.kind == JsonValue::Kind::null_value) !=
-        (total_gold_offsets.kind == JsonValue::Kind::null_value)) {
+    if (experience_offsets.kind == JsonValue::Kind::null_value &&
+        experience_projection.kind != JsonValue::Kind::null_value) {
         throw std::runtime_error(
-            "profile schema: experienceOffsets and totalGoldOffsets must occur together");
+            "profile schema: experienceProjection requires experienceOffsets");
     }
     if (experience_offsets.kind != JsonValue::Kind::null_value) {
         profile.experience_offsets = fixed_offsets<4>(
             experience_offsets, "experienceOffsets", profile.content_length);
+        profile.experience_projection =
+            experience_projection.kind == JsonValue::Kind::null_value
+                ? "float32"
+                : string_value(experience_projection, "experienceProjection", 32);
+        if (profile.experience_projection != "float32" &&
+            profile.experience_projection != "floor-invariant") {
+            throw std::runtime_error(
+                "profile schema: unsupported experienceProjection");
+        }
+    }
+    if (total_gold_offsets.kind != JsonValue::Kind::null_value) {
         profile.total_gold_offsets = fixed_offsets<4>(
             total_gold_offsets, "totalGoldOffsets", profile.content_length);
     }

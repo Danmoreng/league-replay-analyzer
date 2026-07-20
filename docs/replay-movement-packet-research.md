@@ -34,7 +34,7 @@ structural result. It reads only the ten saved exact-build `16.14.794.5912`
 `.rofl` files and uses the existing replay-only ward decoder solely as an
 entity-ID oracle. The
 oracle is bound to the checked-in external profile provenance fingerprint
-`fnv1a64:5cf4895f9e6d3f4c`; profile drift fails closed. It does not read
+`fnv1a64:c52aa67610f4495c`; profile drift fails closed. It does not read
 Timeline, Match-V5, client binaries, or runtime inputs.
 
 The fixed seven-replay D7 split is completely loaded, selected, and asserted

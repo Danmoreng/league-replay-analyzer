@@ -198,6 +198,7 @@ function snapshotProfileJson(): string {
           championNetworkIdBase,
           cipherToPlain: identityCipher(),
           experienceOffsets,
+          experienceProjection: "float32",
           totalGoldOffsets,
           laneMinionsKilledOffsets,
           neutralMinionsKilledOffsets,
@@ -236,6 +237,24 @@ function partialCsOnlySnapshotProfileJson(): string {
   cipher[0] = null;
   codec.ambiguousCipherMappings = [{ cipher: 0, plain: [0] }];
   delete codec.experienceOffsets;
+  delete codec.experienceProjection;
+  delete codec.totalGoldOffsets;
+  return JSON.stringify(profile);
+}
+
+function partialXpSnapshotProfileJson(): string {
+  const profile = JSON.parse(snapshotProfileJson()) as {
+    profiles: Array<{ keyframeParticipantStats: Record<string, unknown> }>;
+  };
+  const codec = profile.profiles[0]!.keyframeParticipantStats;
+  const cipher = codec.cipherToPlain as Array<number | null>;
+  // 1140.0f uses 0x80 as its second little-endian byte. Both 0x80 and
+  // 0x81 keep floor(Float32LE) at 1140, so the runtime may emit only that
+  // invariant integer while retaining neither exact byte mapping.
+  cipher[0x80] = null;
+  cipher[0x81] = null;
+  codec.ambiguousCipherMappings = [{ cipher: 0x80, plain: [0x80, 0x81] }];
+  codec.experienceProjection = "floor-invariant";
   delete codec.totalGoldOffsets;
   return JSON.stringify(profile);
 }
@@ -351,6 +370,7 @@ describe("participant-stat-snapshot Wasm ABI contract", () => {
       snapshotContentLength,
       championNetworkIdBase,
       experienceAvailable: true,
+      experienceProjection: "float32",
       totalGoldAvailable: true,
       levelDerivation: "xp-thresholds-with-replay-final-level-cap",
       neutralMinionsKilledProjection: "floor-plus-1e-5",
@@ -424,6 +444,7 @@ describe("participant-stat-snapshot Wasm ABI contract", () => {
     );
     expect(result.profile).toMatchObject({
       experienceAvailable: false,
+      experienceProjection: null,
       totalGoldAvailable: false,
       levelDerivation: null,
     });
@@ -433,6 +454,32 @@ describe("participant-stat-snapshot Wasm ABI contract", () => {
           participantId: 1,
           experience: null,
           level: null,
+          totalGold: null,
+          laneMinionsKilled: 55,
+          neutralMinionsKilled: 19,
+        }),
+      ]),
+    );
+  });
+
+  it("emits invariant floored XP and derived level without fabricating total gold", () => {
+    const result = extractParticipantStatSnapshots(
+      module,
+      buildSnapshotReplay(),
+      partialXpSnapshotProfileJson(),
+    );
+    expect(result.profile).toMatchObject({
+      experienceAvailable: true,
+      experienceProjection: "floor-invariant",
+      totalGoldAvailable: false,
+      levelDerivation: "xp-thresholds-with-replay-final-level-cap",
+    });
+    expect(result.snapshots).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          participantId: 1,
+          experience: 1140,
+          level: 4,
           totalGold: null,
           laneMinionsKilled: 55,
           neutralMinionsKilled: 19,

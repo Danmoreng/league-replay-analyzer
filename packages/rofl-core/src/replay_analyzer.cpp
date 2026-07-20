@@ -6006,7 +6006,7 @@ struct ReplayParticipantStatSnapshot {
     const PacketBlock& block,
     const std::array<std::size_t, 4>& offsets,
     const KeyframeParticipantStatsDecoderProfile& profile,
-    bool neutral_projection
+    std::string_view projection
 ) {
     std::array<std::uint8_t, 4> cipher_bytes{};
     std::vector<std::uint8_t> unresolved;
@@ -6048,10 +6048,12 @@ struct ReplayParticipantStatSnapshot {
             ambiguous_result = true;
             return;
         }
-        const float projected_value = neutral_projection
-            ? std::floor(value + keyframe_neutral_projection_epsilon(profile))
-            : value;
-        if (!neutral_projection && std::trunc(value) != value) {
+        const bool exact_integer = projection == "exact-integer";
+        const float epsilon = projection == "floor-invariant"
+            ? 0.0F
+            : keyframe_neutral_projection_epsilon(profile);
+        const float projected_value = exact_integer ? value : std::floor(value + epsilon);
+        if (exact_integer && std::trunc(value) != value) {
             ambiguous_result = true;
             return;
         }
@@ -6179,10 +6181,20 @@ void write_participant_stat_snapshot_block_json(
                     ++rejected_invalid_owner_packet_count;
                     continue;
                 }
-                const std::optional<float> experience = profile.experience_offsets.has_value()
-                    ? decode_keyframe_stat_float32_le(
-                          decompressed, block, *profile.experience_offsets, profile)
-                    : std::nullopt;
+                std::optional<float> experience;
+                if (profile.experience_offsets.has_value()) {
+                    if (profile.experience_projection == "floor-invariant") {
+                        const auto projected = decode_keyframe_stat_projected_integer(
+                            decompressed, block, *profile.experience_offsets, profile,
+                            "floor-invariant");
+                        if (projected.has_value()) {
+                            experience = static_cast<float>(*projected);
+                        }
+                    } else {
+                        experience = decode_keyframe_stat_float32_le(
+                            decompressed, block, *profile.experience_offsets, profile);
+                    }
+                }
                 const std::optional<float> total_gold = profile.total_gold_offsets.has_value()
                     ? decode_keyframe_stat_float32_le(
                           decompressed, block, *profile.total_gold_offsets, profile)
@@ -6190,11 +6202,11 @@ void write_participant_stat_snapshot_block_json(
                 const std::optional<int> lane_minions_killed =
                     decode_keyframe_stat_projected_integer(
                         decompressed, block, profile.lane_minions_killed_offsets,
-                        profile, false);
+                        profile, "exact-integer");
                 const std::optional<int> neutral_minions_killed =
                     decode_keyframe_stat_projected_integer(
                         decompressed, block, profile.neutral_minions_killed_offsets,
-                        profile, true);
+                        profile, profile.neutral_minions_killed_projection);
                 const std::optional<int> level = experience.has_value()
                     ? std::optional<int>(derive_keyframe_level(
                           *experience,
@@ -6354,6 +6366,13 @@ void write_participant_stat_snapshot_block_json(
            << fixed_hex(profile.champion_network_id_base, 8) << "\""
            << ",\"experienceAvailable\":"
            << (profile.experience_offsets.has_value() ? "true" : "false")
+           << ",\"experienceProjection\":";
+    if (profile.experience_offsets.has_value()) {
+        output << '"' << json_escape(profile.experience_projection) << '"';
+    } else {
+        output << "null";
+    }
+    output
            << ",\"totalGoldAvailable\":"
            << (profile.total_gold_offsets.has_value() ? "true" : "false")
            << ",\"levelDerivation\":";
@@ -15142,7 +15161,6 @@ std::string match_event_window(
 }
 
 }  // namespace rofl::core
-
 
 
 

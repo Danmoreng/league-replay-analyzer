@@ -107,8 +107,11 @@ field only when every injective domain assignment has the same projection;
 missing domains or divergent projections fail closed. The canonical complete
 16.14 cipher table SHA-256 is
 `c9be1f4971505dcc7c4366329366794108c1b031060039a2bcfd2d60134ed4be`; the
-loader rejects duplicate known values or an unsupported exact build. The 16.14
-profile decodes XP from `[83,85,87,89]`, total gold from
+loader rejects duplicate known values or an unsupported exact build. Every
+historical profile now pins `experienceOffsets` independently of optional
+`totalGoldOffsets`. `experienceProjection` is either exact decoded `float32`
+or fail-closed `floor-invariant` over bounded domains. The 16.14 profile
+decodes XP from `[83,85,87,89]`, total gold from
 `[115,117,119,121]`, and lane CS from `[123,125,127,129]`. Level is derived
 with the patch-pinned XP thresholds and the replay-embedded validated final
 level's 18-or-20 cap. Runtime does not consult, learn from, or repair values
@@ -118,17 +121,18 @@ integral, ownership is invalid, a participant track decreases, a
 timestamp/participant pair is duplicated, or a keyframe does not contain the
 complete participant set 1 through 10. Neutral CS is projected with the
 D7-frozen `floor(value + 1e-5)` rule and reproduces 3,200/3,200 D7/H3 labels.
-Historical exact-build profiles expose lane/jungle CS only and emit null XP,
-level, and total gold. Across the complete 57-replay corpus, jungle CS is
-16,760/16,760 exact and lane CS is 16,751/16,760 exact plus nine accepted
-same-keyframe ordering boundaries.
+Historical exact-build profiles expose XP, derived level, and lane/jungle CS,
+while total gold remains null. Across the complete 57-replay corpus, XP is
+16,746/16,760 exact plus 14 accepted ordering boundaries, level is
+16,759/16,760 exact plus one boundary, jungle CS is 16,760/16,760 exact, and
+lane CS is 16,751/16,760 exact plus nine boundaries.
 Current spendable gold, health, and resources remain absent pending separate
 semantic/promotion gates.
 
 The canonical profile asset currently carries revision
-`2026-07-25-cross-patch-cs`, SHA-256
-`a4ee89df1ff70e97fa97b9b64c632851584c110bc65af2301420a930e79307d3`, and
-fingerprint `fnv1a64:5cf4895f9e6d3f4c`. All exact-build surfaces fail closed
+`2026-07-26-cross-patch-xp`, SHA-256
+`813838149a17a955d6fe07a3cc6e85855595b9e519d9e75f8ded935fe466d523`, and
+fingerprint `fnv1a64:c52aa67610f4495c`. All exact-build surfaces fail closed
 for a missing, invalid, non-external, or unsupported exact-build profile.
 
 Ward position remains unavailable: the corresponding 16.14 research produced
