@@ -646,7 +646,12 @@ Two July 2026 maintained gates narrow those gaps without adding product fields:
   intervals (16/16 sale-Undo and 35/36 purchase-Undo intervals). Cumulative
   sale proceeds improve the current-gold comparison to 1,459/3,200 snapshots
   but do not close the residual; sold-item identity is also unavailable, so no
-  spendable-gold field is promoted.
+  spendable-gold field is promoted. A corrected cross-replay multiplicity gate
+  additionally freezes all eight exact one-per-champion/keyframe families
+  (`0x0081`, `0x0151`, `0x0196`, `0x0233`, `0x02EB`, `0x038D`, `0x0452`, and
+  `0x047A`) across the same 3,200 snapshots. Outside the separately exhaustive
+  `0x02EB` audit, no raw or profile-permuted UInt/Float32 scalar with stride
+  `1..8` reproduces current gold in D7 and H3.
 - every exact-build champion/keyframe `0x0081` payload has six replay-only
   trailing records and reuses the established item-ID symbol grammar, but the
   records are not directly usable as current inventory. A Timeline-derived
@@ -658,7 +663,11 @@ Two July 2026 maintained gates narrow those gaps without adding product fields:
   material: 957/1,336 false-extra item occurrences have no prior labelled
   identity action, while 378 have a latest labelled removal. Thus missing
   Timeline operations explain many apparent extras, but known historical
-  identities still reject a direct current-slot interpretation. The preceding
+  identities still reject a direct current-slot interpretation. The stronger
+  whole-record gate finds 49 D7 and 28 H3 byte-identical, same-ordinal item
+  records with opposite strict activity labels; even the full record bytes
+  therefore cannot determine current activity without component-level or
+  temporal state. The preceding
   component contains the sold item for 112/116 sales. Combining the structural
   removal slot with reverse record ordinal `5-slot`, then failing closed when
   the preceding same-owner component is older than 30 seconds, identifies the

@@ -640,15 +640,15 @@ numeric replay-native correction field is found.
 
 The exact-build `0x03F9` family has a complete seven-value structural candidate:
 
-| Payload | Replay bits | Candidate slot | Combined packets |
-| ------- | ----------- | -------------: | ---------------: |
-| 6 bytes | `bit7=0, bit8=0` | 0 | 180 |
-| 6 bytes | `bit7=1, bit8=1` | 1 | 208 |
-| 6 bytes | `bit7=1, bit8=0` | 2 | 278 |
-| 7 bytes | `bit16=1, bit17=0` | 3 | 321 |
-| 7 bytes | `bit16=0, bit17=1` | 4 | 491 |
-| 7 bytes | `bit16=0, bit17=0` | 5 | 284 |
-| 7 bytes | `bit16=1, bit17=1` | 6 | 312 |
+| Payload | Replay bits        | Candidate slot | Combined packets |
+| ------- | ------------------ | -------------: | ---------------: |
+| 6 bytes | `bit7=0, bit8=0`   |              0 |              180 |
+| 6 bytes | `bit7=1, bit8=1`   |              1 |              208 |
+| 6 bytes | `bit7=1, bit8=0`   |              2 |              278 |
+| 7 bytes | `bit16=1, bit17=0` |              3 |              321 |
+| 7 bytes | `bit16=0, bit17=1` |              4 |              491 |
+| 7 bytes | `bit16=0, bit17=0` |              5 |              284 |
+| 7 bytes | `bit16=1, bit17=1` |              6 |              312 |
 
 The unused six-byte symbol `bit7=0, bit8=1` never occurs. All 2,074 packets
 decode structurally: 1,293 D7 and 781 H3, with every candidate slot represented
@@ -789,6 +789,17 @@ slots.
 The current-inventory and slot-ordinal hypotheses are therefore rejected.
 Record boundaries and reused item symbols remain useful structural evidence,
 but they do not authorize a C++/Wasm/product inventory field.
+
+The maintained activity gate now rules out the broader record-local version of
+the hypothesis, not only small bit fields. It freezes 8,137 D7 and 4,014 H3
+strict labels where the offline reducer can prove one decoded record identity
+active or removed. Grouping by record ordinal, decoded item, and the complete
+record payload finds 49 conflicted byte-identical keys in D7 and 28 in H3. The
+minimum unavoidable error is 51 D7 plus 30 H3 labels. Across individual
+participant tracks, 33 unchanged records transition from active to inactive
+and one transitions back while component-prefix and sibling context change.
+Consequently no function of the item record bytes alone can recover current
+activity; the next decoder must model component-level or temporal state.
 
 A narrower add/record-change gate remains useful for further grammar search.
 It selects intervals containing exactly one Timeline purchase label, one

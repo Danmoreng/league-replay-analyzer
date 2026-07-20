@@ -65,6 +65,10 @@ are outside scope even when described by historical community work.
   reproduce its compact D7/H3 promotion gate.
 - `scripts/research_keyframe_current_gold_16_14.mjs` reproduces the exact-build
   spent-gold-like lane and the negative current-gold correction searches.
+- `scripts/research_keyframe_champion_current_gold_families_16_14.mjs` freezes
+  the corrected replay-aware one-block-per-champion/keyframe population for
+  eight packet families and rejects raw or profile-permuted UInt/Float32
+  scalars with strides 1..8 outside the separately audited `0x02EB` family.
 - `scripts/research_keyframe_inventory_slots_16_14.mjs` reproduces the exact
   six-record keyframe `0x0081` structure, freezes the `-2..+2` Timeline-state
   alignment audit, separates prior-labelled removals from item identities
@@ -72,6 +76,9 @@ are outside scope even when described by historical community work.
   direct current-slot interpretation on D7 and frozen H3. It also freezes
   8,137 D7 plus 4,014 H3 strict active/inactive record labels and rejects every
   one/two-bit affine or contiguous one-to-eight-bit record-local activity rule.
+  A whole-record collision gate finds 49 D7 and 28 H3 byte-identical,
+  same-ordinal records with opposite activity labels, proving that activity
+  requires component-level or temporal context.
 - `scripts/research_inventory_forward_slot_reducer_16_14.mjs` tests the bounded
   cross-product of add-length sets, four removal-nibble sets, duplicate
   handling, trinket protection, and four deterministic add-slot placement

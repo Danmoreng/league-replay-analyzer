@@ -97,6 +97,18 @@ const EXPECTED_RECORD_ACTIVITY_METRICS = Object.freeze({
   }),
 });
 
+const EXPECTED_RECORD_ACTIVITY_CONTEXT_METRICS = Object.freeze({
+  discovery: Object.freeze({ conflictedKeyCount: 49, minorityErrorFloor: 51 }),
+  holdout: Object.freeze({ conflictedKeyCount: 28, minorityErrorFloor: 30 }),
+  combined: Object.freeze({ conflictedKeyCount: 115, minorityErrorFloor: 135 }),
+  transitions: Object.freeze({
+    count: 34,
+    activeToInactiveCount: 33,
+    inactiveToActiveCount: 1,
+    prefixChangedCount: 34,
+  }),
+});
+
 function parseArgs(argv) {
   const args = {
     cliPath: path.join("build-linux", "packages", "rofl-core", "rofl_core_cli"),
@@ -556,10 +568,7 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
     falseExtraSamples: [],
   };
   const timelineAlignmentValidation = Object.fromEntries(
-    [-2, -1, 0, 1, 2].map((blockOffset) => [
-      String(blockOffset),
-      emptyTimelineStateValidation(),
-    ]),
+    [-2, -1, 0, 1, 2].map((blockOffset) => [String(blockOffset), emptyTimelineStateValidation()]),
   );
   const falseExtraDiagnostics = {
     occurrenceCount: 0,
@@ -594,10 +603,7 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
         eventIndex += 1;
       }
       const labelledInventory = inventory.filter((itemId) => inventoryItemIds.has(itemId));
-      const decoded = decodeMainSlots(
-        Buffer.from(block.contentHex, "hex"),
-        inventoryItemIds,
-      );
+      const decoded = decodeMainSlots(Buffer.from(block.contentHex, "hex"), inventoryItemIds);
       const decodedMainSlots = decoded.decodedMainSlots;
       const decodedInventory = decodedMainSlots.filter((itemId) => itemId !== 0);
       for (const record of decoded.records) {
@@ -612,17 +618,28 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
         );
         const active = labelledCount >= decodedCount ? true : null;
         const labelledActive =
-          active === true ? true : labelledCount === 0 && latestAction?.action === "remove" ? false : null;
+          active === true
+            ? true
+            : labelledCount === 0 && latestAction?.action === "remove"
+              ? false
+              : null;
         if (labelledActive === null) continue;
         recordActivityRows.push({
           replayId,
           partition,
           participantId,
+          segmentId: block.segmentId,
+          blockTimestampMillis: block.timestampMillis,
           stateTimestampMillis,
           recordOrdinal: 5 - record.slot,
           itemId,
           contentLength: record.contentLength,
           payloadHex: record.payloadHex,
+          componentPrefixHex: Buffer.from(block.contentHex, "hex")
+            .subarray(0, decoded.recordStarts[0])
+            .toString("hex"),
+          siblingPayloadHexes: decoded.records.map((candidate) => candidate.payloadHex),
+          componentPayloadHex: block.contentHex,
           active: labelledActive,
         });
       }
@@ -885,6 +902,141 @@ function activityMetrics(rows) {
   };
 }
 
+function activityConflictMetrics(rows, keySelector) {
+  const labelsByKey = new Map();
+  for (const row of rows) {
+    const key = keySelector(row);
+    const labels = labelsByKey.get(key) ?? { active: 0, inactive: 0 };
+    if (row.active) labels.active += 1;
+    else labels.inactive += 1;
+    labelsByKey.set(key, labels);
+  }
+  const conflicted = [...labelsByKey.values()].filter(
+    (labels) => labels.active > 0 && labels.inactive > 0,
+  );
+  return {
+    distinctKeyCount: labelsByKey.size,
+    conflictedKeyCount: conflicted.length,
+    conflictedRowCount: conflicted.reduce(
+      (sum, labels) => sum + labels.active + labels.inactive,
+      0,
+    ),
+    minorityErrorFloor: conflicted.reduce(
+      (sum, labels) => sum + Math.min(labels.active, labels.inactive),
+      0,
+    ),
+  };
+}
+
+function recordLocalActivityConflicts(rows) {
+  return {
+    payload: activityConflictMetrics(rows, (row) => row.payloadHex),
+    ordinalAndPayload: activityConflictMetrics(
+      rows,
+      (row) => `${row.recordOrdinal}:${row.payloadHex}`,
+    ),
+    itemAndPayload: activityConflictMetrics(rows, (row) => `${row.itemId}:${row.payloadHex}`),
+    ordinalItemAndPayload: activityConflictMetrics(
+      rows,
+      (row) => `${row.recordOrdinal}:${row.itemId}:${row.payloadHex}`,
+    ),
+  };
+}
+
+function recordActivityConflictSamples(rows, limit = 16) {
+  const rowsByKey = new Map();
+  for (const row of rows) {
+    const key = `${row.recordOrdinal}:${row.itemId}:${row.payloadHex}`;
+    const grouped = rowsByKey.get(key) ?? [];
+    grouped.push(row);
+    rowsByKey.set(key, grouped);
+  }
+  const samples = [];
+  for (const [key, grouped] of rowsByKey) {
+    const active = grouped.find((row) => row.active);
+    const inactive = grouped.find((row) => !row.active);
+    if (active === undefined || inactive === undefined) continue;
+    const compact = (row) => ({
+      replayId: row.replayId,
+      participantId: row.participantId,
+      segmentId: row.segmentId,
+      blockTimestampMillis: row.blockTimestampMillis,
+      stateTimestampMillis: row.stateTimestampMillis,
+      componentPrefixHex: row.componentPrefixHex,
+      siblingPayloadHexes: row.siblingPayloadHexes,
+      componentPayloadHex: row.componentPayloadHex,
+    });
+    samples.push({ key, active: compact(active), inactive: compact(inactive) });
+    if (samples.length >= limit) break;
+  }
+  return samples;
+}
+
+function recordActivityTransitions(rows, limit = 32) {
+  const rowsByTrackRecord = new Map();
+  for (const row of rows) {
+    const key = `${row.replayId}:${row.participantId}:${row.recordOrdinal}:${row.itemId}:${row.payloadHex}`;
+    const grouped = rowsByTrackRecord.get(key) ?? [];
+    grouped.push(row);
+    rowsByTrackRecord.set(key, grouped);
+  }
+  const transitions = [];
+  for (const [key, grouped] of rowsByTrackRecord) {
+    grouped.sort(
+      (left, right) =>
+        left.segmentId - right.segmentId || left.blockTimestampMillis - right.blockTimestampMillis,
+    );
+    for (let index = 1; index < grouped.length; index += 1) {
+      const before = grouped[index - 1];
+      const after = grouped[index];
+      if (before.active === after.active) continue;
+      transitions.push({
+        key,
+        direction: before.active ? "active-to-inactive" : "inactive-to-active",
+        segmentDelta: after.segmentId - before.segmentId,
+        timestampDeltaMillis: after.stateTimestampMillis - before.stateTimestampMillis,
+        componentPrefixChanged: before.componentPrefixHex !== after.componentPrefixHex,
+        changedSiblingOrdinals: before.siblingPayloadHexes.flatMap((payloadHex, ordinal) =>
+          payloadHex === after.siblingPayloadHexes[ordinal] ? [] : [ordinal],
+        ),
+        before: {
+          segmentId: before.segmentId,
+          stateTimestampMillis: before.stateTimestampMillis,
+          componentPrefixHex: before.componentPrefixHex,
+          siblingPayloadHexes: before.siblingPayloadHexes,
+          componentPayloadHex: before.componentPayloadHex,
+        },
+        after: {
+          segmentId: after.segmentId,
+          stateTimestampMillis: after.stateTimestampMillis,
+          componentPrefixHex: after.componentPrefixHex,
+          siblingPayloadHexes: after.siblingPayloadHexes,
+          componentPayloadHex: after.componentPayloadHex,
+        },
+      });
+    }
+  }
+  const compact = transitions.map(({ before, after, ...transition }) => transition);
+  const countByChangedSiblingSet = {};
+  for (const transition of compact) {
+    const key = transition.changedSiblingOrdinals.join(",");
+    countByChangedSiblingSet[key] = (countByChangedSiblingSet[key] ?? 0) + 1;
+  }
+  return {
+    count: transitions.length,
+    activeToInactiveCount: transitions.filter(
+      (transition) => transition.direction === "active-to-inactive",
+    ).length,
+    inactiveToActiveCount: transitions.filter(
+      (transition) => transition.direction === "inactive-to-active",
+    ).length,
+    prefixChangedCount: transitions.filter((transition) => transition.componentPrefixChanged)
+      .length,
+    countByChangedSiblingSet,
+    samples: transitions.slice(0, limit),
+  };
+}
+
 function evaluateActivityCandidate(rows, candidate) {
   let exact = 0;
   let wrong = 0;
@@ -1060,10 +1212,7 @@ function summarizeTimelineState(reports) {
 
 function summarizeTimelineAlignments(reports) {
   const summary = Object.fromEntries(
-    [-2, -1, 0, 1, 2].map((blockOffset) => [
-      String(blockOffset),
-      emptyTimelineStateValidation(),
-    ]),
+    [-2, -1, 0, 1, 2].map((blockOffset) => [String(blockOffset), emptyTimelineStateValidation()]),
   );
   for (const report of reports) {
     for (const [blockOffset, validation] of Object.entries(
@@ -1211,8 +1360,7 @@ function main() {
     holdout: compactAlignmentMetrics(summarizeTimelineAlignments(holdoutReports)),
   };
   if (
-    JSON.stringify(timelineAlignmentMetrics) !==
-    JSON.stringify(EXPECTED_TIMELINE_ALIGNMENT_METRICS)
+    JSON.stringify(timelineAlignmentMetrics) !== JSON.stringify(EXPECTED_TIMELINE_ALIGNMENT_METRICS)
   ) {
     fail("Frozen Timeline alignment metrics drifted.", {
       expected: EXPECTED_TIMELINE_ALIGNMENT_METRICS,
@@ -1244,6 +1392,17 @@ function main() {
       recordActivityRows.filter((row) => row.partition === "D7"),
       recordActivityRows.filter((row) => row.partition === "H3"),
     ),
+    recordLocalConflicts: {
+      discovery: recordLocalActivityConflicts(
+        recordActivityRows.filter((row) => row.partition === "D7"),
+      ),
+      holdout: recordLocalActivityConflicts(
+        recordActivityRows.filter((row) => row.partition === "H3"),
+      ),
+      combined: recordLocalActivityConflicts(recordActivityRows),
+    },
+    recordLocalConflictSamples: recordActivityConflictSamples(recordActivityRows),
+    unchangedRecordActivityTransitions: recordActivityTransitions(recordActivityRows),
   };
   const compactRecordActivityMetrics = {
     discovery: recordActivityResearch.discovery,
@@ -1267,6 +1426,50 @@ function main() {
     fail("Frozen keyframe record-activity metrics drifted.", {
       expected: EXPECTED_RECORD_ACTIVITY_METRICS,
       actual: compactRecordActivityMetrics,
+    });
+  }
+  const compactRecordActivityContextMetrics = {
+    discovery: {
+      conflictedKeyCount:
+        recordActivityResearch.recordLocalConflicts.discovery.ordinalItemAndPayload
+          .conflictedKeyCount,
+      minorityErrorFloor:
+        recordActivityResearch.recordLocalConflicts.discovery.ordinalItemAndPayload
+          .minorityErrorFloor,
+    },
+    holdout: {
+      conflictedKeyCount:
+        recordActivityResearch.recordLocalConflicts.holdout.ordinalItemAndPayload
+          .conflictedKeyCount,
+      minorityErrorFloor:
+        recordActivityResearch.recordLocalConflicts.holdout.ordinalItemAndPayload
+          .minorityErrorFloor,
+    },
+    combined: {
+      conflictedKeyCount:
+        recordActivityResearch.recordLocalConflicts.combined.ordinalItemAndPayload
+          .conflictedKeyCount,
+      minorityErrorFloor:
+        recordActivityResearch.recordLocalConflicts.combined.ordinalItemAndPayload
+          .minorityErrorFloor,
+    },
+    transitions: {
+      count: recordActivityResearch.unchangedRecordActivityTransitions.count,
+      activeToInactiveCount:
+        recordActivityResearch.unchangedRecordActivityTransitions.activeToInactiveCount,
+      inactiveToActiveCount:
+        recordActivityResearch.unchangedRecordActivityTransitions.inactiveToActiveCount,
+      prefixChangedCount:
+        recordActivityResearch.unchangedRecordActivityTransitions.prefixChangedCount,
+    },
+  };
+  if (
+    JSON.stringify(compactRecordActivityContextMetrics) !==
+    JSON.stringify(EXPECTED_RECORD_ACTIVITY_CONTEXT_METRICS)
+  ) {
+    fail("Frozen keyframe record-activity context metrics drifted.", {
+      expected: EXPECTED_RECORD_ACTIVITY_CONTEXT_METRICS,
+      actual: compactRecordActivityContextMetrics,
     });
   }
   if (JSON.stringify(finalSuffixMetrics) !== JSON.stringify(EXPECTED_FINAL_SUFFIX_METRICS)) {
@@ -1337,9 +1540,10 @@ function main() {
       "A bounded -2..+2 keyframe/Timeline alignment audit confirms the existing -1 block alignment is uniquely strongest; simple missing-minute alignment does not explain the remaining mismatches.",
       "Of 1,336 false-extra item occurrences, 957 have no prior Timeline identity action, proving that Timeline item events are incomplete as a state oracle; 378 have a latest labelled removal, so missing labels do not make the six records current slots.",
       "Replay operation packets absent from the Timeline follow 34/36 stable-Timeline final mismatches, but two mismatches remain even without a later packet from the four known families.",
+      "A whole-record activity falsification finds opposite active/inactive labels for 49 byte-identical same-ordinal item records in D7 and 28 in H3; record-local bytes therefore cannot determine whether a historical item identity is currently active.",
     ],
     conclusion:
-      "The six trailing keyframe 0x0081 records and their reused item-ID symbols are exact replay structure. Timeline omissions explain much of the prior apparent mismatch, but known removed identities and two replay-operation-free final mismatches still reject a direct current-slot interpretation. A replay-native operation reducer remains necessary before C++/Wasm/UI promotion.",
+      "The six trailing keyframe 0x0081 records and their reused item-ID symbols are exact replay structure. Timeline omissions explain much of the prior apparent mismatch, but known removed identities, byte-identical records with opposite activity labels, and two replay-operation-free final mismatches reject a direct current-slot interpretation. Activity requires component-level or temporal state, and a replay-native operation reducer remains necessary before C++/Wasm/UI promotion.",
   };
   fs.mkdirSync(path.dirname(path.resolve(args.outputPath)), { recursive: true });
   fs.writeFileSync(path.resolve(args.outputPath), `${JSON.stringify(output, null, 2)}\n`);
