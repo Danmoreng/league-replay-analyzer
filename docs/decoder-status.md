@@ -434,6 +434,28 @@ four symbols reaches an earlier decoded add, so replay-only sold-item identity
 remains 0/116 available. Consequently the reducer recovers neither sale price
 nor a current-gold correction and does not authorize C++/Wasm/UI inventory.
 
+An offline Timeline-oracle backward solver now tests the stronger hypothesis
+that the saved API item identities can fill those replay-only gaps. The final
+seven-slot anchor still comes from each ROFL, and candidate slots still come
+from exact-framed `0x03F9`; Timeline labels are research input only. The strict
+solver reverses 366/3,230 owner/timestamp groups across 100 participants,
+including 169 groups constrained by replay candidate slots and 29 containing a
+sale, but no participant reaches the beginning.
+
+The failure is not only missing replay linkage: Riot Timeline item events are
+not a complete physical-inventory log. An exact identity-balance projection of
+all 4,977 Timeline labels from the replay-final inventory leaves 13 negative
+units and 858 positive units; zero of 100 participant balances close, and 36
+tracks imply more than seven positive starting units. The two largest tracks
+are both Viego (131 and 67 positive units, 198 combined) and contain many item
+identities outside their final build, strong offline evidence that possession
+cloning/destruction is mixed into the same API event vocabulary. Non-Viego
+tracks still leave 660 positive units, dominated by system/perk item IDs,
+consumables, trinkets, and support-item transformations. A bounded diagnostic
+can reach the beginning only by skipping 1,022 event mutations, and only five
+best-observed histories end empty. Timeline therefore helps label packet
+semantics, but tracing it backward verbatim cannot produce product inventory.
+
 Owner-local ordinal/count lookups likewise leave zero exact H3 hypothesis;
 non-contiguous XOR rules are massively non-unique, and most nearby keyframe
 inventory anchors contain multiple item operations. Neither state order nor

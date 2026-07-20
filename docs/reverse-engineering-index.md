@@ -80,6 +80,11 @@ are outside scope even when described by historical community work.
   replay-final seven-slot inventories and reverses conservative symbolic
   add/removal suffixes; it reaches four of 116 sales but resolves zero item
   identities before fail-closed operation barriers.
+- `scripts/research_inventory_timeline_oracle_backward_slots_16_14.mjs` uses
+  saved Timeline identities only as an offline diagnostic around replay-final
+  slots and `0x03F9` candidate slots. Its exact balance gate proves Timeline
+  item events are not a complete slot-pure log, with likely Viego possession
+  copies and unmatched system/transformation/consumable events.
 - `scripts/research_inventory_gold_adjustments_16_14.mjs` freezes the
   static-recipe/Undo spend-ledger comparison and the incomplete cumulative-sale
   correction for current gold.

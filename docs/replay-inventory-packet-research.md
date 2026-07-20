@@ -879,6 +879,57 @@ semantics. It does not reject a future reducer after `0x0146`, non-sale
 `0x03F9`, add placement, swaps, counts, and instances are decoded. No sold item,
 sale price, current-gold correction, or dynamic inventory state is promoted.
 
+### Timeline-oracle backward slot diagnostic
+
+[`research_inventory_timeline_oracle_backward_slots_16_14.mjs`](../scripts/research_inventory_timeline_oracle_backward_slots_16_14.mjs)
+tests whether the saved Timeline supplies the identities missing from the
+replay-only reducer. It remains deliberately offline: the final seven slots,
+champion identity, `0x03F9` candidate slots, and sale provenance come from the
+ROFL; Timeline item events drive only this diagnostic.
+
+The strict seven-slot solver enumerates same-timestamp event order, duplicate
+items, empty-slot placement, and identity-to-removal-slot assignments. It
+reverses 268/2,135 D7 and 98/1,095 frozen H3 groups. This includes 169 groups
+whose destroyed/sold identities are constrained by distinct replay candidate
+slots and 29 sale groups, but all 100 participant tracks hit a state
+contradiction before the beginning.
+
+An independent per-item balance makes the cause measurable without slot
+branching. Starting at the replay-final multiset and reversing all 4,977 saved
+Timeline item labels produces:
+
+- 13 negative units across 13 participant tracks, proving that some recorded
+  creations lack a corresponding removal/final item under the naive grammar;
+- 858 positive units, with 36 tracks exceeding the seven-slot capacity and no
+  participant reaching an exact zero balance;
+- 198 positive units on the two Viego tracks alone, including impossible
+  131- and 67-unit beginnings. Their broad cross-build item sets are strong
+  evidence that possession copies/destruction share the Timeline item-event
+  vocabulary;
+- 660 positive units outside Viego, so possession is not the only gap. System
+  IDs `2001`/`2002`, `120x` perk/quest items, consumables, trinkets, and
+  `386x` support-item transformations dominate the residual.
+
+A separate 64-state bounded diagnostic may skip a label instead of forcing it
+into a slot. Its best observed histories still skip 1,022 mutations (775
+destroyed, 228 purchased, 14 sold, five undo), and only five of 100 end with an
+empty beginning. This is an upper-bound diagnostic rather than a global
+minimum, but the exact balance contradictions already prove that Timeline is
+neither complete nor slot-pure.
+
+```bash
+node scripts/research_inventory_timeline_oracle_backward_slots_16_14.mjs \
+  --cli build-linux/packages/rofl-core/rofl_core_cli \
+  --decoder-profiles packages/rofl-core/profiles/replay-decoder-profiles.v1.json \
+  --output tmp/inventory-timeline-oracle-backward-slots-16.14.json
+```
+
+The useful next split is therefore semantic, not another unconstrained reverse
+trace: isolate Viego possession copies, non-inventory system/perk records,
+consumable use, trinket replacement, and support-item transformations, then
+map each class back to replay packets. Timeline remains an oracle for those
+classes and never a runtime reducer input.
+
 ```bash
 node scripts/research_keyframe_inventory_slots_16_14.mjs \
   --cli build-linux/packages/rofl-core/rofl_core_cli \
