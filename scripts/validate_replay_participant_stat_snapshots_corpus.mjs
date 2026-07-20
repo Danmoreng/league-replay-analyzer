@@ -88,7 +88,9 @@ function canonicalProfile(profileBytes, manifest) {
     "Keyframe profile packet grammar drifted.", grammar);
   assert(JSON.stringify(grammar.experienceOffsets) === JSON.stringify(expected.experienceOffsets) &&
     JSON.stringify(grammar.totalGoldOffsets) === JSON.stringify(expected.totalGoldOffsets) &&
-    JSON.stringify(grammar.laneMinionsKilledOffsets) === JSON.stringify(expected.laneMinionsKilledOffsets),
+    JSON.stringify(grammar.laneMinionsKilledOffsets) === JSON.stringify(expected.laneMinionsKilledOffsets) &&
+    JSON.stringify(grammar.neutralMinionsKilledOffsets) === JSON.stringify(expected.neutralMinionsKilledOffsets) &&
+    grammar.neutralMinionsKilledProjection === expected.neutralMinionsKilledProjection,
   "Keyframe profile value offsets drifted.", grammar);
   assert(Array.isArray(grammar.cipherToPlain) && grammar.cipherToPlain.length === 256 &&
     new Set(grammar.cipherToPlain).size === 256 && grammar.cipherToPlain.every((value) =>
@@ -128,6 +130,7 @@ function validateSnapshot(snapshot, grammar) {
   assert(Number.isInteger(snapshot.level) && snapshot.level >= 1 && snapshot.level <= 20, "Snapshot level must be an integer from 1 through 20.", snapshot);
   assert(Number.isFinite(snapshot.totalGold) && snapshot.totalGold >= 0, "Snapshot totalGold must be finite and non-negative.", snapshot);
   assert(Number.isInteger(snapshot.laneMinionsKilled) && snapshot.laneMinionsKilled >= 0, "Snapshot laneMinionsKilled must be a non-negative integer.", snapshot);
+  assert(Number.isInteger(snapshot.neutralMinionsKilled) && snapshot.neutralMinionsKilled >= 0, "Snapshot neutralMinionsKilled must be a non-negative integer.", snapshot);
   const block = snapshot.provenance?.snapshotBlock;
   const networkId = grammar.championNetworkIdBase + snapshot.participantId;
   assert(block?.channel === grammar.channel && block.packetType === grammar.snapshotPacketType &&
@@ -139,7 +142,7 @@ function validateSnapshot(snapshot, grammar) {
 
 function assertExtractorProfile(profile, expected) {
   assert(profile && typeof profile === "object", "Extractor omitted profile provenance.");
-  for (const field of ["segmentType", "channel", "snapshotPacketType", "snapshotContentLength", "championNetworkIdBase", "levelDerivation", "origin", "schema", "registryId", "revision"]) {
+  for (const field of ["segmentType", "channel", "snapshotPacketType", "snapshotContentLength", "championNetworkIdBase", "levelDerivation", "neutralMinionsKilledProjection", "origin", "schema", "registryId", "revision"]) {
     assert(profile[field] === expected[field], `Extractor profile provenance drifted at ${field}.`, { expected: expected[field], actual: profile[field] });
   }
   assert(normalizeFingerprint(profile.fingerprint) === expected.fingerprint,
@@ -163,8 +166,12 @@ function validateAgainstApi(replayId, groups, timeline, match, manifest, seenExc
     for (const snapshot of group.snapshots) {
       const api = frame.participantFrames?.[snapshot.participantId];
       assert(api && Number.isInteger(api.xp) && Number.isInteger(api.level) &&
-        Number.isInteger(api.totalGold) && Number.isInteger(api.minionsKilled),
+        Number.isInteger(api.totalGold) && Number.isInteger(api.minionsKilled) &&
+        Number.isInteger(api.jungleMinionsKilled),
         `${replayId} Timeline frame omits participant ${snapshot.participantId}.`);
+      assert(snapshot.neutralMinionsKilled === api.jungleMinionsKilled,
+        `${replayId} replay neutral CS does not exactly reproduce the Timeline oracle.`,
+        { groupIndex, snapshot, api });
       const exact = Math.floor(snapshot.experience) === api.xp && snapshot.level === api.level &&
         Math.floor(snapshot.totalGold) === api.totalGold && snapshot.laneMinionsKilled === api.minionsKilled;
       const key = exceptionKey(replayId, groupIndex, snapshot.participantId);
@@ -198,7 +205,8 @@ function validateAgainstApi(replayId, groups, timeline, match, manifest, seenExc
     assert(snapshot.experience === manifest.runtime.initialState.experience &&
       snapshot.level === manifest.runtime.initialState.level &&
       snapshot.totalGold === manifest.runtime.initialState.totalGold &&
-      snapshot.laneMinionsKilled === manifest.runtime.initialState.laneMinionsKilled,
+      snapshot.laneMinionsKilled === manifest.runtime.initialState.laneMinionsKilled &&
+      snapshot.neutralMinionsKilled === manifest.runtime.initialState.neutralMinionsKilled,
       `${replayId} initial replay participant state drifted.`, snapshot);
   }
   assert(first.timestampMillis === manifest.runtime.initialState.timestampMillis,
@@ -209,10 +217,12 @@ function validateAgainstApi(replayId, groups, timeline, match, manifest, seenExc
   for (const snapshot of finalGroup.snapshots) {
     const final = finalParticipants.find((participant) => participant.participantId === snapshot.participantId);
     assert(final && Number.isInteger(final.champExperience) && Number.isInteger(final.champLevel) &&
-      Number.isInteger(final.goldEarned) && Number.isInteger(final.totalMinionsKilled),
+      Number.isInteger(final.goldEarned) && Number.isInteger(final.totalMinionsKilled) &&
+      Number.isInteger(final.neutralMinionsKilled),
       `${replayId} Match fixture omits final participant ${snapshot.participantId}.`);
     assert(Math.floor(snapshot.experience) <= final.champExperience && snapshot.level <= final.champLevel &&
-      snapshot.totalGold <= final.goldEarned && snapshot.laneMinionsKilled <= final.totalMinionsKilled,
+      snapshot.totalGold <= final.goldEarned && snapshot.laneMinionsKilled <= final.totalMinionsKilled &&
+      snapshot.neutralMinionsKilled <= final.neutralMinionsKilled,
       `${replayId} final keyframe exceeds saved final Match-V5 state.`, { snapshot, final });
   }
   return acceptedOrderingDifferences;
@@ -266,7 +276,8 @@ function runFixture(args, manifest, profile, fixture, seenExceptions) {
       assert(current.timestampMillis > previous.timestampMillis &&
         current.experience >= previous.experience && current.level >= previous.level &&
         current.totalGold >= previous.totalGold &&
-        current.laneMinionsKilled >= previous.laneMinionsKilled,
+        current.laneMinionsKilled >= previous.laneMinionsKilled &&
+        current.neutralMinionsKilled >= previous.neutralMinionsKilled,
       `${fixture.replayId} participant snapshot series is not monotonic.`, { previous, current });
     }
   }
@@ -277,6 +288,7 @@ function runFixture(args, manifest, profile, fixture, seenExceptions) {
     fixture.replayId, groups, timeline, match, manifest, seenExceptions);
   return {
     replayId: fixture.replayId, partition: fixture.partition, status: "pass", snapshotCount: snapshots.length,
+    neutralMinionsKilledExactCount: snapshots.length,
     diagnostics, groupCount: groups.length, acceptedOrderingDifferences,
     hashes: {
       profileSha256: profile.sha256,
@@ -290,6 +302,7 @@ function runFixture(args, manifest, profile, fixture, seenExceptions) {
 function partitionSummary(rows, expected) {
   const result = {
     replayCount: rows.length, snapshotCount: sum(rows, "snapshotCount"),
+    neutralMinionsKilledExactCount: sum(rows, "neutralMinionsKilledExactCount"),
     rejectedInvalidOwnerPacketCount: rows.reduce((total, row) => total + row.diagnostics.rejectedInvalidOwnerPacketCount, 0),
     rejectedInvalidValuePacketCount: rows.reduce((total, row) => total + row.diagnostics.rejectedInvalidValuePacketCount, 0),
   };

@@ -1,6 +1,6 @@
 # Replay Decoder Status
 
-Updated: 2026-07-23
+Updated: 2026-07-24
 Baseline commit: `fe39e13`
 
 This is the canonical handoff for the current decoder state. Read it before
@@ -70,9 +70,9 @@ Wasm, and consumed by the Vue application unless noted otherwise.
 | Purchase-linked resulting-item updates | Timestamp, participant, resulting item ID, matched strict bundle template, and packet provenance in `rofl-replay-purchase-linked-item-updates/v1`                                                                                                                          | External-profile-only, exact build `16.14.794.5912`: 193/193 offline-validated updates (D7 130, H3 63), zero extras/wrong IDs, maximum 1 ms delta. Strict subset only: 2,326/2,519 profiled add/update packets remain unavailable; no slot, instance, removal/component identity, count, complete inventory, price/gold, or undo state.                                                                                                                                                                                                                                                          |
 | Direct add-only item purchases         | Timestamp, replay-native participant, structural 13-bit item ID, buildable-component flag, and add-block provenance in `rofl-replay-direct-item-purchases/v1`                                                                                                              | External-profile-only, exact build `16.14.794.5912`: 1,278/1,278 exact purchases (D7 844, H3 434), zero extras/wrong IDs, maximum 1 ms delta. This includes 1,043/1,043 buildable components (D7 710, H3 333). It accepts only an isolated champion-owned channel-1 `0x0369`, length 14/15 add, with no relevant `0x0369`/`0x03F9`/`0x0146`/`0x0081` family operation for that owner within +/-1 ms and a decoded ID in the profile-pinned static real-item catalog. It does not expose a general purchase classifier, slot, instance, quantity, price, gold, removal, undo, or inventory state. |
 | Item sale operations                   | Timestamp, replay-native participant, exact sale-operation classification, and removal-block provenance in `rofl-replay-item-sales/v1`                                                                                                                                     | External-profile-only, exact build `16.14.794.5912`: 116/116 offline-validated sale operations (D7 77, H3 39), zero extras/misses, maximum 1 ms delta. The event proves only the operation and its source block; sold item ID, slot, instance, count/charges, price, gold gain, undo, and inventory state are explicitly unavailable.                                                                                                                                                                                                                                                            |
-| Keyframe participant stat snapshots    | Timestamp, replay-native participant, Float32 XP, XP-derived level, Float32 total gold, and integer lane CS in `rofl-replay-participant-stat-snapshots/v2`                                                                                                                 | External-profile-only, exact build `16.14.794.5912`: champion-owned keyframe `0x02EB`, 1,479-byte payloads, a profile-pinned 256-byte cipher-to-plain permutation, and fixed interleaved Float32LE stripes. D7/H3: all 2,170/1,030 snapshots are finite and monotonic; level agrees with all 3,200 saved Timeline frames and floored XP agrees for 3,198/3,200, with only two already-frozen ordering-boundary differences. Lane CS remains integral in every snapshot. Timeline data is never a runtime input or fallback.                                                                      |
+| Keyframe participant stat snapshots    | Timestamp, replay-native participant, integer lane CS, and projected integer neutral/jungle CS for all 13 exact builds in `rofl-replay-participant-stat-snapshots/v4`; exact build `16.14.794.5912` additionally retains Float32 XP, XP-derived level, and Float32 cumulative total gold | External-profile-only across patch groups 15.22, 15.23, 15.24, 16.1, 16.5, 16.6, 16.7, 16.9, and 16.14. The 57-replay productive gate emits 16,760 snapshots: jungle CS is 16,760/16,760 exact, lane CS is 16,751/16,760 exact, and the remaining nine are frozen same-keyframe ordering boundaries with zero unaccepted mismatches. Partial ciphers in 15.24/16.1/16.5 use bounded domains and emit only invariant integer projections. Timeline data is never a runtime input or fallback. |
 
-The historical built-in coverage includes patch groups `15.22`, `15.23`,
+The historical built-in event coverage includes patch groups `15.22`, `15.23`,
 `15.24`, `16.1`, `16.5`, `16.6`, `16.7`, and `16.9`. The externally supplied
 profile additionally validates exact build `16.14.794.5912`: 684/684 kills,
 99/99 objectives, 1,477/1,477 ward placements, 484/484 ward removals, and
@@ -80,16 +80,18 @@ profile additionally validates exact build `16.14.794.5912`: 684/684 kills,
 enables the strict 193/193 purchase-linked resulting-item-update subset, the
 strict 1,278/1,278 direct-add-only purchase subset, and the exact 116/116
 item-sale-operation stream. It also enables the profile-backed keyframe XP,
-level, total-gold, and lane-CS snapshot surface; none of these exact-build
-surfaces is available through built-in fallback profiles. The profile revision
-is `2026-07-23`, its SHA-256 is
-`47f20aae95740df4fb3b66417cabd146abe85c23b432c5fa1bd17d868995f9b0`, and its
-provenance fingerprint is `fnv1a64:7eb24280c8b9ce1d`.
+level, total-gold, lane-CS, and neutral-CS snapshot surface. Exact-build
+external profiles now also provide lane/jungle CS for every historical corpus
+patch group; historical snapshots leave XP, level, and total gold unavailable.
+None of these snapshot surfaces is available through built-in fallback
+profiles. The profile revision is `2026-07-25-cross-patch-cs`, its SHA-256 is
+`a4ee89df1ff70e97fa97b9b64c632851584c110bc65af2301420a930e79307d3`, and its
+provenance fingerprint is `fnv1a64:5cf4895f9e6d3f4c`.
 
 The browser decoding layer exposes the real Wasm participant summary, kill
 timeline, objective timeline, ward lifecycle, both exact-build item-purchase
 subsets, the exact-build item-sale-operation stream, and exact-build
-replay-native keyframe XP/level/total-gold/lane-CS snapshots for the locally
+replay-native keyframe XP/level/total-gold/lane-CS/neutral-CS snapshots for the locally
 loaded replay. Not every decoded research stream is mounted in the product
 view.
 
@@ -99,7 +101,8 @@ and elite objectives. Ward lifecycle, purchase subsets, and sale operations
 remain available to research/debug tooling but are deliberately absent from the
 product timeline. Compact champion cards show the champion portrait, player,
 role, scrub-time K/D/A, and—where the exact-build external profile is
-present—derived level and lane CS. Cumulative total gold is not shown as
+present—lane CS and neutral/jungle CS, plus derived level where separately
+available. Cumulative total gold is not shown as
 spendable current gold. Partial purchase and operation streams are not shown as
 inventory slots or current inventory. Final inventories, fake health/resource
 bars, the minimap, explanatory decoder copy, and ward-position research
@@ -416,23 +419,28 @@ different inferred record movements; `c550cb` alone includes both record
 physical inventory swaps or slot labels.
 
 A replay-only backward reducer now tests whether the embedded final seven-slot
-inventory can close the missing identity link without a direct add-slot field.
-For each participant it starts from the productive validated ROFL summary,
-walks exact-framed item groups backward, removes decoded `0x0369` items from
-matching concrete/symbolic slots, and restores provenance-keyed symbols into
-the `0x03F9` candidate slot. Productive `rofl-replay-item-sales/v1` events mark
-sale-removal symbols; saved Timeline sold-item IDs are loaded only after the
-reduction as an offline oracle.
+inventory can close missing identity links without a direct add-slot field. It
+includes decoded `0x0369` lengths 14/15/16/17 plus length-11 trinket changes.
+Productive sales retain their structural fixed-slot candidate and a
+provenance-keyed identity. Other low-nibble-5/13 removals and `0x0146` records
+branch over the bounded alternatives “no unit-count change” or “one anonymous
+main-slot unit removed”; anonymous non-sale units are canonicalized so only
+sale identities retain provenance. Nine exact sale-Undo anchors additionally
+restore a replay-native item identity: a productive fresh sale candidate must
+occur exactly once in the later same-owner `0x0081` record set. Unlinked
+`0x0081`, other removal nibbles, contradictions, and more than 4,096 states
+still fail closed.
 
-The conservative gate accepts only removal low-nibble `5` and stops before
-`0x0146`, chunk `0x0081`, other removal operations, duplicate slots, missing
-add IDs, contradictions, or excessive branching. Across all 100 exact-build
-participants it can reverse only 26/6,918 relevant suffix groups: 73 tracks
-stop at an unresolved context/Undo family and 27 at an unresolved removal
-operation. It reaches four D7 sale removals and zero H3 sales, but none of the
-four symbols reaches an earlier decoded add, so replay-only sold-item identity
-remains 0/116 available. Consequently the reducer recovers neither sale price
-nor a current-gold correction and does not authorize C++/Wasm/UI inventory.
+This expanded model reverses 4,280/6,945 relevant owner/time groups and reaches
+the beginning for 36/70 D7 plus 14/30 frozen-H3 participants. It encounters
+48/77 D7 and 24/39 H3 sales. Five sale symbols bind uniquely to an earlier
+decoded add—three D7 and two H3—and all five match the offline Timeline oracle,
+with zero wrong identities. The result is a material traceability checkpoint,
+not a runtime decoder: 20 tracks exceed the branch cap, 50 complete tracks
+still retain hundreds or thousands of possible slot histories, `0x0081` Undo
+coverage remains partial, and only five sale identities are unique. It therefore
+recovers neither complete inventory nor a complete sale/current-gold ledger and
+does not authorize C++/Wasm/UI inventory.
 
 An offline Timeline-oracle backward solver now tests the stronger hypothesis
 that the saved API item identities can fill those replay-only gaps. The final
@@ -508,7 +516,13 @@ Within the 31 exact `0x0081` anchors, there is no same-owner/time/chunk
 `0x0369`, `0x03F9`, or `0x0146` companion. Nearest-operation and 60-second
 lookback links recover at most 6/23 D7 and 2/8 H3 offline `beforeId` labels, and
 no payload byte maps exactly to Undo `beforeId`, `afterId`, or `goldGain`.
-These anchors therefore still cannot update replay-native inventory state.
+Applying the established 13-bit item grammar changes the result for sale Undo.
+All 11 nonzero `afterId` labels occur in the six trailing records at the normal
+item offset and persist into the following keyframe. Linking productive fresh
+sale candidates to an item occurring exactly once in the Undo record set yields
+6/6 exact D7 discovery and 3/3 exact frozen-H3 restored identities, with zero
+wrong candidates across all 31 anchors. The remaining 22 partial-family anchors,
+including purchase Undo identity, still fail closed and prevent complete state.
 Nearest same-owner keyframe components provide no full equality, chunk
 subsequence, shared four-byte prefix, common aligned XOR edit, or stable
 ordinal either.
@@ -559,7 +573,30 @@ partial typed-stream boundaries only: neither a directory index/token nor a
 typed record has proven cell or value meaning. Direct, descriptor-guided, and
 raw typed-stream Gold/CS relations remain negative.
 
-#### Productive exact-build keyframe XP, level, gold, and lane-CS snapshots
+#### Productive cross-patch keyframe CS snapshots
+
+The external profile now carries exact-build keyframe packet grammars,
+patch-specific cipher tables, and lane/jungle Float32LE offsets for all 13
+exact builds in the 57-replay corpus. Three serialization layouts recur:
+reverse-contiguous fields in 15.22/16.5/16.6, stride-two fields in
+15.23/15.24/16.1/16.14, and contiguous fields in 16.7/16.9. The cipher table is
+patch-specific and does not transfer across groups.
+
+The productive full-corpus gate covers 16,760 participant snapshots. Jungle CS
+matches 16,760/16,760 saved Timeline labels. Lane CS matches 16,751/16,760;
+the remaining nine are monotonic values bounded by the current and next API
+frames under the frozen same-keyframe ordering rule, with zero unaccepted
+mismatches. Patch groups 15.24, 16.1, and 16.5 retain partial injective ciphers
+plus bounded domains for the few unresolved symbols that occur in CS fields.
+Runtime enumerates those domains and emits only when every allowed assignment
+produces the same integer. See `docs/keyframe-cs-cross-patch.md` for the exact
+build/layout table and reproduction commands.
+
+Historical v4 snapshots expose lane and jungle CS while leaving XP, level, and
+total gold null. This avoids widening the older-patch claim beyond the field
+gate requested here.
+
+#### Productive exact-build 16.14 XP, level, gold, and CS snapshots
 
 The 16.14 `0x02EB` owner/keyframe slab now has a separate, promoted decoder
 boundary. It is deliberately independent of the non-semantic `0x01EB`
@@ -600,10 +637,10 @@ complete, profile-validated replay-embedded final-stat record and uses only its
 final level to choose the participant's 18-or-20 cap. Saved Riot fixtures do
 not participate in this derivation.
 
-The normalized surface is `rofl-replay-participant-stat-snapshots/v2`. It is
+The normalized surface is `rofl-replay-participant-stat-snapshots/v4`. It is
 implemented in C++, exposed through the external-profile-only Wasm ABI, and
 consumed by the product roster at the current scrub time. Missing, invalid,
-non-bijective, built-in, ambiguous, or non-exact-build profiles fail closed;
+non-injective, built-in, unresolved, or non-exact-build profiles fail closed;
 the UI shows stat snapshots unavailable rather than final values or API data.
 
 Reproduce the compact ten-replay D7/H3 gate after building the native CLI:
@@ -617,12 +654,16 @@ node scripts/validate_replay_participant_stat_snapshots_corpus.mjs \
 The report is compact and retains only counts, hashes, diagnostics, and the five
 frozen ordering differences; it does not serialize the 3,200 snapshots again.
 
-Neutral CS `[131,133,135,137]` uses the same frozen cipher and exhibits strong
-D7/H3 finite/nonnegative/monotonic Float32 evidence, but fractional/epsilon and
-integer-projection ambiguity keep it research-only. It is not part of the
-profile, normalized schema, Wasm output, or browser state. Current spendable
-gold, health, max health, mana/resource, damage, alive state, and full inventory
-remain unresolved.
+Neutral CS `[131,133,135,137]` uses the same frozen cipher. The replay-native
+Float32 value is finite, nonnegative, and monotonic across every snapshot but
+contains real fractional neutral-CS weights. Discovery defines the exact
+`floor(value + epsilon)` interval as `[3.814697265625e-6,
+3.0517578125e-5)` and freezes `epsilon = 1e-5`; that rule reproduces all
+2,170 D7 and all 1,030 previously unopened H3 `jungleMinionsKilled` labels.
+The field is profile-backed, emitted as integer `neutralMinionsKilled`, exposed
+through Native/Wasm/TypeScript, and shown by the product roster at scrub time.
+Current spendable gold, health, max health, mana/resource, damage, alive state,
+and full inventory remain unresolved.
 
 Two July 2026 maintained gates narrow those gaps without adding product fields:
 
@@ -635,14 +676,41 @@ Two July 2026 maintained gates narrow those gaps without adding product fields:
   intervals (16/16 sale-Undo and 35/36 purchase-Undo intervals). Cumulative
   sale proceeds improve the current-gold comparison to 1,459/3,200 snapshots
   but do not close the residual; sold-item identity is also unavailable, so no
-  spendable-gold field is promoted.
+  spendable-gold field is promoted. A corrected cross-replay multiplicity gate
+  additionally freezes all eight exact one-per-champion/keyframe families
+  (`0x0081`, `0x0151`, `0x0196`, `0x0233`, `0x02EB`, `0x038D`, `0x0452`, and
+  `0x047A`) across the same 3,200 snapshots. Outside the separately exhaustive
+  `0x02EB` audit, no raw or profile-permuted UInt/Float32 scalar with stride
+  `1..8` reproduces current gold in D7 and H3.
 - every exact-build champion/keyframe `0x0081` payload has six replay-only
   trailing records and reuses the established item-ID symbol grammar, but the
-  current-inventory interpretation is falsified. A Timeline-derived offline
-  reducer sees false-extra decoded items in 675/2,170 D7 and 374/1,030 H3
-  snapshots. The preceding component contains the sold item for 112/116 sales,
-  and the new removal-slot candidate agrees with the reverse record ordinal in
-  108/111 unique-truth sales. All 72 strict trinket replacements select
+  records are not directly usable as current inventory. A Timeline-derived
+  offline reducer sees false-extra decoded items in 675/2,170 D7 and 374/1,030
+  H3 snapshots. A new bounded alignment audit tests record state against
+  Timeline event reductions at keyframe offsets `-2..+2`; the existing `-1`
+  alignment is uniquely strongest in both D7 and H3, so a missing one-minute
+  shift does not close the gap. Timeline incompleteness is nevertheless
+  material: 957/1,336 false-extra item occurrences have no prior labelled
+  identity action, while 378 have a latest labelled removal. Thus missing
+  Timeline operations explain many apparent extras, but known historical
+  identities still reject a direct current-slot interpretation. The stronger
+  whole-record gate finds 49 D7 and 28 H3 byte-identical, same-ordinal item
+  records with opposite strict activity labels; even the full record bytes
+  therefore cannot determine current activity without component-level or
+  temporal state. Per-ordinal searches over normalized component-prefix and all
+  six sibling-record start/end contexts additionally find zero conflict-free
+  D7 contiguous one-to-eight-bit lookups and zero one/two-bit affine rules for
+  every ordinal, before H3 is consulted. There is no simple surrounding
+  activity mask under this grammar. The preceding
+  component contains the sold item for 112/116 sales. Combining the structural
+  removal slot with reverse record ordinal `5-slot`, then failing closed when
+  the preceding same-owner component is older than 30 seconds, identifies the
+  sold item in 36/36 D7 discovery sales and 13/13 frozen-H3 holdout sales with
+  zero wrong identities; D7 exercises all six main slots. Older candidates are
+  deliberately unavailable, so this is a conservative research subset rather
+  than a complete sale decoder. Without the freshness gate, the new
+  removal-slot candidate agrees with the reverse record ordinal in 108/111
+  unique-truth sales. All 72 strict trinket replacements select
   candidate slot 6, but only that slot has a zero-error semantic oracle. The
   181 isolated add/record-change anchors cover all six main candidate slots,
   while no bounded contiguous add-payload lookup is conflict-free on D7. An
@@ -650,11 +718,23 @@ Two July 2026 maintained gates narrow those gaps without adding product fields:
   and no companion-field lookup. Twenty-one no-item-event same-multiset record
   reorderings also fail as swap labels: five lack every profiled operation
   family and repeated `0x0146` payloads accompany contradictory record moves.
-  A backward reducer anchored at the replay-embedded final seven slots reverses
-  only 26/6,918 relevant suffix groups, reaches four sales, and resolves zero
-  sale identities before conservative barriers. This remains historical
+  An expanded backward reducer anchored at the replay-embedded final seven
+  slots reverses 4,270/6,945 relevant groups and reaches the beginning for
+  49/100 tracks. It encounters 71/116 sales and uniquely links five sale
+  identities with `5 exact / 0 wrong` offline validation, but leaves hundreds
+  or thousands of candidate histories per completed track. Of 36 final-slot mismatches on
+  tracks with no later Timeline item event, 34 do have later replay-native
+  operations from the known four-family population. The other two do not, so
+  Timeline omissions alone still do not establish state. A separately bounded
+  forward reducer also includes length-11 trinket changes and rare length-16/17
+  add records. Its deterministic replay-only candidate reconstructs `9/70` D7
+  and `5/30` H3 exact final slot tracks; a symbolic placement solver reaches
+  23/70 and 13/30 final anchors. A separate best score that assumes initial
+  trinket 3340 reaches 10/70 and 6/30 but is explicitly non-promotable because
+  that seed is not replay-native. This remains historical
   shop/Undo and removal-slot candidate evidence, not a complete physical
-  inventory or sold-item identity decoder.
+  inventory decoder. The fresh sale subset is also research-only pending a
+  profile-backed C++ implementation and full-corpus promotion.
 
 Both artifacts remain research-only and fail closed. The product continues to
 omit current gold and dynamic inventory slots instead of relabelling total gold,
@@ -738,9 +818,9 @@ intervals and adds 361 unchanged-interval events; the only zero-extra prefix
 candidate covers zero positive deltas. The next keyframe step is therefore a
 stateful replication/record grammar, not a wider static scalar packing.
 
-Position, health, resources, current gold, XP, level, neutral CS, damage, KDA,
-and alive state are not decoded. Exact-build total gold and lane CS are the
-only productive keyframe state fields. Older supervised keyframe assignments
+Position, health, resources, current gold, damage, KDA, and alive state are not
+decoded. Exact-build XP, derived level, total gold, lane CS, and neutral/jungle
+CS are productive keyframe state fields. Older supervised keyframe assignments
 remain research artifacts, not replay-only runtime fields. The blocker for the
 remaining state is the inner replication/component serialization grammar. See
 [`keyframe-champion-state-discovery.md`](keyframe-champion-state-discovery.md).
@@ -748,6 +828,17 @@ remaining state is the inner replication/component serialization grammar. See
 ### Movement
 
 There is no valid replay-native position, path target, or waypoint decoder.
+
+A maintained exact-build direct-scalar gate now also rules out the simplest
+keyframe-state interpretation. Across 2,170 D7 and 1,030 H3 champion snapshots,
+the substantial exact one-per-champion/keyframe families `0x0081`, `0x02EB`,
+and `0x047A` were searched for raw and profile-permuted signed Int16 and
+Float32 LE/BE lanes with strides 1 through 8. D7 selected candidates before H3
+was opened. Neither axis survives: the best affine RMSE remains about 3,763 X
+and 3,622 Y map units, while the strongest D7 first-difference correlations are
+only `-0.0138` X and `0.0548` Y and remain weak or reverse sign in H3. Champion
+position is therefore not another direct scalar alongside the promoted
+`0x02EB` stats; research must decode the movement/component message grammar.
 
 The frequent champion-handle-associated `0x01AB` family has also failed the
 coordinate/waypoint promotion gate: neither its raw payload nor bounded

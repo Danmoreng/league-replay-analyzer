@@ -23,12 +23,15 @@ const snapshotContentLength = 1479;
 const experienceOffsets = [83, 85, 87, 89];
 const totalGoldOffsets = [109, 115, 117, 119];
 const laneMinionsKilledOffsets = [125, 127, 129, 131];
+const neutralMinionsKilledOffsets = [133, 135, 137, 139];
 
 interface SnapshotCodec {
   cipherToPlain: number[];
   experienceOffsets: number[];
   totalGoldOffsets: number[];
   laneMinionsKilledOffsets: number[];
+  neutralMinionsKilledOffsets: number[];
+  neutralMinionsKilledProjection: "floor-plus-1e-5";
 }
 
 function appendU16Le(bytes: number[], value: number): void {
@@ -93,6 +96,7 @@ function buildSnapshotReplayWithCodec(
   assignCipherBytes(keyframe, codec.experienceOffsets, 1140, codec.cipherToPlain);
   assignCipherBytes(keyframe, codec.totalGoldOffsets, 1234, codec.cipherToPlain);
   assignCipherBytes(keyframe, codec.laneMinionsKilledOffsets, 55, codec.cipherToPlain);
+  assignCipherBytes(keyframe, codec.neutralMinionsKilledOffsets, 19.6, codec.cipherToPlain);
   const payload: number[] = [];
   for (let participantId = 1; participantId <= 10; participantId += 1) {
     appendPacket(payload, 2, snapshotPacketType, championNetworkIdBase + participantId, keyframe);
@@ -103,7 +107,7 @@ function buildSnapshotReplayWithCodec(
     LEVEL: "18",
     EXP: "20000",
     MINIONS_KILLED: "100",
-    NEUTRAL_MINIONS_KILLED: "0",
+    NEUTRAL_MINIONS_KILLED: "100",
     ITEM0: "0",
     ITEM1: "0",
     ITEM2: "0",
@@ -150,6 +154,8 @@ function buildSnapshotReplay(replayGameVersion = gameVersion): ArrayBuffer {
       experienceOffsets,
       totalGoldOffsets,
       laneMinionsKilledOffsets,
+      neutralMinionsKilledOffsets,
+      neutralMinionsKilledProjection: "floor-plus-1e-5",
     },
     replayGameVersion,
   );
@@ -182,9 +188,9 @@ function snapshotProfileJson(): string {
     profiles: [
       {
         versionGroup: "16.14",
-        acceptedGameVersions: [gameVersion],
         finalStatsValidated: true,
         keyframeParticipantStats: {
+          acceptedGameVersions: [gameVersion],
           segmentType: "keyframe",
           channel: 1,
           packetType: snapshotPacketType,
@@ -194,6 +200,8 @@ function snapshotProfileJson(): string {
           experienceOffsets,
           totalGoldOffsets,
           laneMinionsKilledOffsets,
+          neutralMinionsKilledOffsets,
+          neutralMinionsKilledProjection: "floor-plus-1e-5",
         },
       },
     ],
@@ -216,6 +224,19 @@ function malformedSnapshotProfileJson(): string {
     profiles: Array<{ keyframeParticipantStats: { cipherToPlain: number[] } }>;
   };
   profile.profiles[0]?.keyframeParticipantStats.cipherToPlain.pop();
+  return JSON.stringify(profile);
+}
+
+function partialCsOnlySnapshotProfileJson(): string {
+  const profile = JSON.parse(snapshotProfileJson()) as {
+    profiles: Array<{ keyframeParticipantStats: Record<string, unknown> }>;
+  };
+  const codec = profile.profiles[0]!.keyframeParticipantStats;
+  const cipher = codec.cipherToPlain as Array<number | null>;
+  cipher[0] = null;
+  codec.ambiguousCipherMappings = [{ cipher: 0, plain: [0] }];
+  delete codec.experienceOffsets;
+  delete codec.totalGoldOffsets;
   return JSON.stringify(profile);
 }
 
@@ -314,7 +335,7 @@ describe("participant-stat-snapshot Wasm ABI contract", () => {
     const profileJson = snapshotProfileJson();
     const result = extractParticipantStatSnapshots(module, buildSnapshotReplay(), profileJson);
 
-    expect(result.schema).toBe("rofl-replay-participant-stat-snapshots/v2");
+    expect(result.schema).toBe("rofl-replay-participant-stat-snapshots/v4");
     expect(result.source).toMatchObject({ runtimeInput: "rofl-only", riotApiInput: false });
     expect(result.gameVersion).toBe(gameVersion);
     expect(result.versionGroup).toBe("16.14");
@@ -329,7 +350,10 @@ describe("participant-stat-snapshot Wasm ABI contract", () => {
       snapshotPacketType,
       snapshotContentLength,
       championNetworkIdBase,
-      levelDerivation: "patch-16.14-xp-thresholds-with-replay-final-level-cap",
+      experienceAvailable: true,
+      totalGoldAvailable: true,
+      levelDerivation: "xp-thresholds-with-replay-final-level-cap",
+      neutralMinionsKilledProjection: "floor-plus-1e-5",
     });
     expect(result.snapshots).toHaveLength(10);
     expect(result.snapshots).toEqual(
@@ -341,6 +365,7 @@ describe("participant-stat-snapshot Wasm ABI contract", () => {
           level: 4,
           totalGold: 1234,
           laneMinionsKilled: 55,
+          neutralMinionsKilled: 19,
           provenance: expect.objectContaining({
             snapshotBlock: expect.objectContaining({
               packetType: snapshotPacketType,
@@ -359,6 +384,8 @@ describe("participant-stat-snapshot Wasm ABI contract", () => {
     expect(codec.experienceOffsets).toEqual([83, 85, 87, 89]);
     expect(codec.totalGoldOffsets).toEqual([115, 117, 119, 121]);
     expect(codec.laneMinionsKilledOffsets).toEqual([123, 125, 127, 129]);
+    expect(codec.neutralMinionsKilledOffsets).toEqual([131, 133, 135, 137]);
+    expect(codec.neutralMinionsKilledProjection).toBe("floor-plus-1e-5");
     expect(codec.cipherToPlain).toHaveLength(256);
 
     const result = extractParticipantStatSnapshots(
@@ -383,6 +410,32 @@ describe("participant-stat-snapshot Wasm ABI contract", () => {
           level: 4,
           totalGold: 1234,
           laneMinionsKilled: 55,
+          neutralMinionsKilled: 19,
+        }),
+      ]),
+    );
+  });
+
+  it("emits invariant CS from a bounded partial cipher without fabricating other stats", () => {
+    const result = extractParticipantStatSnapshots(
+      module,
+      buildSnapshotReplay(),
+      partialCsOnlySnapshotProfileJson(),
+    );
+    expect(result.profile).toMatchObject({
+      experienceAvailable: false,
+      totalGoldAvailable: false,
+      levelDerivation: null,
+    });
+    expect(result.snapshots).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          participantId: 1,
+          experience: null,
+          level: null,
+          totalGold: null,
+          laneMinionsKilled: 55,
+          neutralMinionsKilled: 19,
         }),
       ]),
     );
@@ -412,6 +465,6 @@ describe("participant-stat-snapshot Wasm ABI contract", () => {
         buildSnapshotReplay("16.14.794.5913"),
         snapshotProfileJson(),
       ),
-    ).toThrow("restricted to exact build 16.14.794.5912");
+    ).toThrow("no exact-build grammar for 16.14.794.5913");
   });
 });

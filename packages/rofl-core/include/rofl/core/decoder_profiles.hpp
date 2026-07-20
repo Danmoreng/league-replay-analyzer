@@ -163,18 +163,24 @@ struct InventorySaleSubsetDecoderProfile {
     std::vector<std::uint8_t> sale_payload_byte2_values;
 };
 
-// Exact-build keyframe participant-state bytes. The cipher table is a
-// profile-supplied bijection; it is never inferred from runtime replay data.
+// Exact-build keyframe participant-state bytes. Known cipher entries and
+// bounded ambiguity domains are profile-supplied; they are never inferred
+// from runtime replay data. A missing entry fails closed unless every value in
+// its frozen domain yields the same projected integer for that field.
 struct KeyframeParticipantStatsDecoderProfile {
+    std::vector<std::string> accepted_game_versions;
     std::string segment_type;
     std::uint8_t channel = 0;
     std::uint16_t packet_type = 0;
     std::size_t content_length = 0;
     std::uint32_t champion_network_id_base = 0;
-    std::array<std::uint8_t, 256> cipher_to_plain{};
-    std::array<std::size_t, 4> experience_offsets{};
-    std::array<std::size_t, 4> total_gold_offsets{};
+    std::array<std::optional<std::uint8_t>, 256> cipher_to_plain{};
+    std::array<std::vector<std::uint8_t>, 256> ambiguous_cipher_plain_domains{};
+    std::optional<std::array<std::size_t, 4>> experience_offsets;
+    std::optional<std::array<std::size_t, 4>> total_gold_offsets;
     std::array<std::size_t, 4> lane_minions_killed_offsets{};
+    std::array<std::size_t, 4> neutral_minions_killed_offsets{};
+    std::string neutral_minions_killed_projection;
 };
 
 struct DecoderVersionProfile {

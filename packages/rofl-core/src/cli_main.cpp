@@ -1379,7 +1379,7 @@ int main(int argc, char** argv) {
     std::cout << "Use --extract-replay-purchase-linked-item-updates-json <path-to-rofl> --decoder-profiles <json-path> to emit the strict replay-only 16.14 purchase-linked resulting-item subset; it is not a complete purchase or inventory timeline.\n";
     std::cout << "Use --extract-replay-direct-item-purchases-json <path-to-rofl> --decoder-profiles <json-path> to emit exact-build direct add-only item purchases classified by the replay plus the profile-pinned static item catalog; slots and inventory state remain unavailable.\n";
     std::cout << "Use --extract-replay-item-sales-json <path-to-rofl> --decoder-profiles <json-path> to emit exact-build replay-only sale operations; sold item identity, slot, price, gold gain, and inventory state remain unavailable.\n";
-    std::cout << "Use --extract-replay-participant-stat-snapshots-json <path-to-rofl> --decoder-profiles <json-path> to emit exact-build replay-only keyframe XP, level, gold, and lane-CS snapshots.\n";
+    std::cout << "Use --extract-replay-participant-stat-snapshots-json <path-to-rofl> --decoder-profiles <json-path> to emit exact-build replay-only keyframe lane/jungle CS snapshots, plus XP, level, and total gold where separately available.\n";
     std::cout << "Use --extract-replay-ward-position-candidates-json <path-to-rofl> [--decoder-profiles <json-path>] to emit strictly research-only replay-byte ward marker hypotheses without promoting decoded positions.\n";
     std::cout << "Use --dump-chunk-subrecords <path-to-rofl> --chunk-id <id> to dump subrecords for a chunk.\n";
     std::cout << "Use --summarize-subrecord-families <path-to-rofl> [--min-length <n>] [--min-records <n>] [--top-families <n>] to rank recurring subrecord families across the replay.\n";
@@ -1409,7 +1409,6 @@ int main(int argc, char** argv) {
     std::cout << "Use --match-event-window <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --event-x <x> --event-y <y> --timestamp-ms <ms> [--stride <len>] [--chunk-time-ms <ms>] [--chunk-base-id <id>] [--chunk-radius <n>] [--top-slots <n>] [--move-epsilon <f>] [--smooth-threshold <f>] to rank sparse slot samples near one known event location.\n";
     return 0;
 }
-
 
 
 

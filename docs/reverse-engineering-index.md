@@ -1,6 +1,6 @@
 # Reverse Engineering Docs Index
 
-Updated: 2026-07-23
+Updated: 2026-07-24
 
 This file consolidates the replay reverse-engineering documentation into a smaller set of active references.
 
@@ -58,16 +58,49 @@ are outside scope even when described by historical community work.
   non-semantic boundary)
 - `docs/decoder-status.md` also records the promoted exact-build `0x02EB`
   participant-snapshot grammar: the profile-pinned 256-byte permutation and
-  interleaved XP/total-gold/lane-CS Float32LE stripes plus the replay-only
-  XP-threshold/final-level-cap derivation. Neutral CS remains research-only.
+  interleaved XP/total-gold/lane-CS/neutral-CS Float32LE stripes plus the
+  replay-only XP-threshold/final-level-cap derivation and D7-frozen
+  `floor(value + 1e-5)` neutral-CS projection.
 - `scripts/validate_replay_participant_stat_snapshots_corpus.mjs` and
   `scripts/manifests/replay-participant-stat-snapshots-16.14.expected.json`
   reproduce its compact D7/H3 promotion gate.
+- `scripts/research_keyframe_neutral_cs_16_14.mjs` reproduces the Discovery
+  projection selection and untouched Holdout validation for neutral CS.
+- `docs/keyframe-cs-cross-patch.md`,
+  `scripts/research_keyframe_cs_cross_patch.mjs`, and
+  `scripts/validate_replay_participant_cs_snapshots_corpus.mjs` reproduce the
+  nine-patch/13-build keyframe layout and cipher selection plus the productive
+  57-replay lane/jungle-CS gate. The bounded partial-cipher domain rule for
+  15.24, 16.1, and 16.5 is documented there.
+- `scripts/research_keyframe_champion_positions_16_14.mjs` rejects direct raw
+  or profile-permuted signed Int16/Float32 position scalars in the three
+  substantial exact one-per-champion/keyframe families.
 - `scripts/research_keyframe_current_gold_16_14.mjs` reproduces the exact-build
   spent-gold-like lane and the negative current-gold correction searches.
+- `scripts/research_keyframe_champion_current_gold_families_16_14.mjs` freezes
+  the corrected replay-aware one-block-per-champion/keyframe population for
+  eight packet families and rejects raw or profile-permuted UInt/Float32
+  scalars with strides 1..8 outside the separately audited `0x02EB` family.
 - `scripts/research_keyframe_inventory_slots_16_14.mjs` reproduces the exact
-  six-record keyframe `0x0081` structure and falsifies its interpretation as
-  current champion inventory on D7 and frozen H3.
+  six-record keyframe `0x0081` structure, freezes the `-2..+2` Timeline-state
+  alignment audit, separates prior-labelled removals from item identities
+  absent in Timeline, and checks later replay operations before rejecting a
+  direct current-slot interpretation on D7 and frozen H3. It also freezes
+  8,137 D7 plus 4,014 H3 strict active/inactive record labels and rejects every
+  one/two-bit affine or contiguous one-to-eight-bit record-local activity rule.
+  A whole-record collision gate finds 49 D7 and 28 H3 byte-identical,
+  same-ordinal records with opposite activity labels, proving that activity
+  requires component-level or temporal context. Its follow-up prefix/sibling
+  context gate rejects every per-ordinal contiguous one-to-eight-bit lookup and
+  one/two-bit affine rule on D7 before opening H3.
+- `scripts/research_inventory_forward_slot_reducer_16_14.mjs` tests the bounded
+  cross-product of add-length sets, four removal-nibble sets, duplicate
+  handling, trinket protection, and four deterministic add-slot placement
+  rules against replay-embedded final slots. Length-11 trinkets and rare
+  length-16/17 adds improve the replay-only candidate to 9/70 D7 and 5/30 H3
+  exact final slot tracks. A provisional static initial-trinket seed reaches
+  10/70 and 6/30 but is explicitly non-promotable. Symbolic placement reaches
+  23/70 and 13/30 final anchors while retaining non-unique histories.
 - `scripts/research_inventory_add_slot_companions_16_14.mjs` exhausts the
   same-owner `+/-1 ms` packet-family/direct-bit-field search around 181 strict
   add/historical-record anchors; only `0x0369` has complete D7 support and it
@@ -77,9 +110,14 @@ are outside scope even when described by historical community work.
   swap labels through missing operation families and contradictory repeated
   `0x0146` payloads.
 - `scripts/research_inventory_backward_reducer_16_14.mjs` starts from embedded
-  replay-final seven-slot inventories and reverses conservative symbolic
-  add/removal suffixes; it reaches four of 116 sales but resolves zero item
-  identities before fail-closed operation barriers.
+  replay-final seven-slot inventories and reverses expanded symbolic
+  add/removal/context histories plus the exact sale-Undo restored-item subset.
+  It reaches the beginning for 50/100 tracks, encounters 72/116 sales, and
+  uniquely resolves five sale identities with `5 exact / 0 wrong` offline
+  validation, but retains thousands of ambiguous slot histories.
+- `scripts/research_inventory_undo_component_families.mjs` applies the proven
+  item grammar to the 31 exact patch-16.14 Undo anchors and freezes a replay-only
+  fresh-sale linkage at 6/6 D7 plus 3/3 H3 restored identities, zero wrong.
 - `scripts/research_inventory_timeline_oracle_backward_slots_16_14.mjs` uses
   saved Timeline identities only as an offline diagnostic around replay-final
   slots and `0x03F9` candidate slots. Its exact balance gate proves Timeline
@@ -89,8 +127,9 @@ are outside scope even when described by historical community work.
   static-recipe/Undo spend-ledger comparison and the incomplete cumulative-sale
   correction for current gold.
 - `scripts/research_inventory_sale_identity_16_14.mjs` freezes the six-record
-  sale-history candidate constraint and the negative removal identity/record
-  linkage searches.
+  sale-history candidate constraint, the negative raw removal/record linkage
+  searches, and a replay-only 30-second freshness rule that identifies 36/36
+  D7 discovery plus 13/13 frozen-H3 sold items with zero wrong identities.
 - `docs/replay-movement-packet-research.md`
 - `docs/rofl-api-parity.md`
 - `docs/keyframe-api-parity.md`

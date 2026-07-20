@@ -20,8 +20,8 @@ const WARD_DECODER_PROFILE = Object.freeze({
   origin: "external",
   schema: "rofl-replay-decoder-profiles/v1",
   registryId: "league-replay-analyzer-offline-validated",
-  revision: "2026-07-21",
-  fingerprint: "fnv1a64:10b2b8d2727009a0",
+  revision: "2026-07-25-cross-patch-cs",
+  fingerprint: "fnv1a64:5cf4895f9e6d3f4c",
 });
 
 // Fixed before this maintained research checkpoint. D7 is fully processed and

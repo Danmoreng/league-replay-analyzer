@@ -5908,10 +5908,11 @@ void write_inventory_sale_removal_block_json(
 struct ReplayParticipantStatSnapshot {
     long long timestamp_millis = 0;
     int participant_id = 0;
-    float experience = 0.0F;
-    int level = 1;
-    float total_gold = 0.0F;
-    float lane_minions_killed = 0.0F;
+    std::optional<float> experience;
+    std::optional<int> level;
+    std::optional<float> total_gold;
+    int lane_minions_killed = 0;
+    int neutral_minions_killed = 0;
     PacketBlock block;
 };
 
@@ -5919,8 +5920,8 @@ struct ReplayParticipantStatSnapshot {
     const KeyframeParticipantStatsDecoderProfile& profile
 ) {
     return profile.segment_type == "keyframe" && profile.channel == 1 &&
-           profile.packet_type == 0x02EB && profile.content_length == 1479 &&
-           profile.champion_network_id_base == 1073741997;
+           profile.packet_type != 0 && profile.content_length >= 1000 &&
+           profile.content_length <= 4096 && profile.champion_network_id_base != 0;
 }
 
 [[nodiscard]] bool keyframe_stat_offsets_are_valid(
@@ -5935,9 +5936,20 @@ struct ReplayParticipantStatSnapshot {
         }
         return true;
     };
-    return offsets_valid(profile.experience_offsets) &&
-           offsets_valid(profile.total_gold_offsets) &&
-           offsets_valid(profile.lane_minions_killed_offsets);
+    return (!profile.experience_offsets.has_value() ||
+               offsets_valid(*profile.experience_offsets)) &&
+           (!profile.total_gold_offsets.has_value() ||
+               offsets_valid(*profile.total_gold_offsets)) &&
+           offsets_valid(profile.lane_minions_killed_offsets) &&
+           offsets_valid(profile.neutral_minions_killed_offsets);
+}
+
+[[nodiscard]] float keyframe_neutral_projection_epsilon(
+    const KeyframeParticipantStatsDecoderProfile& profile
+) {
+    return profile.neutral_minions_killed_projection == "floor-plus-2e-5"
+        ? 0.00002F
+        : 0.00001F;
 }
 
 [[nodiscard]] int derive_keyframe_level(float experience, int final_level) {
@@ -5956,18 +5968,21 @@ struct ReplayParticipantStatSnapshot {
     return std::min(level, final_level > 18 ? 20 : 18);
 }
 
-[[nodiscard]] bool keyframe_stat_cipher_is_bijective(
+[[nodiscard]] bool keyframe_stat_cipher_is_injective(
     const KeyframeParticipantStatsDecoderProfile& profile
 ) {
     std::array<bool, 256> seen{};
-    for (const std::uint8_t plain : profile.cipher_to_plain) {
-        if (seen[plain]) return false;
-        seen[plain] = true;
+    std::size_t known_count = 0;
+    for (const auto plain : profile.cipher_to_plain) {
+        if (!plain.has_value()) continue;
+        if (seen[*plain]) return false;
+        seen[*plain] = true;
+        ++known_count;
     }
-    return true;
+    return known_count >= 128;
 }
 
-[[nodiscard]] float decode_keyframe_stat_float32_le(
+[[nodiscard]] std::optional<float> decode_keyframe_stat_float32_le(
     const std::vector<std::uint8_t>& decompressed,
     const PacketBlock& block,
     const std::array<std::size_t, 4>& offsets,
@@ -5979,10 +5994,98 @@ struct ReplayParticipantStatSnapshot {
         if (payload_index >= decompressed.size() || payload_index >= block.end_offset) {
             throw std::runtime_error("Keyframe participant stats payload offset escaped packet bounds.");
         }
-        bits |= static_cast<std::uint32_t>(
-            profile.cipher_to_plain[decompressed[payload_index]]) << (index * 8U);
+        const auto plain = profile.cipher_to_plain[decompressed[payload_index]];
+        if (!plain.has_value()) return std::nullopt;
+        bits |= static_cast<std::uint32_t>(*plain) << (index * 8U);
     }
     return std::bit_cast<float>(bits);
+}
+
+[[nodiscard]] std::optional<int> decode_keyframe_stat_projected_integer(
+    const std::vector<std::uint8_t>& decompressed,
+    const PacketBlock& block,
+    const std::array<std::size_t, 4>& offsets,
+    const KeyframeParticipantStatsDecoderProfile& profile,
+    bool neutral_projection
+) {
+    std::array<std::uint8_t, 4> cipher_bytes{};
+    std::vector<std::uint8_t> unresolved;
+    for (std::size_t index = 0; index < offsets.size(); ++index) {
+        const std::size_t payload_index = block.content_offset + offsets[index];
+        if (payload_index >= decompressed.size() || payload_index >= block.end_offset) {
+            throw std::runtime_error(
+                "Keyframe participant stats payload offset escaped packet bounds.");
+        }
+        const std::uint8_t cipher = decompressed[payload_index];
+        cipher_bytes[index] = cipher;
+        if (!profile.cipher_to_plain[cipher].has_value() &&
+            std::find(unresolved.begin(), unresolved.end(), cipher) == unresolved.end()) {
+            if (profile.ambiguous_cipher_plain_domains[cipher].empty()) {
+                return std::nullopt;
+            }
+            unresolved.push_back(cipher);
+        }
+    }
+    std::array<std::optional<std::uint8_t>, 256> assignments = profile.cipher_to_plain;
+    std::array<bool, 256> used_plain{};
+    for (const auto plain : assignments) {
+        if (plain.has_value()) used_plain[*plain] = true;
+    }
+    std::optional<int> projected_result;
+    std::size_t candidate_count = 0;
+    bool ambiguous_result = false;
+    bool search_limit_exceeded = false;
+    const auto evaluate = [&]() {
+        std::uint32_t bits = 0;
+        for (std::size_t index = 0; index < cipher_bytes.size(); ++index) {
+            const auto plain = assignments[cipher_bytes[index]];
+            if (!plain.has_value()) return;
+            bits |= static_cast<std::uint32_t>(*plain) << (index * 8U);
+        }
+        const float value = std::bit_cast<float>(bits);
+        if (!std::isfinite(value) || value < 0.0F ||
+            value > static_cast<float>(std::numeric_limits<int>::max())) {
+            ambiguous_result = true;
+            return;
+        }
+        const float projected_value = neutral_projection
+            ? std::floor(value + keyframe_neutral_projection_epsilon(profile))
+            : value;
+        if (!neutral_projection && std::trunc(value) != value) {
+            ambiguous_result = true;
+            return;
+        }
+        const int candidate = static_cast<int>(projected_value);
+        ++candidate_count;
+        if (!projected_result.has_value()) projected_result = candidate;
+        else if (*projected_result != candidate) ambiguous_result = true;
+    };
+    std::function<void(std::size_t)> visit = [&](std::size_t index) {
+        if (ambiguous_result || search_limit_exceeded) return;
+        if (candidate_count >= 1'000'000) {
+            search_limit_exceeded = true;
+            return;
+        }
+        if (index == unresolved.size()) {
+            evaluate();
+            return;
+        }
+        const std::uint8_t cipher = unresolved[index];
+        for (const std::uint8_t plain : profile.ambiguous_cipher_plain_domains[cipher]) {
+            if (used_plain[plain]) continue;
+            assignments[cipher] = plain;
+            used_plain[plain] = true;
+            visit(index + 1);
+            used_plain[plain] = false;
+            assignments[cipher] = std::nullopt;
+            if (ambiguous_result || search_limit_exceeded) return;
+        }
+    };
+    visit(0);
+    if (ambiguous_result || search_limit_exceeded || candidate_count == 0) {
+        return std::nullopt;
+    }
+    return projected_result;
 }
 
 [[nodiscard]] int keyframe_stat_owner_to_participant_id(
@@ -6015,11 +6118,6 @@ void write_participant_stat_snapshot_block_json(
     const DecoderProfileRegistry& decoder_profiles
 ) {
     const ReplaySummary summary = parse_replay_bytes(bytes, decoder_profiles);
-    if (summary.game_version != "16.14.794.5912") {
-        throw std::runtime_error(
-            "Keyframe participant stats decoder is restricted to exact build 16.14.794.5912."
-        );
-    }
     const DecoderVersionProfile* selected = find_decoder_profile(
         decoder_profiles, summary.game_version);
     if (selected == nullptr || !selected->keyframe_participant_stats.has_value()) {
@@ -6030,24 +6128,32 @@ void write_participant_stat_snapshot_block_json(
     }
     const KeyframeParticipantStatsDecoderProfile& profile =
         *selected->keyframe_participant_stats;
+    if (std::find(profile.accepted_game_versions.begin(),
+                  profile.accepted_game_versions.end(), summary.game_version) ==
+        profile.accepted_game_versions.end()) {
+        throw std::runtime_error(
+            "Keyframe participant stats decoder has no exact-build grammar for " +
+            summary.game_version + ".");
+    }
     if (!selected->final_stats_validated.value_or(false) ||
         !summary.capabilities.validated_final_player_stats_available ||
         summary.players.size() != 10 ||
-        std::any_of(summary.players.begin(), summary.players.end(), [](const PlayerSummary& player) {
-            return player.level < 1 || player.level > 20 || player.experience < 0;
-        })) {
+        (profile.experience_offsets.has_value() &&
+         std::any_of(summary.players.begin(), summary.players.end(), [](const PlayerSummary& player) {
+             return player.level < 1 || player.level > 20 || player.experience < 0;
+         }))) {
         throw std::runtime_error(
             "Keyframe participant level derivation requires validated replay-embedded final stats."
         );
     }
     if (!keyframe_stat_profile_is_exact(profile)) {
         throw std::runtime_error(
-            "Keyframe participant stats profile must be keyframe/channel-1/0x02EB/content-length-1479."
+            "Keyframe participant stats profile has an invalid keyframe packet grammar."
         );
     }
-    if (!keyframe_stat_offsets_are_valid(profile) || !keyframe_stat_cipher_is_bijective(profile)) {
+    if (!keyframe_stat_offsets_are_valid(profile) || !keyframe_stat_cipher_is_injective(profile)) {
         throw std::runtime_error(
-            "Keyframe participant stats profile has invalid offsets or a non-bijective cipher table."
+            "Keyframe participant stats profile has invalid offsets or a non-injective cipher table."
         );
     }
 
@@ -6073,18 +6179,34 @@ void write_participant_stat_snapshot_block_json(
                     ++rejected_invalid_owner_packet_count;
                     continue;
                 }
-                const float experience = decode_keyframe_stat_float32_le(
-                    decompressed, block, profile.experience_offsets, profile);
-                const float total_gold = decode_keyframe_stat_float32_le(
-                    decompressed, block, profile.total_gold_offsets, profile);
-                const float lane_minions_killed = decode_keyframe_stat_float32_le(
-                    decompressed, block, profile.lane_minions_killed_offsets, profile);
-                const int level = derive_keyframe_level(
-                    experience, summary.players[static_cast<std::size_t>(participant_id - 1)].level);
-                const bool invalid_value = !std::isfinite(experience) || experience < 0.0F ||
-                    !std::isfinite(total_gold) || total_gold < 0.0F ||
-                    !std::isfinite(lane_minions_killed) || lane_minions_killed < 0.0F ||
-                    std::trunc(lane_minions_killed) != lane_minions_killed;
+                const std::optional<float> experience = profile.experience_offsets.has_value()
+                    ? decode_keyframe_stat_float32_le(
+                          decompressed, block, *profile.experience_offsets, profile)
+                    : std::nullopt;
+                const std::optional<float> total_gold = profile.total_gold_offsets.has_value()
+                    ? decode_keyframe_stat_float32_le(
+                          decompressed, block, *profile.total_gold_offsets, profile)
+                    : std::nullopt;
+                const std::optional<int> lane_minions_killed =
+                    decode_keyframe_stat_projected_integer(
+                        decompressed, block, profile.lane_minions_killed_offsets,
+                        profile, false);
+                const std::optional<int> neutral_minions_killed =
+                    decode_keyframe_stat_projected_integer(
+                        decompressed, block, profile.neutral_minions_killed_offsets,
+                        profile, true);
+                const std::optional<int> level = experience.has_value()
+                    ? std::optional<int>(derive_keyframe_level(
+                          *experience,
+                          summary.players[static_cast<std::size_t>(participant_id - 1)].level))
+                    : std::nullopt;
+                const bool invalid_value =
+                    (profile.experience_offsets.has_value() &&
+                     (!experience.has_value() || !std::isfinite(*experience) || *experience < 0.0F)) ||
+                    (profile.total_gold_offsets.has_value() &&
+                     (!total_gold.has_value() || !std::isfinite(*total_gold) || *total_gold < 0.0F)) ||
+                    !lane_minions_killed.has_value() || *lane_minions_killed < 0 ||
+                    !neutral_minions_killed.has_value() || *neutral_minions_killed < 0;
                 if (invalid_value) {
                     ++rejected_invalid_value_packet_count;
                     continue;
@@ -6095,7 +6217,8 @@ void write_participant_stat_snapshot_block_json(
                     experience,
                     level,
                     total_gold,
-                    lane_minions_killed,
+                    lane_minions_killed.value_or(0),
+                    neutral_minions_killed.value_or(0),
                     block,
                 });
             }
@@ -6141,7 +6264,8 @@ void write_participant_stat_snapshot_block_json(
         }
     }
     std::array<std::optional<float>, 10> previous_gold;
-    std::array<std::optional<float>, 10> previous_lane_minions;
+    std::array<std::optional<int>, 10> previous_lane_minions;
+    std::array<std::optional<int>, 10> previous_neutral_minions;
     std::array<std::optional<float>, 10> previous_experience;
     std::array<std::optional<int>, 10> previous_level;
     std::vector<ReplayParticipantStatSnapshot> monotonic_snapshots;
@@ -6149,21 +6273,29 @@ void write_participant_stat_snapshot_block_json(
     for (const ReplayParticipantStatSnapshot& snapshot : snapshots) {
         const std::size_t participant_index =
             static_cast<std::size_t>(snapshot.participant_id - 1);
-        if ((previous_experience[participant_index].has_value() &&
-                snapshot.experience < *previous_experience[participant_index]) ||
-            (previous_level[participant_index].has_value() &&
-                snapshot.level < *previous_level[participant_index]) ||
-            (previous_gold[participant_index].has_value() &&
-                snapshot.total_gold < *previous_gold[participant_index]) ||
+        if ((snapshot.experience.has_value() &&
+             previous_experience[participant_index].has_value() &&
+                *snapshot.experience < *previous_experience[participant_index]) ||
+            (snapshot.level.has_value() && previous_level[participant_index].has_value() &&
+                *snapshot.level < *previous_level[participant_index]) ||
+            (snapshot.total_gold.has_value() && previous_gold[participant_index].has_value() &&
+                *snapshot.total_gold < *previous_gold[participant_index]) ||
             (previous_lane_minions[participant_index].has_value() &&
-                snapshot.lane_minions_killed < *previous_lane_minions[participant_index])) {
+                snapshot.lane_minions_killed < *previous_lane_minions[participant_index]) ||
+            (previous_neutral_minions[participant_index].has_value() &&
+                snapshot.neutral_minions_killed < *previous_neutral_minions[participant_index])) {
             ++rejected_invalid_value_packet_count;
             continue;
         }
-        previous_experience[participant_index] = snapshot.experience;
-        previous_level[participant_index] = snapshot.level;
-        previous_gold[participant_index] = snapshot.total_gold;
+        if (snapshot.experience.has_value()) {
+            previous_experience[participant_index] = *snapshot.experience;
+        }
+        if (snapshot.level.has_value()) previous_level[participant_index] = *snapshot.level;
+        if (snapshot.total_gold.has_value()) {
+            previous_gold[participant_index] = *snapshot.total_gold;
+        }
         previous_lane_minions[participant_index] = snapshot.lane_minions_killed;
+        previous_neutral_minions[participant_index] = snapshot.neutral_minions_killed;
         monotonic_snapshots.push_back(snapshot);
     }
     snapshots = std::move(monotonic_snapshots);
@@ -6200,7 +6332,7 @@ void write_participant_stat_snapshot_block_json(
     }
 
     std::ostringstream output;
-    output << "{\"schema\":\"rofl-replay-participant-stat-snapshots/v2\",\"source\":{\"replayPath\":";
+    output << "{\"schema\":\"rofl-replay-participant-stat-snapshots/v4\",\"source\":{\"replayPath\":";
     if (source.has_file) output << '\"' << json_escape(source.replay_path) << '\"';
     else output << "null";
     output << ",\"replayId\":";
@@ -6220,7 +6352,18 @@ void write_participant_stat_snapshot_block_json(
            << ",\"championNetworkIdBase\":" << profile.champion_network_id_base
            << ",\"championNetworkIdBaseHex\":\""
            << fixed_hex(profile.champion_network_id_base, 8) << "\""
-           << ",\"levelDerivation\":\"patch-16.14-xp-thresholds-with-replay-final-level-cap\"";
+           << ",\"experienceAvailable\":"
+           << (profile.experience_offsets.has_value() ? "true" : "false")
+           << ",\"totalGoldAvailable\":"
+           << (profile.total_gold_offsets.has_value() ? "true" : "false")
+           << ",\"levelDerivation\":";
+    if (profile.experience_offsets.has_value()) {
+        output << "\"xp-thresholds-with-replay-final-level-cap\"";
+    } else {
+        output << "null";
+    }
+    output << ",\"neutralMinionsKilledProjection\":\""
+           << json_escape(profile.neutral_minions_killed_projection) << "\"";
     write_decoder_profile_provenance_fields(output, &decoder_profiles);
     output << "},\"snapshots\":[";
     for (std::size_t index = 0; index < snapshots.size(); ++index) {
@@ -6228,12 +6371,22 @@ void write_participant_stat_snapshot_block_json(
         const ReplayParticipantStatSnapshot& snapshot = snapshots[index];
         output << "{\"timestampMillis\":" << snapshot.timestamp_millis
                << ",\"participantId\":" << snapshot.participant_id
-               << ",\"experience\":" << std::setprecision(std::numeric_limits<float>::max_digits10)
-               << snapshot.experience
-               << ",\"level\":" << snapshot.level
-               << ",\"totalGold\":" << std::setprecision(std::numeric_limits<float>::max_digits10)
-               << snapshot.total_gold
+               << ",\"experience\":";
+        if (snapshot.experience.has_value()) {
+            output << std::setprecision(std::numeric_limits<float>::max_digits10)
+                   << *snapshot.experience;
+        } else output << "null";
+        output << ",\"level\":";
+        if (snapshot.level.has_value()) output << *snapshot.level;
+        else output << "null";
+        output << ",\"totalGold\":";
+        if (snapshot.total_gold.has_value()) {
+            output << std::setprecision(std::numeric_limits<float>::max_digits10)
+                   << *snapshot.total_gold;
+        } else output << "null";
+        output
                << ",\"laneMinionsKilled\":" << snapshot.lane_minions_killed
+               << ",\"neutralMinionsKilled\":" << snapshot.neutral_minions_killed
                << ",\"provenance\":{\"snapshotBlock\":";
         write_participant_stat_snapshot_block_json(output, snapshot.block);
         output << "}}";
@@ -14989,12 +15142,6 @@ std::string match_event_window(
 }
 
 }  // namespace rofl::core
-
-
-
-
-
-
 
 
 

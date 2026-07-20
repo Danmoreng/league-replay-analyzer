@@ -20,9 +20,9 @@ the 6/7-byte removal family still has no decoded slot or item-instance
 reference. Consequently, a removal cannot yet be mapped to the item that left
 a champion's inventory without using an offline Riot label.
 
-The canonical profile revision is `2026-07-21`, SHA-256
-`f690f77926c09d28998c52e5a56044c4575a23a268f49328c071be02d2359cce`, with
-fingerprint `fnv1a64:10b2b8d2727009a0`.
+The canonical profile revision is `2026-07-25-cross-patch-cs`, SHA-256
+`a4ee89df1ff70e97fa97b9b64c632851584c110bc65af2301420a930e79307d3`, with
+fingerprint `fnv1a64:5cf4895f9e6d3f4c`.
 
 ## Reproducing the result
 
@@ -640,15 +640,15 @@ numeric replay-native correction field is found.
 
 The exact-build `0x03F9` family has a complete seven-value structural candidate:
 
-| Payload | Replay bits | Candidate slot | Combined packets |
-| ------- | ----------- | -------------: | ---------------: |
-| 6 bytes | `bit7=0, bit8=0` | 0 | 180 |
-| 6 bytes | `bit7=1, bit8=1` | 1 | 208 |
-| 6 bytes | `bit7=1, bit8=0` | 2 | 278 |
-| 7 bytes | `bit16=1, bit17=0` | 3 | 321 |
-| 7 bytes | `bit16=0, bit17=1` | 4 | 491 |
-| 7 bytes | `bit16=0, bit17=0` | 5 | 284 |
-| 7 bytes | `bit16=1, bit17=1` | 6 | 312 |
+| Payload | Replay bits        | Candidate slot | Combined packets |
+| ------- | ------------------ | -------------: | ---------------: |
+| 6 bytes | `bit7=0, bit8=0`   |              0 |              180 |
+| 6 bytes | `bit7=1, bit8=1`   |              1 |              208 |
+| 6 bytes | `bit7=1, bit8=0`   |              2 |              278 |
+| 7 bytes | `bit16=1, bit17=0` |              3 |              321 |
+| 7 bytes | `bit16=0, bit17=1` |              4 |              491 |
+| 7 bytes | `bit16=0, bit17=0` |              5 |              284 |
+| 7 bytes | `bit16=1, bit17=1` |              6 |              312 |
 
 The unused six-byte symbol `bit7=0, bit8=1` never occurs. All 2,074 packets
 decode structurally: 1,293 D7 and 781 H3, with every candidate slot represented
@@ -790,6 +790,23 @@ The current-inventory and slot-ordinal hypotheses are therefore rejected.
 Record boundaries and reused item symbols remain useful structural evidence,
 but they do not authorize a C++/Wasm/product inventory field.
 
+The maintained activity gate now rules out the broader record-local version of
+the hypothesis, not only small bit fields. It freezes 8,137 D7 and 4,014 H3
+strict labels where the offline reducer can prove one decoded record identity
+active or removed. Grouping by record ordinal, decoded item, and the complete
+record payload finds 49 conflicted byte-identical keys in D7 and 28 in H3. The
+minimum unavoidable error is 51 D7 plus 30 H3 labels. Across individual
+participant tracks, 33 unchanged records transition from active to inactive
+and one transitions back while component-prefix and sibling context change.
+Consequently no function of the item record bytes alone can recover current
+activity. A second per-ordinal gate normalizes the component prefix plus the
+start/end of all six sibling records. It searches every contiguous one-to-eight
+bit lookup and every one/two-bit affine combination across those sources. All
+six record ordinals have zero conflict-free Discovery candidates under both
+grammars, before Holdout is consulted. This rejects a simple surrounding
+activity mask; the next decoder must model the stateful operation history or a
+more complex component grammar.
+
 A narrower add/record-change gate remains useful for further grammar search.
 It selects intervals containing exactly one Timeline purchase label, one
 replay-native `0x0369` add with the same decoded item, and one changed `0x0081`
@@ -848,36 +865,45 @@ read through the productive validated summary. It then walks the four profiled
 item families backward with exact participant, timestamp, source order, and
 packet provenance:
 
-- a decoded `0x0369` add is undone only by removing its item from a compatible
-  concrete or symbolic slot;
-- a low-nibble-`5` `0x03F9` removal is undone only by restoring a unique
-  provenance-keyed symbol into its candidate slot when that slot is empty;
+- decoded `0x0369` lengths 14/15/16/17 and length-11 trinket adds are undone by
+  removing the item from compatible concrete or anonymous slots; a same-item
+  branch remains because the family also contains result/state updates;
+- productive sales restore a provenance-keyed symbol in their structural slot;
+  non-sale low-nibble-5/13 removals branch between no unit-count change and one
+  anonymous removed unit over empty main slots;
+- unresolved `0x0146` records use the same bounded no-change/anonymous-removal
+  union, and equivalent anonymous non-sale states are canonicalized;
 - productive `rofl-replay-item-sales/v1` provenance marks which symbols are
   sale candidates;
-- `0x0146`, chunk `0x0081`, non-`5` removal operations, duplicate candidate
-  slots, unknown add symbols, state contradictions, and excessive branching
-  stop the participant track instead of being guessed.
+- the exact sale-Undo subset removes one restored item identity from an unknown
+  matching main slot while reversing; its gate requires a productive fresh
+  sold-item candidate to occur exactly once in the later `0x0081` records;
+- unlinked chunk `0x0081`, removal nibbles other than 5/13, unknown add symbols,
+  state contradictions, and excessive branching stop the participant track.
 
 The symbolic reducer has an always-run synthetic identity/linkage self-test.
-Its corpus gate covers 4,645 D7 and 2,273 H3 relevant owner/time groups. The
-final-state suffix reaches only 24 D7 and two H3 groups. Fifty D7 and 23 H3
-tracks stop at `0x0146`/Undo-component groups; another 20 D7 and seven H3 stop
-at an unresolved removal operation. Four of 77 D7 sales are encountered, zero
-of 39 H3 sales are encountered, and no sale symbol can be linked back to an
-earlier decoded add. Offline Timeline validation therefore records
-`0 exact / 0 wrong / 116 unavailable` sold-item identities.
+Its corpus gate covers 4,665 D7 and 2,280 H3 relevant owner/time groups after
+the newly included add lengths. It reverses 3,036 D7 plus 1,244 H3 groups and
+reaches the beginning for 36/70 D7 plus 14/30 H3 tracks. It encounters 48/77
+D7 and 24/39 H3 sales. Three D7 and two H3 sale identities bind uniquely to an
+earlier replay add; the offline oracle records `5 exact / 0 wrong / 111
+unavailable`. Twenty tracks hit the 4,096-state cap, and even beginning-reaching
+tracks retain hundreds or thousands of candidate histories.
 
 ```bash
 node scripts/research_inventory_backward_reducer_16_14.mjs \
   --cli build-linux/packages/rofl-core/rofl_core_cli \
   --decoder-profiles packages/rofl-core/profiles/replay-decoder-profiles.v1.json \
+  --item-data tmp/autoresearch/2026-07-20-gold-inventory/static/Data-Dragon-16.14.1-item.json \
   --output tmp/inventory-backward-reducer-research-16.14.json
 ```
 
-This rejects final-state anchoring as a shortcut around unresolved operation
-semantics. It does not reject a future reducer after `0x0146`, non-sale
-`0x03F9`, add placement, swaps, counts, and instances are decoded. No sold item,
-sale price, current-gold correction, or dynamic inventory state is promoted.
+This proves that missing consumption/update alternatives were a major reason
+the original backward trace stopped, and that final anchoring can link a small
+sale-identity subset. It does not make those alternatives unique or decode
+all `0x0081`, add placement, swaps, counts, and instances. No complete sold-item
+stream, sale price,
+current-gold correction, or dynamic inventory state is promoted.
 
 ### Timeline-oracle backward slot diagnostic
 

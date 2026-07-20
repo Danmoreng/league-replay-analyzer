@@ -10,7 +10,7 @@ import {
 } from "./replayParticipantStatSnapshots";
 
 const result: ReplayParticipantStatSnapshotsResult = {
-  schema: "rofl-replay-participant-stat-snapshots/v2",
+  schema: "rofl-replay-participant-stat-snapshots/v4",
   source: {
     replayPath: null,
     replayId: null,
@@ -28,7 +28,10 @@ const result: ReplayParticipantStatSnapshotsResult = {
     snapshotContentLength: 1479,
     championNetworkIdBase: 0x400000ad,
     championNetworkIdBaseHex: "0x400000AD",
-    levelDerivation: "patch-16.14-xp-thresholds-with-replay-final-level-cap",
+    experienceAvailable: true,
+    totalGoldAvailable: true,
+    levelDerivation: "xp-thresholds-with-replay-final-level-cap",
+    neutralMinionsKilledProjection: "floor-plus-1e-5",
     origin: "external",
     schema: "rofl-replay-decoder-profiles/v1",
     registryId: "participant-stat-snapshots-contract",
@@ -44,6 +47,7 @@ const result: ReplayParticipantStatSnapshotsResult = {
       level: 4,
       totalGold: 1_200 + participantId,
       laneMinionsKilled: participantId,
+      neutralMinionsKilled: participantId * 4,
       provenance: {
         snapshotBlock: {
           channel: 1 as const,
@@ -84,6 +88,31 @@ const result: ReplayParticipantStatSnapshotsResult = {
 describe("participant stat snapshot contract", () => {
   it("accepts the exact replay-only, externally profiled snapshot schema", () => {
     expect(parseReplayParticipantStatSnapshotsResult(result)).toEqual(result);
+  });
+
+  it("accepts historical CS-only snapshots without fabricating XP, level, or gold", () => {
+    const historical = structuredClone(result);
+    historical.gameVersion = "15.24.733.6673";
+    historical.versionGroup = "15.24";
+    historical.profile.snapshotPacketType = 34;
+    historical.profile.snapshotPacketTypeHex = "0x0022";
+    historical.profile.snapshotContentLength = 1291;
+    historical.profile.championNetworkIdBase = 1073742151;
+    historical.profile.championNetworkIdBaseHex = "0x40000147";
+    historical.profile.experienceAvailable = false;
+    historical.profile.totalGoldAvailable = false;
+    historical.profile.levelDerivation = null;
+    for (const snapshot of historical.snapshots) {
+      snapshot.experience = null;
+      snapshot.level = null;
+      snapshot.totalGold = null;
+      snapshot.provenance.snapshotBlock.packetType = 34;
+      snapshot.provenance.snapshotBlock.packetTypeHex = "0x0022";
+      snapshot.provenance.snapshotBlock.contentLength = 1291;
+      snapshot.provenance.snapshotBlock.blockParam =
+        historical.profile.championNetworkIdBase + snapshot.participantId;
+    }
+    expect(parseReplayParticipantStatSnapshotsResult(historical)).toEqual(historical);
   });
 
   it("formats snapshot timestamps as a match clock", () => {
@@ -168,6 +197,23 @@ describe("participant stat snapshot contract", () => {
     );
   });
 
+  it("rejects neutral-CS regression across keyframes", () => {
+    const decreasing = structuredClone(result);
+    const secondGroup = structuredClone(decreasing.snapshots).map((snapshot) => ({
+      ...snapshot,
+      timestampMillis: snapshot.timestampMillis + 60_000,
+    }));
+    secondGroup[0]!.neutralMinionsKilled = 0;
+    decreasing.snapshots.push(...secondGroup);
+    decreasing.diagnostics.keyframeRecordCount = 2;
+    decreasing.diagnostics.keyframeSegmentCount = 2;
+    decreasing.diagnostics.profiledSnapshotPacketCount = 20;
+    decreasing.diagnostics.emittedSnapshotCount = 20;
+    expect(() => parseReplayParticipantStatSnapshotsResult(decreasing)).toThrow(
+      "monotonic across keyframes",
+    );
+  });
+
   it("uses the profiled Wasm export and validates its decoded JSON before returning it", () => {
     const source = readFileSync(
       fileURLToPath(new URL("./wasmReplayParser.ts", import.meta.url)),
@@ -177,5 +223,15 @@ describe("participant stat snapshot contract", () => {
     expect(source).toContain("lra_extract_replay_participant_stat_snapshots_buffer_with_profiles");
     expect(source).toContain("parseReplayParticipantStatSnapshotsResult");
     expect(source).toContain("DEFAULT_DECODER_PROFILE_REGISTRY_JSON");
+  });
+
+  it("mounts scrub-time neutral CS in the product roster", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("./components/ProductReplayView.vue", import.meta.url)),
+      "utf8",
+    );
+    expect(source).toContain("snapshot.neutralMinionsKilled");
+    expect(source).toContain("jungleCs: snapshot.neutralMinionsKilled");
+    expect(source).toContain("Jungle");
   });
 });

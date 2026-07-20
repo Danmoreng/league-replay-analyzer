@@ -19,6 +19,7 @@ target_link_options(rofl_wasm PRIVATE
     "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString']"
     "-sEXPORTED_FUNCTIONS=['_malloc','_free','_lra_alloc_buffer','_lra_copy_buffer_chunk','_lra_free_buffer','_lra_parse_replay_buffer','_lra_parse_replay_buffer_with_profiles','_lra_extract_replay_kills_buffer','_lra_extract_replay_kills_buffer_with_profiles','_lra_extract_replay_purchase_linked_item_updates_buffer_with_profiles','_lra_extract_replay_direct_item_purchases_buffer_with_profiles','_lra_extract_replay_item_sales_buffer_with_profiles','_lra_extract_replay_participant_stat_snapshots_buffer_with_profiles','_lra_extract_replay_objectives_buffer','_lra_extract_replay_objectives_buffer_with_profiles','_lra_extract_replay_wards_buffer','_lra_extract_replay_wards_buffer_with_profiles','_lra_extract_replay_ward_position_candidates_buffer','_lra_extract_replay_ward_position_candidates_buffer_with_profiles','_lra_scan_replay_families_buffer','_lra_analyze_entity_slab_buffer','_lra_analyze_sparse_family_buffer','_lra_analyze_scalar_family_buffer','_lra_analyze_clean_row_offsets_buffer','_lra_analyze_bitfield_schema_buffer','_lra_free_string']"
     "-sALLOW_MEMORY_GROWTH=1"
+    "-sSTACK_SIZE=1048576"
     "-fexceptions"
     "-sMODULARIZE=1"
     "-sEXPORT_ES6=1"
@@ -26,4 +27,3 @@ target_link_options(rofl_wasm PRIVATE
     "-sFILESYSTEM=0"
     "-o${CMAKE_CURRENT_BINARY_DIR}/rofl_wasm.js"
 )
-

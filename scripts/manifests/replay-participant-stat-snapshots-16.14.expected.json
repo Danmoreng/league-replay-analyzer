@@ -19,9 +19,9 @@
     "origin": "external",
     "schema": "rofl-replay-decoder-profiles/v1",
     "registryId": "league-replay-analyzer-offline-validated",
-    "revision": "2026-07-23",
-    "sha256": "47f20aae95740df4fb3b66417cabd146abe85c23b432c5fa1bd17d868995f9b0",
-    "fingerprint": "fnv1a64:7eb24280c8b9ce1d",
+    "revision": "2026-07-25-cross-patch-cs",
+    "sha256": "a4ee89df1ff70e97fa97b9b64c632851584c110bc65af2301420a930e79307d3",
+    "fingerprint": "fnv1a64:5cf4895f9e6d3f4c",
     "cipherToPlainSha256": "c9be1f4971505dcc7c4366329366794108c1b031060039a2bcfd2d60134ed4be"
   },
   "profileGrammar": {
@@ -30,22 +30,24 @@
     "snapshotPacketType": 747,
     "snapshotContentLength": 1479,
     "championNetworkIdBase": 1073741997,
-    "levelDerivation": "patch-16.14-xp-thresholds-with-replay-final-level-cap",
+    "levelDerivation": "xp-thresholds-with-replay-final-level-cap",
     "experienceOffsets": [83, 85, 87, 89],
     "totalGoldOffsets": [115, 117, 119, 121],
-    "laneMinionsKilledOffsets": [123, 125, 127, 129]
+    "laneMinionsKilledOffsets": [123, 125, 127, 129],
+    "neutralMinionsKilledOffsets": [131, 133, 135, 137],
+    "neutralMinionsKilledProjection": "floor-plus-1e-5"
   },
   "runtime": {
-    "schema": "rofl-replay-participant-stat-snapshots/v2",
+    "schema": "rofl-replay-participant-stat-snapshots/v4",
     "source": { "runtimeInput": "rofl-only", "riotApiInput": false },
     "coverage": "profiled-keyframe-participant-stats-only",
-    "initialState": { "timestampMillis": 0, "experience": 0, "level": 1, "totalGold": 500, "laneMinionsKilled": 0 },
+    "initialState": { "timestampMillis": 0, "experience": 0, "level": 1, "totalGold": 500, "laneMinionsKilled": 0, "neutralMinionsKilled": 0 },
     "participantCountPerSnapshot": 10
   },
   "expected": {
-    "D7": { "replayCount": 7, "snapshotCount": 2170, "rejectedInvalidOwnerPacketCount": 0, "rejectedInvalidValuePacketCount": 0 },
-    "H3": { "replayCount": 3, "snapshotCount": 1030, "rejectedInvalidOwnerPacketCount": 0, "rejectedInvalidValuePacketCount": 0 },
-    "combined": { "replayCount": 10, "snapshotCount": 3200, "rejectedInvalidOwnerPacketCount": 0, "rejectedInvalidValuePacketCount": 0, "acceptedApiOrderingDifferenceCount": 5 }
+    "D7": { "replayCount": 7, "snapshotCount": 2170, "neutralMinionsKilledExactCount": 2170, "rejectedInvalidOwnerPacketCount": 0, "rejectedInvalidValuePacketCount": 0 },
+    "H3": { "replayCount": 3, "snapshotCount": 1030, "neutralMinionsKilledExactCount": 1030, "rejectedInvalidOwnerPacketCount": 0, "rejectedInvalidValuePacketCount": 0 },
+    "combined": { "replayCount": 10, "snapshotCount": 3200, "neutralMinionsKilledExactCount": 3200, "rejectedInvalidOwnerPacketCount": 0, "rejectedInvalidValuePacketCount": 0, "acceptedApiOrderingDifferenceCount": 5 }
   },
   "apiOrderingDifferences": [
     {

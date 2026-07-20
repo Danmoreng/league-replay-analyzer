@@ -11,6 +11,7 @@ const PROFILE = Object.freeze({
   exactReplayBuild: "16.14.794.5912",
   packetType: 0x0081,
   addPacketType: 0x0369,
+  inventoryOperationPacketTypes: Object.freeze([0x0369, 0x03f9, 0x0146, 0x0081]),
   championOwnerBase: 0x400000ad,
   discovery: Object.freeze([
     "EUW1-7919517389",
@@ -53,6 +54,65 @@ const EXPECTED_ADD_SLOT_CANDIDATES = Object.freeze({
 const EXPECTED_REARRANGEMENT_CANDIDATES = Object.freeze({
   discoveryCount: 12,
   holdoutCount: 9,
+});
+
+const EXPECTED_TIMELINE_ALIGNMENT_METRICS = Object.freeze({
+  discovery: Object.freeze({
+    "-2": Object.freeze({ exact: 789, subset: 1031 }),
+    "-1": Object.freeze({ exact: 1219, subset: 1495 }),
+    0: Object.freeze({ exact: 642, subset: 1121 }),
+    1: Object.freeze({ exact: 226, subset: 849 }),
+    2: Object.freeze({ exact: 89, subset: 678 }),
+  }),
+  holdout: Object.freeze({
+    "-2": Object.freeze({ exact: 322, subset: 438 }),
+    "-1": Object.freeze({ exact: 513, subset: 656 }),
+    0: Object.freeze({ exact: 276, subset: 493 }),
+    1: Object.freeze({ exact: 104, subset: 369 }),
+    2: Object.freeze({ exact: 46, subset: 283 }),
+  }),
+});
+
+const EXPECTED_FALSE_EXTRA_METRICS = Object.freeze({
+  discovery: Object.freeze({ occurrences: 804, removed: 160, acquired: 1, absent: 643 }),
+  holdout: Object.freeze({ occurrences: 532, removed: 218, acquired: 0, absent: 314 }),
+});
+
+const EXPECTED_FINAL_SUFFIX_METRICS = Object.freeze({
+  discovery: Object.freeze({ mismatchWithReplayOperations: 23, mismatchWithout: 1 }),
+  holdout: Object.freeze({ mismatchWithReplayOperations: 11, mismatchWithout: 1 }),
+});
+
+const EXPECTED_RECORD_ACTIVITY_METRICS = Object.freeze({
+  discovery: Object.freeze({ rowCount: 8137, activeCount: 7978, inactiveCount: 159 }),
+  holdout: Object.freeze({ rowCount: 4014, activeCount: 3796, inactiveCount: 218 }),
+  affineBitSearch: Object.freeze({
+    minimumBitCount: 104,
+    candidateCount: 0,
+    zeroWrongHoldoutCandidateCount: 0,
+  }),
+  contiguousLookupSearch: Object.freeze({
+    candidateCount: 0,
+    zeroWrongHoldoutCandidateCount: 0,
+  }),
+});
+
+const EXPECTED_RECORD_ACTIVITY_CONTEXT_METRICS = Object.freeze({
+  discovery: Object.freeze({ conflictedKeyCount: 49, minorityErrorFloor: 51 }),
+  holdout: Object.freeze({ conflictedKeyCount: 28, minorityErrorFloor: 30 }),
+  combined: Object.freeze({ conflictedKeyCount: 115, minorityErrorFloor: 135 }),
+  transitions: Object.freeze({
+    count: 34,
+    activeToInactiveCount: 33,
+    inactiveToActiveCount: 1,
+    prefixChangedCount: 34,
+  }),
+});
+
+const EXPECTED_COMPONENT_CONTEXT_ACTIVITY_METRICS = Object.freeze({
+  lookupCandidateCounts: Object.freeze([0, 0, 0, 0, 0, 0]),
+  affineFeatureCounts: Object.freeze([1504, 1184, 1184, 1184, 1184, 1472]),
+  affineCandidateCounts: Object.freeze([0, 0, 0, 0, 0, 0]),
 });
 
 function parseArgs(argv) {
@@ -258,6 +318,7 @@ function decodeMainSlots(payload, inventoryItemIds) {
       slot: 5 - ordinal,
       contentLength: end - start,
       prefixHex: payload.subarray(start, Math.min(end, start + 8)).toString("hex"),
+      payloadHex: payload.subarray(start, end).toString("hex"),
     };
   });
   const decodedMainSlots = Array(6).fill(0);
@@ -299,6 +360,56 @@ function isMultisetSubset(subset, superset) {
 
 function sameMultiset(left, right) {
   return [...left].sort((a, b) => a - b).join(",") === [...right].sort((a, b) => a - b).join(",");
+}
+
+function multisetDifference(left, right) {
+  const remaining = [...right];
+  return left.filter((itemId) => {
+    const index = remaining.indexOf(itemId);
+    if (index === -1) return true;
+    remaining.splice(index, 1);
+    return false;
+  });
+}
+
+function latestLabelledItemAction(events, itemId, cutoffTimestampMillis) {
+  let latest = null;
+  for (const event of events) {
+    if (event.timestamp > cutoffTimestampMillis + 1) break;
+    let action = null;
+    if (event.type === "ITEM_PURCHASED" && event.itemId === itemId) action = "acquire";
+    else if (
+      (event.type === "ITEM_DESTROYED" || event.type === "ITEM_SOLD") &&
+      event.itemId === itemId
+    ) {
+      action = "remove";
+    } else if (event.type === "ITEM_UNDO" && event.afterId === itemId) action = "acquire";
+    else if (event.type === "ITEM_UNDO" && event.beforeId === itemId) action = "remove";
+    if (action !== null) latest = { action, timestampMillis: event.timestamp };
+  }
+  return latest;
+}
+
+function emptyTimelineStateValidation() {
+  return {
+    snapshotCount: 0,
+    exactMultisetSnapshotCount: 0,
+    decodedSubsetSnapshotCount: 0,
+    falseExtraItemSnapshotCount: 0,
+  };
+}
+
+function validateDecodedInventory(decodedMainSlots, labelledInventory, validation) {
+  const decodedInventory = decodedMainSlots.filter((itemId) => itemId !== 0);
+  validation.snapshotCount += 1;
+  if (sameMultiset(decodedInventory, labelledInventory)) {
+    validation.exactMultisetSnapshotCount += 1;
+  }
+  if (isMultisetSubset(decodedInventory, labelledInventory)) {
+    validation.decodedSubsetSnapshotCount += 1;
+  } else {
+    validation.falseExtraItemSnapshotCount += 1;
+  }
 }
 
 function countOrderedEmbeddings(positionDomains, limit = 2) {
@@ -445,14 +556,34 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
       };
     })
     .filter((row) => row.participantId >= 1 && row.participantId <= 10);
+  const inventoryOperationPackets = PROFILE.inventoryOperationPacketTypes.flatMap((packetType) =>
+    dumpPacketType(args, replayPath, packetType, "chunk")
+      .map((block) => ({
+        participantId: block.blockParam - PROFILE.championOwnerBase,
+        timestampMillis: block.timestampMillis,
+        packetType,
+        contentLength: block.contentLength,
+      }))
+      .filter((row) => row.participantId >= 1 && row.participantId <= 10),
+  );
   const strictAddSlotRows = [];
   const rearrangementCandidateRows = [];
+  const recordActivityRows = [];
   const timelineStateValidation = {
-    snapshotCount: 0,
-    exactMultisetSnapshotCount: 0,
-    decodedSubsetSnapshotCount: 0,
-    falseExtraItemSnapshotCount: 0,
+    ...emptyTimelineStateValidation(),
     falseExtraSamples: [],
+  };
+  const timelineAlignmentValidation = Object.fromEntries(
+    [-2, -1, 0, 1, 2].map((blockOffset) => [String(blockOffset), emptyTimelineStateValidation()]),
+  );
+  const falseExtraDiagnostics = {
+    occurrenceCount: 0,
+    latestLabelledActionRemovedCount: 0,
+    latestLabelledActionAcquiredCount: 0,
+    noPriorLabelledIdentityActionCount: 0,
+    byItemId: {},
+    byChampionName: {},
+    samples: [],
   };
   for (let participantId = 1; participantId <= 10; participantId += 1) {
     const participantEvents = events
@@ -478,11 +609,46 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
         eventIndex += 1;
       }
       const labelledInventory = inventory.filter((itemId) => inventoryItemIds.has(itemId));
-      const decodedMainSlots = decodeMainSlots(
-        Buffer.from(block.contentHex, "hex"),
-        inventoryItemIds,
-      ).decodedMainSlots;
+      const decoded = decodeMainSlots(Buffer.from(block.contentHex, "hex"), inventoryItemIds);
+      const decodedMainSlots = decoded.decodedMainSlots;
       const decodedInventory = decodedMainSlots.filter((itemId) => itemId !== 0);
+      for (const record of decoded.records) {
+        const itemId = decodedMainSlots[record.slot];
+        if (itemId === 0) continue;
+        const decodedCount = decodedInventory.filter((candidate) => candidate === itemId).length;
+        const labelledCount = labelledInventory.filter((candidate) => candidate === itemId).length;
+        const latestAction = latestLabelledItemAction(
+          participantEvents,
+          itemId,
+          stateTimestampMillis,
+        );
+        const active = labelledCount >= decodedCount ? true : null;
+        const labelledActive =
+          active === true
+            ? true
+            : labelledCount === 0 && latestAction?.action === "remove"
+              ? false
+              : null;
+        if (labelledActive === null) continue;
+        recordActivityRows.push({
+          replayId,
+          partition,
+          participantId,
+          segmentId: block.segmentId,
+          blockTimestampMillis: block.timestampMillis,
+          stateTimestampMillis,
+          recordOrdinal: 5 - record.slot,
+          itemId,
+          contentLength: record.contentLength,
+          payloadHex: record.payloadHex,
+          componentPrefixHex: Buffer.from(block.contentHex, "hex")
+            .subarray(0, decoded.recordStarts[0])
+            .toString("hex"),
+          siblingPayloadHexes: decoded.records.map((candidate) => candidate.payloadHex),
+          componentPayloadHex: block.contentHex,
+          active: labelledActive,
+        });
+      }
       participantSnapshots.push({
         stateTimestampMillis,
         blockTimestampMillis: block.timestampMillis,
@@ -496,6 +662,37 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
       if (decodedSubset) timelineStateValidation.decodedSubsetSnapshotCount += 1;
       else {
         timelineStateValidation.falseExtraItemSnapshotCount += 1;
+        const extraItems = multisetDifference(decodedInventory, labelledInventory);
+        const championName = match.info.participants[participantId - 1].championName;
+        for (const itemId of extraItems) {
+          falseExtraDiagnostics.occurrenceCount += 1;
+          falseExtraDiagnostics.byItemId[itemId] =
+            (falseExtraDiagnostics.byItemId[itemId] ?? 0) + 1;
+          falseExtraDiagnostics.byChampionName[championName] =
+            (falseExtraDiagnostics.byChampionName[championName] ?? 0) + 1;
+          const latestAction = latestLabelledItemAction(
+            participantEvents,
+            itemId,
+            stateTimestampMillis,
+          );
+          if (latestAction?.action === "remove") {
+            falseExtraDiagnostics.latestLabelledActionRemovedCount += 1;
+          } else if (latestAction?.action === "acquire") {
+            falseExtraDiagnostics.latestLabelledActionAcquiredCount += 1;
+          } else {
+            falseExtraDiagnostics.noPriorLabelledIdentityActionCount += 1;
+          }
+          if (falseExtraDiagnostics.samples.length < 12) {
+            falseExtraDiagnostics.samples.push({
+              participantId,
+              championName,
+              timestampMillis: block.timestampMillis,
+              stateTimestampMillis,
+              itemId,
+              latestLabelledAction: latestAction,
+            });
+          }
+        }
         if (timelineStateValidation.falseExtraSamples.length < 8) {
           timelineStateValidation.falseExtraSamples.push({
             participantId,
@@ -505,6 +702,30 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
             decodedInventory,
           });
         }
+      }
+    }
+    for (const [blockOffsetText, validation] of Object.entries(timelineAlignmentValidation)) {
+      const blockOffset = Number(blockOffsetText);
+      const alignedInventory = [];
+      let alignedEventIndex = 0;
+      for (let snapshotIndex = 0; snapshotIndex < participantSnapshots.length; snapshotIndex += 1) {
+        const alignedBlockIndex = Math.max(
+          0,
+          Math.min(participantBlocks.length - 1, snapshotIndex + blockOffset),
+        );
+        const cutoffTimestampMillis = participantBlocks[alignedBlockIndex].timestampMillis;
+        while (
+          alignedEventIndex < participantEvents.length &&
+          participantEvents[alignedEventIndex].timestamp <= cutoffTimestampMillis + 1
+        ) {
+          applyItemEvent(alignedInventory, participantEvents[alignedEventIndex]);
+          alignedEventIndex += 1;
+        }
+        validateDecodedInventory(
+          participantSnapshots[snapshotIndex].decodedMainSlots,
+          alignedInventory.filter((itemId) => inventoryItemIds.has(itemId)),
+          validation,
+        );
       }
     }
     for (let index = 1; index < participantSnapshots.length; index += 1) {
@@ -568,6 +789,13 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
   const tracks = [];
   for (let participantId = 1; participantId <= 10; participantId += 1) {
     const block = lastByParticipant.get(participantId);
+    const participantBlocks = blocksByParticipant
+      .get(participantId)
+      .sort(
+        (left, right) => left.segmentId - right.segmentId || left.blockIndex - right.blockIndex,
+      );
+    const lastStateTimestampMillis =
+      participantBlocks.at(-2)?.timestampMillis ?? participantBlocks.at(-1).timestampMillis;
     const participant = match.info.participants[participantId - 1];
     const slots = Array.from({ length: 7 }, (_, slot) => participant[`item${slot}`]);
     if (slots.some((itemId) => !Number.isInteger(itemId) || itemId < 0)) {
@@ -576,6 +804,11 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
     const laterEvents = events.filter(
       (event) =>
         event.participantId === participantId && event.timestamp > block.timestampMillis + 1,
+    );
+    const replayOperationsAfterLastState = inventoryOperationPackets.filter(
+      (operation) =>
+        operation.participantId === participantId &&
+        operation.timestampMillis > lastStateTimestampMillis + 1,
     );
     const payload = Buffer.from(block.contentHex, "hex");
     const { recordStarts, records, decodedMainSlots } = decodeMainSlots(payload, inventoryItemIds);
@@ -604,8 +837,17 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
       partition,
       participantId,
       lastKeyframeTimestampMillis: block.timestampMillis,
+      lastStateTimestampMillis,
       stableTail: laterEvents.length === 0,
       laterItemEventCount: laterEvents.length,
+      replayOperationAfterLastStateCount: replayOperationsAfterLastState.length,
+      replayOperationAfterLastStateSignature:
+        replayOperationsAfterLastState
+          .map(
+            (operation) =>
+              `0x${operation.packetType.toString(16).padStart(4, "0")}:${operation.contentLength}`,
+          )
+          .join(">") || "NONE",
       finalSlots: slots,
       occupiedMainSlotCount: reversedOccupiedMainSlots.length,
       expectedPairOccurrenceCount: reversedOccupiedMainSlots.filter(
@@ -643,6 +885,7 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
     tracks,
     strictAddSlotRows,
     rearrangementCandidateRows,
+    recordActivityRows,
     input: {
       replayId,
       partition,
@@ -651,7 +894,513 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
       keyframeBlockCount,
       completeSixRecordBlockCount,
       timelineStateValidation,
+      timelineAlignmentValidation,
+      falseExtraDiagnostics,
     },
+  };
+}
+
+function activityMetrics(rows) {
+  return {
+    rowCount: rows.length,
+    activeCount: rows.filter((row) => row.active).length,
+    inactiveCount: rows.filter((row) => !row.active).length,
+  };
+}
+
+function activityConflictMetrics(rows, keySelector) {
+  const labelsByKey = new Map();
+  for (const row of rows) {
+    const key = keySelector(row);
+    const labels = labelsByKey.get(key) ?? { active: 0, inactive: 0 };
+    if (row.active) labels.active += 1;
+    else labels.inactive += 1;
+    labelsByKey.set(key, labels);
+  }
+  const conflicted = [...labelsByKey.values()].filter(
+    (labels) => labels.active > 0 && labels.inactive > 0,
+  );
+  return {
+    distinctKeyCount: labelsByKey.size,
+    conflictedKeyCount: conflicted.length,
+    conflictedRowCount: conflicted.reduce(
+      (sum, labels) => sum + labels.active + labels.inactive,
+      0,
+    ),
+    minorityErrorFloor: conflicted.reduce(
+      (sum, labels) => sum + Math.min(labels.active, labels.inactive),
+      0,
+    ),
+  };
+}
+
+function recordLocalActivityConflicts(rows) {
+  return {
+    payload: activityConflictMetrics(rows, (row) => row.payloadHex),
+    ordinalAndPayload: activityConflictMetrics(
+      rows,
+      (row) => `${row.recordOrdinal}:${row.payloadHex}`,
+    ),
+    itemAndPayload: activityConflictMetrics(rows, (row) => `${row.itemId}:${row.payloadHex}`),
+    ordinalItemAndPayload: activityConflictMetrics(
+      rows,
+      (row) => `${row.recordOrdinal}:${row.itemId}:${row.payloadHex}`,
+    ),
+  };
+}
+
+function recordActivityConflictSamples(rows, limit = 16) {
+  const rowsByKey = new Map();
+  for (const row of rows) {
+    const key = `${row.recordOrdinal}:${row.itemId}:${row.payloadHex}`;
+    const grouped = rowsByKey.get(key) ?? [];
+    grouped.push(row);
+    rowsByKey.set(key, grouped);
+  }
+  const samples = [];
+  for (const [key, grouped] of rowsByKey) {
+    const active = grouped.find((row) => row.active);
+    const inactive = grouped.find((row) => !row.active);
+    if (active === undefined || inactive === undefined) continue;
+    const compact = (row) => ({
+      replayId: row.replayId,
+      participantId: row.participantId,
+      segmentId: row.segmentId,
+      blockTimestampMillis: row.blockTimestampMillis,
+      stateTimestampMillis: row.stateTimestampMillis,
+      componentPrefixHex: row.componentPrefixHex,
+      siblingPayloadHexes: row.siblingPayloadHexes,
+      componentPayloadHex: row.componentPayloadHex,
+    });
+    samples.push({ key, active: compact(active), inactive: compact(inactive) });
+    if (samples.length >= limit) break;
+  }
+  return samples;
+}
+
+function recordActivityTransitions(rows, limit = 32) {
+  const rowsByTrackRecord = new Map();
+  for (const row of rows) {
+    const key = `${row.replayId}:${row.participantId}:${row.recordOrdinal}:${row.itemId}:${row.payloadHex}`;
+    const grouped = rowsByTrackRecord.get(key) ?? [];
+    grouped.push(row);
+    rowsByTrackRecord.set(key, grouped);
+  }
+  const transitions = [];
+  for (const [key, grouped] of rowsByTrackRecord) {
+    grouped.sort(
+      (left, right) =>
+        left.segmentId - right.segmentId || left.blockTimestampMillis - right.blockTimestampMillis,
+    );
+    for (let index = 1; index < grouped.length; index += 1) {
+      const before = grouped[index - 1];
+      const after = grouped[index];
+      if (before.active === after.active) continue;
+      transitions.push({
+        key,
+        direction: before.active ? "active-to-inactive" : "inactive-to-active",
+        segmentDelta: after.segmentId - before.segmentId,
+        timestampDeltaMillis: after.stateTimestampMillis - before.stateTimestampMillis,
+        componentPrefixChanged: before.componentPrefixHex !== after.componentPrefixHex,
+        changedSiblingOrdinals: before.siblingPayloadHexes.flatMap((payloadHex, ordinal) =>
+          payloadHex === after.siblingPayloadHexes[ordinal] ? [] : [ordinal],
+        ),
+        before: {
+          segmentId: before.segmentId,
+          stateTimestampMillis: before.stateTimestampMillis,
+          componentPrefixHex: before.componentPrefixHex,
+          siblingPayloadHexes: before.siblingPayloadHexes,
+          componentPayloadHex: before.componentPayloadHex,
+        },
+        after: {
+          segmentId: after.segmentId,
+          stateTimestampMillis: after.stateTimestampMillis,
+          componentPrefixHex: after.componentPrefixHex,
+          siblingPayloadHexes: after.siblingPayloadHexes,
+          componentPayloadHex: after.componentPayloadHex,
+        },
+      });
+    }
+  }
+  const compact = transitions.map(({ before, after, ...transition }) => transition);
+  const countByChangedSiblingSet = {};
+  for (const transition of compact) {
+    const key = transition.changedSiblingOrdinals.join(",");
+    countByChangedSiblingSet[key] = (countByChangedSiblingSet[key] ?? 0) + 1;
+  }
+  return {
+    count: transitions.length,
+    activeToInactiveCount: transitions.filter(
+      (transition) => transition.direction === "active-to-inactive",
+    ).length,
+    inactiveToActiveCount: transitions.filter(
+      (transition) => transition.direction === "inactive-to-active",
+    ).length,
+    prefixChangedCount: transitions.filter((transition) => transition.componentPrefixChanged)
+      .length,
+    countByChangedSiblingSet,
+    samples: transitions.slice(0, limit),
+  };
+}
+
+function reverseBytes(buffer) {
+  return Buffer.from(buffer).reverse();
+}
+
+function activityContextSources(row) {
+  const prefix = Buffer.from(row.componentPrefixHex, "hex");
+  const sources = [
+    { name: "component-prefix-start", payload: prefix },
+    { name: "component-prefix-end", payload: reverseBytes(prefix) },
+  ];
+  for (let ordinal = 0; ordinal < row.siblingPayloadHexes.length; ordinal += 1) {
+    const sibling = Buffer.from(row.siblingPayloadHexes[ordinal], "hex");
+    sources.push({ name: `sibling-${ordinal}-start`, payload: sibling });
+    sources.push({ name: `sibling-${ordinal}-end`, payload: reverseBytes(sibling) });
+  }
+  return sources;
+}
+
+function searchComponentContextActivityLookups(discoveryRows, holdoutRows) {
+  const discoveryPrepared = discoveryRows.map((row) => ({
+    ...row,
+    contextSources: new Map(
+      activityContextSources(row).map((source) => [source.name, source.payload]),
+    ),
+  }));
+  const holdoutPrepared = holdoutRows.map((row) => ({
+    ...row,
+    contextSources: new Map(
+      activityContextSources(row).map((source) => [source.name, source.payload]),
+    ),
+  }));
+  const sourceNames = [...discoveryPrepared[0].contextSources.keys()];
+  const byOrdinal = [];
+  for (let recordOrdinal = 0; recordOrdinal < 6; recordOrdinal += 1) {
+    const discovery = discoveryPrepared.filter((row) => row.recordOrdinal === recordOrdinal);
+    const holdout = holdoutPrepared.filter((row) => row.recordOrdinal === recordOrdinal);
+    const candidates = [];
+    for (const sourceName of sourceNames) {
+      const minimumBitCount = Math.min(
+        ...discovery.map((row) => row.contextSources.get(sourceName).length * 8),
+      );
+      for (let width = 1; width <= 8; width += 1) {
+        for (let start = 0; start + width <= minimumBitCount; start += 1) {
+          for (const reversed of [false, true]) {
+            const labels = new Map();
+            let conflict = false;
+            for (const row of discovery) {
+              const value = recordBitValue(
+                row.contextSources.get(sourceName),
+                start,
+                width,
+                reversed,
+              );
+              const previous = labels.get(value);
+              if (previous !== undefined && previous !== row.active) {
+                conflict = true;
+                break;
+              }
+              labels.set(value, row.active);
+            }
+            if (conflict) continue;
+            let exact = 0;
+            let wrong = 0;
+            let unavailable = 0;
+            for (const row of holdout) {
+              const value = recordBitValue(
+                row.contextSources.get(sourceName),
+                start,
+                width,
+                reversed,
+              );
+              const predicted = labels.get(value);
+              if (predicted === undefined) unavailable += 1;
+              else if (predicted === row.active) exact += 1;
+              else wrong += 1;
+            }
+            candidates.push({
+              sourceName,
+              start,
+              width,
+              reversed,
+              symbolCount: labels.size,
+              holdout: { exact, wrong, unavailable },
+            });
+          }
+        }
+      }
+    }
+    candidates.sort(
+      (left, right) =>
+        left.holdout.wrong - right.holdout.wrong ||
+        left.holdout.unavailable - right.holdout.unavailable ||
+        right.holdout.exact - left.holdout.exact ||
+        left.width - right.width ||
+        left.start - right.start ||
+        left.sourceName.localeCompare(right.sourceName),
+    );
+    byOrdinal.push({
+      recordOrdinal,
+      discoveryRowCount: discovery.length,
+      holdoutRowCount: holdout.length,
+      candidateCount: candidates.length,
+      completeZeroWrongHoldoutCandidateCount: candidates.filter(
+        (candidate) => candidate.holdout.wrong === 0 && candidate.holdout.unavailable === 0,
+      ).length,
+      bestCandidates: candidates.slice(0, 32),
+    });
+  }
+  return {
+    sources: sourceNames,
+    byOrdinal,
+    completeSixOrdinalRuleAvailable: byOrdinal.every(
+      (ordinal) => ordinal.completeZeroWrongHoldoutCandidateCount > 0,
+    ),
+  };
+}
+
+function bitSignature(rows, valueSelector) {
+  const signature = Buffer.alloc(Math.ceil(rows.length / 8));
+  for (let index = 0; index < rows.length; index += 1) {
+    if (valueSelector(rows[index])) signature[index >> 3] |= 1 << (index & 7);
+  }
+  return signature;
+}
+
+function xorSignatures(...signatures) {
+  const result = Buffer.alloc(signatures[0].length);
+  for (const signature of signatures) {
+    for (let index = 0; index < result.length; index += 1) result[index] ^= signature[index];
+  }
+  return result;
+}
+
+function populatedSignature(rowCount) {
+  const signature = Buffer.alloc(Math.ceil(rowCount / 8), 0xff);
+  const remainder = rowCount % 8;
+  if (remainder !== 0) signature[signature.length - 1] = (1 << remainder) - 1;
+  return signature;
+}
+
+function searchComponentContextActivityAffineBits(discoveryRows, holdoutRows) {
+  const prepare = (rows) =>
+    rows.map((row) => ({
+      ...row,
+      contextSources: new Map(
+        activityContextSources(row).map((source) => [source.name, source.payload]),
+      ),
+    }));
+  const discoveryPrepared = prepare(discoveryRows);
+  const holdoutPrepared = prepare(holdoutRows);
+  const sourceNames = [...discoveryPrepared[0].contextSources.keys()];
+  const byOrdinal = [];
+  for (let recordOrdinal = 0; recordOrdinal < 6; recordOrdinal += 1) {
+    const discovery = discoveryPrepared.filter((row) => row.recordOrdinal === recordOrdinal);
+    const holdout = holdoutPrepared.filter((row) => row.recordOrdinal === recordOrdinal);
+    const features = [];
+    for (const sourceName of sourceNames) {
+      const minimumBitCount = Math.min(
+        ...discovery.map((row) => row.contextSources.get(sourceName).length * 8),
+      );
+      for (let bit = 0; bit < minimumBitCount; bit += 1) {
+        features.push({
+          sourceName,
+          bit,
+          signature: bitSignature(discovery, (row) =>
+            payloadBit(row.contextSources.get(sourceName), bit),
+          ),
+        });
+      }
+    }
+    const featuresBySignature = new Map();
+    for (let featureIndex = 0; featureIndex < features.length; featureIndex += 1) {
+      const key = features[featureIndex].signature.toString("base64");
+      const indices = featuresBySignature.get(key) ?? [];
+      indices.push(featureIndex);
+      featuresBySignature.set(key, indices);
+    }
+    const target = bitSignature(discovery, (row) => row.active);
+    const ones = populatedSignature(discovery.length);
+    const candidateKeys = new Set();
+    const candidates = [];
+    const addCandidate = (leftIndex, rightIndex, inverse) => {
+      const ordered = [leftIndex, rightIndex].sort((left, right) => left - right);
+      const key = `${ordered[0]}:${ordered[1]}:${inverse}`;
+      if (candidateKeys.has(key)) return;
+      candidateKeys.add(key);
+      const selected = ordered.map((index) => features[index]);
+      let exact = 0;
+      let wrong = 0;
+      let unavailable = 0;
+      for (const row of holdout) {
+        if (
+          selected.some(
+            (feature) => feature.bit >= row.contextSources.get(feature.sourceName).length * 8,
+          )
+        ) {
+          unavailable += 1;
+          continue;
+        }
+        const predicted = Boolean(
+          payloadBit(row.contextSources.get(selected[0].sourceName), selected[0].bit) ^
+          payloadBit(row.contextSources.get(selected[1].sourceName), selected[1].bit) ^
+          inverse,
+        );
+        if (predicted === row.active) exact += 1;
+        else wrong += 1;
+      }
+      candidates.push({
+        bits: selected.map(({ sourceName, bit }) => ({ sourceName, bit })),
+        inverse,
+        holdout: { exact, wrong, unavailable },
+      });
+    };
+    for (let leftIndex = 0; leftIndex < features.length; leftIndex += 1) {
+      for (const inverse of [0, 1]) {
+        const wanted = xorSignatures(
+          features[leftIndex].signature,
+          target,
+          inverse === 1 ? ones : Buffer.alloc(ones.length),
+        ).toString("base64");
+        for (const rightIndex of featuresBySignature.get(wanted) ?? []) {
+          addCandidate(leftIndex, rightIndex, inverse);
+        }
+      }
+    }
+    candidates.sort(
+      (left, right) =>
+        left.holdout.wrong - right.holdout.wrong ||
+        left.holdout.unavailable - right.holdout.unavailable ||
+        right.holdout.exact - left.holdout.exact ||
+        left.bits[0].sourceName.localeCompare(right.bits[0].sourceName) ||
+        left.bits[0].bit - right.bits[0].bit,
+    );
+    byOrdinal.push({
+      recordOrdinal,
+      discoveryRowCount: discovery.length,
+      holdoutRowCount: holdout.length,
+      featureCount: features.length,
+      candidateCount: candidates.length,
+      completeZeroWrongHoldoutCandidateCount: candidates.filter(
+        (candidate) => candidate.holdout.wrong === 0 && candidate.holdout.unavailable === 0,
+      ).length,
+      bestCandidates: candidates.slice(0, 32),
+    });
+  }
+  return {
+    sources: sourceNames,
+    byOrdinal,
+    completeSixOrdinalRuleAvailable: byOrdinal.every(
+      (ordinal) => ordinal.completeZeroWrongHoldoutCandidateCount > 0,
+    ),
+  };
+}
+
+function evaluateActivityCandidate(rows, candidate) {
+  let exact = 0;
+  let wrong = 0;
+  for (const row of rows) {
+    const payload = Buffer.from(row.payloadHex, "hex");
+    if (candidate.bits.some((bit) => bit >= payload.length * 8)) continue;
+    const value = candidate.bits.reduce((result, bit) => result ^ payloadBit(payload, bit), 0);
+    const predicted = Boolean(value ^ candidate.inverse);
+    if (predicted === row.active) exact += 1;
+    else wrong += 1;
+  }
+  return { exact, wrong, unavailable: rows.length - exact - wrong };
+}
+
+function searchRecordActivityBits(discoveryRows, holdoutRows) {
+  const minimumBitCount = Math.min(
+    ...discoveryRows.map((row) => Buffer.from(row.payloadHex, "hex").length * 8),
+  );
+  const candidates = [];
+  for (let left = 0; left < minimumBitCount; left += 1) {
+    for (let right = left; right < minimumBitCount; right += 1) {
+      const bits = left === right ? [left] : [left, right];
+      for (const inverse of [0, 1]) {
+        const candidate = { bits, inverse };
+        const discovery = evaluateActivityCandidate(discoveryRows, candidate);
+        if (discovery.wrong !== 0 || discovery.unavailable !== 0) continue;
+        candidates.push({
+          ...candidate,
+          discovery,
+          holdout: evaluateActivityCandidate(holdoutRows, candidate),
+        });
+      }
+    }
+  }
+  return {
+    minimumBitCount,
+    candidateCount: candidates.length,
+    zeroWrongHoldoutCandidateCount: candidates.filter((candidate) => candidate.holdout.wrong === 0)
+      .length,
+    candidates: candidates.slice(0, 32),
+  };
+}
+
+function recordBitValue(payload, start, width, reversed) {
+  let value = 0;
+  for (let index = 0; index < width; index += 1) {
+    const outputBit = reversed ? width - 1 - index : index;
+    value |= payloadBit(payload, start + index) << outputBit;
+  }
+  return value;
+}
+
+function searchRecordActivityLookups(discoveryRows, holdoutRows) {
+  const minimumBitCount = Math.min(
+    ...discoveryRows.map((row) => Buffer.from(row.payloadHex, "hex").length * 8),
+  );
+  const candidates = [];
+  for (let width = 1; width <= 8; width += 1) {
+    for (let start = 0; start + width <= minimumBitCount; start += 1) {
+      for (const reversed of [false, true]) {
+        const labels = new Map();
+        let conflict = false;
+        for (const row of discoveryRows) {
+          const value = recordBitValue(Buffer.from(row.payloadHex, "hex"), start, width, reversed);
+          const previous = labels.get(value);
+          if (previous !== undefined && previous !== row.active) {
+            conflict = true;
+            break;
+          }
+          labels.set(value, row.active);
+        }
+        if (conflict) continue;
+        let exact = 0;
+        let wrong = 0;
+        let unavailable = 0;
+        for (const row of holdoutRows) {
+          const value = recordBitValue(Buffer.from(row.payloadHex, "hex"), start, width, reversed);
+          const predicted = labels.get(value);
+          if (predicted === undefined) unavailable += 1;
+          else if (predicted === row.active) exact += 1;
+          else wrong += 1;
+        }
+        candidates.push({
+          start,
+          width,
+          reversed,
+          symbolCount: labels.size,
+          holdout: { exact, wrong, unavailable },
+        });
+      }
+    }
+  }
+  candidates.sort(
+    (left, right) =>
+      left.holdout.wrong - right.holdout.wrong ||
+      right.holdout.exact - left.holdout.exact ||
+      left.width - right.width ||
+      left.start - right.start,
+  );
+  return {
+    candidateCount: candidates.length,
+    zeroWrongHoldoutCandidateCount: candidates.filter((candidate) => candidate.holdout.wrong === 0)
+      .length,
+    bestCandidates: candidates.slice(0, 32),
   };
 }
 
@@ -678,6 +1427,12 @@ function summarize(tracks) {
       .length,
     stableTailExactFinalMainMultisetTrackCount: stable.filter(
       (track) => track.exactFinalMainMultiset,
+    ).length,
+    stableTailMismatchWithReplayOperationAfterStateCount: stable.filter(
+      (track) => !track.exactFinalMainSlots && track.replayOperationAfterLastStateCount > 0,
+    ).length,
+    stableTailMismatchWithoutReplayOperationAfterStateCount: stable.filter(
+      (track) => !track.exactFinalMainSlots && track.replayOperationAfterLastStateCount === 0,
     ).length,
     stableTailOrderedEmbeddingTrackCount: stable.filter((track) => track.orderedEmbeddingAvailable)
       .length,
@@ -715,6 +1470,83 @@ function summarizeTimelineState(reports) {
   );
 }
 
+function summarizeTimelineAlignments(reports) {
+  const summary = Object.fromEntries(
+    [-2, -1, 0, 1, 2].map((blockOffset) => [String(blockOffset), emptyTimelineStateValidation()]),
+  );
+  for (const report of reports) {
+    for (const [blockOffset, validation] of Object.entries(
+      report.input.timelineAlignmentValidation,
+    )) {
+      for (const field of Object.keys(summary[blockOffset])) {
+        summary[blockOffset][field] += validation[field];
+      }
+    }
+  }
+  return summary;
+}
+
+function summarizeFalseExtraDiagnostics(reports) {
+  const summary = {
+    occurrenceCount: 0,
+    latestLabelledActionRemovedCount: 0,
+    latestLabelledActionAcquiredCount: 0,
+    noPriorLabelledIdentityActionCount: 0,
+    byItemId: {},
+    byChampionName: {},
+  };
+  for (const report of reports) {
+    const diagnostics = report.input.falseExtraDiagnostics;
+    for (const field of [
+      "occurrenceCount",
+      "latestLabelledActionRemovedCount",
+      "latestLabelledActionAcquiredCount",
+      "noPriorLabelledIdentityActionCount",
+    ]) {
+      summary[field] += diagnostics[field];
+    }
+    for (const histogramField of ["byItemId", "byChampionName"]) {
+      for (const [key, count] of Object.entries(diagnostics[histogramField])) {
+        summary[histogramField][key] = (summary[histogramField][key] ?? 0) + count;
+      }
+      summary[histogramField] = Object.fromEntries(
+        Object.entries(summary[histogramField]).sort(
+          (left, right) => right[1] - left[1] || left[0].localeCompare(right[0]),
+        ),
+      );
+    }
+  }
+  return summary;
+}
+
+function compactAlignmentMetrics(summary) {
+  return Object.fromEntries(
+    Object.entries(summary).map(([offset, metrics]) => [
+      offset,
+      {
+        exact: metrics.exactMultisetSnapshotCount,
+        subset: metrics.decodedSubsetSnapshotCount,
+      },
+    ]),
+  );
+}
+
+function compactFalseExtraMetrics(summary) {
+  return {
+    occurrences: summary.occurrenceCount,
+    removed: summary.latestLabelledActionRemovedCount,
+    acquired: summary.latestLabelledActionAcquiredCount,
+    absent: summary.noPriorLabelledIdentityActionCount,
+  };
+}
+
+function compactFinalSuffixMetrics(summary) {
+  return {
+    mismatchWithReplayOperations: summary.stableTailMismatchWithReplayOperationAfterStateCount,
+    mismatchWithout: summary.stableTailMismatchWithoutReplayOperationAfterStateCount,
+  };
+}
+
 function frozenPartitionMetrics(reports) {
   const timeline = summarizeTimelineState(reports);
   return {
@@ -739,6 +1571,7 @@ function main() {
   const tracks = reports.flatMap((report) => report.tracks);
   const strictAddSlotRows = reports.flatMap((report) => report.strictAddSlotRows);
   const rearrangementCandidateRows = reports.flatMap((report) => report.rearrangementCandidateRows);
+  const recordActivityRows = reports.flatMap((report) => report.recordActivityRows);
   const discoveryReports = reports.filter((report) => report.input.partition === "D7");
   const holdoutReports = reports.filter((report) => report.input.partition === "H3");
   const frozenMetrics = {
@@ -782,6 +1615,157 @@ function main() {
       actual: rearrangementCandidateMetrics,
     });
   }
+  const timelineAlignmentMetrics = {
+    discovery: compactAlignmentMetrics(summarizeTimelineAlignments(discoveryReports)),
+    holdout: compactAlignmentMetrics(summarizeTimelineAlignments(holdoutReports)),
+  };
+  if (
+    JSON.stringify(timelineAlignmentMetrics) !== JSON.stringify(EXPECTED_TIMELINE_ALIGNMENT_METRICS)
+  ) {
+    fail("Frozen Timeline alignment metrics drifted.", {
+      expected: EXPECTED_TIMELINE_ALIGNMENT_METRICS,
+      actual: timelineAlignmentMetrics,
+    });
+  }
+  const falseExtraMetrics = {
+    discovery: compactFalseExtraMetrics(summarizeFalseExtraDiagnostics(discoveryReports)),
+    holdout: compactFalseExtraMetrics(summarizeFalseExtraDiagnostics(holdoutReports)),
+  };
+  if (JSON.stringify(falseExtraMetrics) !== JSON.stringify(EXPECTED_FALSE_EXTRA_METRICS)) {
+    fail("Frozen missing-Timeline-identity metrics drifted.", {
+      expected: EXPECTED_FALSE_EXTRA_METRICS,
+      actual: falseExtraMetrics,
+    });
+  }
+  const finalSuffixMetrics = {
+    discovery: compactFinalSuffixMetrics(summarize(discovery)),
+    holdout: compactFinalSuffixMetrics(summarize(holdout)),
+  };
+  const recordActivityResearch = {
+    discovery: activityMetrics(recordActivityRows.filter((row) => row.partition === "D7")),
+    holdout: activityMetrics(recordActivityRows.filter((row) => row.partition === "H3")),
+    affineBitSearch: searchRecordActivityBits(
+      recordActivityRows.filter((row) => row.partition === "D7"),
+      recordActivityRows.filter((row) => row.partition === "H3"),
+    ),
+    contiguousLookupSearch: searchRecordActivityLookups(
+      recordActivityRows.filter((row) => row.partition === "D7"),
+      recordActivityRows.filter((row) => row.partition === "H3"),
+    ),
+    recordLocalConflicts: {
+      discovery: recordLocalActivityConflicts(
+        recordActivityRows.filter((row) => row.partition === "D7"),
+      ),
+      holdout: recordLocalActivityConflicts(
+        recordActivityRows.filter((row) => row.partition === "H3"),
+      ),
+      combined: recordLocalActivityConflicts(recordActivityRows),
+    },
+    recordLocalConflictSamples: recordActivityConflictSamples(recordActivityRows),
+    unchangedRecordActivityTransitions: recordActivityTransitions(recordActivityRows),
+    componentContextLookupSearch: searchComponentContextActivityLookups(
+      recordActivityRows.filter((row) => row.partition === "D7"),
+      recordActivityRows.filter((row) => row.partition === "H3"),
+    ),
+    componentContextAffineBitSearch: searchComponentContextActivityAffineBits(
+      recordActivityRows.filter((row) => row.partition === "D7"),
+      recordActivityRows.filter((row) => row.partition === "H3"),
+    ),
+  };
+  const compactRecordActivityMetrics = {
+    discovery: recordActivityResearch.discovery,
+    holdout: recordActivityResearch.holdout,
+    affineBitSearch: {
+      minimumBitCount: recordActivityResearch.affineBitSearch.minimumBitCount,
+      candidateCount: recordActivityResearch.affineBitSearch.candidateCount,
+      zeroWrongHoldoutCandidateCount:
+        recordActivityResearch.affineBitSearch.zeroWrongHoldoutCandidateCount,
+    },
+    contiguousLookupSearch: {
+      candidateCount: recordActivityResearch.contiguousLookupSearch.candidateCount,
+      zeroWrongHoldoutCandidateCount:
+        recordActivityResearch.contiguousLookupSearch.zeroWrongHoldoutCandidateCount,
+    },
+  };
+  if (
+    JSON.stringify(compactRecordActivityMetrics) !==
+    JSON.stringify(EXPECTED_RECORD_ACTIVITY_METRICS)
+  ) {
+    fail("Frozen keyframe record-activity metrics drifted.", {
+      expected: EXPECTED_RECORD_ACTIVITY_METRICS,
+      actual: compactRecordActivityMetrics,
+    });
+  }
+  const compactRecordActivityContextMetrics = {
+    discovery: {
+      conflictedKeyCount:
+        recordActivityResearch.recordLocalConflicts.discovery.ordinalItemAndPayload
+          .conflictedKeyCount,
+      minorityErrorFloor:
+        recordActivityResearch.recordLocalConflicts.discovery.ordinalItemAndPayload
+          .minorityErrorFloor,
+    },
+    holdout: {
+      conflictedKeyCount:
+        recordActivityResearch.recordLocalConflicts.holdout.ordinalItemAndPayload
+          .conflictedKeyCount,
+      minorityErrorFloor:
+        recordActivityResearch.recordLocalConflicts.holdout.ordinalItemAndPayload
+          .minorityErrorFloor,
+    },
+    combined: {
+      conflictedKeyCount:
+        recordActivityResearch.recordLocalConflicts.combined.ordinalItemAndPayload
+          .conflictedKeyCount,
+      minorityErrorFloor:
+        recordActivityResearch.recordLocalConflicts.combined.ordinalItemAndPayload
+          .minorityErrorFloor,
+    },
+    transitions: {
+      count: recordActivityResearch.unchangedRecordActivityTransitions.count,
+      activeToInactiveCount:
+        recordActivityResearch.unchangedRecordActivityTransitions.activeToInactiveCount,
+      inactiveToActiveCount:
+        recordActivityResearch.unchangedRecordActivityTransitions.inactiveToActiveCount,
+      prefixChangedCount:
+        recordActivityResearch.unchangedRecordActivityTransitions.prefixChangedCount,
+    },
+  };
+  if (
+    JSON.stringify(compactRecordActivityContextMetrics) !==
+    JSON.stringify(EXPECTED_RECORD_ACTIVITY_CONTEXT_METRICS)
+  ) {
+    fail("Frozen keyframe record-activity context metrics drifted.", {
+      expected: EXPECTED_RECORD_ACTIVITY_CONTEXT_METRICS,
+      actual: compactRecordActivityContextMetrics,
+    });
+  }
+  const compactComponentContextActivityMetrics = {
+    lookupCandidateCounts: recordActivityResearch.componentContextLookupSearch.byOrdinal.map(
+      (ordinal) => ordinal.candidateCount,
+    ),
+    affineFeatureCounts: recordActivityResearch.componentContextAffineBitSearch.byOrdinal.map(
+      (ordinal) => ordinal.featureCount,
+    ),
+    affineCandidateCounts: recordActivityResearch.componentContextAffineBitSearch.byOrdinal.map(
+      (ordinal) => ordinal.candidateCount,
+    ),
+  };
+  if (
+    JSON.stringify(compactComponentContextActivityMetrics) !==
+    JSON.stringify(EXPECTED_COMPONENT_CONTEXT_ACTIVITY_METRICS)
+  ) {
+    fail("Frozen keyframe component-context activity metrics drifted.", {
+      expected: EXPECTED_COMPONENT_CONTEXT_ACTIVITY_METRICS,
+      actual: compactComponentContextActivityMetrics,
+    });
+  }
+  if (JSON.stringify(finalSuffixMetrics) !== JSON.stringify(EXPECTED_FINAL_SUFFIX_METRICS)) {
+    fail("Frozen final-suffix replay-operation metrics drifted.", {
+      expected: EXPECTED_FINAL_SUFFIX_METRICS,
+      actual: finalSuffixMetrics,
+    });
+  }
   const output = {
     schema: "rofl-keyframe-inventory-slot-research-16.14/v1",
     researchOnly: true,
@@ -808,19 +1792,29 @@ function main() {
       discovery: {
         finalStableTail: summarize(discovery),
         timelineState: summarizeTimelineState(discoveryReports),
+        timelineAlignments: summarizeTimelineAlignments(discoveryReports),
+        falseExtraDiagnostics: summarizeFalseExtraDiagnostics(discoveryReports),
       },
       holdout: {
         finalStableTail: summarize(holdout),
         timelineState: summarizeTimelineState(holdoutReports),
+        timelineAlignments: summarizeTimelineAlignments(holdoutReports),
+        falseExtraDiagnostics: summarizeFalseExtraDiagnostics(holdoutReports),
       },
       combined: {
         finalStableTail: summarize(tracks),
         timelineState: summarizeTimelineState(reports),
+        timelineAlignments: summarizeTimelineAlignments(reports),
+        falseExtraDiagnostics: summarizeFalseExtraDiagnostics(reports),
       },
     },
     frozenMetrics,
+    timelineAlignmentMetrics,
+    falseExtraMetrics,
+    finalSuffixMetrics,
     addSlotCandidateMetrics,
     rearrangementCandidateMetrics,
+    recordActivityResearch,
     inputs: reports.map((report) => report.input),
     stableTailTracks: tracks.filter((track) => track.stableTail),
     isolatedAddRecordChangeRows: strictAddSlotRows,
@@ -831,9 +1825,14 @@ function main() {
       "Empty slots, duplicate-item counts, physical slot moves, and the complete record grammar remain unresolved.",
       "The 181 isolated add/record-change anchors cover all six main record ordinals, but no contiguous one-to-eight-bit add-payload lookup is even conflict-free on Discovery.",
       "The independently decoded chunk operation subsets still do not provide complete between-keyframe inventory reconstruction.",
+      "A bounded -2..+2 keyframe/Timeline alignment audit confirms the existing -1 block alignment is uniquely strongest; simple missing-minute alignment does not explain the remaining mismatches.",
+      "Of 1,336 false-extra item occurrences, 957 have no prior Timeline identity action, proving that Timeline item events are incomplete as a state oracle; 378 have a latest labelled removal, so missing labels do not make the six records current slots.",
+      "Replay operation packets absent from the Timeline follow 34/36 stable-Timeline final mismatches, but two mismatches remain even without a later packet from the four known families.",
+      "A whole-record activity falsification finds opposite active/inactive labels for 49 byte-identical same-ordinal item records in D7 and 28 in H3; record-local bytes therefore cannot determine whether a historical item identity is currently active.",
+      "Per-ordinal component-context searches over the component prefix and all six sibling records find zero conflict-free D7 contiguous one-to-eight-bit lookups and zero one/two-bit affine rules before H3 is consulted; there is no simple surrounding activity mask under this normalized grammar.",
     ],
     conclusion:
-      "The six trailing keyframe 0x0081 records and their reused item-ID symbols are exact replay structure, but the current-inventory interpretation is falsified on Discovery and frozen Holdout. No C++/Wasm/UI inventory state is authorized from this family.",
+      "The six trailing keyframe 0x0081 records and their reused item-ID symbols are exact replay structure. Timeline omissions explain much of the prior apparent mismatch, but known removed identities, byte-identical records with opposite activity labels, absence of a simple prefix/sibling activity mask, and two replay-operation-free final mismatches reject a direct current-slot interpretation. A stateful replay-native operation reducer remains necessary before C++/Wasm/UI promotion.",
   };
   fs.mkdirSync(path.dirname(path.resolve(args.outputPath)), { recursive: true });
   fs.writeFileSync(path.resolve(args.outputPath), `${JSON.stringify(output, null, 2)}\n`);
