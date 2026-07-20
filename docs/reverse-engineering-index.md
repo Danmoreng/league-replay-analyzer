@@ -76,6 +76,10 @@ are outside scope even when described by historical community work.
   same-multiset historical-record reorderings and rejects their use as direct
   swap labels through missing operation families and contradictory repeated
   `0x0146` payloads.
+- `scripts/research_inventory_backward_reducer_16_14.mjs` starts from embedded
+  replay-final seven-slot inventories and reverses conservative symbolic
+  add/removal suffixes; it reaches four of 116 sales but resolves zero item
+  identities before fail-closed operation barriers.
 - `scripts/research_inventory_gold_adjustments_16_14.mjs` freezes the
   static-recipe/Undo spend-ledger comparison and the incomplete cumulative-sale
   correction for current gold.

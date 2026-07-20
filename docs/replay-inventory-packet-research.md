@@ -839,6 +839,46 @@ and optional owner during the native framing pass rather than materializing an
 all-type replay dump. This keeps exact operation-window research bounded while
 retaining segment and packet provenance.
 
+### Replay-only backward reducer from final inventory
+
+[`research_inventory_backward_reducer_16_14.mjs`](../scripts/research_inventory_backward_reducer_16_14.mjs)
+tests a stateful alternative to direct slot-field searches. Its match-state
+anchor is the seven final item slots in each saved ROFL's embedded `statsJson`,
+read through the productive validated summary. It then walks the four profiled
+item families backward with exact participant, timestamp, source order, and
+packet provenance:
+
+- a decoded `0x0369` add is undone only by removing its item from a compatible
+  concrete or symbolic slot;
+- a low-nibble-`5` `0x03F9` removal is undone only by restoring a unique
+  provenance-keyed symbol into its candidate slot when that slot is empty;
+- productive `rofl-replay-item-sales/v1` provenance marks which symbols are
+  sale candidates;
+- `0x0146`, chunk `0x0081`, non-`5` removal operations, duplicate candidate
+  slots, unknown add symbols, state contradictions, and excessive branching
+  stop the participant track instead of being guessed.
+
+The symbolic reducer has an always-run synthetic identity/linkage self-test.
+Its corpus gate covers 4,645 D7 and 2,273 H3 relevant owner/time groups. The
+final-state suffix reaches only 24 D7 and two H3 groups. Fifty D7 and 23 H3
+tracks stop at `0x0146`/Undo-component groups; another 20 D7 and seven H3 stop
+at an unresolved removal operation. Four of 77 D7 sales are encountered, zero
+of 39 H3 sales are encountered, and no sale symbol can be linked back to an
+earlier decoded add. Offline Timeline validation therefore records
+`0 exact / 0 wrong / 116 unavailable` sold-item identities.
+
+```bash
+node scripts/research_inventory_backward_reducer_16_14.mjs \
+  --cli build-linux/packages/rofl-core/rofl_core_cli \
+  --decoder-profiles packages/rofl-core/profiles/replay-decoder-profiles.v1.json \
+  --output tmp/inventory-backward-reducer-research-16.14.json
+```
+
+This rejects final-state anchoring as a shortcut around unresolved operation
+semantics. It does not reject a future reducer after `0x0146`, non-sale
+`0x03F9`, add placement, swaps, counts, and instances are decoded. No sold item,
+sale price, current-gold correction, or dynamic inventory state is promoted.
+
 ```bash
 node scripts/research_keyframe_inventory_slots_16_14.mjs \
   --cli build-linux/packages/rofl-core/rofl_core_cli \

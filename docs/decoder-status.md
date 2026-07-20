@@ -415,6 +415,25 @@ different inferred record movements; `c550cb` alone includes both record
 `5 -> 4` and `4 -> 5`. These are historical component reorderings, not proven
 physical inventory swaps or slot labels.
 
+A replay-only backward reducer now tests whether the embedded final seven-slot
+inventory can close the missing identity link without a direct add-slot field.
+For each participant it starts from the productive validated ROFL summary,
+walks exact-framed item groups backward, removes decoded `0x0369` items from
+matching concrete/symbolic slots, and restores provenance-keyed symbols into
+the `0x03F9` candidate slot. Productive `rofl-replay-item-sales/v1` events mark
+sale-removal symbols; saved Timeline sold-item IDs are loaded only after the
+reduction as an offline oracle.
+
+The conservative gate accepts only removal low-nibble `5` and stops before
+`0x0146`, chunk `0x0081`, other removal operations, duplicate slots, missing
+add IDs, contradictions, or excessive branching. Across all 100 exact-build
+participants it can reverse only 26/6,918 relevant suffix groups: 73 tracks
+stop at an unresolved context/Undo family and 27 at an unresolved removal
+operation. It reaches four D7 sale removals and zero H3 sales, but none of the
+four symbols reaches an earlier decoded add, so replay-only sold-item identity
+remains 0/116 available. Consequently the reducer recovers neither sale price
+nor a current-gold correction and does not authorize C++/Wasm/UI inventory.
+
 Owner-local ordinal/count lookups likewise leave zero exact H3 hypothesis;
 non-contiguous XOR rules are massively non-unique, and most nearby keyframe
 inventory anchors contain multiple item operations. Neither state order nor
@@ -609,8 +628,11 @@ Two July 2026 maintained gates narrow those gaps without adding product fields:
   and no companion-field lookup. Twenty-one no-item-event same-multiset record
   reorderings also fail as swap labels: five lack every profiled operation
   family and repeated `0x0146` payloads accompany contradictory record moves.
-  This remains historical shop/Undo and removal-slot candidate evidence, not a
-  complete physical inventory or sold-item identity decoder.
+  A backward reducer anchored at the replay-embedded final seven slots reverses
+  only 26/6,918 relevant suffix groups, reaches four sales, and resolves zero
+  sale identities before conservative barriers. This remains historical
+  shop/Undo and removal-slot candidate evidence, not a complete physical
+  inventory or sold-item identity decoder.
 
 Both artifacts remain research-only and fail closed. The product continues to
 omit current gold and dynamic inventory slots instead of relabelling total gold,
