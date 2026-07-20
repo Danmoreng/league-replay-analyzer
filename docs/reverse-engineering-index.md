@@ -69,7 +69,9 @@ are outside scope even when described by historical community work.
   six-record keyframe `0x0081` structure, freezes the `-2..+2` Timeline-state
   alignment audit, separates prior-labelled removals from item identities
   absent in Timeline, and checks later replay operations before rejecting a
-  direct current-slot interpretation on D7 and frozen H3.
+  direct current-slot interpretation on D7 and frozen H3. It also freezes
+  8,137 D7 plus 4,014 H3 strict active/inactive record labels and rejects every
+  one/two-bit affine or contiguous one-to-eight-bit record-local activity rule.
 - `scripts/research_inventory_forward_slot_reducer_16_14.mjs` tests the bounded
   cross-product of add-length sets, four removal-nibble sets, duplicate
   handling, trinket protection, and four deterministic add-slot placement
@@ -88,10 +90,13 @@ are outside scope even when described by historical community work.
   `0x0146` payloads.
 - `scripts/research_inventory_backward_reducer_16_14.mjs` starts from embedded
   replay-final seven-slot inventories and reverses expanded symbolic
-  add/removal/context histories. It reaches the beginning for 49/100 tracks,
-  encounters 71/116 sales, and uniquely resolves five sale identities with
-  `5 exact / 0 wrong` offline validation, but retains thousands of ambiguous
-  slot histories and leaves Undo semantics unresolved.
+  add/removal/context histories plus the exact sale-Undo restored-item subset.
+  It reaches the beginning for 50/100 tracks, encounters 72/116 sales, and
+  uniquely resolves five sale identities with `5 exact / 0 wrong` offline
+  validation, but retains thousands of ambiguous slot histories.
+- `scripts/research_inventory_undo_component_families.mjs` applies the proven
+  item grammar to the 31 exact patch-16.14 Undo anchors and freezes a replay-only
+  fresh-sale linkage at 6/6 D7 plus 3/3 H3 restored identities, zero wrong.
 - `scripts/research_inventory_timeline_oracle_backward_slots_16_14.mjs` uses
   saved Timeline identities only as an offline diagnostic around replay-final
   slots and `0x03F9` candidate slots. Its exact balance gate proves Timeline

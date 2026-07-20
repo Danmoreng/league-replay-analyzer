@@ -858,13 +858,16 @@ packet provenance:
   union, and equivalent anonymous non-sale states are canonicalized;
 - productive `rofl-replay-item-sales/v1` provenance marks which symbols are
   sale candidates;
-- chunk `0x0081`, removal nibbles other than 5/13, unknown add symbols, state
-  contradictions, and excessive branching stop the participant track.
+- the exact sale-Undo subset removes one restored item identity from an unknown
+  matching main slot while reversing; its gate requires a productive fresh
+  sold-item candidate to occur exactly once in the later `0x0081` records;
+- unlinked chunk `0x0081`, removal nibbles other than 5/13, unknown add symbols,
+  state contradictions, and excessive branching stop the participant track.
 
 The symbolic reducer has an always-run synthetic identity/linkage self-test.
 Its corpus gate covers 4,665 D7 and 2,280 H3 relevant owner/time groups after
-the newly included add lengths. It reverses 3,026 D7 plus 1,244 H3 groups and
-reaches the beginning for 35/70 D7 plus 14/30 H3 tracks. It encounters 47/77
+the newly included add lengths. It reverses 3,036 D7 plus 1,244 H3 groups and
+reaches the beginning for 36/70 D7 plus 14/30 H3 tracks. It encounters 48/77
 D7 and 24/39 H3 sales. Three D7 and two H3 sale identities bind uniquely to an
 earlier replay add; the offline oracle records `5 exact / 0 wrong / 111
 unavailable`. Twenty tracks hit the 4,096-state cap, and even beginning-reaching
@@ -874,13 +877,15 @@ tracks retain hundreds or thousands of candidate histories.
 node scripts/research_inventory_backward_reducer_16_14.mjs \
   --cli build-linux/packages/rofl-core/rofl_core_cli \
   --decoder-profiles packages/rofl-core/profiles/replay-decoder-profiles.v1.json \
+  --item-data tmp/autoresearch/2026-07-20-gold-inventory/static/Data-Dragon-16.14.1-item.json \
   --output tmp/inventory-backward-reducer-research-16.14.json
 ```
 
 This proves that missing consumption/update alternatives were a major reason
 the original backward trace stopped, and that final anchoring can link a small
 sale-identity subset. It does not make those alternatives unique or decode
-`0x0081`, add placement, swaps, counts, and instances. No sold item, sale price,
+all `0x0081`, add placement, swaps, counts, and instances. No complete sold-item
+stream, sale price,
 current-gold correction, or dynamic inventory state is promoted.
 
 ### Timeline-oracle backward slot diagnostic

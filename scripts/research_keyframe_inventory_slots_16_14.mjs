@@ -83,6 +83,20 @@ const EXPECTED_FINAL_SUFFIX_METRICS = Object.freeze({
   holdout: Object.freeze({ mismatchWithReplayOperations: 11, mismatchWithout: 1 }),
 });
 
+const EXPECTED_RECORD_ACTIVITY_METRICS = Object.freeze({
+  discovery: Object.freeze({ rowCount: 8137, activeCount: 7978, inactiveCount: 159 }),
+  holdout: Object.freeze({ rowCount: 4014, activeCount: 3796, inactiveCount: 218 }),
+  affineBitSearch: Object.freeze({
+    minimumBitCount: 104,
+    candidateCount: 0,
+    zeroWrongHoldoutCandidateCount: 0,
+  }),
+  contiguousLookupSearch: Object.freeze({
+    candidateCount: 0,
+    zeroWrongHoldoutCandidateCount: 0,
+  }),
+});
+
 function parseArgs(argv) {
   const args = {
     cliPath: path.join("build-linux", "packages", "rofl-core", "rofl_core_cli"),
@@ -286,6 +300,7 @@ function decodeMainSlots(payload, inventoryItemIds) {
       slot: 5 - ordinal,
       contentLength: end - start,
       prefixHex: payload.subarray(start, Math.min(end, start + 8)).toString("hex"),
+      payloadHex: payload.subarray(start, end).toString("hex"),
     };
   });
   const decodedMainSlots = Array(6).fill(0);
@@ -535,6 +550,7 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
   );
   const strictAddSlotRows = [];
   const rearrangementCandidateRows = [];
+  const recordActivityRows = [];
   const timelineStateValidation = {
     ...emptyTimelineStateValidation(),
     falseExtraSamples: [],
@@ -578,11 +594,38 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
         eventIndex += 1;
       }
       const labelledInventory = inventory.filter((itemId) => inventoryItemIds.has(itemId));
-      const decodedMainSlots = decodeMainSlots(
+      const decoded = decodeMainSlots(
         Buffer.from(block.contentHex, "hex"),
         inventoryItemIds,
-      ).decodedMainSlots;
+      );
+      const decodedMainSlots = decoded.decodedMainSlots;
       const decodedInventory = decodedMainSlots.filter((itemId) => itemId !== 0);
+      for (const record of decoded.records) {
+        const itemId = decodedMainSlots[record.slot];
+        if (itemId === 0) continue;
+        const decodedCount = decodedInventory.filter((candidate) => candidate === itemId).length;
+        const labelledCount = labelledInventory.filter((candidate) => candidate === itemId).length;
+        const latestAction = latestLabelledItemAction(
+          participantEvents,
+          itemId,
+          stateTimestampMillis,
+        );
+        const active = labelledCount >= decodedCount ? true : null;
+        const labelledActive =
+          active === true ? true : labelledCount === 0 && latestAction?.action === "remove" ? false : null;
+        if (labelledActive === null) continue;
+        recordActivityRows.push({
+          replayId,
+          partition,
+          participantId,
+          stateTimestampMillis,
+          recordOrdinal: 5 - record.slot,
+          itemId,
+          contentLength: record.contentLength,
+          payloadHex: record.payloadHex,
+          active: labelledActive,
+        });
+      }
       participantSnapshots.push({
         stateTimestampMillis,
         blockTimestampMillis: block.timestampMillis,
@@ -819,6 +862,7 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
     tracks,
     strictAddSlotRows,
     rearrangementCandidateRows,
+    recordActivityRows,
     input: {
       replayId,
       partition,
@@ -830,6 +874,121 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
       timelineAlignmentValidation,
       falseExtraDiagnostics,
     },
+  };
+}
+
+function activityMetrics(rows) {
+  return {
+    rowCount: rows.length,
+    activeCount: rows.filter((row) => row.active).length,
+    inactiveCount: rows.filter((row) => !row.active).length,
+  };
+}
+
+function evaluateActivityCandidate(rows, candidate) {
+  let exact = 0;
+  let wrong = 0;
+  for (const row of rows) {
+    const payload = Buffer.from(row.payloadHex, "hex");
+    if (candidate.bits.some((bit) => bit >= payload.length * 8)) continue;
+    const value = candidate.bits.reduce((result, bit) => result ^ payloadBit(payload, bit), 0);
+    const predicted = Boolean(value ^ candidate.inverse);
+    if (predicted === row.active) exact += 1;
+    else wrong += 1;
+  }
+  return { exact, wrong, unavailable: rows.length - exact - wrong };
+}
+
+function searchRecordActivityBits(discoveryRows, holdoutRows) {
+  const minimumBitCount = Math.min(
+    ...discoveryRows.map((row) => Buffer.from(row.payloadHex, "hex").length * 8),
+  );
+  const candidates = [];
+  for (let left = 0; left < minimumBitCount; left += 1) {
+    for (let right = left; right < minimumBitCount; right += 1) {
+      const bits = left === right ? [left] : [left, right];
+      for (const inverse of [0, 1]) {
+        const candidate = { bits, inverse };
+        const discovery = evaluateActivityCandidate(discoveryRows, candidate);
+        if (discovery.wrong !== 0 || discovery.unavailable !== 0) continue;
+        candidates.push({
+          ...candidate,
+          discovery,
+          holdout: evaluateActivityCandidate(holdoutRows, candidate),
+        });
+      }
+    }
+  }
+  return {
+    minimumBitCount,
+    candidateCount: candidates.length,
+    zeroWrongHoldoutCandidateCount: candidates.filter((candidate) => candidate.holdout.wrong === 0)
+      .length,
+    candidates: candidates.slice(0, 32),
+  };
+}
+
+function recordBitValue(payload, start, width, reversed) {
+  let value = 0;
+  for (let index = 0; index < width; index += 1) {
+    const outputBit = reversed ? width - 1 - index : index;
+    value |= payloadBit(payload, start + index) << outputBit;
+  }
+  return value;
+}
+
+function searchRecordActivityLookups(discoveryRows, holdoutRows) {
+  const minimumBitCount = Math.min(
+    ...discoveryRows.map((row) => Buffer.from(row.payloadHex, "hex").length * 8),
+  );
+  const candidates = [];
+  for (let width = 1; width <= 8; width += 1) {
+    for (let start = 0; start + width <= minimumBitCount; start += 1) {
+      for (const reversed of [false, true]) {
+        const labels = new Map();
+        let conflict = false;
+        for (const row of discoveryRows) {
+          const value = recordBitValue(Buffer.from(row.payloadHex, "hex"), start, width, reversed);
+          const previous = labels.get(value);
+          if (previous !== undefined && previous !== row.active) {
+            conflict = true;
+            break;
+          }
+          labels.set(value, row.active);
+        }
+        if (conflict) continue;
+        let exact = 0;
+        let wrong = 0;
+        let unavailable = 0;
+        for (const row of holdoutRows) {
+          const value = recordBitValue(Buffer.from(row.payloadHex, "hex"), start, width, reversed);
+          const predicted = labels.get(value);
+          if (predicted === undefined) unavailable += 1;
+          else if (predicted === row.active) exact += 1;
+          else wrong += 1;
+        }
+        candidates.push({
+          start,
+          width,
+          reversed,
+          symbolCount: labels.size,
+          holdout: { exact, wrong, unavailable },
+        });
+      }
+    }
+  }
+  candidates.sort(
+    (left, right) =>
+      left.holdout.wrong - right.holdout.wrong ||
+      right.holdout.exact - left.holdout.exact ||
+      left.width - right.width ||
+      left.start - right.start,
+  );
+  return {
+    candidateCount: candidates.length,
+    zeroWrongHoldoutCandidateCount: candidates.filter((candidate) => candidate.holdout.wrong === 0)
+      .length,
+    bestCandidates: candidates.slice(0, 32),
   };
 }
 
@@ -1003,6 +1162,7 @@ function main() {
   const tracks = reports.flatMap((report) => report.tracks);
   const strictAddSlotRows = reports.flatMap((report) => report.strictAddSlotRows);
   const rearrangementCandidateRows = reports.flatMap((report) => report.rearrangementCandidateRows);
+  const recordActivityRows = reports.flatMap((report) => report.recordActivityRows);
   const discoveryReports = reports.filter((report) => report.input.partition === "D7");
   const holdoutReports = reports.filter((report) => report.input.partition === "H3");
   const frozenMetrics = {
@@ -1073,6 +1233,42 @@ function main() {
     discovery: compactFinalSuffixMetrics(summarize(discovery)),
     holdout: compactFinalSuffixMetrics(summarize(holdout)),
   };
+  const recordActivityResearch = {
+    discovery: activityMetrics(recordActivityRows.filter((row) => row.partition === "D7")),
+    holdout: activityMetrics(recordActivityRows.filter((row) => row.partition === "H3")),
+    affineBitSearch: searchRecordActivityBits(
+      recordActivityRows.filter((row) => row.partition === "D7"),
+      recordActivityRows.filter((row) => row.partition === "H3"),
+    ),
+    contiguousLookupSearch: searchRecordActivityLookups(
+      recordActivityRows.filter((row) => row.partition === "D7"),
+      recordActivityRows.filter((row) => row.partition === "H3"),
+    ),
+  };
+  const compactRecordActivityMetrics = {
+    discovery: recordActivityResearch.discovery,
+    holdout: recordActivityResearch.holdout,
+    affineBitSearch: {
+      minimumBitCount: recordActivityResearch.affineBitSearch.minimumBitCount,
+      candidateCount: recordActivityResearch.affineBitSearch.candidateCount,
+      zeroWrongHoldoutCandidateCount:
+        recordActivityResearch.affineBitSearch.zeroWrongHoldoutCandidateCount,
+    },
+    contiguousLookupSearch: {
+      candidateCount: recordActivityResearch.contiguousLookupSearch.candidateCount,
+      zeroWrongHoldoutCandidateCount:
+        recordActivityResearch.contiguousLookupSearch.zeroWrongHoldoutCandidateCount,
+    },
+  };
+  if (
+    JSON.stringify(compactRecordActivityMetrics) !==
+    JSON.stringify(EXPECTED_RECORD_ACTIVITY_METRICS)
+  ) {
+    fail("Frozen keyframe record-activity metrics drifted.", {
+      expected: EXPECTED_RECORD_ACTIVITY_METRICS,
+      actual: compactRecordActivityMetrics,
+    });
+  }
   if (JSON.stringify(finalSuffixMetrics) !== JSON.stringify(EXPECTED_FINAL_SUFFIX_METRICS)) {
     fail("Frozen final-suffix replay-operation metrics drifted.", {
       expected: EXPECTED_FINAL_SUFFIX_METRICS,
@@ -1127,6 +1323,7 @@ function main() {
     finalSuffixMetrics,
     addSlotCandidateMetrics,
     rearrangementCandidateMetrics,
+    recordActivityResearch,
     inputs: reports.map((report) => report.input),
     stableTailTracks: tracks.filter((track) => track.stableTail),
     isolatedAddRecordChangeRows: strictAddSlotRows,

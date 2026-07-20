@@ -422,17 +422,20 @@ Productive sales retain their structural fixed-slot candidate and a
 provenance-keyed identity. Other low-nibble-5/13 removals and `0x0146` records
 branch over the bounded alternatives “no unit-count change” or “one anonymous
 main-slot unit removed”; anonymous non-sale units are canonicalized so only
-sale identities retain provenance. Chunk `0x0081`, other removal nibbles,
-contradictions, and more than 4,096 states still fail closed.
+sale identities retain provenance. Nine exact sale-Undo anchors additionally
+restore a replay-native item identity: a productive fresh sale candidate must
+occur exactly once in the later same-owner `0x0081` record set. Unlinked
+`0x0081`, other removal nibbles, contradictions, and more than 4,096 states
+still fail closed.
 
-This expanded model reverses 4,270/6,945 relevant owner/time groups and reaches
-the beginning for 35/70 D7 plus 14/30 frozen-H3 participants. It encounters
-47/77 D7 and 24/39 H3 sales. Five sale symbols bind uniquely to an earlier
+This expanded model reverses 4,280/6,945 relevant owner/time groups and reaches
+the beginning for 36/70 D7 plus 14/30 frozen-H3 participants. It encounters
+48/77 D7 and 24/39 H3 sales. Five sale symbols bind uniquely to an earlier
 decoded add—three D7 and two H3—and all five match the offline Timeline oracle,
 with zero wrong identities. The result is a material traceability checkpoint,
-not a runtime decoder: 20 tracks exceed the branch cap, 49 complete tracks
+not a runtime decoder: 20 tracks exceed the branch cap, 50 complete tracks
 still retain hundreds or thousands of possible slot histories, `0x0081` Undo
-semantics remain absent, and only five sale identities are unique. It therefore
+coverage remains partial, and only five sale identities are unique. It therefore
 recovers neither complete inventory nor a complete sale/current-gold ledger and
 does not authorize C++/Wasm/UI inventory.
 
@@ -510,7 +513,13 @@ Within the 31 exact `0x0081` anchors, there is no same-owner/time/chunk
 `0x0369`, `0x03F9`, or `0x0146` companion. Nearest-operation and 60-second
 lookback links recover at most 6/23 D7 and 2/8 H3 offline `beforeId` labels, and
 no payload byte maps exactly to Undo `beforeId`, `afterId`, or `goldGain`.
-These anchors therefore still cannot update replay-native inventory state.
+Applying the established 13-bit item grammar changes the result for sale Undo.
+All 11 nonzero `afterId` labels occur in the six trailing records at the normal
+item offset and persist into the following keyframe. Linking productive fresh
+sale candidates to an item occurring exactly once in the Undo record set yields
+6/6 exact D7 discovery and 3/3 exact frozen-H3 restored identities, with zero
+wrong candidates across all 31 anchors. The remaining 22 partial-family anchors,
+including purchase Undo identity, still fail closed and prevent complete state.
 Nearest same-owner keyframe components provide no full equality, chunk
 subsequence, shared four-byte prefix, common aligned XOR edit, or stable
 ordinal either.
