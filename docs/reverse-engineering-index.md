@@ -68,6 +68,14 @@ are outside scope even when described by historical community work.
 - `scripts/research_keyframe_inventory_slots_16_14.mjs` reproduces the exact
   six-record keyframe `0x0081` structure and falsifies its interpretation as
   current champion inventory on D7 and frozen H3.
+- `scripts/research_inventory_add_slot_companions_16_14.mjs` exhausts the
+  same-owner `+/-1 ms` packet-family/direct-bit-field search around 181 strict
+  add/historical-record anchors; only `0x0369` has complete D7 support and it
+  yields no conflict-free record-ordinal lookup.
+- `scripts/research_inventory_rearrangement_windows_16_14.mjs` freezes 21
+  same-multiset historical-record reorderings and rejects their use as direct
+  swap labels through missing operation families and contradictory repeated
+  `0x0146` payloads.
 - `scripts/research_inventory_gold_adjustments_16_14.mjs` freezes the
   static-recipe/Undo spend-ledger comparison and the incomplete cumulative-sale
   correction for current gold.

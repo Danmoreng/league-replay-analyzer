@@ -2722,6 +2722,73 @@ std::string dump_packet_types_file_json(
     return output.str();
 }
 
+std::string dump_packet_window_file_json(
+    const std::string& path,
+    std::string_view segment_type,
+    long long start_timestamp_millis,
+    long long end_timestamp_millis,
+    int channel,
+    std::uint32_t block_param,
+    bool block_param_provided,
+    std::size_t max_blocks
+) {
+    if (start_timestamp_millis > end_timestamp_millis) {
+        throw std::invalid_argument("Packet window start must not exceed end");
+    }
+    if (channel < -1 || channel > 7) {
+        throw std::invalid_argument("Packet window channel must be between 0 and 7");
+    }
+
+    const std::vector<std::uint8_t> bytes = read_file_bytes(path);
+    const ReplaySummary summary = parse_replay_bytes(bytes);
+    std::size_t matching_block_count = 0;
+    std::vector<DumpedPacketBlock> dumped;
+    const PacketFileScan scan = scan_packet_segments(
+        bytes, summary, segment_type,
+        [&](const ReplaySegmentSummary& segment, const std::vector<std::uint8_t>& decompressed, const PacketBlockParseResult& result) {
+            for (const PacketBlock& block : result.blocks) {
+                const long long timestamp_millis = packet_timestamp_millis(block.timestamp_seconds);
+                if (timestamp_millis < start_timestamp_millis || timestamp_millis > end_timestamp_millis) continue;
+                if (channel >= 0 && block.channel != static_cast<std::uint8_t>(channel)) continue;
+                if (block_param_provided && block.block_param != block_param) continue;
+                matching_block_count += 1;
+                if (max_blocks > 0 && dumped.size() >= max_blocks) continue;
+                dumped.push_back(make_dumped_packet_block(segment, decompressed, block));
+            }
+        });
+
+    std::ostringstream output;
+    output << '{';
+    output << "\"schema\":\"packet-window-dump.v1\",";
+    output << "\"replayPath\":\"" << json_escape(path) << "\",";
+    output << "\"matchId\":" << summary.container.match_id << ',';
+    output << "\"gameVersion\":\"" << json_escape(summary.game_version) << "\",";
+    output << "\"versionGroup\":\"" << json_escape(packet_version_group(summary.game_version)) << "\",";
+    output << "\"segmentType\":\"" << json_escape(scan.segment_filter) << "\",";
+    output << "\"startTimestampMillis\":" << start_timestamp_millis << ',';
+    output << "\"endTimestampMillis\":" << end_timestamp_millis << ',';
+    output << "\"channel\":" << channel << ',';
+    output << "\"blockParamProvided\":" << bool_to_json(block_param_provided) << ',';
+    output << "\"blockParam\":" << block_param << ',';
+    output << "\"maxBlocks\":" << max_blocks << ',';
+    output << "\"matchingBlockCount\":" << matching_block_count << ',';
+    output << "\"emittedBlockCount\":" << dumped.size() << ',';
+    output << "\"truncated\":" << bool_to_json(dumped.size() < matching_block_count) << ',';
+    output << "\"valid\":" << bool_to_json(scan.selected_segment_count > 0 && scan.exact_segment_count == scan.selected_segment_count) << ',';
+    output << "\"blocks\":[";
+    for (std::size_t index = 0; index < dumped.size(); ++index) {
+        if (index > 0) output << ',';
+        write_dumped_packet_block_json(output, dumped[index]);
+    }
+    output << "],\"errors\":[";
+    for (std::size_t index = 0; index < scan.errors.size(); ++index) {
+        if (index > 0) output << ',';
+        write_packet_scan_error_json(output, scan.errors[index]);
+    }
+    output << "]}";
+    return output.str();
+}
+
 namespace {
 
 struct KillPacketProfile {
@@ -14922,7 +14989,6 @@ std::string match_event_window(
 }
 
 }  // namespace rofl::core
-
 
 
 

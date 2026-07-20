@@ -127,6 +127,16 @@ struct ReplaySummary {
 [[nodiscard]] std::string summarize_packet_types_file_json(const std::string& path, std::string_view segment_type = "all", std::size_t top_types = 0);
 [[nodiscard]] std::string dump_packet_type_file_json(const std::string& path, std::uint16_t packet_type, std::string_view segment_type = "all", std::size_t max_blocks = 64);
 [[nodiscard]] std::string dump_packet_types_file_json(const std::string& path, const std::vector<std::uint16_t>& packet_types, std::string_view segment_type = "all", std::size_t max_blocks_per_type = 64);
+[[nodiscard]] std::string dump_packet_window_file_json(
+    const std::string& path,
+    std::string_view segment_type,
+    long long start_timestamp_millis,
+    long long end_timestamp_millis,
+    int channel = -1,
+    std::uint32_t block_param = 0,
+    bool block_param_provided = false,
+    std::size_t max_blocks = 0
+);
 [[nodiscard]] std::string extract_replay_kills_json(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] std::string extract_replay_kills_json(
     const std::vector<std::uint8_t>& bytes,
@@ -249,7 +259,6 @@ struct ReplaySummary {
 [[nodiscard]] std::string match_event_window(const std::string& replay_path, std::size_t target_length, std::uint8_t target_first_byte, std::size_t header_size, std::size_t stride, double event_x, double event_y, int timestamp_millis, int chunk_time_millis, int chunk_base_id, int chunk_radius, std::size_t top_slots, float move_epsilon, float smooth_threshold);
 
 }  // namespace rofl::core
-
 
 
 

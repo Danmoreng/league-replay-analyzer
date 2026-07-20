@@ -798,6 +798,47 @@ ordinals. No contiguous one-to-eight-bit add-payload lookup is conflict-free on
 Discovery, so the record ordinal cannot yet place the added item in a runtime
 slot reducer.
 
+The follow-up companion scan widens the packet search without widening the
+semantic claim. For every one of those 181 anchors it uses the native bounded
+packet-window command to inspect all exact-framed, same-owner channel-1 chunk
+packets within `+/-1 ms` of the `0x0369` add. It evaluates both variable-length
+packet-type families and exact packet-type/content-length families. Of 43
+family representations, only `type:873` (`0x0369`) is present in every one of
+the 126 Discovery windows; no separate companion has complete support. First
+and last occurrences plus every contiguous one-to-eight-bit field produce zero
+conflict-free six-record-ordinal lookup on Discovery, so Holdout has no selected
+candidate to promote.
+
+```bash
+node scripts/research_inventory_add_slot_companions_16_14.mjs \
+  --cli build-linux/packages/rofl-core/rofl_core_cli \
+  --keyframe-research tmp/keyframe-inventory-slots-research-16.14.json \
+  --output tmp/inventory-add-slot-companions-research-16.14.json
+```
+
+The same keyframe harness now freezes 21 no-item-event, same-multiset record
+reorderings (12 D7, 9 H3). These are useful negative swap anchors, not physical
+swap labels. A replay-only window scan finds five intervals with none of the
+profiled add, removal, removal-context, or chunk Undo-component families and
+zero packet type/length/four-byte-prefix signatures occurring exactly once in
+all 21 windows. Fourteen windows contain 21 `0x0146` packets, but six repeated
+payloads each span different inferred record movements. In particular,
+`c550cb` occurs with both record `5 -> 4` and `4 -> 5`. That contradiction
+rejects interpreting the payload as a direct source/destination slot symbol
+under this record model.
+
+```bash
+node scripts/research_inventory_rearrangement_windows_16_14.mjs \
+  --cli build-linux/packages/rofl-core/rofl_core_cli \
+  --keyframe-research tmp/keyframe-inventory-slots-research-16.14.json \
+  --output tmp/inventory-rearrangement-windows-research-16.14.json
+```
+
+Both scans use `--dump-packet-window-json`, which filters timestamp, channel,
+and optional owner during the native framing pass rather than materializing an
+all-type replay dump. This keeps exact operation-window research bounded while
+retaining segment and packet provenance.
+
 ```bash
 node scripts/research_keyframe_inventory_slots_16_14.mjs \
   --cli build-linux/packages/rofl-core/rofl_core_cli \

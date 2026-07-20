@@ -50,6 +50,11 @@ const EXPECTED_ADD_SLOT_CANDIDATES = Object.freeze({
   discoveryContiguousLookupCandidateCount: 0,
 });
 
+const EXPECTED_REARRANGEMENT_CANDIDATES = Object.freeze({
+  discoveryCount: 12,
+  holdoutCount: 9,
+});
+
 function parseArgs(argv) {
   const args = {
     cliPath: path.join("build-linux", "packages", "rofl-core", "rofl_core_cli"),
@@ -441,6 +446,7 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
     })
     .filter((row) => row.participantId >= 1 && row.participantId <= 10);
   const strictAddSlotRows = [];
+  const rearrangementCandidateRows = [];
   const timelineStateValidation = {
     snapshotCount: 0,
     exactMultisetSnapshotCount: 0,
@@ -519,6 +525,25 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
           event.timestamp > previous.stateTimestampMillis + 1 &&
           event.timestamp <= current.stateTimestampMillis + 1,
       );
+      const previousMultiset = [...previous.decodedMainSlots].sort((left, right) => left - right);
+      const currentMultiset = [...current.decodedMainSlots].sort((left, right) => left - right);
+      if (
+        intervalEvents.length === 0 &&
+        changedSlots.length >= 2 &&
+        previousMultiset.some((itemId) => itemId !== 0) &&
+        previousMultiset.every((itemId, itemIndex) => itemId === currentMultiset[itemIndex])
+      ) {
+        rearrangementCandidateRows.push({
+          replayId,
+          partition,
+          participantId,
+          intervalStartMillis: previous.stateTimestampMillis,
+          intervalEndMillis: current.stateTimestampMillis,
+          beforeSlots: previous.decodedMainSlots,
+          afterSlots: current.decodedMainSlots,
+          changedSlots,
+        });
+      }
       if (
         changedSlots.length === 1 &&
         changedSlots[0].itemId !== 0 &&
@@ -617,6 +642,7 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
   return {
     tracks,
     strictAddSlotRows,
+    rearrangementCandidateRows,
     input: {
       replayId,
       partition,
@@ -712,6 +738,7 @@ function main() {
   ];
   const tracks = reports.flatMap((report) => report.tracks);
   const strictAddSlotRows = reports.flatMap((report) => report.strictAddSlotRows);
+  const rearrangementCandidateRows = reports.flatMap((report) => report.rearrangementCandidateRows);
   const discoveryReports = reports.filter((report) => report.input.partition === "D7");
   const holdoutReports = reports.filter((report) => report.input.partition === "H3");
   const frozenMetrics = {
@@ -740,6 +767,19 @@ function main() {
     fail("Frozen add-slot candidate metrics drifted.", {
       expected: EXPECTED_ADD_SLOT_CANDIDATES,
       actual: addSlotCandidateMetrics,
+    });
+  }
+  const rearrangementCandidateMetrics = {
+    discoveryCount: rearrangementCandidateRows.filter((row) => row.partition === "D7").length,
+    holdoutCount: rearrangementCandidateRows.filter((row) => row.partition === "H3").length,
+  };
+  if (
+    JSON.stringify(rearrangementCandidateMetrics) !==
+    JSON.stringify(EXPECTED_REARRANGEMENT_CANDIDATES)
+  ) {
+    fail("Frozen same-multiset rearrangement candidate metrics drifted.", {
+      expected: EXPECTED_REARRANGEMENT_CANDIDATES,
+      actual: rearrangementCandidateMetrics,
     });
   }
   const output = {
@@ -780,9 +820,11 @@ function main() {
     },
     frozenMetrics,
     addSlotCandidateMetrics,
+    rearrangementCandidateMetrics,
     inputs: reports.map((report) => report.input),
     stableTailTracks: tracks.filter((track) => track.stableTail),
     isolatedAddRecordChangeRows: strictAddSlotRows,
+    rearrangementCandidateRows,
     nonPromotionReasons: [
       "The replay-only selector retains items that the offline Timeline reducer has already removed: 1,049/3,200 snapshots contain at least one false-extra candidate, including 374/1,030 frozen Holdout snapshots.",
       "The six records are therefore not champion current-inventory slots; their behavior remains consistent with a shop/undo component or another historical item state.",

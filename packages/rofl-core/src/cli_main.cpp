@@ -205,6 +205,63 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (first_arg == "--dump-packet-window-json" && argc > 2) {
+        try {
+            const std::string path = argv[2];
+            std::string segment_type = "chunk";
+            long long start_timestamp_millis = 0;
+            long long end_timestamp_millis = 0;
+            bool start_provided = false;
+            bool end_provided = false;
+            int channel = -1;
+            std::uint32_t block_param = 0;
+            bool block_param_provided = false;
+            std::size_t max_blocks = 0;
+            for (int i = 3; i < argc; ++i) {
+                const std::string_view arg = argv[i];
+                if (arg == "--start-ms" && i + 1 < argc) {
+                    start_timestamp_millis = std::stoll(argv[++i]);
+                    start_provided = true;
+                } else if (arg == "--end-ms" && i + 1 < argc) {
+                    end_timestamp_millis = std::stoll(argv[++i]);
+                    end_provided = true;
+                } else if (arg == "--channel" && i + 1 < argc) {
+                    channel = std::stoi(argv[++i]);
+                } else if (arg == "--block-param" && i + 1 < argc) {
+                    const unsigned long long value = std::stoull(argv[++i], nullptr, 0);
+                    if (value > 0xFFFFFFFFULL) {
+                        throw std::out_of_range("Block param must fit in an unsigned 32-bit integer");
+                    }
+                    block_param = static_cast<std::uint32_t>(value);
+                    block_param_provided = true;
+                } else if ((arg == "--segment-type" || arg == "--record-type") && i + 1 < argc) {
+                    segment_type = argv[++i];
+                } else if (arg == "--max-blocks" && i + 1 < argc) {
+                    max_blocks = std::stoull(argv[++i]);
+                } else {
+                    throw std::invalid_argument(
+                        "Unknown or incomplete --dump-packet-window-json option: " + std::string(arg));
+                }
+            }
+            if (!start_provided || !end_provided) {
+                throw std::invalid_argument("Packet window requires --start-ms and --end-ms");
+            }
+            std::cout << rofl::core::dump_packet_window_file_json(
+                path,
+                segment_type,
+                start_timestamp_millis,
+                end_timestamp_millis,
+                channel,
+                block_param,
+                block_param_provided,
+                max_blocks);
+            return 0;
+        } catch (const std::exception& exception) {
+            std::cerr << exception.what() << '\n';
+            return 1;
+        }
+    }
+
     if (first_arg == "--extract-replay-kills-json" && argc > 2) {
         try {
             const auto decoder_profiles = load_optional_decoder_profile_registry(argc, argv, 3);
@@ -1315,6 +1372,7 @@ int main(int argc, char** argv) {
     std::cout << "Use --summarize-packet-types-json <path-to-rofl> [--segment-type startup|keyframe|chunk|all] [--top-types <n>] to catalog packet types as JSON. A top-types value of 0 emits every group.\n";
     std::cout << "Use --dump-packet-type-json <path-to-rofl> --packet-type <u16> [--segment-type startup|keyframe|chunk|all] [--max-blocks <n>] to dump matching packet blocks as JSON. Decimal and 0x-prefixed packet types are accepted.\n";
     std::cout << "Use --dump-packet-types-json <path-to-rofl> --packet-type <u16> [--packet-type <u16> ...] [--segment-type startup|keyframe|chunk|all] [--max-blocks <n>] to dump multiple packet types from one replay parse. Limits apply per packet type.\n";
+    std::cout << "Use --dump-packet-window-json <path-to-rofl> --start-ms <ms> --end-ms <ms> [--channel <0..7>] [--block-param <u32>] [--segment-type startup|keyframe|chunk|all] [--max-blocks <n>] to dump an exact replay-time/owner packet window.\n";
     std::cout << "Use --extract-replay-kills-json <path-to-rofl> [--decoder-profiles <json-path>] to emit ROFL-only normalized champion kill events with participant and packet provenance.\n";
     std::cout << "Use --extract-replay-objectives-json <path-to-rofl> [--decoder-profiles <json-path>] to emit ROFL-only elite-monster objective events with monster class and packet provenance.\n";
     std::cout << "Use --extract-replay-wards-json <path-to-rofl> [--decoder-profiles <json-path>] to emit ROFL-only standard ward placement and conservative ward-kill events with entity and participant provenance.\n";
@@ -1351,7 +1409,6 @@ int main(int argc, char** argv) {
     std::cout << "Use --match-event-window <path-to-rofl> --length <len> --first-byte <byte> --header-size <len> --event-x <x> --event-y <y> --timestamp-ms <ms> [--stride <len>] [--chunk-time-ms <ms>] [--chunk-base-id <id>] [--chunk-radius <n>] [--top-slots <n>] [--move-epsilon <f>] [--smooth-threshold <f>] to rank sparse slot samples near one known event location.\n";
     return 0;
 }
-
 
 
 

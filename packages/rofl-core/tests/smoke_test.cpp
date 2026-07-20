@@ -788,6 +788,41 @@ bool test_multi_packet_type_dump_fixture() {
            json.find("\"errors\":[]") != std::string::npos;
 }
 
+bool test_packet_window_dump_fixture() {
+    constexpr std::uint32_t champion_base = 0x400000AD;
+    const std::string path = "rofl_core_smoke_packet_window_fixture.rofl";
+    {
+        std::ofstream file(path, std::ios::binary);
+        const auto bytes = build_footer_kill_fixture();
+        file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    }
+
+    const std::string json = rofl::core::dump_packet_window_file_json(
+        path,
+        "chunk",
+        12500,
+        12500,
+        1,
+        champion_base + 1,
+        true,
+        1
+    );
+    bool invalid_window_rejected = false;
+    try {
+        (void)rofl::core::dump_packet_window_file_json(path, "chunk", 2, 1);
+    } catch (const std::invalid_argument&) {
+        invalid_window_rejected = true;
+    }
+    std::remove(path.c_str());
+    return invalid_window_rejected &&
+           json.find("\"schema\":\"packet-window-dump.v1\"") != std::string::npos &&
+           json.find("\"startTimestampMillis\":12500,\"endTimestampMillis\":12500") != std::string::npos &&
+           json.find("\"channel\":1,\"blockParamProvided\":true,\"blockParam\":1073741998") != std::string::npos &&
+           json.find("\"matchingBlockCount\":2,\"emittedBlockCount\":1,\"truncated\":true") != std::string::npos &&
+           json.find("\"timestampMillis\":12500") != std::string::npos &&
+           json.find("\"errors\":[]") != std::string::npos;
+}
+
 bool test_replay_objective_extractor_fixture() {
     const std::string json =
         rofl::core::extract_replay_objectives_json(build_footer_objective_fixture());
@@ -1755,6 +1790,10 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    if (!test_packet_window_dump_fixture()) {
+        return EXIT_FAILURE;
+    }
+
     if (!test_replay_objective_extractor_fixture()) {
         return EXIT_FAILURE;
     }
@@ -1789,4 +1828,3 @@ int main() {
 
     return EXIT_SUCCESS;
 }
-

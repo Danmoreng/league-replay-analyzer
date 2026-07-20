@@ -395,6 +395,26 @@ record across all six main candidate slots (126 D7, 55 H3). No contiguous
 one-to-eight-bit add-payload lookup is conflict-free even on D7, so add
 placement remains unresolved.
 
+A bounded all-family companion scan now closes the simplest remaining version
+of that hypothesis. For each of the 181 anchors it inspects every exact-framed,
+same-owner channel-1 chunk packet within one millisecond of the labelled add.
+Across 43 packet-type and packet-type/content-length family representations,
+only the variable-length `0x0369` add family itself occurs in all 126 D7
+windows. Testing first/last occurrences and every contiguous one-to-eight-bit
+field yields zero conflict-free D7 record-ordinal lookup; consequently there is
+no candidate to evaluate or promote on H3. There is no separate universal
+same-time add-slot companion under this bound.
+
+The historical-record ordering itself is also a poor swap oracle. Twenty-one
+same-multiset `0x0081` reorder intervals have no offline Timeline item event
+(12 D7, 9 H3). Five contain none of the profiled `0x0369`, `0x03F9`, `0x0146`,
+or chunk `0x0081` operation families, and no packet type/length/four-byte-prefix
+signature occurs exactly once in every window. The other intervals include 21
+`0x0146` packets across 14 windows, but six repeated payloads each accompany
+different inferred record movements; `c550cb` alone includes both record
+`5 -> 4` and `4 -> 5`. These are historical component reorderings, not proven
+physical inventory swaps or slot labels.
+
 Owner-local ordinal/count lookups likewise leave zero exact H3 hypothesis;
 non-contiguous XOR rules are massively non-unique, and most nearby keyframe
 inventory anchors contain multiple item operations. Neither state order nor
@@ -584,8 +604,12 @@ Two July 2026 maintained gates narrow those gaps without adding product fields:
   108/111 unique-truth sales. All 72 strict trinket replacements select
   candidate slot 6, but only that slot has a zero-error semantic oracle. The
   181 isolated add/record-change anchors cover all six main candidate slots,
-  while no bounded contiguous add-payload lookup is conflict-free on D7. This
-  remains historical shop/Undo and removal-slot candidate evidence, not a
+  while no bounded contiguous add-payload lookup is conflict-free on D7. An
+  all-family +/-1 ms scan finds only the add family present in every D7 window
+  and no companion-field lookup. Twenty-one no-item-event same-multiset record
+  reorderings also fail as swap labels: five lack every profiled operation
+  family and repeated `0x0146` payloads accompany contradictory record moves.
+  This remains historical shop/Undo and removal-slot candidate evidence, not a
   complete physical inventory or sold-item identity decoder.
 
 Both artifacts remain research-only and fail closed. The product continues to
