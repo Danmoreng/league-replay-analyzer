@@ -27,27 +27,39 @@ const PROFILE = Object.freeze({
 });
 
 const EXPECTED_BEST = Object.freeze({
-  removalNibbles: Object.freeze([2, 5, 13]),
-  placement: "removedPhysical",
+  removalNibbles: Object.freeze([5, 13]),
+  placement: "lowestEmpty",
+  ignoreExisting: false,
+  protectTrinketSlot: false,
   discovery: Object.freeze({
     trackCount: 70,
     exactSlotTrackCount: 0,
     exactMultisetTrackCount: 0,
+    exactSlotCellCount: 283,
+    exactMainSlotCellCount: 283,
+    exactTrinketSlotCount: 0,
     unavailableAddCount: 0,
-    overflowAddCount: 84,
-    occupiedRemovalCount: 1071,
-    emptyRemovalCount: 222,
+    ignoredExistingAddCount: 0,
+    overflowAddCount: 93,
+    occupiedRemovalCount: 1070,
+    emptyRemovalCount: 220,
   }),
   holdout: Object.freeze({
     trackCount: 30,
     exactSlotTrackCount: 0,
     exactMultisetTrackCount: 0,
+    exactSlotCellCount: 118,
+    exactMainSlotCellCount: 118,
+    exactTrinketSlotCount: 0,
     unavailableAddCount: 0,
-    overflowAddCount: 88,
-    occupiedRemovalCount: 670,
-    emptyRemovalCount: 111,
+    ignoredExistingAddCount: 0,
+    overflowAddCount: 93,
+    occupiedRemovalCount: 665,
+    emptyRemovalCount: 115,
   }),
 });
+
+const TRINKET_ITEM_IDS = new Set([3340, 3363, 3364]);
 
 function parseArgs(argv) {
   const args = {
@@ -267,16 +279,19 @@ function nextAddSlot(slots, removedSlots, placement) {
 function reduceTrack(operations, candidate) {
   const slots = Array(7).fill(0);
   let unavailableAddCount = 0;
+  let ignoredExistingAddCount = 0;
   let overflowAddCount = 0;
   let occupiedRemovalCount = 0;
   let emptyRemovalCount = 0;
   for (const group of groupOperations(operations)) {
+    const adds = group.filter((operation) => operation.family === "add");
+    const hasTrinketAdd = adds.some((operation) => TRINKET_ITEM_IDS.has(operation.itemId));
     const removals = group.filter(
       (operation) =>
         operation.family === "remove" &&
-        candidate.removalNibbles.includes(operation.operationNibble),
+        candidate.removalNibbles.includes(operation.operationNibble) &&
+        (!candidate.protectTrinketSlot || operation.slot !== 6 || hasTrinketAdd),
     );
-    const adds = group.filter((operation) => operation.family === "add");
     const removedSlots = [];
     for (const removal of removals) {
       if (removal.slot === null) continue;
@@ -290,6 +305,14 @@ function reduceTrack(operations, candidate) {
         unavailableAddCount += 1;
         continue;
       }
+      if (candidate.ignoreExisting && slots.includes(add.itemId)) {
+        ignoredExistingAddCount += 1;
+        continue;
+      }
+      if (candidate.protectTrinketSlot && TRINKET_ITEM_IDS.has(add.itemId)) {
+        slots[6] = add.itemId;
+        continue;
+      }
       const slot = nextAddSlot(slots, removedSlots, candidate.placement);
       if (slot === -1) {
         overflowAddCount += 1;
@@ -300,7 +323,14 @@ function reduceTrack(operations, candidate) {
       if (removedIndex !== -1) removedSlots.splice(removedIndex, 1);
     }
   }
-  return { slots, unavailableAddCount, overflowAddCount, occupiedRemovalCount, emptyRemovalCount };
+  return {
+    slots,
+    unavailableAddCount,
+    ignoredExistingAddCount,
+    overflowAddCount,
+    occupiedRemovalCount,
+    emptyRemovalCount,
+  };
 }
 
 function sameMultiset(left, right) {
@@ -323,7 +353,19 @@ function scoreTracks(tracks, candidate) {
     trackCount: rows.length,
     exactSlotTrackCount: rows.filter((row) => row.exactSlots).length,
     exactMultisetTrackCount: rows.filter((row) => row.exactMultiset).length,
+    exactSlotCellCount: rows.reduce(
+      (sum, row) =>
+        sum + row.slots.filter((itemId, slot) => itemId === row.expected[slot]).length,
+      0,
+    ),
+    exactMainSlotCellCount: rows.reduce(
+      (sum, row) =>
+        sum + row.slots.slice(0, 6).filter((itemId, slot) => itemId === row.expected[slot]).length,
+      0,
+    ),
+    exactTrinketSlotCount: rows.filter((row) => row.slots[6] === row.expected[6]).length,
     unavailableAddCount: rows.reduce((sum, row) => sum + row.unavailableAddCount, 0),
+    ignoredExistingAddCount: rows.reduce((sum, row) => sum + row.ignoredExistingAddCount, 0),
     overflowAddCount: rows.reduce((sum, row) => sum + row.overflowAddCount, 0),
     occupiedRemovalCount: rows.reduce((sum, row) => sum + row.occupiedRemovalCount, 0),
     emptyRemovalCount: rows.reduce((sum, row) => sum + row.emptyRemovalCount, 0),
@@ -354,28 +396,33 @@ function main() {
     }
   }
   const candidates = [];
-  for (const removalNibbles of [[2, 5, 13], [5, 13], [5]]) {
-    for (const placement of [
-      "lowestEmpty",
-      "removedPhysical",
-      "removedReverse",
-      "removedAscending",
-    ]) {
-      const candidate = { removalNibbles, placement };
-      const discovery = scoreTracks(
-        tracks.filter((track) => track.partition === "D7"),
-        candidate,
-      );
-      candidates.push({
-        ...candidate,
-        discovery: { ...discovery, rows: undefined },
-      });
+  for (const removalNibbles of [[2, 5, 13], [5, 13], [2, 5], [5]]) {
+    for (const ignoreExisting of [false, true]) {
+      for (const protectTrinketSlot of [false, true]) {
+        for (const placement of [
+          "lowestEmpty",
+          "removedPhysical",
+          "removedReverse",
+          "removedAscending",
+        ]) {
+          const candidate = { removalNibbles, placement, ignoreExisting, protectTrinketSlot };
+          const discovery = scoreTracks(
+            tracks.filter((track) => track.partition === "D7"),
+            candidate,
+          );
+          candidates.push({
+            ...candidate,
+            discovery: { ...discovery, rows: undefined },
+          });
+        }
+      }
     }
   }
   candidates.sort(
     (left, right) =>
       right.discovery.exactSlotTrackCount - left.discovery.exactSlotTrackCount ||
       right.discovery.exactMultisetTrackCount - left.discovery.exactMultisetTrackCount ||
+      right.discovery.exactSlotCellCount - left.discovery.exactSlotCellCount ||
       left.discovery.overflowAddCount - right.discovery.overflowAddCount ||
       left.placement.localeCompare(right.placement),
   );

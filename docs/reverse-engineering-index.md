@@ -71,11 +71,12 @@ are outside scope even when described by historical community work.
   absent in Timeline, and checks later replay operations before rejecting a
   direct current-slot interpretation on D7 and frozen H3.
 - `scripts/research_inventory_forward_slot_reducer_16_14.mjs` tests the bounded
-  cross-product of three removal-nibble sets and four deterministic add-slot
-  placement rules from an empty inventory against replay-embedded final slots;
-  the best D7-selected rule closes zero D7 or H3 participant tracks, proving
-  that item identity plus the structural removal-slot candidate is not yet a
-  complete operation grammar.
+  cross-product of four removal-nibble sets, duplicate handling, trinket
+  protection, and four deterministic add-slot placement rules from an empty
+  inventory against replay-embedded final slots. The best D7-selected rule gets
+  283/420 D7 and 118/180 H3 main-slot cells right but closes zero complete D7
+  or H3 participant tracks, proving that item identity plus the structural
+  removal-slot candidate is not yet a complete operation grammar.
 - `scripts/research_inventory_add_slot_companions_16_14.mjs` exhausts the
   same-owner `+/-1 ms` packet-family/direct-bit-field search around 181 strict
   add/historical-record anchors; only `0x0369` has complete D7 support and it
@@ -97,8 +98,9 @@ are outside scope even when described by historical community work.
   static-recipe/Undo spend-ledger comparison and the incomplete cumulative-sale
   correction for current gold.
 - `scripts/research_inventory_sale_identity_16_14.mjs` freezes the six-record
-  sale-history candidate constraint and the negative removal identity/record
-  linkage searches.
+  sale-history candidate constraint, the negative raw removal/record linkage
+  searches, and a replay-only 30-second freshness rule that identifies 36/36
+  D7 discovery plus 13/13 frozen-H3 sold items with zero wrong identities.
 - `docs/replay-movement-packet-research.md`
 - `docs/rofl-api-parity.md`
 - `docs/keyframe-api-parity.md`

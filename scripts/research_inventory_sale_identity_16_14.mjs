@@ -46,6 +46,12 @@ const EXPECTED = Object.freeze({
   holdoutLengthSelectsOrdinalHalf: 37,
   discoveryDisappearedContainsTruth: 3,
   holdoutDisappearedContainsTruth: 0,
+  discoveryFreshCandidateCount: 36,
+  discoveryFreshExactCount: 36,
+  discoveryFreshWrongCount: 0,
+  holdoutFreshCandidateCount: 13,
+  holdoutFreshExactCount: 13,
+  holdoutFreshWrongCount: 0,
 });
 
 function parseArgs(argv) {
@@ -252,6 +258,18 @@ function multisetDifference(left, right) {
   });
 }
 
+function decodeRemovalSlot(payload) {
+  if (payload.length === 6) {
+    const symbol = `${payloadBit(payload, 7)}${payloadBit(payload, 8)}`;
+    return { "00": 0, 11: 1, 10: 2 }[symbol] ?? null;
+  }
+  if (payload.length === 7) {
+    const symbol = `${payloadBit(payload, 16)}${payloadBit(payload, 17)}`;
+    return { 10: 3, "01": 4, "00": 5, 11: 6 }[symbol] ?? null;
+  }
+  return null;
+}
+
 function inspectReplay(args, replayId, partition, items) {
   const replayPath = path.resolve(args.replayDir, `${replayId}.rofl`);
   const fixtureRoot = path.resolve(args.apiRoot, replayId.replaceAll("-", "_"));
@@ -267,6 +285,7 @@ function inspectReplay(args, replayId, partition, items) {
   const allItemEvents = timelineItemEvents(timeline);
   const removals = dumpPacketType(args, replayPath, PROFILE.removalPacketType);
   const removalContexts = dumpPacketType(args, replayPath, PROFILE.removalContextPacketType);
+  const undoComponents = dumpPacketType(args, replayPath, PROFILE.keyframeShopPacketType);
   const adds = dumpPacketType(args, replayPath, PROFILE.addPacketType)
     .filter((block) => {
       const participantId = block.blockParam - PROFILE.championOwnerBase;
@@ -377,6 +396,39 @@ function inspectReplay(args, replayId, partition, items) {
           (precedingKeyframe?.timestampMillis ?? Number.NEGATIVE_INFINITY) + 1 &&
         context.timestampMillis < label.timestamp - 1,
     );
+    const interveningAdds = adds.filter(
+      (add) =>
+        add.participantId === label.participantId &&
+        add.timestampMillis >
+          (precedingKeyframe?.timestampMillis ?? Number.NEGATIVE_INFINITY) + 1 &&
+        add.timestampMillis < label.timestamp - 1,
+    );
+    const interveningRemovals = removals.filter(
+      (removal) =>
+        removal.channel === 1 &&
+        removal.blockParam - PROFILE.championOwnerBase === label.participantId &&
+        removal.timestampMillis >
+          (precedingKeyframe?.timestampMillis ?? Number.NEGATIVE_INFINITY) + 1 &&
+        removal.timestampMillis < label.timestamp - 1,
+    );
+    const interveningUndoComponents = undoComponents.filter(
+      (component) =>
+        component.channel === 1 &&
+        component.blockParam - PROFILE.championOwnerBase === label.participantId &&
+        component.timestampMillis >
+          (precedingKeyframe?.timestampMillis ?? Number.NEGATIVE_INFINITY) + 1 &&
+        component.timestampMillis < label.timestamp - 1,
+    );
+    const removalPayload = Buffer.from(block.contentHex, "hex");
+    const candidateSlot = decodeRemovalSlot(removalPayload);
+    const candidateRecordOrdinal =
+      candidateSlot !== null && candidateSlot >= 0 && candidateSlot <= 5
+        ? 5 - candidateSlot
+        : null;
+    const candidateItemId =
+      candidateRecordOrdinal === null
+        ? null
+        : (precedingKeyframe?.records[candidateRecordOrdinal]?.itemId ?? null);
     rows.push({
       replayId,
       partition,
@@ -386,7 +438,7 @@ function inspectReplay(args, replayId, partition, items) {
       sellGain,
       contentLength: block.contentLength,
       payloadHex: block.contentHex,
-      payload: Buffer.from(block.contentHex, "hex"),
+      payload: removalPayload,
       priorMatchingAddCount: priorMatchingAdds.length,
       pairedAddPayload: priorMatchingAdds.length === 1 ? priorMatchingAdds[0].payload : null,
       pairedAddPayloadHex: priorMatchingAdds.length === 1 ? priorMatchingAdds[0].payloadHex : null,
@@ -395,6 +447,17 @@ function inspectReplay(args, replayId, partition, items) {
       interveningItemEventCount: interveningItemEvents.length,
       interveningItemEventTypes: interveningItemEvents.map((event) => event.type),
       interveningRemovalContextCount: interveningRemovalContexts.length,
+      interveningAddCount: interveningAdds.length,
+      interveningRemovalCount: interveningRemovals.length,
+      interveningUndoComponentCount: interveningUndoComponents.length,
+      interveningRelevantOperationCount:
+        interveningAdds.length +
+        interveningRemovals.length +
+        interveningRemovalContexts.length +
+        interveningUndoComponents.length,
+      candidateSlot,
+      candidateRecordOrdinal,
+      candidateItemId,
       precedingTruthOrdinals,
       keyframeTruthOrdinal: precedingTruthOrdinals.length === 1 ? precedingTruthOrdinals[0] : null,
       precedingKeyframeRecords: precedingKeyframe?.records ?? [],
@@ -681,6 +744,25 @@ function countsBy(rows, field) {
   return Object.fromEntries([...counts].sort((left, right) => left[0] - right[0]));
 }
 
+function isFreshSaleIdentityCandidate(row) {
+  const ageMillis = row.timestampMillis - row.precedingKeyframeTimestampMillis;
+  return (
+    Number.isInteger(row.candidateItemId) &&
+    row.candidateItemId > 0 &&
+    ageMillis >= 0 &&
+    ageMillis <= 30_000
+  );
+}
+
+function scoreFreshSaleIdentity(rows) {
+  const selected = rows.filter(isFreshSaleIdentityCandidate);
+  return {
+    candidateCount: selected.length,
+    exactCount: selected.filter((row) => row.candidateItemId === row.itemId).length,
+    wrongCount: selected.filter((row) => row.candidateItemId !== row.itemId).length,
+  };
+}
+
 function main() {
   const args = parseArgs(process.argv);
   const items = loadStaticItems(args.itemDataPath);
@@ -716,6 +798,8 @@ function main() {
   const lengthSelectsOrdinalHalf = (row) =>
     (row.contentLength === 7 && row.keyframeTruthOrdinal < 3) ||
     (row.contentLength === 6 && row.keyframeTruthOrdinal >= 3);
+  const discoveryFresh = scoreFreshSaleIdentity(discovery);
+  const holdoutFresh = scoreFreshSaleIdentity(holdout);
   const actual = {
     discoverySaleCount: discovery.length,
     holdoutSaleCount: holdout.length,
@@ -737,6 +821,12 @@ function main() {
     holdoutDisappearedContainsTruth: holdout.filter((row) =>
       row.disappearedKeyframeItems.includes(row.itemId),
     ).length,
+    discoveryFreshCandidateCount: discoveryFresh.candidateCount,
+    discoveryFreshExactCount: discoveryFresh.exactCount,
+    discoveryFreshWrongCount: discoveryFresh.wrongCount,
+    holdoutFreshCandidateCount: holdoutFresh.candidateCount,
+    holdoutFreshExactCount: holdoutFresh.exactCount,
+    holdoutFreshWrongCount: holdoutFresh.wrongCount,
   };
   if (JSON.stringify(actual) !== JSON.stringify(EXPECTED)) {
     fail("Frozen sale identity research metrics drifted.", {
@@ -794,6 +884,20 @@ function main() {
     keyframeOrdinalCandidates,
     addRemovalLinkageCandidates,
     keyframeRecordLinkageCandidates,
+    freshSaleIdentityCandidate: {
+      maxPrecedingKeyframeAgeMillis: 30_000,
+      replayOnlyRule:
+        "Decode the 0x03F9 candidate slot, select reverse 0x0081 record ordinal 5-slot from the preceding same-owner keyframe component, require one catalog-valid item ID, and fail closed when the sale is more than 30 seconds after that component timestamp.",
+      discovery: discoveryFresh,
+      holdout: holdoutFresh,
+      slotCounts: {
+        discovery: countsBy(discovery.filter(isFreshSaleIdentityCandidate), "candidateSlot"),
+        holdout: countsBy(holdout.filter(isFreshSaleIdentityCandidate), "candidateSlot"),
+      },
+      rows: rows.filter(isFreshSaleIdentityCandidate).map(
+        ({ payload: _payload, pairedAddPayload: _pairedAddPayload, ...row }) => row,
+      ),
+    },
     labelledRows: rows.map(
       ({ payload: _payload, pairedAddPayload: _pairedAddPayload, ...row }) => ({
         ...row,
@@ -803,7 +907,7 @@ function main() {
       }),
     ),
     conclusion:
-      "The preceding six-record shop-history component contains the sold item for 112/116 sales, and removal length partitions all 111 unique truth ordinals into record halves on D7 and H3. Raw item/gain/ordinal lookups, add/removal XOR, and direct record/removal XOR do not generalize exactly. This is historical candidate linkage, not sold-item identity, physical slot, instance, gold gain, or inventory state.",
+      "The preceding six-record shop-history component contains the sold item for 112/116 sales, and removal length partitions all 111 unique truth ordinals into record halves on D7 and H3. A replay-only 30-second freshness gate over the candidate removal slot and reverse record ordinal yields 36/36 exact D7 and 13/13 exact frozen-H3 sold identities with all six main slots represented in Discovery. It remains research-only pending a profile-backed C++ implementation and full-corpus promotion; older candidates, raw item/gain/ordinal lookups, add/removal XOR, and direct record/removal XOR still fail closed.",
   };
   const outputPath = path.resolve(args.outputPath);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });

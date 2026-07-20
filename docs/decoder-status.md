@@ -648,9 +648,15 @@ Two July 2026 maintained gates narrow those gaps without adding product fields:
   identity action, while 378 have a latest labelled removal. Thus missing
   Timeline operations explain many apparent extras, but known historical
   identities still reject a direct current-slot interpretation. The preceding
-  component contains the sold item for 112/116 sales,
-  and the new removal-slot candidate agrees with the reverse record ordinal in
-  108/111 unique-truth sales. All 72 strict trinket replacements select
+  component contains the sold item for 112/116 sales. Combining the structural
+  removal slot with reverse record ordinal `5-slot`, then failing closed when
+  the preceding same-owner component is older than 30 seconds, identifies the
+  sold item in 36/36 D7 discovery sales and 13/13 frozen-H3 holdout sales with
+  zero wrong identities; D7 exercises all six main slots. Older candidates are
+  deliberately unavailable, so this is a conservative research subset rather
+  than a complete sale decoder. Without the freshness gate, the new
+  removal-slot candidate agrees with the reverse record ordinal in 108/111
+  unique-truth sales. All 72 strict trinket replacements select
   candidate slot 6, but only that slot has a zero-error semantic oracle. The
   181 isolated add/record-change anchors cover all six main candidate slots,
   while no bounded contiguous add-payload lookup is conflict-free on D7. An
@@ -664,12 +670,14 @@ Two July 2026 maintained gates narrow those gaps without adding product fields:
   tracks with no later Timeline item event, 34 do have later replay-native
   operations from the known four-family population. The other two do not, so
   Timeline omissions alone still do not establish state. A separately bounded
-  forward reducer tests all three removal-nibble sets and four deterministic
-  add-placement rules over exact add identities and candidate removal slots;
-  its best D7-selected rule reconstructs `0/70` D7 and `0/30` H3 final slot or
-  multiset tracks. This remains historical
+  forward reducer tests four removal-nibble sets, duplicate-item handling,
+  trinket protection, and four deterministic add-placement rules over exact add
+  identities and candidate removal slots. Its best D7-selected rule gets
+  283/420 D7 and 118/180 H3 main-slot cells right, but reconstructs `0/70` D7
+  and `0/30` H3 complete final slot or multiset tracks. This remains historical
   shop/Undo and removal-slot candidate evidence, not a complete physical
-  inventory or sold-item identity decoder.
+  inventory decoder. The fresh sale subset is also research-only pending a
+  profile-backed C++ implementation and full-corpus promotion.
 
 Both artifacts remain research-only and fail closed. The product continues to
 omit current gold and dynamic inventory slots instead of relabelling total gold,
