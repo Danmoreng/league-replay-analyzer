@@ -66,8 +66,16 @@ are outside scope even when described by historical community work.
 - `scripts/research_keyframe_current_gold_16_14.mjs` reproduces the exact-build
   spent-gold-like lane and the negative current-gold correction searches.
 - `scripts/research_keyframe_inventory_slots_16_14.mjs` reproduces the exact
-  six-record keyframe `0x0081` structure and falsifies its interpretation as
-  current champion inventory on D7 and frozen H3.
+  six-record keyframe `0x0081` structure, freezes the `-2..+2` Timeline-state
+  alignment audit, separates prior-labelled removals from item identities
+  absent in Timeline, and checks later replay operations before rejecting a
+  direct current-slot interpretation on D7 and frozen H3.
+- `scripts/research_inventory_forward_slot_reducer_16_14.mjs` tests the bounded
+  cross-product of three removal-nibble sets and four deterministic add-slot
+  placement rules from an empty inventory against replay-embedded final slots;
+  the best D7-selected rule closes zero D7 or H3 participant tracks, proving
+  that item identity plus the structural removal-slot candidate is not yet a
+  complete operation grammar.
 - `scripts/research_inventory_add_slot_companions_16_14.mjs` exhausts the
   same-owner `+/-1 ms` packet-family/direct-bit-field search around 181 strict
   add/historical-record anchors; only `0x0369` has complete D7 support and it

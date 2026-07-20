@@ -11,6 +11,7 @@ const PROFILE = Object.freeze({
   exactReplayBuild: "16.14.794.5912",
   packetType: 0x0081,
   addPacketType: 0x0369,
+  inventoryOperationPacketTypes: Object.freeze([0x0369, 0x03f9, 0x0146, 0x0081]),
   championOwnerBase: 0x400000ad,
   discovery: Object.freeze([
     "EUW1-7919517389",
@@ -53,6 +54,33 @@ const EXPECTED_ADD_SLOT_CANDIDATES = Object.freeze({
 const EXPECTED_REARRANGEMENT_CANDIDATES = Object.freeze({
   discoveryCount: 12,
   holdoutCount: 9,
+});
+
+const EXPECTED_TIMELINE_ALIGNMENT_METRICS = Object.freeze({
+  discovery: Object.freeze({
+    "-2": Object.freeze({ exact: 789, subset: 1031 }),
+    "-1": Object.freeze({ exact: 1219, subset: 1495 }),
+    0: Object.freeze({ exact: 642, subset: 1121 }),
+    1: Object.freeze({ exact: 226, subset: 849 }),
+    2: Object.freeze({ exact: 89, subset: 678 }),
+  }),
+  holdout: Object.freeze({
+    "-2": Object.freeze({ exact: 322, subset: 438 }),
+    "-1": Object.freeze({ exact: 513, subset: 656 }),
+    0: Object.freeze({ exact: 276, subset: 493 }),
+    1: Object.freeze({ exact: 104, subset: 369 }),
+    2: Object.freeze({ exact: 46, subset: 283 }),
+  }),
+});
+
+const EXPECTED_FALSE_EXTRA_METRICS = Object.freeze({
+  discovery: Object.freeze({ occurrences: 804, removed: 160, acquired: 1, absent: 643 }),
+  holdout: Object.freeze({ occurrences: 532, removed: 218, acquired: 0, absent: 314 }),
+});
+
+const EXPECTED_FINAL_SUFFIX_METRICS = Object.freeze({
+  discovery: Object.freeze({ mismatchWithReplayOperations: 23, mismatchWithout: 1 }),
+  holdout: Object.freeze({ mismatchWithReplayOperations: 11, mismatchWithout: 1 }),
 });
 
 function parseArgs(argv) {
@@ -301,6 +329,56 @@ function sameMultiset(left, right) {
   return [...left].sort((a, b) => a - b).join(",") === [...right].sort((a, b) => a - b).join(",");
 }
 
+function multisetDifference(left, right) {
+  const remaining = [...right];
+  return left.filter((itemId) => {
+    const index = remaining.indexOf(itemId);
+    if (index === -1) return true;
+    remaining.splice(index, 1);
+    return false;
+  });
+}
+
+function latestLabelledItemAction(events, itemId, cutoffTimestampMillis) {
+  let latest = null;
+  for (const event of events) {
+    if (event.timestamp > cutoffTimestampMillis + 1) break;
+    let action = null;
+    if (event.type === "ITEM_PURCHASED" && event.itemId === itemId) action = "acquire";
+    else if (
+      (event.type === "ITEM_DESTROYED" || event.type === "ITEM_SOLD") &&
+      event.itemId === itemId
+    ) {
+      action = "remove";
+    } else if (event.type === "ITEM_UNDO" && event.afterId === itemId) action = "acquire";
+    else if (event.type === "ITEM_UNDO" && event.beforeId === itemId) action = "remove";
+    if (action !== null) latest = { action, timestampMillis: event.timestamp };
+  }
+  return latest;
+}
+
+function emptyTimelineStateValidation() {
+  return {
+    snapshotCount: 0,
+    exactMultisetSnapshotCount: 0,
+    decodedSubsetSnapshotCount: 0,
+    falseExtraItemSnapshotCount: 0,
+  };
+}
+
+function validateDecodedInventory(decodedMainSlots, labelledInventory, validation) {
+  const decodedInventory = decodedMainSlots.filter((itemId) => itemId !== 0);
+  validation.snapshotCount += 1;
+  if (sameMultiset(decodedInventory, labelledInventory)) {
+    validation.exactMultisetSnapshotCount += 1;
+  }
+  if (isMultisetSubset(decodedInventory, labelledInventory)) {
+    validation.decodedSubsetSnapshotCount += 1;
+  } else {
+    validation.falseExtraItemSnapshotCount += 1;
+  }
+}
+
 function countOrderedEmbeddings(positionDomains, limit = 2) {
   let states = new Map([[-1, 1]]);
   for (const positions of positionDomains) {
@@ -445,14 +523,36 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
       };
     })
     .filter((row) => row.participantId >= 1 && row.participantId <= 10);
+  const inventoryOperationPackets = PROFILE.inventoryOperationPacketTypes.flatMap((packetType) =>
+    dumpPacketType(args, replayPath, packetType, "chunk")
+      .map((block) => ({
+        participantId: block.blockParam - PROFILE.championOwnerBase,
+        timestampMillis: block.timestampMillis,
+        packetType,
+        contentLength: block.contentLength,
+      }))
+      .filter((row) => row.participantId >= 1 && row.participantId <= 10),
+  );
   const strictAddSlotRows = [];
   const rearrangementCandidateRows = [];
   const timelineStateValidation = {
-    snapshotCount: 0,
-    exactMultisetSnapshotCount: 0,
-    decodedSubsetSnapshotCount: 0,
-    falseExtraItemSnapshotCount: 0,
+    ...emptyTimelineStateValidation(),
     falseExtraSamples: [],
+  };
+  const timelineAlignmentValidation = Object.fromEntries(
+    [-2, -1, 0, 1, 2].map((blockOffset) => [
+      String(blockOffset),
+      emptyTimelineStateValidation(),
+    ]),
+  );
+  const falseExtraDiagnostics = {
+    occurrenceCount: 0,
+    latestLabelledActionRemovedCount: 0,
+    latestLabelledActionAcquiredCount: 0,
+    noPriorLabelledIdentityActionCount: 0,
+    byItemId: {},
+    byChampionName: {},
+    samples: [],
   };
   for (let participantId = 1; participantId <= 10; participantId += 1) {
     const participantEvents = events
@@ -496,6 +596,37 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
       if (decodedSubset) timelineStateValidation.decodedSubsetSnapshotCount += 1;
       else {
         timelineStateValidation.falseExtraItemSnapshotCount += 1;
+        const extraItems = multisetDifference(decodedInventory, labelledInventory);
+        const championName = match.info.participants[participantId - 1].championName;
+        for (const itemId of extraItems) {
+          falseExtraDiagnostics.occurrenceCount += 1;
+          falseExtraDiagnostics.byItemId[itemId] =
+            (falseExtraDiagnostics.byItemId[itemId] ?? 0) + 1;
+          falseExtraDiagnostics.byChampionName[championName] =
+            (falseExtraDiagnostics.byChampionName[championName] ?? 0) + 1;
+          const latestAction = latestLabelledItemAction(
+            participantEvents,
+            itemId,
+            stateTimestampMillis,
+          );
+          if (latestAction?.action === "remove") {
+            falseExtraDiagnostics.latestLabelledActionRemovedCount += 1;
+          } else if (latestAction?.action === "acquire") {
+            falseExtraDiagnostics.latestLabelledActionAcquiredCount += 1;
+          } else {
+            falseExtraDiagnostics.noPriorLabelledIdentityActionCount += 1;
+          }
+          if (falseExtraDiagnostics.samples.length < 12) {
+            falseExtraDiagnostics.samples.push({
+              participantId,
+              championName,
+              timestampMillis: block.timestampMillis,
+              stateTimestampMillis,
+              itemId,
+              latestLabelledAction: latestAction,
+            });
+          }
+        }
         if (timelineStateValidation.falseExtraSamples.length < 8) {
           timelineStateValidation.falseExtraSamples.push({
             participantId,
@@ -505,6 +636,30 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
             decodedInventory,
           });
         }
+      }
+    }
+    for (const [blockOffsetText, validation] of Object.entries(timelineAlignmentValidation)) {
+      const blockOffset = Number(blockOffsetText);
+      const alignedInventory = [];
+      let alignedEventIndex = 0;
+      for (let snapshotIndex = 0; snapshotIndex < participantSnapshots.length; snapshotIndex += 1) {
+        const alignedBlockIndex = Math.max(
+          0,
+          Math.min(participantBlocks.length - 1, snapshotIndex + blockOffset),
+        );
+        const cutoffTimestampMillis = participantBlocks[alignedBlockIndex].timestampMillis;
+        while (
+          alignedEventIndex < participantEvents.length &&
+          participantEvents[alignedEventIndex].timestamp <= cutoffTimestampMillis + 1
+        ) {
+          applyItemEvent(alignedInventory, participantEvents[alignedEventIndex]);
+          alignedEventIndex += 1;
+        }
+        validateDecodedInventory(
+          participantSnapshots[snapshotIndex].decodedMainSlots,
+          alignedInventory.filter((itemId) => inventoryItemIds.has(itemId)),
+          validation,
+        );
       }
     }
     for (let index = 1; index < participantSnapshots.length; index += 1) {
@@ -568,6 +723,13 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
   const tracks = [];
   for (let participantId = 1; participantId <= 10; participantId += 1) {
     const block = lastByParticipant.get(participantId);
+    const participantBlocks = blocksByParticipant
+      .get(participantId)
+      .sort(
+        (left, right) => left.segmentId - right.segmentId || left.blockIndex - right.blockIndex,
+      );
+    const lastStateTimestampMillis =
+      participantBlocks.at(-2)?.timestampMillis ?? participantBlocks.at(-1).timestampMillis;
     const participant = match.info.participants[participantId - 1];
     const slots = Array.from({ length: 7 }, (_, slot) => participant[`item${slot}`]);
     if (slots.some((itemId) => !Number.isInteger(itemId) || itemId < 0)) {
@@ -576,6 +738,11 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
     const laterEvents = events.filter(
       (event) =>
         event.participantId === participantId && event.timestamp > block.timestampMillis + 1,
+    );
+    const replayOperationsAfterLastState = inventoryOperationPackets.filter(
+      (operation) =>
+        operation.participantId === participantId &&
+        operation.timestampMillis > lastStateTimestampMillis + 1,
     );
     const payload = Buffer.from(block.contentHex, "hex");
     const { recordStarts, records, decodedMainSlots } = decodeMainSlots(payload, inventoryItemIds);
@@ -604,8 +771,17 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
       partition,
       participantId,
       lastKeyframeTimestampMillis: block.timestampMillis,
+      lastStateTimestampMillis,
       stableTail: laterEvents.length === 0,
       laterItemEventCount: laterEvents.length,
+      replayOperationAfterLastStateCount: replayOperationsAfterLastState.length,
+      replayOperationAfterLastStateSignature:
+        replayOperationsAfterLastState
+          .map(
+            (operation) =>
+              `0x${operation.packetType.toString(16).padStart(4, "0")}:${operation.contentLength}`,
+          )
+          .join(">") || "NONE",
       finalSlots: slots,
       occupiedMainSlotCount: reversedOccupiedMainSlots.length,
       expectedPairOccurrenceCount: reversedOccupiedMainSlots.filter(
@@ -651,6 +827,8 @@ function inspectReplay(args, replayId, partition, inventoryItemIds) {
       keyframeBlockCount,
       completeSixRecordBlockCount,
       timelineStateValidation,
+      timelineAlignmentValidation,
+      falseExtraDiagnostics,
     },
   };
 }
@@ -678,6 +856,12 @@ function summarize(tracks) {
       .length,
     stableTailExactFinalMainMultisetTrackCount: stable.filter(
       (track) => track.exactFinalMainMultiset,
+    ).length,
+    stableTailMismatchWithReplayOperationAfterStateCount: stable.filter(
+      (track) => !track.exactFinalMainSlots && track.replayOperationAfterLastStateCount > 0,
+    ).length,
+    stableTailMismatchWithoutReplayOperationAfterStateCount: stable.filter(
+      (track) => !track.exactFinalMainSlots && track.replayOperationAfterLastStateCount === 0,
     ).length,
     stableTailOrderedEmbeddingTrackCount: stable.filter((track) => track.orderedEmbeddingAvailable)
       .length,
@@ -713,6 +897,86 @@ function summarizeTimelineState(reports) {
       falseExtraItemSnapshotCount: 0,
     },
   );
+}
+
+function summarizeTimelineAlignments(reports) {
+  const summary = Object.fromEntries(
+    [-2, -1, 0, 1, 2].map((blockOffset) => [
+      String(blockOffset),
+      emptyTimelineStateValidation(),
+    ]),
+  );
+  for (const report of reports) {
+    for (const [blockOffset, validation] of Object.entries(
+      report.input.timelineAlignmentValidation,
+    )) {
+      for (const field of Object.keys(summary[blockOffset])) {
+        summary[blockOffset][field] += validation[field];
+      }
+    }
+  }
+  return summary;
+}
+
+function summarizeFalseExtraDiagnostics(reports) {
+  const summary = {
+    occurrenceCount: 0,
+    latestLabelledActionRemovedCount: 0,
+    latestLabelledActionAcquiredCount: 0,
+    noPriorLabelledIdentityActionCount: 0,
+    byItemId: {},
+    byChampionName: {},
+  };
+  for (const report of reports) {
+    const diagnostics = report.input.falseExtraDiagnostics;
+    for (const field of [
+      "occurrenceCount",
+      "latestLabelledActionRemovedCount",
+      "latestLabelledActionAcquiredCount",
+      "noPriorLabelledIdentityActionCount",
+    ]) {
+      summary[field] += diagnostics[field];
+    }
+    for (const histogramField of ["byItemId", "byChampionName"]) {
+      for (const [key, count] of Object.entries(diagnostics[histogramField])) {
+        summary[histogramField][key] = (summary[histogramField][key] ?? 0) + count;
+      }
+      summary[histogramField] = Object.fromEntries(
+        Object.entries(summary[histogramField]).sort(
+          (left, right) => right[1] - left[1] || left[0].localeCompare(right[0]),
+        ),
+      );
+    }
+  }
+  return summary;
+}
+
+function compactAlignmentMetrics(summary) {
+  return Object.fromEntries(
+    Object.entries(summary).map(([offset, metrics]) => [
+      offset,
+      {
+        exact: metrics.exactMultisetSnapshotCount,
+        subset: metrics.decodedSubsetSnapshotCount,
+      },
+    ]),
+  );
+}
+
+function compactFalseExtraMetrics(summary) {
+  return {
+    occurrences: summary.occurrenceCount,
+    removed: summary.latestLabelledActionRemovedCount,
+    acquired: summary.latestLabelledActionAcquiredCount,
+    absent: summary.noPriorLabelledIdentityActionCount,
+  };
+}
+
+function compactFinalSuffixMetrics(summary) {
+  return {
+    mismatchWithReplayOperations: summary.stableTailMismatchWithReplayOperationAfterStateCount,
+    mismatchWithout: summary.stableTailMismatchWithoutReplayOperationAfterStateCount,
+  };
 }
 
 function frozenPartitionMetrics(reports) {
@@ -782,6 +1046,39 @@ function main() {
       actual: rearrangementCandidateMetrics,
     });
   }
+  const timelineAlignmentMetrics = {
+    discovery: compactAlignmentMetrics(summarizeTimelineAlignments(discoveryReports)),
+    holdout: compactAlignmentMetrics(summarizeTimelineAlignments(holdoutReports)),
+  };
+  if (
+    JSON.stringify(timelineAlignmentMetrics) !==
+    JSON.stringify(EXPECTED_TIMELINE_ALIGNMENT_METRICS)
+  ) {
+    fail("Frozen Timeline alignment metrics drifted.", {
+      expected: EXPECTED_TIMELINE_ALIGNMENT_METRICS,
+      actual: timelineAlignmentMetrics,
+    });
+  }
+  const falseExtraMetrics = {
+    discovery: compactFalseExtraMetrics(summarizeFalseExtraDiagnostics(discoveryReports)),
+    holdout: compactFalseExtraMetrics(summarizeFalseExtraDiagnostics(holdoutReports)),
+  };
+  if (JSON.stringify(falseExtraMetrics) !== JSON.stringify(EXPECTED_FALSE_EXTRA_METRICS)) {
+    fail("Frozen missing-Timeline-identity metrics drifted.", {
+      expected: EXPECTED_FALSE_EXTRA_METRICS,
+      actual: falseExtraMetrics,
+    });
+  }
+  const finalSuffixMetrics = {
+    discovery: compactFinalSuffixMetrics(summarize(discovery)),
+    holdout: compactFinalSuffixMetrics(summarize(holdout)),
+  };
+  if (JSON.stringify(finalSuffixMetrics) !== JSON.stringify(EXPECTED_FINAL_SUFFIX_METRICS)) {
+    fail("Frozen final-suffix replay-operation metrics drifted.", {
+      expected: EXPECTED_FINAL_SUFFIX_METRICS,
+      actual: finalSuffixMetrics,
+    });
+  }
   const output = {
     schema: "rofl-keyframe-inventory-slot-research-16.14/v1",
     researchOnly: true,
@@ -808,17 +1105,26 @@ function main() {
       discovery: {
         finalStableTail: summarize(discovery),
         timelineState: summarizeTimelineState(discoveryReports),
+        timelineAlignments: summarizeTimelineAlignments(discoveryReports),
+        falseExtraDiagnostics: summarizeFalseExtraDiagnostics(discoveryReports),
       },
       holdout: {
         finalStableTail: summarize(holdout),
         timelineState: summarizeTimelineState(holdoutReports),
+        timelineAlignments: summarizeTimelineAlignments(holdoutReports),
+        falseExtraDiagnostics: summarizeFalseExtraDiagnostics(holdoutReports),
       },
       combined: {
         finalStableTail: summarize(tracks),
         timelineState: summarizeTimelineState(reports),
+        timelineAlignments: summarizeTimelineAlignments(reports),
+        falseExtraDiagnostics: summarizeFalseExtraDiagnostics(reports),
       },
     },
     frozenMetrics,
+    timelineAlignmentMetrics,
+    falseExtraMetrics,
+    finalSuffixMetrics,
     addSlotCandidateMetrics,
     rearrangementCandidateMetrics,
     inputs: reports.map((report) => report.input),
@@ -831,9 +1137,12 @@ function main() {
       "Empty slots, duplicate-item counts, physical slot moves, and the complete record grammar remain unresolved.",
       "The 181 isolated add/record-change anchors cover all six main record ordinals, but no contiguous one-to-eight-bit add-payload lookup is even conflict-free on Discovery.",
       "The independently decoded chunk operation subsets still do not provide complete between-keyframe inventory reconstruction.",
+      "A bounded -2..+2 keyframe/Timeline alignment audit confirms the existing -1 block alignment is uniquely strongest; simple missing-minute alignment does not explain the remaining mismatches.",
+      "Of 1,336 false-extra item occurrences, 957 have no prior Timeline identity action, proving that Timeline item events are incomplete as a state oracle; 378 have a latest labelled removal, so missing labels do not make the six records current slots.",
+      "Replay operation packets absent from the Timeline follow 34/36 stable-Timeline final mismatches, but two mismatches remain even without a later packet from the four known families.",
     ],
     conclusion:
-      "The six trailing keyframe 0x0081 records and their reused item-ID symbols are exact replay structure, but the current-inventory interpretation is falsified on Discovery and frozen Holdout. No C++/Wasm/UI inventory state is authorized from this family.",
+      "The six trailing keyframe 0x0081 records and their reused item-ID symbols are exact replay structure. Timeline omissions explain much of the prior apparent mismatch, but known removed identities and two replay-operation-free final mismatches still reject a direct current-slot interpretation. A replay-native operation reducer remains necessary before C++/Wasm/UI promotion.",
   };
   fs.mkdirSync(path.dirname(path.resolve(args.outputPath)), { recursive: true });
   fs.writeFileSync(path.resolve(args.outputPath), `${JSON.stringify(output, null, 2)}\n`);

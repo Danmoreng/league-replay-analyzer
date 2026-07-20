@@ -638,9 +638,17 @@ Two July 2026 maintained gates narrow those gaps without adding product fields:
   spendable-gold field is promoted.
 - every exact-build champion/keyframe `0x0081` payload has six replay-only
   trailing records and reuses the established item-ID symbol grammar, but the
-  current-inventory interpretation is falsified. A Timeline-derived offline
-  reducer sees false-extra decoded items in 675/2,170 D7 and 374/1,030 H3
-  snapshots. The preceding component contains the sold item for 112/116 sales,
+  records are not directly usable as current inventory. A Timeline-derived
+  offline reducer sees false-extra decoded items in 675/2,170 D7 and 374/1,030
+  H3 snapshots. A new bounded alignment audit tests record state against
+  Timeline event reductions at keyframe offsets `-2..+2`; the existing `-1`
+  alignment is uniquely strongest in both D7 and H3, so a missing one-minute
+  shift does not close the gap. Timeline incompleteness is nevertheless
+  material: 957/1,336 false-extra item occurrences have no prior labelled
+  identity action, while 378 have a latest labelled removal. Thus missing
+  Timeline operations explain many apparent extras, but known historical
+  identities still reject a direct current-slot interpretation. The preceding
+  component contains the sold item for 112/116 sales,
   and the new removal-slot candidate agrees with the reverse record ordinal in
   108/111 unique-truth sales. All 72 strict trinket replacements select
   candidate slot 6, but only that slot has a zero-error semantic oracle. The
@@ -652,7 +660,14 @@ Two July 2026 maintained gates narrow those gaps without adding product fields:
   family and repeated `0x0146` payloads accompany contradictory record moves.
   A backward reducer anchored at the replay-embedded final seven slots reverses
   only 26/6,918 relevant suffix groups, reaches four sales, and resolves zero
-  sale identities before conservative barriers. This remains historical
+  sale identities before conservative barriers. Of 36 final-slot mismatches on
+  tracks with no later Timeline item event, 34 do have later replay-native
+  operations from the known four-family population. The other two do not, so
+  Timeline omissions alone still do not establish state. A separately bounded
+  forward reducer tests all three removal-nibble sets and four deterministic
+  add-placement rules over exact add identities and candidate removal slots;
+  its best D7-selected rule reconstructs `0/70` D7 and `0/30` H3 final slot or
+  multiset tracks. This remains historical
   shop/Undo and removal-slot candidate evidence, not a complete physical
   inventory or sold-item identity decoder.
 
