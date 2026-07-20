@@ -78,7 +78,9 @@ are outside scope even when described by historical community work.
   one/two-bit affine or contiguous one-to-eight-bit record-local activity rule.
   A whole-record collision gate finds 49 D7 and 28 H3 byte-identical,
   same-ordinal records with opposite activity labels, proving that activity
-  requires component-level or temporal context.
+  requires component-level or temporal context. Its follow-up prefix/sibling
+  context gate rejects every per-ordinal contiguous one-to-eight-bit lookup and
+  one/two-bit affine rule on D7 before opening H3.
 - `scripts/research_inventory_forward_slot_reducer_16_14.mjs` tests the bounded
   cross-product of add-length sets, four removal-nibble sets, duplicate
   handling, trinket protection, and four deterministic add-slot placement

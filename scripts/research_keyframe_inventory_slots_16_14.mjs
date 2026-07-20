@@ -109,6 +109,12 @@ const EXPECTED_RECORD_ACTIVITY_CONTEXT_METRICS = Object.freeze({
   }),
 });
 
+const EXPECTED_COMPONENT_CONTEXT_ACTIVITY_METRICS = Object.freeze({
+  lookupCandidateCounts: Object.freeze([0, 0, 0, 0, 0, 0]),
+  affineFeatureCounts: Object.freeze([1504, 1184, 1184, 1184, 1184, 1472]),
+  affineCandidateCounts: Object.freeze([0, 0, 0, 0, 0, 0]),
+});
+
 function parseArgs(argv) {
   const args = {
     cliPath: path.join("build-linux", "packages", "rofl-core", "rofl_core_cli"),
@@ -1037,6 +1043,260 @@ function recordActivityTransitions(rows, limit = 32) {
   };
 }
 
+function reverseBytes(buffer) {
+  return Buffer.from(buffer).reverse();
+}
+
+function activityContextSources(row) {
+  const prefix = Buffer.from(row.componentPrefixHex, "hex");
+  const sources = [
+    { name: "component-prefix-start", payload: prefix },
+    { name: "component-prefix-end", payload: reverseBytes(prefix) },
+  ];
+  for (let ordinal = 0; ordinal < row.siblingPayloadHexes.length; ordinal += 1) {
+    const sibling = Buffer.from(row.siblingPayloadHexes[ordinal], "hex");
+    sources.push({ name: `sibling-${ordinal}-start`, payload: sibling });
+    sources.push({ name: `sibling-${ordinal}-end`, payload: reverseBytes(sibling) });
+  }
+  return sources;
+}
+
+function searchComponentContextActivityLookups(discoveryRows, holdoutRows) {
+  const discoveryPrepared = discoveryRows.map((row) => ({
+    ...row,
+    contextSources: new Map(
+      activityContextSources(row).map((source) => [source.name, source.payload]),
+    ),
+  }));
+  const holdoutPrepared = holdoutRows.map((row) => ({
+    ...row,
+    contextSources: new Map(
+      activityContextSources(row).map((source) => [source.name, source.payload]),
+    ),
+  }));
+  const sourceNames = [...discoveryPrepared[0].contextSources.keys()];
+  const byOrdinal = [];
+  for (let recordOrdinal = 0; recordOrdinal < 6; recordOrdinal += 1) {
+    const discovery = discoveryPrepared.filter((row) => row.recordOrdinal === recordOrdinal);
+    const holdout = holdoutPrepared.filter((row) => row.recordOrdinal === recordOrdinal);
+    const candidates = [];
+    for (const sourceName of sourceNames) {
+      const minimumBitCount = Math.min(
+        ...discovery.map((row) => row.contextSources.get(sourceName).length * 8),
+      );
+      for (let width = 1; width <= 8; width += 1) {
+        for (let start = 0; start + width <= minimumBitCount; start += 1) {
+          for (const reversed of [false, true]) {
+            const labels = new Map();
+            let conflict = false;
+            for (const row of discovery) {
+              const value = recordBitValue(
+                row.contextSources.get(sourceName),
+                start,
+                width,
+                reversed,
+              );
+              const previous = labels.get(value);
+              if (previous !== undefined && previous !== row.active) {
+                conflict = true;
+                break;
+              }
+              labels.set(value, row.active);
+            }
+            if (conflict) continue;
+            let exact = 0;
+            let wrong = 0;
+            let unavailable = 0;
+            for (const row of holdout) {
+              const value = recordBitValue(
+                row.contextSources.get(sourceName),
+                start,
+                width,
+                reversed,
+              );
+              const predicted = labels.get(value);
+              if (predicted === undefined) unavailable += 1;
+              else if (predicted === row.active) exact += 1;
+              else wrong += 1;
+            }
+            candidates.push({
+              sourceName,
+              start,
+              width,
+              reversed,
+              symbolCount: labels.size,
+              holdout: { exact, wrong, unavailable },
+            });
+          }
+        }
+      }
+    }
+    candidates.sort(
+      (left, right) =>
+        left.holdout.wrong - right.holdout.wrong ||
+        left.holdout.unavailable - right.holdout.unavailable ||
+        right.holdout.exact - left.holdout.exact ||
+        left.width - right.width ||
+        left.start - right.start ||
+        left.sourceName.localeCompare(right.sourceName),
+    );
+    byOrdinal.push({
+      recordOrdinal,
+      discoveryRowCount: discovery.length,
+      holdoutRowCount: holdout.length,
+      candidateCount: candidates.length,
+      completeZeroWrongHoldoutCandidateCount: candidates.filter(
+        (candidate) => candidate.holdout.wrong === 0 && candidate.holdout.unavailable === 0,
+      ).length,
+      bestCandidates: candidates.slice(0, 32),
+    });
+  }
+  return {
+    sources: sourceNames,
+    byOrdinal,
+    completeSixOrdinalRuleAvailable: byOrdinal.every(
+      (ordinal) => ordinal.completeZeroWrongHoldoutCandidateCount > 0,
+    ),
+  };
+}
+
+function bitSignature(rows, valueSelector) {
+  const signature = Buffer.alloc(Math.ceil(rows.length / 8));
+  for (let index = 0; index < rows.length; index += 1) {
+    if (valueSelector(rows[index])) signature[index >> 3] |= 1 << (index & 7);
+  }
+  return signature;
+}
+
+function xorSignatures(...signatures) {
+  const result = Buffer.alloc(signatures[0].length);
+  for (const signature of signatures) {
+    for (let index = 0; index < result.length; index += 1) result[index] ^= signature[index];
+  }
+  return result;
+}
+
+function populatedSignature(rowCount) {
+  const signature = Buffer.alloc(Math.ceil(rowCount / 8), 0xff);
+  const remainder = rowCount % 8;
+  if (remainder !== 0) signature[signature.length - 1] = (1 << remainder) - 1;
+  return signature;
+}
+
+function searchComponentContextActivityAffineBits(discoveryRows, holdoutRows) {
+  const prepare = (rows) =>
+    rows.map((row) => ({
+      ...row,
+      contextSources: new Map(
+        activityContextSources(row).map((source) => [source.name, source.payload]),
+      ),
+    }));
+  const discoveryPrepared = prepare(discoveryRows);
+  const holdoutPrepared = prepare(holdoutRows);
+  const sourceNames = [...discoveryPrepared[0].contextSources.keys()];
+  const byOrdinal = [];
+  for (let recordOrdinal = 0; recordOrdinal < 6; recordOrdinal += 1) {
+    const discovery = discoveryPrepared.filter((row) => row.recordOrdinal === recordOrdinal);
+    const holdout = holdoutPrepared.filter((row) => row.recordOrdinal === recordOrdinal);
+    const features = [];
+    for (const sourceName of sourceNames) {
+      const minimumBitCount = Math.min(
+        ...discovery.map((row) => row.contextSources.get(sourceName).length * 8),
+      );
+      for (let bit = 0; bit < minimumBitCount; bit += 1) {
+        features.push({
+          sourceName,
+          bit,
+          signature: bitSignature(discovery, (row) =>
+            payloadBit(row.contextSources.get(sourceName), bit),
+          ),
+        });
+      }
+    }
+    const featuresBySignature = new Map();
+    for (let featureIndex = 0; featureIndex < features.length; featureIndex += 1) {
+      const key = features[featureIndex].signature.toString("base64");
+      const indices = featuresBySignature.get(key) ?? [];
+      indices.push(featureIndex);
+      featuresBySignature.set(key, indices);
+    }
+    const target = bitSignature(discovery, (row) => row.active);
+    const ones = populatedSignature(discovery.length);
+    const candidateKeys = new Set();
+    const candidates = [];
+    const addCandidate = (leftIndex, rightIndex, inverse) => {
+      const ordered = [leftIndex, rightIndex].sort((left, right) => left - right);
+      const key = `${ordered[0]}:${ordered[1]}:${inverse}`;
+      if (candidateKeys.has(key)) return;
+      candidateKeys.add(key);
+      const selected = ordered.map((index) => features[index]);
+      let exact = 0;
+      let wrong = 0;
+      let unavailable = 0;
+      for (const row of holdout) {
+        if (
+          selected.some(
+            (feature) => feature.bit >= row.contextSources.get(feature.sourceName).length * 8,
+          )
+        ) {
+          unavailable += 1;
+          continue;
+        }
+        const predicted = Boolean(
+          payloadBit(row.contextSources.get(selected[0].sourceName), selected[0].bit) ^
+          payloadBit(row.contextSources.get(selected[1].sourceName), selected[1].bit) ^
+          inverse,
+        );
+        if (predicted === row.active) exact += 1;
+        else wrong += 1;
+      }
+      candidates.push({
+        bits: selected.map(({ sourceName, bit }) => ({ sourceName, bit })),
+        inverse,
+        holdout: { exact, wrong, unavailable },
+      });
+    };
+    for (let leftIndex = 0; leftIndex < features.length; leftIndex += 1) {
+      for (const inverse of [0, 1]) {
+        const wanted = xorSignatures(
+          features[leftIndex].signature,
+          target,
+          inverse === 1 ? ones : Buffer.alloc(ones.length),
+        ).toString("base64");
+        for (const rightIndex of featuresBySignature.get(wanted) ?? []) {
+          addCandidate(leftIndex, rightIndex, inverse);
+        }
+      }
+    }
+    candidates.sort(
+      (left, right) =>
+        left.holdout.wrong - right.holdout.wrong ||
+        left.holdout.unavailable - right.holdout.unavailable ||
+        right.holdout.exact - left.holdout.exact ||
+        left.bits[0].sourceName.localeCompare(right.bits[0].sourceName) ||
+        left.bits[0].bit - right.bits[0].bit,
+    );
+    byOrdinal.push({
+      recordOrdinal,
+      discoveryRowCount: discovery.length,
+      holdoutRowCount: holdout.length,
+      featureCount: features.length,
+      candidateCount: candidates.length,
+      completeZeroWrongHoldoutCandidateCount: candidates.filter(
+        (candidate) => candidate.holdout.wrong === 0 && candidate.holdout.unavailable === 0,
+      ).length,
+      bestCandidates: candidates.slice(0, 32),
+    });
+  }
+  return {
+    sources: sourceNames,
+    byOrdinal,
+    completeSixOrdinalRuleAvailable: byOrdinal.every(
+      (ordinal) => ordinal.completeZeroWrongHoldoutCandidateCount > 0,
+    ),
+  };
+}
+
 function evaluateActivityCandidate(rows, candidate) {
   let exact = 0;
   let wrong = 0;
@@ -1403,6 +1663,14 @@ function main() {
     },
     recordLocalConflictSamples: recordActivityConflictSamples(recordActivityRows),
     unchangedRecordActivityTransitions: recordActivityTransitions(recordActivityRows),
+    componentContextLookupSearch: searchComponentContextActivityLookups(
+      recordActivityRows.filter((row) => row.partition === "D7"),
+      recordActivityRows.filter((row) => row.partition === "H3"),
+    ),
+    componentContextAffineBitSearch: searchComponentContextActivityAffineBits(
+      recordActivityRows.filter((row) => row.partition === "D7"),
+      recordActivityRows.filter((row) => row.partition === "H3"),
+    ),
   };
   const compactRecordActivityMetrics = {
     discovery: recordActivityResearch.discovery,
@@ -1470,6 +1738,26 @@ function main() {
     fail("Frozen keyframe record-activity context metrics drifted.", {
       expected: EXPECTED_RECORD_ACTIVITY_CONTEXT_METRICS,
       actual: compactRecordActivityContextMetrics,
+    });
+  }
+  const compactComponentContextActivityMetrics = {
+    lookupCandidateCounts: recordActivityResearch.componentContextLookupSearch.byOrdinal.map(
+      (ordinal) => ordinal.candidateCount,
+    ),
+    affineFeatureCounts: recordActivityResearch.componentContextAffineBitSearch.byOrdinal.map(
+      (ordinal) => ordinal.featureCount,
+    ),
+    affineCandidateCounts: recordActivityResearch.componentContextAffineBitSearch.byOrdinal.map(
+      (ordinal) => ordinal.candidateCount,
+    ),
+  };
+  if (
+    JSON.stringify(compactComponentContextActivityMetrics) !==
+    JSON.stringify(EXPECTED_COMPONENT_CONTEXT_ACTIVITY_METRICS)
+  ) {
+    fail("Frozen keyframe component-context activity metrics drifted.", {
+      expected: EXPECTED_COMPONENT_CONTEXT_ACTIVITY_METRICS,
+      actual: compactComponentContextActivityMetrics,
     });
   }
   if (JSON.stringify(finalSuffixMetrics) !== JSON.stringify(EXPECTED_FINAL_SUFFIX_METRICS)) {
@@ -1541,9 +1829,10 @@ function main() {
       "Of 1,336 false-extra item occurrences, 957 have no prior Timeline identity action, proving that Timeline item events are incomplete as a state oracle; 378 have a latest labelled removal, so missing labels do not make the six records current slots.",
       "Replay operation packets absent from the Timeline follow 34/36 stable-Timeline final mismatches, but two mismatches remain even without a later packet from the four known families.",
       "A whole-record activity falsification finds opposite active/inactive labels for 49 byte-identical same-ordinal item records in D7 and 28 in H3; record-local bytes therefore cannot determine whether a historical item identity is currently active.",
+      "Per-ordinal component-context searches over the component prefix and all six sibling records find zero conflict-free D7 contiguous one-to-eight-bit lookups and zero one/two-bit affine rules before H3 is consulted; there is no simple surrounding activity mask under this normalized grammar.",
     ],
     conclusion:
-      "The six trailing keyframe 0x0081 records and their reused item-ID symbols are exact replay structure. Timeline omissions explain much of the prior apparent mismatch, but known removed identities, byte-identical records with opposite activity labels, and two replay-operation-free final mismatches reject a direct current-slot interpretation. Activity requires component-level or temporal state, and a replay-native operation reducer remains necessary before C++/Wasm/UI promotion.",
+      "The six trailing keyframe 0x0081 records and their reused item-ID symbols are exact replay structure. Timeline omissions explain much of the prior apparent mismatch, but known removed identities, byte-identical records with opposite activity labels, absence of a simple prefix/sibling activity mask, and two replay-operation-free final mismatches reject a direct current-slot interpretation. A stateful replay-native operation reducer remains necessary before C++/Wasm/UI promotion.",
   };
   fs.mkdirSync(path.dirname(path.resolve(args.outputPath)), { recursive: true });
   fs.writeFileSync(path.resolve(args.outputPath), `${JSON.stringify(output, null, 2)}\n`);

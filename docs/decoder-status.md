@@ -667,7 +667,11 @@ Two July 2026 maintained gates narrow those gaps without adding product fields:
   whole-record gate finds 49 D7 and 28 H3 byte-identical, same-ordinal item
   records with opposite strict activity labels; even the full record bytes
   therefore cannot determine current activity without component-level or
-  temporal state. The preceding
+  temporal state. Per-ordinal searches over normalized component-prefix and all
+  six sibling-record start/end contexts additionally find zero conflict-free
+  D7 contiguous one-to-eight-bit lookups and zero one/two-bit affine rules for
+  every ordinal, before H3 is consulted. There is no simple surrounding
+  activity mask under this grammar. The preceding
   component contains the sold item for 112/116 sales. Combining the structural
   removal slot with reverse record ordinal `5-slot`, then failing closed when
   the preceding same-owner component is older than 30 seconds, identifies the

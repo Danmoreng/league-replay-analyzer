@@ -799,7 +799,13 @@ minimum unavoidable error is 51 D7 plus 30 H3 labels. Across individual
 participant tracks, 33 unchanged records transition from active to inactive
 and one transitions back while component-prefix and sibling context change.
 Consequently no function of the item record bytes alone can recover current
-activity; the next decoder must model component-level or temporal state.
+activity. A second per-ordinal gate normalizes the component prefix plus the
+start/end of all six sibling records. It searches every contiguous one-to-eight
+bit lookup and every one/two-bit affine combination across those sources. All
+six record ordinals have zero conflict-free Discovery candidates under both
+grammars, before Holdout is consulted. This rejects a simple surrounding
+activity mask; the next decoder must model the stateful operation history or a
+more complex component grammar.
 
 A narrower add/record-change gate remains useful for further grammar search.
 It selects intervals containing exactly one Timeline purchase label, one
