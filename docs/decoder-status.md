@@ -416,23 +416,25 @@ different inferred record movements; `c550cb` alone includes both record
 physical inventory swaps or slot labels.
 
 A replay-only backward reducer now tests whether the embedded final seven-slot
-inventory can close the missing identity link without a direct add-slot field.
-For each participant it starts from the productive validated ROFL summary,
-walks exact-framed item groups backward, removes decoded `0x0369` items from
-matching concrete/symbolic slots, and restores provenance-keyed symbols into
-the `0x03F9` candidate slot. Productive `rofl-replay-item-sales/v1` events mark
-sale-removal symbols; saved Timeline sold-item IDs are loaded only after the
-reduction as an offline oracle.
+inventory can close missing identity links without a direct add-slot field. It
+includes decoded `0x0369` lengths 14/15/16/17 plus length-11 trinket changes.
+Productive sales retain their structural fixed-slot candidate and a
+provenance-keyed identity. Other low-nibble-5/13 removals and `0x0146` records
+branch over the bounded alternatives “no unit-count change” or “one anonymous
+main-slot unit removed”; anonymous non-sale units are canonicalized so only
+sale identities retain provenance. Chunk `0x0081`, other removal nibbles,
+contradictions, and more than 4,096 states still fail closed.
 
-The conservative gate accepts only removal low-nibble `5` and stops before
-`0x0146`, chunk `0x0081`, other removal operations, duplicate slots, missing
-add IDs, contradictions, or excessive branching. Across all 100 exact-build
-participants it can reverse only 26/6,918 relevant suffix groups: 73 tracks
-stop at an unresolved context/Undo family and 27 at an unresolved removal
-operation. It reaches four D7 sale removals and zero H3 sales, but none of the
-four symbols reaches an earlier decoded add, so replay-only sold-item identity
-remains 0/116 available. Consequently the reducer recovers neither sale price
-nor a current-gold correction and does not authorize C++/Wasm/UI inventory.
+This expanded model reverses 4,270/6,945 relevant owner/time groups and reaches
+the beginning for 35/70 D7 plus 14/30 frozen-H3 participants. It encounters
+47/77 D7 and 24/39 H3 sales. Five sale symbols bind uniquely to an earlier
+decoded add—three D7 and two H3—and all five match the offline Timeline oracle,
+with zero wrong identities. The result is a material traceability checkpoint,
+not a runtime decoder: 20 tracks exceed the branch cap, 49 complete tracks
+still retain hundreds or thousands of possible slot histories, `0x0081` Undo
+semantics remain absent, and only five sale identities are unique. It therefore
+recovers neither complete inventory nor a complete sale/current-gold ledger and
+does not authorize C++/Wasm/UI inventory.
 
 An offline Timeline-oracle backward solver now tests the stronger hypothesis
 that the saved API item identities can fill those replay-only gaps. The final
@@ -664,17 +666,20 @@ Two July 2026 maintained gates narrow those gaps without adding product fields:
   and no companion-field lookup. Twenty-one no-item-event same-multiset record
   reorderings also fail as swap labels: five lack every profiled operation
   family and repeated `0x0146` payloads accompany contradictory record moves.
-  A backward reducer anchored at the replay-embedded final seven slots reverses
-  only 26/6,918 relevant suffix groups, reaches four sales, and resolves zero
-  sale identities before conservative barriers. Of 36 final-slot mismatches on
+  An expanded backward reducer anchored at the replay-embedded final seven
+  slots reverses 4,270/6,945 relevant groups and reaches the beginning for
+  49/100 tracks. It encounters 71/116 sales and uniquely links five sale
+  identities with `5 exact / 0 wrong` offline validation, but leaves hundreds
+  or thousands of candidate histories per completed track. Of 36 final-slot mismatches on
   tracks with no later Timeline item event, 34 do have later replay-native
   operations from the known four-family population. The other two do not, so
   Timeline omissions alone still do not establish state. A separately bounded
-  forward reducer tests four removal-nibble sets, duplicate-item handling,
-  trinket protection, and four deterministic add-placement rules over exact add
-  identities and candidate removal slots. Its best D7-selected rule gets
-  283/420 D7 and 118/180 H3 main-slot cells right, but reconstructs `0/70` D7
-  and `0/30` H3 complete final slot or multiset tracks. This remains historical
+  forward reducer also includes length-11 trinket changes and rare length-16/17
+  add records. Its deterministic replay-only candidate reconstructs `9/70` D7
+  and `5/30` H3 exact final slot tracks; a symbolic placement solver reaches
+  23/70 and 13/30 final anchors. A separate best score that assumes initial
+  trinket 3340 reaches 10/70 and 6/30 but is explicitly non-promotable because
+  that seed is not replay-native. This remains historical
   shop/Undo and removal-slot candidate evidence, not a complete physical
   inventory decoder. The fresh sale subset is also research-only pending a
   profile-backed C++ implementation and full-corpus promotion.

@@ -11,7 +11,11 @@ const PROFILE = Object.freeze({
   exactReplayBuild: "16.14.794.5912",
   championOwnerBase: 0x400000ad,
   families: Object.freeze([
-    Object.freeze({ name: "add", packetType: 0x0369, lengths: Object.freeze([14, 15]) }),
+    Object.freeze({
+      name: "add",
+      packetType: 0x0369,
+      lengths: Object.freeze([11, 14, 15, 16, 17]),
+    }),
     Object.freeze({ name: "removal", packetType: 0x03f9, lengths: Object.freeze([6, 7]) }),
     Object.freeze({
       name: "removalContext",
@@ -35,54 +39,64 @@ const PROFILE = Object.freeze({
   maxBranches: 4096,
 });
 
+const TRINKET_ITEM_IDS = new Set([3340, 3363, 3364]);
+
 const EXPECTED = Object.freeze({
   discovery: Object.freeze({
     participantCount: 70,
-    relevantGroupCount: 4645,
-    processedSuffixGroupCount: 24,
+    relevantGroupCount: 4665,
+    processedSuffixGroupCount: 3026,
     barrierReasons: Object.freeze({
-      "unresolved-family": 50,
-      "unresolved-removal-operation": 20,
+      BEGINNING_REACHED: 35,
+      "branch-limit": 12,
+      "state-contradiction": 10,
+      "unresolved-family": 12,
+      "unresolved-removal-operation": 1,
     }),
-    maximumBranchCount: 1,
+    maximumBranchCount: 3954,
     saleCount: 77,
-    encounteredSaleCount: 4,
-    resolvedSaleItemCount: 0,
-    exactResolvedSaleItemCount: 0,
+    encounteredSaleCount: 47,
+    resolvedSaleItemCount: 3,
+    exactResolvedSaleItemCount: 3,
     wrongResolvedSaleItemCount: 0,
-    unavailableSaleItemCount: 77,
+    unavailableSaleItemCount: 74,
   }),
   holdout: Object.freeze({
     participantCount: 30,
-    relevantGroupCount: 2273,
-    processedSuffixGroupCount: 2,
+    relevantGroupCount: 2280,
+    processedSuffixGroupCount: 1244,
     barrierReasons: Object.freeze({
-      "unresolved-family": 23,
-      "unresolved-removal-operation": 7,
+      BEGINNING_REACHED: 14,
+      "branch-limit": 8,
+      "state-contradiction": 4,
+      "unresolved-family": 4,
     }),
-    maximumBranchCount: 1,
+    maximumBranchCount: 3996,
     saleCount: 39,
-    encounteredSaleCount: 0,
-    resolvedSaleItemCount: 0,
-    exactResolvedSaleItemCount: 0,
+    encounteredSaleCount: 24,
+    resolvedSaleItemCount: 2,
+    exactResolvedSaleItemCount: 2,
     wrongResolvedSaleItemCount: 0,
-    unavailableSaleItemCount: 39,
+    unavailableSaleItemCount: 37,
   }),
   combined: Object.freeze({
     participantCount: 100,
-    relevantGroupCount: 6918,
-    processedSuffixGroupCount: 26,
+    relevantGroupCount: 6945,
+    processedSuffixGroupCount: 4270,
     barrierReasons: Object.freeze({
-      "unresolved-family": 73,
-      "unresolved-removal-operation": 27,
+      BEGINNING_REACHED: 49,
+      "branch-limit": 20,
+      "state-contradiction": 14,
+      "unresolved-family": 16,
+      "unresolved-removal-operation": 1,
     }),
-    maximumBranchCount: 1,
+    maximumBranchCount: 3996,
     saleCount: 116,
-    encounteredSaleCount: 4,
-    resolvedSaleItemCount: 0,
-    exactResolvedSaleItemCount: 0,
+    encounteredSaleCount: 71,
+    resolvedSaleItemCount: 5,
+    exactResolvedSaleItemCount: 5,
     wrongResolvedSaleItemCount: 0,
-    unavailableSaleItemCount: 116,
+    unavailableSaleItemCount: 111,
   }),
 });
 
@@ -233,12 +247,16 @@ function dumpRelevantBlocks(args, replayPath) {
       const owner = participantId(block);
       if (!family || owner === null) continue;
       const payload = Buffer.from(block.contentHex, "hex");
+      const itemId = family.name === "add" ? decodeAddItemId(payload) : null;
+      if (family.name === "add" && payload.length === 11 && !TRINKET_ITEM_IDS.has(itemId)) {
+        continue;
+      }
       blocks.push({
         ...block,
         family: family.name,
         participantId: owner,
         physicalKey: physicalKey(block),
-        itemId: family.name === "add" ? decodeAddItemId(payload) : null,
+        itemId,
         removalSlot: family.name === "removal" ? decodeRemovalSlot(payload) : null,
         operationNibble: family.name === "removal" ? payload[0] & 0x0f : null,
       });
@@ -359,15 +377,19 @@ function reverseAdd(states, block) {
   if (!Number.isInteger(block.itemId) || block.itemId <= 0) return [];
   const next = [];
   for (const state of states) {
+    if (state.slots.includes(block.itemId)) next.push(cloneState(state));
     for (let slot = 0; slot < state.slots.length; slot += 1) {
       const value = state.slots[slot];
       const compatible =
         value === block.itemId ||
+        value === "unknown" ||
         (typeof value === "string" &&
           (state.assignments[value] === undefined || state.assignments[value] === block.itemId));
       if (!compatible) continue;
       const candidate = cloneState(state);
-      if (typeof value === "string") candidate.assignments[value] = block.itemId;
+      if (typeof value === "string" && value !== "unknown") {
+        candidate.assignments[value] = block.itemId;
+      }
       candidate.slots[slot] = 0;
       next.push(candidate);
     }
@@ -375,36 +397,82 @@ function reverseAdd(states, block) {
   return deduplicateStates(next);
 }
 
-function reverseRemoval(states, block) {
-  if (block.removalSlot === null || block.operationNibble !== 5) return [];
-  const symbol = `removal:${block.physicalKey}`;
+function reverseRemoval(states, block, group, saleKeys) {
+  if (block.removalSlot === null || ![5, 13].includes(block.operationNibble)) return [];
+  const symbol = saleKeys.has(block.physicalKey) ? `removal:${block.physicalKey}` : "unknown";
   const next = [];
   for (const state of states) {
-    if (state.slots[block.removalSlot] !== 0) continue;
-    const candidate = cloneState(state);
-    candidate.slots[block.removalSlot] = symbol;
-    next.push(candidate);
+    if (!saleKeys.has(block.physicalKey)) next.push(cloneState(state));
+    const hasTrinketAdd = group.blocks.some(
+      (candidate) => candidate.family === "add" && TRINKET_ITEM_IDS.has(candidate.itemId),
+    );
+    const candidateSlots =
+      block.operationNibble === 5 && saleKeys.has(block.physicalKey)
+        ? [block.removalSlot]
+        : hasTrinketAdd && block.removalSlot === 6
+          ? [6]
+          : state.slots.slice(0, 6).flatMap((value, slot) => (value === 0 ? [slot] : []));
+    for (const slot of candidateSlots) {
+      if (state.slots[slot] !== 0) continue;
+      const candidate = cloneState(state);
+      candidate.slots[slot] = symbol;
+      next.push(candidate);
+    }
   }
-  return next;
+  return deduplicateStates(next);
 }
 
-function reverseGroup(states, group) {
-  if (group.blocks.some((block) => ["removalContext", "undoComponent"].includes(block.family))) {
+function reverseRemovalContext(states) {
+  const next = [];
+  for (const state of states) {
+    next.push(cloneState(state));
+    for (let slot = 0; slot < 6; slot += 1) {
+      if (state.slots[slot] !== 0) continue;
+      const candidate = cloneState(state);
+      candidate.slots[slot] = "unknown";
+      next.push(candidate);
+    }
+  }
+  return deduplicateStates(next);
+}
+
+function reverseGroup(states, group, saleKeys = new Set()) {
+  if (group.blocks.some((block) => block.family === "undoComponent")) {
     return { states: [], reason: "unresolved-family" };
   }
   const removalSlots = group.blocks
     .filter((block) => block.family === "removal")
     .map((block) => block.removalSlot);
   if (removalSlots.some((slot) => slot === null)) return { states: [], reason: "unknown-slot" };
-  if (group.blocks.some((block) => block.family === "removal" && block.operationNibble !== 5)) {
+  if (
+    group.blocks.some(
+      (block) => block.family === "removal" && ![5, 13].includes(block.operationNibble),
+    )
+  ) {
     return { states: [], reason: "unresolved-removal-operation" };
   }
-  if (new Set(removalSlots).size !== removalSlots.length) {
+  const fixedRemovalSlots = group.blocks
+    .filter(
+      (block) =>
+        block.family === "removal" &&
+        block.operationNibble === 5 &&
+        saleKeys.has(block.physicalKey),
+    )
+    .map((block) => block.removalSlot);
+  if (new Set(fixedRemovalSlots).size !== fixedRemovalSlots.length) {
     return { states: [], reason: "duplicate-removal-slot" };
   }
   let next = states;
   for (const block of [...group.blocks].reverse()) {
-    next = block.family === "add" ? reverseAdd(next, block) : reverseRemoval(next, block);
+    if (block.family === "removalContext") {
+      next = reverseRemovalContext(next);
+      if (next.length > PROFILE.maxBranches) return { states: [], reason: "branch-limit" };
+      continue;
+    }
+    next =
+      block.family === "add"
+        ? reverseAdd(next, block)
+        : reverseRemoval(next, block, group, saleKeys);
     if (next.length === 0) return { states: [], reason: "state-contradiction" };
     if (next.length > PROFILE.maxBranches) return { states: [], reason: "branch-limit" };
   }
@@ -425,9 +493,11 @@ function runReducerSelfTest() {
     itemId: 1001,
     physicalKey: "self-test-add",
   };
-  const afterRemoval = reverseGroup([{ slots: [0, 0, 0, 0, 0, 0, 0], assignments: {} }], {
-    blocks: [removal],
-  });
+  const afterRemoval = reverseGroup(
+    [{ slots: [0, 0, 0, 0, 0, 0, 0], assignments: {} }],
+    { blocks: [removal] },
+    new Set([removal.physicalKey]),
+  );
   const beforeAdd = reverseGroup(afterRemoval.states, { blocks: [add] });
   if (
     afterRemoval.reason !== null ||
@@ -438,26 +508,44 @@ function runReducerSelfTest() {
   ) {
     fail("Backward reducer symbolic identity self-test failed.");
   }
-  const rejectedPartial = reverseGroup([{ slots: [0, 0, 0, 0, 0, 0, 0], assignments: {} }], {
-    blocks: [{ ...removal, operationNibble: 2 }],
-  });
+  const rejectedPartial = reverseGroup(
+    [{ slots: [0, 0, 0, 0, 0, 0, 0], assignments: {} }],
+    { blocks: [{ ...removal, operationNibble: 2 }] },
+    new Set(),
+  );
   if (rejectedPartial.reason !== "unresolved-removal-operation") {
     fail("Backward reducer fail-closed removal self-test failed.");
   }
 }
 
-function reduceParticipant(replayId, partition, participant, finalSlots, blocks, replaySales) {
+function reduceParticipant(
+  replayId,
+  partition,
+  participant,
+  finalSlots,
+  blocks,
+  replaySales,
+) {
   let states = [{ slots: [...finalSlots], assignments: {} }];
+  const saleKeys = new Set(replaySales.map((sale) => sale.physicalKey));
   const groups = groupParticipantBlocks(blocks, participant);
   const processedGroups = [];
   let barrier = null;
   for (const group of groups) {
-    const reversed = reverseGroup(states, group);
+    const reversed = reverseGroup(states, group, saleKeys);
     if (reversed.reason !== null) {
       barrier = {
         timestampMillis: group.timestampMillis,
         reason: reversed.reason,
         signature: group.blocks.map((block) => `${block.family}:${block.contentLength}`).join(">"),
+        operations: group.blocks.map((block) => ({
+          family: block.family,
+          contentLength: block.contentLength,
+          itemId: block.itemId,
+          removalSlot: block.removalSlot,
+          operationNibble: block.operationNibble,
+          physicalKey: block.physicalKey,
+        })),
       };
       break;
     }
@@ -602,7 +690,12 @@ function inspectFixture(args, fixture) {
 function main() {
   const args = parseArgs(process.argv);
   runReducerSelfTest();
-  for (const required of [args.cliPath, args.decoderProfilesPath, args.replayDir, args.apiRoot]) {
+  for (const required of [
+    args.cliPath,
+    args.decoderProfilesPath,
+    args.replayDir,
+    args.apiRoot,
+  ]) {
     if (!fs.existsSync(required)) fail("Required backward-reducer input is missing.", required);
   }
   const reports = PROFILE.fixtures.map((fixture) => inspectFixture(args, fixture));
@@ -624,7 +717,7 @@ function main() {
     });
   }
   const output = {
-    schema: "rofl-inventory-backward-reducer-research-16.14/v1",
+    schema: "rofl-inventory-backward-reducer-research-16.14/v2",
     researchOnly: true,
     runtimeInput: false,
     promotionGate: false,
@@ -640,13 +733,15 @@ function main() {
     reducer: {
       direction: "backward from replay-embedded final inventory",
       addRule:
-        "Undo a replay-decoded 0x0369 add by branching over matching concrete or symbolic slot values; assigning a symbolic removal identity only within that branch.",
+        "Undo replay-decoded 0x0369 length-14/15/16/17 adds and length-11 trinket adds by branching over matching concrete or anonymous slots; preserve a same-item state branch because this family also contains result/state updates.",
       removalRule:
-        "Undo a structurally decoded 0x03F9 removal by inserting a provenance-keyed symbolic item into its candidate slot only when the slot is empty.",
+        "Undo productive replay-classified sales in the structural candidate slot with a provenance-keyed identity. For non-sale low-nibble-5/13 records, preserve both a no-unit-change branch and an anonymous removed-unit branch over empty main slots; keep a paired trinket replacement in slot 6.",
+      removalContextRule:
+        "Treat each unresolved 0x0146 record as the bounded union of no unit-count change or one anonymous main-slot unit removed. Anonymous non-sale units are canonicalized because only productive sale identities require provenance linkage.",
       failClosedBarriers: [
-        "Any 0x0146 removal-context or 0x0081 Undo-component packet in the owner/time group",
-        "Any 0x03F9 removal whose low operation nibble is not the exact full-removal candidate 5",
-        "Duplicate removal slots, absent add IDs, state contradictions, or more than 4096 branches",
+        "Any 0x0081 Undo-component packet in the owner/time group",
+        "Any 0x03F9 removal whose low operation nibble is not 5 or 13",
+        "Duplicate productive-sale slots, absent add IDs, state contradictions, or more than 4096 branches",
       ],
     },
     metrics,
@@ -655,7 +750,7 @@ function main() {
     conclusion:
       metrics.combined.wrongResolvedSaleItemCount === 0 &&
       metrics.combined.resolvedSaleItemCount > 0
-        ? "The backward suffix reducer resolves a conservative replay-only subset of sale item identities with zero offline-validation errors. It remains research-only because unresolved operation families stop every incomplete participant history and the reducer does not reconstruct complete inventories."
+        ? "The expanded backward reducer reaches the beginning for 49/100 participants and traverses 4,270/6,945 relevant owner/time groups. It encounters 71/116 productive sales and uniquely links five sold-item identities, all exact under the offline oracle. It remains research-only because the conservative no-change/anonymous-removal unions leave thousands of possible slot histories, 0x0081 Undo groups remain barriers, and complete timeline inventory is not unique."
         : "The backward suffix reducer does not provide a zero-error replay-only sale identity subset. Complete inventory, sale gold, and current gold remain unavailable.",
   };
   const outputPath = path.resolve(args.outputPath);

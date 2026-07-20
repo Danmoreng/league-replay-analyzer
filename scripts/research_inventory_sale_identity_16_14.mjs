@@ -326,10 +326,12 @@ function inspectReplay(args, replayId, partition, items) {
       );
     })
     .map((block) => {
-      const records = decodeKeyframeShopRecords(Buffer.from(block.contentHex, "hex"), validItemIds);
+      const statePayload = Buffer.from(block.contentHex, "hex");
+      const records = decodeKeyframeShopRecords(statePayload, validItemIds);
       return {
         participantId: block.blockParam - PROFILE.championOwnerBase,
         timestampMillis: block.timestampMillis,
+        payloadHex: block.contentHex,
         items: records.map((record) => record.itemId),
         records,
       };
@@ -444,6 +446,7 @@ function inspectReplay(args, replayId, partition, items) {
       pairedAddPayloadHex: priorMatchingAdds.length === 1 ? priorMatchingAdds[0].payloadHex : null,
       precedingKeyframeItems: precedingKeyframe?.items ?? [],
       precedingKeyframeTimestampMillis: precedingKeyframe?.timestampMillis ?? null,
+      precedingKeyframePayloadHex: precedingKeyframe?.payloadHex ?? null,
       interveningItemEventCount: interveningItemEvents.length,
       interveningItemEventTypes: interveningItemEvents.map((event) => event.type),
       interveningRemovalContextCount: interveningRemovalContexts.length,
@@ -462,6 +465,9 @@ function inspectReplay(args, replayId, partition, items) {
       keyframeTruthOrdinal: precedingTruthOrdinals.length === 1 ? precedingTruthOrdinals[0] : null,
       precedingKeyframeRecords: precedingKeyframe?.records ?? [],
       followingKeyframeItems: followingKeyframe?.items ?? [],
+      followingKeyframeTimestampMillis: followingKeyframe?.timestampMillis ?? null,
+      followingKeyframePayloadHex: followingKeyframe?.payloadHex ?? null,
+      followingKeyframeRecords: followingKeyframe?.records ?? [],
       disappearedKeyframeItems,
     });
   }
@@ -902,6 +908,9 @@ function main() {
       ({ payload: _payload, pairedAddPayload: _pairedAddPayload, ...row }) => ({
         ...row,
         precedingKeyframeRecords: row.precedingKeyframeRecords.map(
+          ({ payload: _recordPayload, ...record }) => record,
+        ),
+        followingKeyframeRecords: row.followingKeyframeRecords.map(
           ({ payload: _recordPayload, ...record }) => record,
         ),
       }),

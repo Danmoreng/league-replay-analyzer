@@ -848,24 +848,27 @@ read through the productive validated summary. It then walks the four profiled
 item families backward with exact participant, timestamp, source order, and
 packet provenance:
 
-- a decoded `0x0369` add is undone only by removing its item from a compatible
-  concrete or symbolic slot;
-- a low-nibble-`5` `0x03F9` removal is undone only by restoring a unique
-  provenance-keyed symbol into its candidate slot when that slot is empty;
+- decoded `0x0369` lengths 14/15/16/17 and length-11 trinket adds are undone by
+  removing the item from compatible concrete or anonymous slots; a same-item
+  branch remains because the family also contains result/state updates;
+- productive sales restore a provenance-keyed symbol in their structural slot;
+  non-sale low-nibble-5/13 removals branch between no unit-count change and one
+  anonymous removed unit over empty main slots;
+- unresolved `0x0146` records use the same bounded no-change/anonymous-removal
+  union, and equivalent anonymous non-sale states are canonicalized;
 - productive `rofl-replay-item-sales/v1` provenance marks which symbols are
   sale candidates;
-- `0x0146`, chunk `0x0081`, non-`5` removal operations, duplicate candidate
-  slots, unknown add symbols, state contradictions, and excessive branching
-  stop the participant track instead of being guessed.
+- chunk `0x0081`, removal nibbles other than 5/13, unknown add symbols, state
+  contradictions, and excessive branching stop the participant track.
 
 The symbolic reducer has an always-run synthetic identity/linkage self-test.
-Its corpus gate covers 4,645 D7 and 2,273 H3 relevant owner/time groups. The
-final-state suffix reaches only 24 D7 and two H3 groups. Fifty D7 and 23 H3
-tracks stop at `0x0146`/Undo-component groups; another 20 D7 and seven H3 stop
-at an unresolved removal operation. Four of 77 D7 sales are encountered, zero
-of 39 H3 sales are encountered, and no sale symbol can be linked back to an
-earlier decoded add. Offline Timeline validation therefore records
-`0 exact / 0 wrong / 116 unavailable` sold-item identities.
+Its corpus gate covers 4,665 D7 and 2,280 H3 relevant owner/time groups after
+the newly included add lengths. It reverses 3,026 D7 plus 1,244 H3 groups and
+reaches the beginning for 35/70 D7 plus 14/30 H3 tracks. It encounters 47/77
+D7 and 24/39 H3 sales. Three D7 and two H3 sale identities bind uniquely to an
+earlier replay add; the offline oracle records `5 exact / 0 wrong / 111
+unavailable`. Twenty tracks hit the 4,096-state cap, and even beginning-reaching
+tracks retain hundreds or thousands of candidate histories.
 
 ```bash
 node scripts/research_inventory_backward_reducer_16_14.mjs \
@@ -874,10 +877,11 @@ node scripts/research_inventory_backward_reducer_16_14.mjs \
   --output tmp/inventory-backward-reducer-research-16.14.json
 ```
 
-This rejects final-state anchoring as a shortcut around unresolved operation
-semantics. It does not reject a future reducer after `0x0146`, non-sale
-`0x03F9`, add placement, swaps, counts, and instances are decoded. No sold item,
-sale price, current-gold correction, or dynamic inventory state is promoted.
+This proves that missing consumption/update alternatives were a major reason
+the original backward trace stopped, and that final anchoring can link a small
+sale-identity subset. It does not make those alternatives unique or decode
+`0x0081`, add placement, swaps, counts, and instances. No sold item, sale price,
+current-gold correction, or dynamic inventory state is promoted.
 
 ### Timeline-oracle backward slot diagnostic
 

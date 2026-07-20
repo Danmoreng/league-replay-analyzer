@@ -71,12 +71,13 @@ are outside scope even when described by historical community work.
   absent in Timeline, and checks later replay operations before rejecting a
   direct current-slot interpretation on D7 and frozen H3.
 - `scripts/research_inventory_forward_slot_reducer_16_14.mjs` tests the bounded
-  cross-product of four removal-nibble sets, duplicate handling, trinket
-  protection, and four deterministic add-slot placement rules from an empty
-  inventory against replay-embedded final slots. The best D7-selected rule gets
-  283/420 D7 and 118/180 H3 main-slot cells right but closes zero complete D7
-  or H3 participant tracks, proving that item identity plus the structural
-  removal-slot candidate is not yet a complete operation grammar.
+  cross-product of add-length sets, four removal-nibble sets, duplicate
+  handling, trinket protection, and four deterministic add-slot placement
+  rules against replay-embedded final slots. Length-11 trinkets and rare
+  length-16/17 adds improve the replay-only candidate to 9/70 D7 and 5/30 H3
+  exact final slot tracks. A provisional static initial-trinket seed reaches
+  10/70 and 6/30 but is explicitly non-promotable. Symbolic placement reaches
+  23/70 and 13/30 final anchors while retaining non-unique histories.
 - `scripts/research_inventory_add_slot_companions_16_14.mjs` exhausts the
   same-owner `+/-1 ms` packet-family/direct-bit-field search around 181 strict
   add/historical-record anchors; only `0x0369` has complete D7 support and it
@@ -86,9 +87,11 @@ are outside scope even when described by historical community work.
   swap labels through missing operation families and contradictory repeated
   `0x0146` payloads.
 - `scripts/research_inventory_backward_reducer_16_14.mjs` starts from embedded
-  replay-final seven-slot inventories and reverses conservative symbolic
-  add/removal suffixes; it reaches four of 116 sales but resolves zero item
-  identities before fail-closed operation barriers.
+  replay-final seven-slot inventories and reverses expanded symbolic
+  add/removal/context histories. It reaches the beginning for 49/100 tracks,
+  encounters 71/116 sales, and uniquely resolves five sale identities with
+  `5 exact / 0 wrong` offline validation, but retains thousands of ambiguous
+  slot histories and leaves Undo semantics unresolved.
 - `scripts/research_inventory_timeline_oracle_backward_slots_16_14.mjs` uses
   saved Timeline identities only as an offline diagnostic around replay-final
   slots and `0x03F9` candidate slots. Its exact balance gate proves Timeline

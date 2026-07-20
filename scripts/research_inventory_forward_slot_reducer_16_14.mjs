@@ -27,35 +27,87 @@ const PROFILE = Object.freeze({
 });
 
 const EXPECTED_BEST = Object.freeze({
+  addLengths: Object.freeze([11, 14, 15, 16, 17]),
+  initialTrinketItemId: 3340,
   removalNibbles: Object.freeze([5, 13]),
   placement: "lowestEmpty",
   ignoreExisting: false,
-  protectTrinketSlot: false,
+  protectTrinketSlot: true,
   discovery: Object.freeze({
     trackCount: 70,
-    exactSlotTrackCount: 0,
-    exactMultisetTrackCount: 0,
-    exactSlotCellCount: 283,
-    exactMainSlotCellCount: 283,
-    exactTrinketSlotCount: 0,
+    exactSlotTrackCount: 10,
+    exactMultisetTrackCount: 14,
+    exactSlotCellCount: 353,
+    exactMainSlotCellCount: 284,
+    exactTrinketSlotCount: 69,
     unavailableAddCount: 0,
     ignoredExistingAddCount: 0,
-    overflowAddCount: 93,
-    occupiedRemovalCount: 1070,
-    emptyRemovalCount: 220,
+    overflowAddCount: 218,
+    occupiedRemovalCount: 1043,
+    emptyRemovalCount: 101,
   }),
   holdout: Object.freeze({
     trackCount: 30,
-    exactSlotTrackCount: 0,
-    exactMultisetTrackCount: 0,
-    exactSlotCellCount: 118,
-    exactMainSlotCellCount: 118,
-    exactTrinketSlotCount: 0,
+    exactSlotTrackCount: 6,
+    exactMultisetTrackCount: 6,
+    exactSlotCellCount: 149,
+    exactMainSlotCellCount: 119,
+    exactTrinketSlotCount: 30,
     unavailableAddCount: 0,
     ignoredExistingAddCount: 0,
-    overflowAddCount: 93,
-    occupiedRemovalCount: 665,
-    emptyRemovalCount: 115,
+    overflowAddCount: 169,
+    occupiedRemovalCount: 638,
+    emptyRemovalCount: 57,
+  }),
+});
+
+const EXPECTED_REPLAY_ONLY = Object.freeze({
+  addLengths: Object.freeze([11, 14, 15, 16, 17]),
+  initialTrinketItemId: 0,
+  removalNibbles: Object.freeze([5, 13]),
+  placement: "lowestEmpty",
+  ignoreExisting: false,
+  protectTrinketSlot: true,
+  discovery: Object.freeze({
+    trackCount: 70,
+    exactSlotTrackCount: 9,
+    exactMultisetTrackCount: 12,
+    exactSlotCellCount: 337,
+    exactMainSlotCellCount: 284,
+    exactTrinketSlotCount: 53,
+    unavailableAddCount: 0,
+    ignoredExistingAddCount: 0,
+    overflowAddCount: 186,
+    occupiedRemovalCount: 1031,
+    emptyRemovalCount: 113,
+  }),
+  holdout: Object.freeze({
+    trackCount: 30,
+    exactSlotTrackCount: 5,
+    exactMultisetTrackCount: 5,
+    exactSlotCellCount: 143,
+    exactMainSlotCellCount: 119,
+    exactTrinketSlotCount: 24,
+    unavailableAddCount: 0,
+    ignoredExistingAddCount: 0,
+    overflowAddCount: 151,
+    occupiedRemovalCount: 633,
+    emptyRemovalCount: 62,
+  }),
+});
+
+const EXPECTED_SYMBOLIC = Object.freeze({
+  discovery: Object.freeze({
+    trackCount: 70,
+    exactTrackCount: 23,
+    overflowedTrackCount: 1,
+    maxPeakStateCount: 50002,
+  }),
+  holdout: Object.freeze({
+    trackCount: 30,
+    exactTrackCount: 13,
+    overflowedTrackCount: 0,
+    maxPeakStateCount: 19032,
   }),
 });
 
@@ -213,14 +265,20 @@ function dumpOperations(args, replayPath) {
       const participantId = block.blockParam - PROFILE.championOwnerBase;
       if (block.channel !== 1 || participantId < 1 || participantId > 10) continue;
       const payload = Buffer.from(block.contentHex, "hex");
-      if (block.packetType === PROFILE.addPacketType && [14, 15].includes(payload.length)) {
+      const decodedItemId =
+        block.packetType === PROFILE.addPacketType ? decodeAddItemId(payload) : null;
+      const isInventoryAdd =
+        [14, 15, 16, 17].includes(payload.length) ||
+        (payload.length === 11 && TRINKET_ITEM_IDS.has(decodedItemId));
+      if (block.packetType === PROFILE.addPacketType && isInventoryAdd) {
         operations.push({
           participantId,
           timestampMillis: block.timestampMillis,
           sourceOffset: block.sourceOffset,
           blockIndex: block.blockIndex,
           family: "add",
-          itemId: decodeAddItemId(payload),
+          itemId: decodedItemId,
+          contentLength: payload.length,
           slot: null,
           operationNibble: null,
         });
@@ -278,13 +336,17 @@ function nextAddSlot(slots, removedSlots, placement) {
 
 function reduceTrack(operations, candidate) {
   const slots = Array(7).fill(0);
+  slots[6] = candidate.initialTrinketItemId;
   let unavailableAddCount = 0;
   let ignoredExistingAddCount = 0;
   let overflowAddCount = 0;
   let occupiedRemovalCount = 0;
   let emptyRemovalCount = 0;
   for (const group of groupOperations(operations)) {
-    const adds = group.filter((operation) => operation.family === "add");
+    const adds = group.filter(
+      (operation) =>
+        operation.family === "add" && candidate.addLengths.includes(operation.contentLength),
+    );
     const hasTrinketAdd = adds.some((operation) => TRINKET_ITEM_IDS.has(operation.itemId));
     const removals = group.filter(
       (operation) =>
@@ -335,6 +397,113 @@ function reduceTrack(operations, candidate) {
 
 function sameMultiset(left, right) {
   return [...left].sort((a, b) => a - b).join(",") === [...right].sort((a, b) => a - b).join(",");
+}
+
+function symbolicTrack(track, candidate, stateLimit = 50_000) {
+  let states = new Map();
+  const initial = Array(7).fill(0);
+  initial[6] = candidate.initialTrinketItemId;
+  states.set(initial.join(","), initial);
+  let peakStateCount = 1;
+  for (const group of groupOperations(track.operations)) {
+    const groupAdds = group.filter(
+      (operation) =>
+        operation.family === "add" && candidate.addLengths.includes(operation.contentLength),
+    );
+    const hasTrinketAdd = groupAdds.some((operation) => TRINKET_ITEM_IDS.has(operation.itemId));
+    const removals = group.filter(
+      (operation) =>
+        operation.family === "remove" &&
+        candidate.removalNibbles.includes(operation.operationNibble) &&
+        (!candidate.protectTrinketSlot || operation.slot !== 6 || hasTrinketAdd),
+    );
+    const adds = groupAdds;
+    const nextStates = new Map();
+    for (const slots of states.values()) {
+      let groupStates = [[...slots]];
+      for (const removal of removals) {
+        if (removal.slot === null) continue;
+        const removed = new Map();
+        for (const state of groupStates) {
+          const candidateSlots =
+            candidate.branchMainRemovals && removal.slot < 6
+              ? [removal.slot, ...state.slice(0, 6).flatMap((itemId, slot) => (itemId ? [slot] : []))]
+              : [removal.slot];
+          for (const slot of new Set(candidateSlots)) {
+            const next = [...state];
+            next[slot] = 0;
+            removed.set(next.join(","), next);
+          }
+        }
+        groupStates = [...removed.values()];
+      }
+      for (const add of adds) {
+        if (!Number.isInteger(add.itemId) || add.itemId <= 0) continue;
+        const expanded = [];
+        for (const state of groupStates) {
+          if (TRINKET_ITEM_IDS.has(add.itemId)) {
+            const next = [...state];
+            next[6] = add.itemId;
+            expanded.push(next);
+            continue;
+          }
+          for (let slot = 0; slot < 6; slot += 1) {
+            if (state[slot] !== 0) continue;
+            const next = [...state];
+            next[slot] = add.itemId;
+            expanded.push(next);
+          }
+          if (candidate.allowExistingUpdate && state.includes(add.itemId)) {
+            expanded.push(state);
+          }
+          if (candidate.allowFullInventoryUpdate && state.slice(0, 6).every(Boolean)) {
+            expanded.push(state);
+          }
+        }
+        groupStates = expanded;
+        if (groupStates.length === 0) break;
+      }
+      for (const state of groupStates) nextStates.set(state.join(","), state);
+      if (nextStates.size > stateLimit) {
+        return { exact: false, overflowed: true, peakStateCount: nextStates.size };
+      }
+    }
+    if (nextStates.size === 0) {
+      return { exact: false, overflowed: false, peakStateCount };
+    }
+    states = nextStates;
+    peakStateCount = Math.max(peakStateCount, states.size);
+  }
+  return {
+    exact: states.has(track.finalSlots.join(",")),
+    overflowed: false,
+    peakStateCount,
+    finalCandidateCount: states.size,
+  };
+}
+
+function scoreSymbolicTracks(tracks, candidate) {
+  const rows = tracks.map((track) => ({
+    replayId: track.replayId,
+    participantId: track.participantId,
+    ...symbolicTrack(track, candidate),
+  }));
+  return {
+    trackCount: rows.length,
+    exactTrackCount: rows.filter((row) => row.exact).length,
+    overflowedTrackCount: rows.filter((row) => row.overflowed).length,
+    maxPeakStateCount: Math.max(...rows.map((row) => row.peakStateCount)),
+    rows,
+  };
+}
+
+function symbolicSummary(score) {
+  return {
+    trackCount: score.trackCount,
+    exactTrackCount: score.exactTrackCount,
+    overflowedTrackCount: score.overflowedTrackCount,
+    maxPeakStateCount: score.maxPeakStateCount,
+  };
 }
 
 function scoreTracks(tracks, candidate) {
@@ -396,24 +565,35 @@ function main() {
     }
   }
   const candidates = [];
-  for (const removalNibbles of [[2, 5, 13], [5, 13], [2, 5], [5]]) {
-    for (const ignoreExisting of [false, true]) {
-      for (const protectTrinketSlot of [false, true]) {
-        for (const placement of [
-          "lowestEmpty",
-          "removedPhysical",
-          "removedReverse",
-          "removedAscending",
-        ]) {
-          const candidate = { removalNibbles, placement, ignoreExisting, protectTrinketSlot };
-          const discovery = scoreTracks(
-            tracks.filter((track) => track.partition === "D7"),
-            candidate,
-          );
-          candidates.push({
-            ...candidate,
-            discovery: { ...discovery, rows: undefined },
-          });
+  for (const addLengths of [[14, 15], [11, 14, 15], [11, 14, 15, 16, 17]]) {
+    for (const initialTrinketItemId of [0, 3340]) {
+      for (const removalNibbles of [[2, 5, 13], [5, 13], [2, 5], [5]]) {
+        for (const ignoreExisting of [false, true]) {
+          for (const protectTrinketSlot of [false, true]) {
+            for (const placement of [
+              "lowestEmpty",
+              "removedPhysical",
+              "removedReverse",
+              "removedAscending",
+            ]) {
+              const candidate = {
+                addLengths,
+                initialTrinketItemId,
+                removalNibbles,
+                placement,
+                ignoreExisting,
+                protectTrinketSlot,
+              };
+              const discovery = scoreTracks(
+                tracks.filter((track) => track.partition === "D7"),
+                candidate,
+              );
+              candidates.push({
+                ...candidate,
+                discovery: { ...discovery, rows: undefined },
+              });
+            }
+          }
         }
       }
     }
@@ -440,14 +620,55 @@ function main() {
   if (JSON.stringify(best) !== JSON.stringify(EXPECTED_BEST)) {
     fail("Frozen forward reducer metrics drifted.", { expected: EXPECTED_BEST, actual: best });
   }
+  const replayOnlyCandidate = evaluatedCandidates.find(
+    (candidate) =>
+      candidate.initialTrinketItemId === 0 &&
+      candidate.addLengths.join(",") === "11,14,15,16,17" &&
+      candidate.removalNibbles.join(",") === "5,13" &&
+      candidate.placement === "lowestEmpty" &&
+      candidate.ignoreExisting === false &&
+      candidate.protectTrinketSlot === true,
+  );
+  if (JSON.stringify(replayOnlyCandidate) !== JSON.stringify(EXPECTED_REPLAY_ONLY)) {
+    fail("Frozen replay-only forward reducer metrics drifted.", {
+      expected: EXPECTED_REPLAY_ONLY,
+      actual: replayOnlyCandidate,
+    });
+  }
+  const symbolicCandidate = {
+    ...best,
+    allowExistingUpdate: true,
+    allowFullInventoryUpdate: true,
+    branchMainRemovals: false,
+  };
+  const symbolicFinalAnchor = {
+    discovery: scoreSymbolicTracks(
+      tracks.filter((track) => track.partition === "D7"),
+      symbolicCandidate,
+    ),
+    holdout: scoreSymbolicTracks(
+      tracks.filter((track) => track.partition === "H3"),
+      symbolicCandidate,
+    ),
+  };
+  const symbolicMetrics = {
+    discovery: symbolicSummary(symbolicFinalAnchor.discovery),
+    holdout: symbolicSummary(symbolicFinalAnchor.holdout),
+  };
+  if (JSON.stringify(symbolicMetrics) !== JSON.stringify(EXPECTED_SYMBOLIC)) {
+    fail("Frozen symbolic final-anchor metrics drifted.", {
+      expected: EXPECTED_SYMBOLIC,
+      actual: symbolicMetrics,
+    });
+  }
   const output = {
-    schema: "rofl-inventory-forward-slot-reducer-research-16.14/v1",
+    schema: "rofl-inventory-forward-slot-reducer-research-16.14/v2",
     researchOnly: true,
     runtimeInput: false,
     promotionGate: false,
     exactReplayBuild: PROFILE.exactReplayBuild,
     replayOnlyInputs: [
-      "Champion-owned 0x0369 length-14/15 add packets with the frozen 13-bit item grammar",
+      "Champion-owned 0x0369 length-14/15/16/17 add packets plus length-11 packets restricted to decoded trinket identities, all using the frozen 13-bit item grammar",
       "Champion-owned 0x03F9 length-6/7 removal packets with the seven-value slot candidate",
       "Replay-embedded validated final seven-slot inventory for evaluation only",
     ],
@@ -457,8 +678,12 @@ function main() {
       ...best,
       combinedRows: scoreTracks(tracks, best).rows,
     },
+    provisionalInitialTrinketAssumption:
+      "The overall best candidate seeds item 3340 in slot 6. This is a static gameplay assumption, not replay-native state, and cannot be promoted.",
+    replayOnlyCandidate,
+    symbolicFinalAnchor,
     conclusion:
-      "A deterministic forward reducer over the known add identity and removal-slot candidates does not reconstruct complete final inventories. The scored variants bound the simple remove/add placement rules before a stateful operation grammar is attempted.",
+      "Expanded 0x0369 coverage and trinket handling materially improve final-state reconstruction but do not close the inventory grammar. Without a fabricated initial trinket, the deterministic replay-only candidate exactly reconstructs 9/70 D7 and 5/30 H3 slot tracks. A symbolic add-placement solver reaches 23/70 D7 and 13/30 H3 final anchors, but one D7 track exceeds 50,000 states and no replay-native initial trinket or unique timeline slot history is available.",
   };
   const outputPath = path.resolve(args.outputPath);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
