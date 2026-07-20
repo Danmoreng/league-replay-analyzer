@@ -8,10 +8,11 @@ neutral/jungle CS for every exact replay build represented by the saved
 external decoder profile. Saved Riot Timeline fixtures are offline validation
 labels only.
 
-Historical profiles intentionally emit `experience`, `level`, and `totalGold`
-as `null`. Exact build `16.14.794.5912` retains its separately validated XP,
-derived-level, and cumulative-total-gold fields. Current spendable gold remains
-unavailable.
+All historical profiles now emit separately validated replay-native XP and
+derived level. Historical `totalGold` remains `null`; exact build
+`16.14.794.5912` retains its cumulative-total-gold field. Current spendable
+gold remains unavailable. See `keyframe-xp-vitals-cross-patch.md` for the XP
+promotion gate and the bounded health/resource negative result.
 
 ## Supported exact builds and layouts
 
@@ -28,13 +29,14 @@ unavailable.
 | 16.14 | `16.14.794.5912` | `0x02EB` / 1,479 | `[123,125,127,129]` | `[131,133,135,137]` |
 
 The raw cipher-to-plain permutation is patch-specific. It does not transfer
-between these groups. Six families have a complete 256-symbol table. The saved
-15.24, 16.1, and 16.5 data leave respectively 52, 3, and 18 table entries
-unresolved, but only three, one, and three unresolved raw symbols occur in the
-CS fields. Profiles retain bounded plain-byte domains for those symbols. The
-runtime enumerates the domains and emits an integer only when every injective
-assignment produces the same projection. A missing domain, divergent result,
-invalid value, or excessive search fails the complete snapshot stream closed.
+between these groups. Six families have a complete 256-symbol table. The XP
+promotion further constrains the partial families: 15.24 has 240 known mappings
+plus nine bounded domains, 16.5 has 249 known mappings plus six bounded domains,
+and the single unresolved 16.1 mapping does not occur in any promoted stat
+field. The runtime enumerates domains and emits an integer only when every
+injective assignment produces the same projection. A missing domain, divergent
+result, invalid value, or excessive search fails the complete snapshot stream
+closed.
 
 Jungle CS uses `floor(Float32 + 1e-5)` except for 16.9, whose frozen projection
 is `floor(Float32 + 2e-5)`. Lane CS must project to an exact nonnegative integer.
@@ -48,8 +50,10 @@ all 57 saved replays:
 - 16,751 / 16,760 lane-CS snapshots exact
 - the remaining nine lane-CS snapshots are monotonic replay values between the
   current and next API frame, matching the frozen same-keyframe ordering rule
-- zero unaccepted lane mismatches, jungle mismatches, unknown emitted values,
-  or monotonic regressions
+- XP is 16,746 exact plus 14 accepted ordering boundaries; level is 16,759
+  exact plus one accepted ordering boundary
+- zero unaccepted stat mismatches, unknown emitted values, or monotonic
+  regressions
 
 Reproduce the research selection and productive corpus gate on Linux:
 

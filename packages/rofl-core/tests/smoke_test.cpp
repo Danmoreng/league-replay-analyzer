@@ -1506,7 +1506,7 @@ std::string keyframe_participant_stats_profile_json() {
         if (value > 0) output << ',';
         output << value;
     }
-    output << R"json(],"experienceOffsets":[83,85,87,89],"totalGoldOffsets":[115,117,119,121],"laneMinionsKilledOffsets":[123,125,127,129],"neutralMinionsKilledOffsets":[131,133,135,137],"neutralMinionsKilledProjection":"floor-plus-1e-5"}}]})json";
+    output << R"json(],"experienceOffsets":[83,85,87,89],"experienceProjection":"float32","totalGoldOffsets":[115,117,119,121],"laneMinionsKilledOffsets":[123,125,127,129],"neutralMinionsKilledOffsets":[131,133,135,137],"neutralMinionsKilledProjection":"floor-plus-1e-5"}}]})json";
     return output.str();
 }
 
@@ -1667,6 +1667,7 @@ bool test_decoder_profile_registry_loader() {
         }
         output << R"json(],
                     "experienceOffsets":[83,85,87,89],
+                    "experienceProjection":"float32",
                     "totalGoldOffsets":[115,117,119,121],
                     "laneMinionsKilledOffsets":[123,125,127,129],
                     "neutralMinionsKilledOffsets":[131,133,135,137],
@@ -1702,6 +1703,7 @@ bool test_decoder_profile_registry_loader() {
         !keyframe_stats.experience_offsets.has_value() ||
         *keyframe_stats.experience_offsets !=
             std::array<std::size_t, 4>{83, 85, 87, 89} ||
+        keyframe_stats.experience_projection != "float32" ||
         !keyframe_stats.total_gold_offsets.has_value() ||
         *keyframe_stats.total_gold_offsets !=
             std::array<std::size_t, 4>{115, 117, 119, 121} ||

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-// Full saved-corpus promotion gate for the productive replay-native CS ABI.
+// Full saved-corpus promotion gate for the productive replay-native XP/level
+// and CS ABI.
 // Riot Timeline files are offline labels only and are never runtime inputs.
 
 import { spawnSync } from "node:child_process";
@@ -38,6 +39,10 @@ const totals = {
   laneExactCount: 0,
   laneOrderingBoundaryCount: 0,
   jungleExactCount: 0,
+  xpExactCount: 0,
+  xpOrderingBoundaryCount: 0,
+  levelExactCount: 0,
+  levelOrderingBoundaryCount: 0,
 };
 const byVersionGroup = {};
 for (const name of fs.readdirSync(replayDir).filter((entry) => entry.endsWith(".rofl")).sort()) {
@@ -65,7 +70,16 @@ for (const name of fs.readdirSync(replayDir).filter((entry) => entry.endsWith(".
     laneExactCount: 0,
     laneOrderingBoundaryCount: 0,
     jungleExactCount: 0,
+    xpExactCount: 0,
+    xpOrderingBoundaryCount: 0,
+    levelExactCount: 0,
+    levelOrderingBoundaryCount: 0,
   };
+  if (decoded.profile?.experienceAvailable !== true ||
+      !["float32", "floor-invariant"].includes(decoded.profile?.experienceProjection) ||
+      decoded.profile?.levelDerivation !== "xp-thresholds-with-replay-final-level-cap") {
+    fail(`XP/level capability is unavailable for ${replayId}.`, decoded.profile);
+  }
   totals.replayCount += 1;
   groupTotals.replayCount += 1;
   for (let index = 0; index < decoded.snapshots.length; index += 1) {
@@ -89,6 +103,20 @@ for (const name of fs.readdirSync(replayDir).filter((entry) => entry.endsWith(".
     if (snapshot.neutralMinionsKilled !== expected.jungleMinionsKilled) {
       fail(`Jungle CS mismatch for ${replayId}.`, { index, snapshot, expected });
     }
+    const decodedXp = Math.floor(snapshot.experience);
+    const xpExact = decodedXp === expected.xp;
+    const xpOrderingBoundary =
+      !xpExact && Number.isInteger(next?.xp) && decodedXp > expected.xp && decodedXp <= next.xp;
+    if (!xpExact && !xpOrderingBoundary) {
+      fail(`XP mismatch for ${replayId}.`, { index, snapshot, expected, next });
+    }
+    const levelExact = snapshot.level === expected.level;
+    const levelOrderingBoundary =
+      !levelExact && xpOrderingBoundary && Number.isInteger(next?.level) &&
+      snapshot.level > expected.level && snapshot.level <= next.level;
+    if (!levelExact && !levelOrderingBoundary) {
+      fail(`Level mismatch for ${replayId}.`, { index, snapshot, expected, next });
+    }
     totals.snapshotCount += 1;
     groupTotals.snapshotCount += 1;
     if (laneExact) {
@@ -100,8 +128,22 @@ for (const name of fs.readdirSync(replayDir).filter((entry) => entry.endsWith(".
     }
     totals.jungleExactCount += 1;
     groupTotals.jungleExactCount += 1;
+    if (xpExact) {
+      totals.xpExactCount += 1;
+      groupTotals.xpExactCount += 1;
+    } else {
+      totals.xpOrderingBoundaryCount += 1;
+      groupTotals.xpOrderingBoundaryCount += 1;
+    }
+    if (levelExact) {
+      totals.levelExactCount += 1;
+      groupTotals.levelExactCount += 1;
+    } else {
+      totals.levelOrderingBoundaryCount += 1;
+      groupTotals.levelOrderingBoundaryCount += 1;
+    }
   }
 }
 
 if (totals.replayCount !== 57) fail("Full corpus gate did not cover all 57 replays.", totals);
-console.log(JSON.stringify({ schema: "rofl-replay-participant-cs-corpus-gate/v1", totals, byVersionGroup }, null, 2));
+console.log(JSON.stringify({ schema: "rofl-replay-participant-stat-corpus-gate/v2", totals, byVersionGroup }, null, 2));

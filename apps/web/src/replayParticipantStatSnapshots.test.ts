@@ -29,6 +29,7 @@ const result: ReplayParticipantStatSnapshotsResult = {
     championNetworkIdBase: 0x400000ad,
     championNetworkIdBaseHex: "0x400000AD",
     experienceAvailable: true,
+    experienceProjection: "float32",
     totalGoldAvailable: true,
     levelDerivation: "xp-thresholds-with-replay-final-level-cap",
     neutralMinionsKilledProjection: "floor-plus-1e-5",
@@ -90,7 +91,7 @@ describe("participant stat snapshot contract", () => {
     expect(parseReplayParticipantStatSnapshotsResult(result)).toEqual(result);
   });
 
-  it("accepts historical CS-only snapshots without fabricating XP, level, or gold", () => {
+  it("accepts a fail-closed CS-only capability without fabricating XP, level, or gold", () => {
     const historical = structuredClone(result);
     historical.gameVersion = "15.24.733.6673";
     historical.versionGroup = "15.24";
@@ -100,6 +101,7 @@ describe("participant stat snapshot contract", () => {
     historical.profile.championNetworkIdBase = 1073742151;
     historical.profile.championNetworkIdBaseHex = "0x40000147";
     historical.profile.experienceAvailable = false;
+    historical.profile.experienceProjection = null;
     historical.profile.totalGoldAvailable = false;
     historical.profile.levelDerivation = null;
     for (const snapshot of historical.snapshots) {
@@ -113,6 +115,17 @@ describe("participant stat snapshot contract", () => {
         historical.profile.championNetworkIdBase + snapshot.participantId;
     }
     expect(parseReplayParticipantStatSnapshotsResult(historical)).toEqual(historical);
+  });
+
+  it("accepts replay-native XP and level without pretending cumulative gold is available", () => {
+    const xpOnly = structuredClone(result);
+    xpOnly.profile.experienceProjection = "floor-invariant";
+    xpOnly.profile.totalGoldAvailable = false;
+    for (const snapshot of xpOnly.snapshots) {
+      snapshot.experience = Math.floor(snapshot.experience!);
+      snapshot.totalGold = null;
+    }
+    expect(parseReplayParticipantStatSnapshotsResult(xpOnly)).toEqual(xpOnly);
   });
 
   it("formats snapshot timestamps as a match clock", () => {

@@ -12,7 +12,7 @@ const H3 = ["EUW1-7921377760", "EUW1-7921482297", "EUW1-7921996430"];
 const BUILD = "16.14.794.5912";
 const TOKENS = ["1/0x0023/9", "1/0x021e/8", "1/0x0288/63", "1/0x0378/1", "1/0x0399/21", "1/0x0399/24", "1/0x03e8/3", "1/0x04aa/17"];
 const TOKEN_BIT = new Map(TOKENS.map((token, index) => [token, 1 << index]));
-const WARD_PROFILE = { origin: "external", schema: "rofl-replay-decoder-profiles/v1", registryId: "league-replay-analyzer-offline-validated", revision: "2026-07-25-cross-patch-cs", fingerprint: "fnv1a64:5cf4895f9e6d3f4c" };
+const WARD_PROFILE = { origin: "external", schema: "rofl-replay-decoder-profiles/v1", registryId: "league-replay-analyzer-offline-validated", revision: "2026-07-26-cross-patch-xp", fingerprint: "fnv1a64:c52aa67610f4495c" };
 const EXPECTED = Object.freeze({
   discovery: Object.freeze({ exactFramedNonzeroParamBlockCount: 7343781, globalDistinctHandleCount: 108063, provenWardHandleCount: 998 }),
   holdout: Object.freeze({ exactFramedNonzeroParamBlockCount: 3269376, globalDistinctHandleCount: 45283, provenWardHandleCount: 479 }),

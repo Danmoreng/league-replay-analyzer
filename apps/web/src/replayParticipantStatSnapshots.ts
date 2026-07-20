@@ -58,6 +58,7 @@ export interface ReplayParticipantStatSnapshotsResult {
     championNetworkIdBase: number;
     championNetworkIdBaseHex: string;
     experienceAvailable: boolean;
+    experienceProjection: "float32" | "floor-invariant" | null;
     totalGoldAvailable: boolean;
     levelDerivation: "xp-thresholds-with-replay-final-level-cap" | null;
     neutralMinionsKilledProjection: "floor-plus-1e-5" | "floor-plus-2e-5";
@@ -288,10 +289,14 @@ export function parseReplayParticipantStatSnapshotsResult(
     profile.totalGoldAvailable,
     "profile.totalGoldAvailable",
   );
-  if (experienceAvailable !== totalGoldAvailable) {
-    throw new Error(
-      "Participant stat snapshots: XP/level and total-gold availability must change together.",
-    );
+  const experienceProjection =
+    profile.experienceProjection === null
+      ? null
+      : profile.experienceProjection === "floor-invariant"
+        ? "floor-invariant"
+        : requiredLiteral(profile.experienceProjection, "float32", "profile.experienceProjection");
+  if (experienceAvailable !== (experienceProjection !== null)) {
+    throw new Error("Participant stat snapshots: XP projection does not match XP availability.");
   }
   if (
     experienceAvailable !==
@@ -439,6 +444,7 @@ export function parseReplayParticipantStatSnapshotsResult(
         "profile.championNetworkIdBaseHex",
       ),
       experienceAvailable,
+      experienceProjection,
       totalGoldAvailable,
       levelDerivation:
         profile.levelDerivation === null

@@ -70,7 +70,7 @@ Wasm, and consumed by the Vue application unless noted otherwise.
 | Purchase-linked resulting-item updates | Timestamp, participant, resulting item ID, matched strict bundle template, and packet provenance in `rofl-replay-purchase-linked-item-updates/v1`                                                                                                                          | External-profile-only, exact build `16.14.794.5912`: 193/193 offline-validated updates (D7 130, H3 63), zero extras/wrong IDs, maximum 1 ms delta. Strict subset only: 2,326/2,519 profiled add/update packets remain unavailable; no slot, instance, removal/component identity, count, complete inventory, price/gold, or undo state.                                                                                                                                                                                                                                                          |
 | Direct add-only item purchases         | Timestamp, replay-native participant, structural 13-bit item ID, buildable-component flag, and add-block provenance in `rofl-replay-direct-item-purchases/v1`                                                                                                              | External-profile-only, exact build `16.14.794.5912`: 1,278/1,278 exact purchases (D7 844, H3 434), zero extras/wrong IDs, maximum 1 ms delta. This includes 1,043/1,043 buildable components (D7 710, H3 333). It accepts only an isolated champion-owned channel-1 `0x0369`, length 14/15 add, with no relevant `0x0369`/`0x03F9`/`0x0146`/`0x0081` family operation for that owner within +/-1 ms and a decoded ID in the profile-pinned static real-item catalog. It does not expose a general purchase classifier, slot, instance, quantity, price, gold, removal, undo, or inventory state. |
 | Item sale operations                   | Timestamp, replay-native participant, exact sale-operation classification, and removal-block provenance in `rofl-replay-item-sales/v1`                                                                                                                                     | External-profile-only, exact build `16.14.794.5912`: 116/116 offline-validated sale operations (D7 77, H3 39), zero extras/misses, maximum 1 ms delta. The event proves only the operation and its source block; sold item ID, slot, instance, count/charges, price, gold gain, undo, and inventory state are explicitly unavailable.                                                                                                                                                                                                                                                            |
-| Keyframe participant stat snapshots    | Timestamp, replay-native participant, integer lane CS, and projected integer neutral/jungle CS for all 13 exact builds in `rofl-replay-participant-stat-snapshots/v4`; exact build `16.14.794.5912` additionally retains Float32 XP, XP-derived level, and Float32 cumulative total gold | External-profile-only across patch groups 15.22, 15.23, 15.24, 16.1, 16.5, 16.6, 16.7, 16.9, and 16.14. The 57-replay productive gate emits 16,760 snapshots: jungle CS is 16,760/16,760 exact, lane CS is 16,751/16,760 exact, and the remaining nine are frozen same-keyframe ordering boundaries with zero unaccepted mismatches. Partial ciphers in 15.24/16.1/16.5 use bounded domains and emit only invariant integer projections. Timeline data is never a runtime input or fallback. |
+| Keyframe participant stat snapshots    | Timestamp, replay-native participant, XP, XP-derived level, integer lane CS, and projected integer neutral/jungle CS for all 13 exact builds in `rofl-replay-participant-stat-snapshots/v4`; exact build `16.14.794.5912` additionally retains Float32 cumulative total gold | External-profile-only across patch groups 15.22, 15.23, 15.24, 16.1, 16.5, 16.6, 16.7, 16.9, and 16.14. The 57-replay productive gate emits 16,760 snapshots: XP is 16,746 exact plus 14 frozen ordering boundaries, level is 16,759 exact plus one ordering boundary, jungle CS is 16,760 exact, and lane CS is 16,751 exact plus nine ordering boundaries, with zero unaccepted mismatches. Partial ciphers emit only invariant integer projections. Timeline data is never a runtime input or fallback. |
 
 The historical built-in event coverage includes patch groups `15.22`, `15.23`,
 `15.24`, `16.1`, `16.5`, `16.6`, `16.7`, and `16.9`. The externally supplied
@@ -81,18 +81,20 @@ enables the strict 193/193 purchase-linked resulting-item-update subset, the
 strict 1,278/1,278 direct-add-only purchase subset, and the exact 116/116
 item-sale-operation stream. It also enables the profile-backed keyframe XP,
 level, total-gold, lane-CS, and neutral-CS snapshot surface. Exact-build
-external profiles now also provide lane/jungle CS for every historical corpus
-patch group; historical snapshots leave XP, level, and total gold unavailable.
+external profiles now also provide XP, derived level, and lane/jungle CS for
+every historical corpus patch group; historical snapshots leave total gold
+unavailable.
 None of these snapshot surfaces is available through built-in fallback
-profiles. The profile revision is `2026-07-25-cross-patch-cs`, its SHA-256 is
-`a4ee89df1ff70e97fa97b9b64c632851584c110bc65af2301420a930e79307d3`, and its
-provenance fingerprint is `fnv1a64:5cf4895f9e6d3f4c`.
+profiles. The profile revision is `2026-07-26-cross-patch-xp`, its SHA-256 is
+`813838149a17a955d6fe07a3cc6e85855595b9e519d9e75f8ded935fe466d523`, and its
+provenance fingerprint is `fnv1a64:c52aa67610f4495c`.
 
 The browser decoding layer exposes the real Wasm participant summary, kill
 timeline, objective timeline, ward lifecycle, both exact-build item-purchase
 subsets, the exact-build item-sale-operation stream, and exact-build
-replay-native keyframe XP/level/total-gold/lane-CS/neutral-CS snapshots for the locally
-loaded replay. Not every decoded research stream is mounted in the product
+replay-native keyframe XP/level/lane-CS/neutral-CS snapshots for every known
+exact build, plus 16.14 cumulative-total-gold snapshots, for the locally loaded
+replay. Not every decoded research stream is mounted in the product
 view.
 
 The default browser landing page is a focused timeline product view. Its
@@ -101,8 +103,7 @@ and elite objectives. Ward lifecycle, purchase subsets, and sale operations
 remain available to research/debug tooling but are deliberately absent from the
 product timeline. Compact champion cards show the champion portrait, player,
 role, scrub-time K/D/A, and—where the exact-build external profile is
-present—lane CS and neutral/jungle CS, plus derived level where separately
-available. Cumulative total gold is not shown as
+present—XP, lane CS, neutral/jungle CS, and derived level. Cumulative total gold is not shown as
 spendable current gold. Partial purchase and operation streams are not shown as
 inventory slots or current inventory. Final inventories, fake health/resource
 bars, the minimap, explanatory decoder copy, and ward-position research
@@ -592,9 +593,9 @@ Runtime enumerates those domains and emits only when every allowed assignment
 produces the same integer. See `docs/keyframe-cs-cross-patch.md` for the exact
 build/layout table and reproduction commands.
 
-Historical v4 snapshots expose lane and jungle CS while leaving XP, level, and
-total gold null. This avoids widening the older-patch claim beyond the field
-gate requested here.
+Historical v4 snapshots now expose replay-native XP and derived level as well
+as lane and jungle CS, while leaving total gold null. See
+`docs/keyframe-xp-vitals-cross-patch.md` for the independent 57-replay gate.
 
 #### Productive exact-build 16.14 XP, level, gold, and CS snapshots
 
@@ -819,8 +820,9 @@ candidate covers zero positive deltas. The next keyframe step is therefore a
 stateful replication/record grammar, not a wider static scalar packing.
 
 Position, health, resources, current gold, damage, KDA, and alive state are not
-decoded. Exact-build XP, derived level, total gold, lane CS, and neutral/jungle
-CS are productive keyframe state fields. Older supervised keyframe assignments
+decoded. Cross-patch XP, derived level, lane CS, and neutral/jungle CS are
+productive keyframe state fields; total gold remains productive only on 16.14.
+Older supervised keyframe assignments
 remain research artifacts, not replay-only runtime fields. The blocker for the
 remaining state is the inner replication/component serialization grammar. See
 [`keyframe-champion-state-discovery.md`](keyframe-champion-state-discovery.md).
@@ -932,13 +934,12 @@ it does not prove what those bytes mean.
 
 ## Recommended Next Work
 
-1. Promote or reject the XP and neutral-CS Float32 research stripes with a
-   frozen integer-projection and snapshot-ordering rule. Keep the D7 cipher
-   fixed, use replay-only fields at runtime, and require Native/Wasm/UI tests
-   before widening the productive snapshot schema.
-2. Decode current gold and then the remaining participant state (level,
-   health, max health, mana/resource) from the same exact-build keyframe
-   grammar without reusing Timeline values at runtime.
+1. Preserve the promoted cross-patch XP/level and lane/jungle-CS corpus gates
+   when extending the keyframe grammar.
+2. Decode current gold and the remaining participant state (health, max
+   health, generic resource/current maximum) without reusing Timeline values
+   at runtime. The direct 16.14 champion-snapshot Float32 scan is negative, so
+   continue with component/bundle grammar rather than another offset guess.
 3. Preserve fail-closed handling for the two absent patch-16.14 item-ID symbols
    while decoding the stateful operation/slot/instance/removal grammar and a
    complete inventory reducer.

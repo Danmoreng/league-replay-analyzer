@@ -177,6 +177,7 @@ struct KeyframeParticipantStatsDecoderProfile {
     std::array<std::optional<std::uint8_t>, 256> cipher_to_plain{};
     std::array<std::vector<std::uint8_t>, 256> ambiguous_cipher_plain_domains{};
     std::optional<std::array<std::size_t, 4>> experience_offsets;
+    std::string experience_projection;
     std::optional<std::array<std::size_t, 4>> total_gold_offsets;
     std::array<std::size_t, 4> lane_minions_killed_offsets{};
     std::array<std::size_t, 4> neutral_minions_killed_offsets{};

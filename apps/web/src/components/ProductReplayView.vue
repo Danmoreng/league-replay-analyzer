@@ -56,6 +56,7 @@ interface TimelineKda {
 interface CurrentParticipantStats {
   participantId: number;
   timestampMillis: number;
+  experience: number | null;
   level: number | null;
   laneCs: number;
   jungleCs: number;
@@ -117,6 +118,7 @@ const participantStatSnapshotRows = computed<CurrentParticipantStats[]>(() => {
     if (
       !Number.isInteger(snapshot.participantId) ||
       !Number.isFinite(snapshot.timestampMillis) ||
+      (snapshot.experience !== null && !Number.isFinite(snapshot.experience)) ||
       (snapshot.level !== null && !Number.isInteger(snapshot.level)) ||
       !Number.isFinite(snapshot.laneMinionsKilled) ||
       !Number.isInteger(snapshot.neutralMinionsKilled)
@@ -126,6 +128,7 @@ const participantStatSnapshotRows = computed<CurrentParticipantStats[]>(() => {
     rows.push({
       participantId: snapshot.participantId,
       timestampMillis: snapshot.timestampMillis,
+      experience: snapshot.experience,
       level: snapshot.level,
       laneCs: snapshot.laneMinionsKilled,
       jungleCs: snapshot.neutralMinionsKilled,
@@ -421,6 +424,14 @@ function onScrub(event: Event): void {
             <span class="player-stats">
               <span>{{ roleLabel(entry.player.teamPosition) }}</span>
               <span v-if="currentParticipantStats(entry.participantId)" class="participant-cs">
+                <span v-if="currentParticipantStats(entry.participantId)!.experience !== null">
+                  {{
+                    Math.floor(
+                      currentParticipantStats(entry.participantId)!.experience!,
+                    ).toLocaleString()
+                  }}
+                  XP
+                </span>
                 <span>
                   {{ Math.trunc(currentParticipantStats(entry.participantId)!.laneCs) }} Lane
                 </span>
